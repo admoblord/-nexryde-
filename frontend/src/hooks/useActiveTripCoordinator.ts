@@ -3,15 +3,24 @@ import { AppState } from 'react-native';
 import { useAppStore } from '@/src/store/appStore';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
-import { isActiveTripStatus } from '@/src/utils/tripStatus';
 import { pullAndApplyActiveTrip, shouldClearTripAfterInactiveApi } from '@/src/services/activeTripSync';
-
-const POLL_MS = 22000;
+import { isActiveTripStatus } from '@/src/utils/tripStatus';
+import {
+  driverTripCoordinatorPollMs,
+  isDriverHighPriorityPolling,
+} from '@/src/constants/driverPollingProfiles';
 
 export default function useActiveTripCoordinator() {
   const setCurrentTrip = useAppStore((s) => s.setCurrentTrip);
+  const currentTrip = useAppStore((s) => s.currentTrip);
+  const isOnline = useAppStore((s) => s.isOnline);
   const { storeReady, canCallAuthedApi } = useAuthedApiReady();
   const { userId } = useAuthedUserId();
+
+  const hasLiveTrip = isActiveTripStatus(currentTrip?.status, currentTrip?.payment_status);
+  const sessionPollingActive = isOnline || hasLiveTrip;
+  const highPriority = isDriverHighPriorityPolling(currentTrip?.status);
+  const pollMs = driverTripCoordinatorPollMs(highPriority);
 
   useEffect(() => {
     if (!storeReady) return;
@@ -23,6 +32,8 @@ export default function useActiveTripCoordinator() {
       }
       return;
     }
+
+    if (!sessionPollingActive) return;
 
     let mounted = true;
 
@@ -39,7 +50,7 @@ export default function useActiveTripCoordinator() {
     };
 
     void pullActiveTrip();
-    const interval = setInterval(() => void pullActiveTrip(), POLL_MS);
+    const interval = setInterval(() => void pullActiveTrip(), pollMs);
 
     const appStateSub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
@@ -52,5 +63,5 @@ export default function useActiveTripCoordinator() {
       clearInterval(interval);
       appStateSub.remove();
     };
-  }, [canCallAuthedApi, storeReady, userId, setCurrentTrip]);
+  }, [canCallAuthedApi, storeReady, userId, setCurrentTrip, pollMs, sessionPollingActive]);
 }

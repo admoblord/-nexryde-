@@ -23,6 +23,12 @@ def rider_trip_payload_from_doc(trip: Optional[dict]) -> dict[str, Any]:
     if not trip:
         return {}
     arrived_at = _iso(trip.get("arrived_at"))
+    try:
+        from trip_fare_adjustments import compute_pickup_wait_payload
+
+        wait_payload = compute_pickup_wait_payload(trip)
+    except Exception:
+        wait_payload = {"free_wait_total_sec": 180, "wait_phase": "idle"}
     return {
         "id": trip.get("id"),
         "status": trip.get("status"),
@@ -45,8 +51,13 @@ def rider_trip_payload_from_doc(trip: Optional[dict]) -> dict[str, Any]:
         "completed_at": _iso(trip.get("completed_at")),
         # Pickup wait payload for rider timer
         "pickup_wait": {
+            **wait_payload,
             "arrived_at": arrived_at,
-            "free_wait_secs": int(trip.get("free_wait_seconds", 300)),
+            "free_wait_secs": int(
+                trip.get("pickup_free_wait_seconds")
+                or wait_payload.get("free_wait_total_sec")
+                or 180
+            ),
         },
         "pickup_code_required": bool(trip.get("pickup_code_required", True)),
         "pickup_code_verified": bool(

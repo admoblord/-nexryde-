@@ -12,11 +12,12 @@ import re
 from database import db
 from user_biometrics import save_user_biometrics, strip_blobs_from_user_update
 from user_lookup import find_user_by_id, PROFILE_API_PROJECTION, QUERY_MAX_TIME_MS
+from pii_encryption import nin_storage_fields, public_nin_fields, resolve_nin_plaintext, strip_sensitive_pii
 from user_scores import build_trust_summary
 from nin_registry_verify import (
     verify_nin_with_full_name,
-    completion_requires_registry_match,
-    completion_allows_format_only,
+    finalize_nin_verification_from_result,
+    nin_verification_audit_fields,
 )
 from face_match import face_template_match_confidence, FACE_TEMPLATE_SIMSWAP_MIN
 
@@ -100,8 +101,40 @@ class UserPreferencesUpdate(BaseModel):
 class RiderVerificationUpdate(BaseModel):
     name: str
     phone: str
-    address: str
-    nin: str
+    address: Optional[str] = ""
+    nin: Optional[str] = ""
+
+
+class AcceptTermsBody(BaseModel):
+    terms_version: str
+    privacy_version: Optional[str] = None
+
+
+def rider_verification_field_sets(user: dict) -> dict:
+    """
+    Uber/Bolt-style rider onboarding: name + phone + NIN are required.
+    Address and face are optional profile upgrades (never block home/booking).
+    """
+    required_missing: list[str] = []
+    optional_missing: list[str] = []
+
+    if not (user.get("name") or "").strip():
+        required_missing.append("name")
+    if not (user.get("phone") or "").strip():
+        required_missing.append("phone")
+    nin = resolve_nin_plaintext(user) or ""
+    if not re.fullmatch(r"\d{11}", nin):
+        required_missing.append("nin")
+    if not (user.get("address") or "").strip():
+        optional_missing.append("address")
+    if not bool(user.get("face_verified")):
+        optional_missing.append("face")
+
+    return {
+        "required_missing": required_missing,
+        "optional_missing": optional_missing,
+        "completed": len(required_missing) == 0,
+    }
 
 
 class RiderNinVerifyBody(BaseModel):
@@ -118,7 +151,9 @@ async def get_user(user_id: str, request: Request):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user["_id"] = str(user["_id"])
-    return user
+    safe = strip_sensitive_pii(user)
+    safe.update(public_nin_fields(user))
+    return safe
 
 
 @users_router.get("/users/{user_id}/trust-summary")
@@ -268,6 +303,89 @@ async def update_user(user_id: str, request: Request, body: UpdateProfileRequest
     return user
 
 
+@users_router.get("/users/{user_id}/legal-status")
+async def get_user_legal_status(user_id: str, request: Request):
+    """Lean legal acceptance record — source of truth for client terms gate."""
+    verify_owner_strict(request, user_id)
+    from legal_constants import CURRENT_PRIVACY_VERSION, CURRENT_TERMS_VERSION, user_legal_current
+
+    user = await find_user_by_id(
+        user_id,
+        {
+            "_id": 0,
+            "id": 1,
+            "role": 1,
+            "terms_accepted": 1,
+            "terms_version": 1,
+            "terms_accepted_at": 1,
+            "privacy_accepted": 1,
+            "privacy_version": 1,
+            "privacy_accepted_at": 1,
+        },
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {
+        "user_id": user_id,
+        "role": user.get("role"),
+        "terms_accepted": bool(user.get("terms_accepted")),
+        "terms_version": user.get("terms_version"),
+        "terms_accepted_at": user.get("terms_accepted_at"),
+        "privacy_accepted": bool(user.get("privacy_accepted")),
+        "privacy_version": user.get("privacy_version"),
+        "privacy_accepted_at": user.get("privacy_accepted_at"),
+        "current_terms_version": CURRENT_TERMS_VERSION,
+        "current_privacy_version": CURRENT_PRIVACY_VERSION,
+        "legal_current": user_legal_current(user),
+    }
+
+
+@users_router.post("/users/{user_id}/accept-terms")
+async def accept_terms(user_id: str, request: Request, body: AcceptTermsBody):
+    """Record acceptance of current Terms and Privacy Policy (signup refresh or material update)."""
+    verify_owner_strict(request, user_id)
+    from legal_constants import CURRENT_TERMS_VERSION, CURRENT_PRIVACY_VERSION
+
+    submitted_terms = (body.terms_version or "").strip()
+    if submitted_terms != CURRENT_TERMS_VERSION:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Outdated terms version. Current version is {CURRENT_TERMS_VERSION}.",
+        )
+    submitted_privacy = (body.privacy_version or CURRENT_PRIVACY_VERSION).strip()
+    if submitted_privacy != CURRENT_PRIVACY_VERSION:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Outdated privacy version. Current version is {CURRENT_PRIVACY_VERSION}.",
+        )
+
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {
+            "terms_accepted": True,
+            "terms_accepted_at": now_iso,
+            "terms_version": CURRENT_TERMS_VERSION,
+            "privacy_accepted": True,
+            "privacy_accepted_at": now_iso,
+            "privacy_version": CURRENT_PRIVACY_VERSION,
+            "updated_at": now_iso,
+        }},
+    )
+    refreshed = await db.users.find_one({"id": user_id}, {"_id": 0})
+    return {
+        "success": True,
+        "message": "Terms and Privacy Policy accepted.",
+        "terms_version": CURRENT_TERMS_VERSION,
+        "privacy_version": CURRENT_PRIVACY_VERSION,
+        "user": refreshed,
+    }
+
+
 @users_router.get("/users/{user_id}/rider-verification-status")
 async def get_rider_verification_status(user_id: str, request: Request):
     verify_owner_strict(request, user_id)
@@ -277,24 +395,14 @@ async def get_rider_verification_status(user_id: str, request: Request):
     if user.get("role") != "rider":
         raise HTTPException(status_code=403, detail="Rider account required")
 
-    missing = []
-    if not (user.get("name") or "").strip():
-        missing.append("name")
-    if not (user.get("phone") or "").strip():
-        missing.append("phone")
-    if not (user.get("address") or "").strip():
-        missing.append("address")
-    nin = (user.get("nin") or "").strip()
-    if not re.fullmatch(r"\d{11}", nin):
-        missing.append("nin")
-    if not bool(user.get("face_verified")):
-        missing.append("face")
+    fields = rider_verification_field_sets(user)
 
     return {
         "user_id": user_id,
         "role": "rider",
-        "completed": len(missing) == 0,
-        "missing": missing,
+        "completed": fields["completed"],
+        "missing": fields["required_missing"],
+        "optional_missing": fields["optional_missing"],
         "nin_registry_verified": bool(user.get("nin_registry_verified")),
         "face_verified": bool(user.get("face_verified")),
     }
@@ -309,44 +417,24 @@ async def complete_rider_verification(user_id: str, request: Request, body: Ride
     if user.get("role") != "rider":
         raise HTTPException(status_code=403, detail="Rider account required")
 
-    if not bool(user.get("face_verified")):
-        raise HTTPException(status_code=400, detail="Complete biometric verification before submitting.")
-
     name = (body.name or "").strip()
     address = (body.address or "").strip()
-    nin = (body.nin or "").strip()
+    nin = (body.nin or "").strip() or (resolve_nin_plaintext(user) or "")
     raw_phone = (body.phone or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Full name is required")
-    if not address:
-        raise HTTPException(status_code=400, detail="Address is required")
     if not re.fullmatch(r"\d{11}", nin):
         raise HTTPException(status_code=400, detail="NIN must be exactly 11 digits")
 
     vr = await verify_nin_with_full_name(nin=nin, full_name=name)
     if not vr.get("format_ok"):
         raise HTTPException(status_code=400, detail=vr.get("message") or "Invalid NIN")
-
-    # Registry match only when explicitly required — webhook presence alone does not block onboarding.
-    need_registry = completion_requires_registry_match()
-    if need_registry:
-        if not vr.get("registry_checked"):
-            raise HTTPException(
-                status_code=503,
-                detail="NIN registry verification is unavailable. Try again soon.",
-            )
-        if not vr.get("registry_verified"):
-            raise HTTPException(status_code=400, detail=vr.get("message") or "NIN could not be verified.")
-        nin_verified_final = True
-        nin_registry_verified_final = True
-    elif completion_allows_format_only():
-        nin_verified_final = True
-        nin_registry_verified_final = bool(vr.get("registry_verified"))
-    else:
-        raise HTTPException(
-            status_code=503,
-            detail="NIN verification is not configured. Contact support.",
-        )
+    try:
+        nin_verified_final, nin_registry_verified_final = finalize_nin_verification_from_result(vr)
+    except ValueError as exc:
+        msg = str(exc)
+        status = 503 if "unavailable" in msg.lower() or "not configured" in msg.lower() else 400
+        raise HTTPException(status_code=status, detail=msg) from exc
 
     digits = ''.join(filter(str.isdigit, raw_phone))
     if len(digits) < 10:
@@ -361,30 +449,32 @@ async def complete_rider_verification(user_id: str, request: Request, body: Ride
         normalized_phone = '+234' + digits
 
     now_iso = datetime.now(timezone.utc).isoformat()
+    nin_set, nin_unset = nin_storage_fields(nin)
     await db.users.update_one(
         {"id": user_id},
-        {"$set": {
-            "name": name,
-            "phone": normalized_phone,
-            "address": address,
-            "nin": nin,
-            "nin_verified": nin_verified_final,
-            "nin_registry_verified": nin_registry_verified_final,
-            "nin_name_match_score": vr.get("name_match_score"),
-            "nin_verify_last_message": vr.get("message"),
-            "nin_verify_checked_at": now_iso,
-            "is_verified": True,
-            "rider_verification_completed": True,
-            "onboarding_complete": True,
-            "updated_at": now_iso,
-        }}
+        {
+            "$set": {
+                "name": name,
+                "phone": normalized_phone,
+                "address": address,
+                **nin_set,
+                "nin_verified": nin_verified_final,
+                "nin_registry_verified": nin_registry_verified_final,
+                **nin_verification_audit_fields(vr, checked_at=now_iso),
+                "is_verified": True,
+                "rider_verification_completed": True,
+                "onboarding_complete": True,
+                "updated_at": now_iso,
+            },
+            "$unset": nin_unset,
+        }
     )
 
     refreshed = await db.users.find_one({"id": user_id}, {"_id": 0})
     return {
         "success": True,
         "message": "Rider verification completed successfully.",
-        "user": refreshed,
+        "user": {**strip_sensitive_pii(refreshed or {}), **public_nin_fields(refreshed)},
     }
 
 

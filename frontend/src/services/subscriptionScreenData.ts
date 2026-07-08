@@ -25,8 +25,14 @@ export interface SubscriptionStatus {
   trial_extended?: boolean;
   trial_extension_count?: number;
   trial_completed?: boolean;
-  trial_urgency?: 'normal' | 'warning' | 'critical';
+  trial_urgency?: 'normal' | 'warning' | 'critical' | 'expired';
   trial_message?: string;
+  trial_day_limit?: number | null;
+  trial_days_remaining?: number | null;
+  trial_emphasis?: 'trips' | 'days';
+  early_subscribe_discount_ngn?: number;
+  early_subscribe_first_month_fee_ngn?: number;
+  early_subscribe_message?: string;
   days_remaining?: number;
   can_upgrade: boolean;
   upgrade_requirements?: {
@@ -76,13 +82,28 @@ function normalizeSubscription(raw: Record<string, unknown>, pricing: PricingDat
     trial_active: Boolean(raw.trial_active || raw.status === 'trial'),
     trial_trips_completed: Number(raw.trial_trips_completed ?? 0),
     trial_trips_remaining: raw.trial_trips_remaining != null ? Number(raw.trial_trips_remaining) : undefined,
-    trial_trips_target: Number(raw.trial_trips_target ?? 20),
+    trial_trips_target: Number(raw.trial_trips_target ?? 15),
     trial_progress_pct: Number(raw.trial_progress_pct ?? 0),
     trial_extended: Boolean(raw.trial_extended ?? false),
     trial_extension_count: Number(raw.trial_extension_count ?? 0),
     trial_completed: Boolean(raw.trial_completed ?? false),
     trial_urgency: (raw.trial_urgency as SubscriptionStatus['trial_urgency']) ?? 'normal',
     trial_message: String(raw.trial_message ?? ''),
+    trial_day_limit: raw.trial_day_limit != null ? Number(raw.trial_day_limit) : null,
+    trial_days_remaining:
+      raw.trial_days_remaining != null
+        ? Number(raw.trial_days_remaining)
+        : raw.days_remaining != null
+          ? Number(raw.days_remaining)
+          : undefined,
+    trial_emphasis: raw.trial_emphasis === 'days' ? 'days' : 'trips',
+    early_subscribe_discount_ngn:
+      raw.early_subscribe_discount_ngn != null ? Number(raw.early_subscribe_discount_ngn) : undefined,
+    early_subscribe_first_month_fee_ngn:
+      raw.early_subscribe_first_month_fee_ngn != null
+        ? Number(raw.early_subscribe_first_month_fee_ngn)
+        : undefined,
+    early_subscribe_message: raw.early_subscribe_message ? String(raw.early_subscribe_message) : undefined,
     days_remaining: raw.days_remaining != null ? Number(raw.days_remaining) : undefined,
     can_upgrade: Boolean(raw.can_upgrade ?? (raw.status === 'active' || raw.status === 'trial')),
     upgrade_requirements: raw.upgrade_requirements as SubscriptionStatus['upgrade_requirements'],

@@ -294,29 +294,35 @@ async def autocomplete_places(
     input: str = Query(..., min_length=1),
     location_bias: Optional[str] = Query(None),
     radius: Optional[int] = Query(None),
-    components: Optional[str] = Query("country:ng")
+    components: Optional[str] = Query("country:ng"),
+    sessiontoken: Optional[str] = Query(None),
 ):
     """
     Google Places Autocomplete Proxy
-    Searches for places and returns predictions
+    Searches for places and returns predictions.
+
+    Pass ``sessiontoken`` from the client so autocomplete + place details bill as one session.
     """
     if not GOOGLE_MAPS_API_KEY:
         raise HTTPException(status_code=500, detail="Google Maps API key not configured")
     
-    if len(input) < 2:
+    if len(input) < 3:
         return {"predictions": [], "status": "OK"}
     
     try:
         await _ensure_places_cache_indexes()
-        key = _cache_key("autocomplete", {
-            "input": input.strip().lower(),
-            "location_bias": location_bias,
-            "radius": radius,
-            "components": components,
-        })
-        cached = await _get_cache(key)
-        if cached:
-            return cached["response"]
+        session = (sessiontoken or "").strip()
+        use_cache = not session
+        if use_cache:
+            key = _cache_key("autocomplete", {
+                "input": input.strip().lower(),
+                "location_bias": location_bias,
+                "radius": radius,
+                "components": components,
+            })
+            cached = await _get_cache(key)
+            if cached:
+                return cached["response"]
 
         # Build location bias parameter
         location_params = f"&components={components}" if components else ""
@@ -324,9 +330,10 @@ async def autocomplete_places(
             location_params += f"&location={location_bias}&radius={radius}"
 
         safe_in = quote(input)
+        session_param = f"&sessiontoken={quote(session)}" if session else ""
         url = (
             f"https://maps.googleapis.com/maps/api/place/autocomplete/json"
-            f"?input={safe_in}{location_params}&key={GOOGLE_MAPS_API_KEY}"
+            f"?input={safe_in}{location_params}{session_param}&key={GOOGLE_MAPS_API_KEY}"
         )
 
         async with httpx.AsyncClient() as client:
@@ -348,17 +355,20 @@ async def autocomplete_places(
                 "predictions": predictions,
                 "status": "OK",
             }
-            await _set_cache(key, response_payload, ttl_seconds=300)
+            if use_cache:
+                await _set_cache(key, response_payload, ttl_seconds=300)
             return response_payload
 
         fb = await _geocode_search_fallback_predictions(input, components or "country:ng")
         if fb:
-            await _set_cache(key, fb, ttl_seconds=300)
+            if use_cache:
+                await _set_cache(key, fb, ttl_seconds=300)
             return fb
 
         if data.get("status") == "OK":
             response_payload = {"predictions": [], "status": "OK"}
-            await _set_cache(key, response_payload, ttl_seconds=120)
+            if use_cache:
+                await _set_cache(key, response_payload, ttl_seconds=120)
             return response_payload
 
         response_payload = {
@@ -366,7 +376,8 @@ async def autocomplete_places(
             "status": data.get("status", "ERROR"),
             "error_message": data.get("error_message", "Unknown error"),
         }
-        await _set_cache(key, response_payload, ttl_seconds=60)
+        if use_cache:
+            await _set_cache(key, response_payload, ttl_seconds=60)
         return response_payload
     
     except Exception as e:
@@ -375,21 +386,33 @@ async def autocomplete_places(
 
 
 @places_router.get("/details/{place_id}")
-async def get_place_details(place_id: str):
+async def get_place_details(
+    place_id: str,
+    sessiontoken: Optional[str] = Query(None),
+):
     """
-    Get place details including coordinates and formatted address
+    Get place details including coordinates and formatted address.
+
+    When completing an autocomplete session, pass the same ``sessiontoken``.
     """
     if not GOOGLE_MAPS_API_KEY:
         raise HTTPException(status_code=500, detail="Google Maps API key not configured")
     
     try:
         await _ensure_places_cache_indexes()
-        key = _cache_key("place_details", {"place_id": place_id})
-        cached = await _get_cache(key)
-        if cached:
-            return cached["response"]
+        session = (sessiontoken or "").strip()
+        use_cache = not session
+        if use_cache:
+            key = _cache_key("place_details", {"place_id": place_id})
+            cached = await _get_cache(key)
+            if cached:
+                return cached["response"]
 
-        url = f"https://maps.googleapis.com/maps/api/place/details/json?place_id={place_id}&fields=geometry,formatted_address&key={GOOGLE_MAPS_API_KEY}"
+        session_param = f"&sessiontoken={quote(session)}" if session else ""
+        url = (
+            f"https://maps.googleapis.com/maps/api/place/details/json"
+            f"?place_id={place_id}&fields=geometry,formatted_address{session_param}&key={GOOGLE_MAPS_API_KEY}"
+        )
         
         async with httpx.AsyncClient() as client:
             response = await client.get(url, timeout=10.0)
@@ -403,7 +426,8 @@ async def get_place_details(place_id: str):
                 "address": result["formatted_address"],
                 "status": "OK"
             }
-            await _set_cache(key, response_payload, ttl_seconds=86400 * 30)
+            if use_cache:
+                await _set_cache(key, response_payload, ttl_seconds=86400 * 30)
             return response_payload
         else:
             raise HTTPException(
@@ -433,7 +457,10 @@ async def reverse_geocode(
     
     try:
         await _ensure_places_cache_indexes()
-        key = _cache_key("reverse_geocode_v2", {"lat": round(lat, 5), "lng": round(lng, 5)})
+        key = _cache_key(
+            "reverse_geocode_v2",
+            {"lat": round(lat, 4), "lng": round(lng, 4)},
+        )
         cached = await _get_cache(key)
         if cached:
             return cached["response"]
@@ -449,7 +476,7 @@ async def reverse_geocode(
         
         if data.get("status") == "OK" and data.get("results"):
             response_payload = _geocode_result_payload(data["results"][0])
-            await _set_cache(key, response_payload, ttl_seconds=86400)
+            await _set_cache(key, response_payload, ttl_seconds=3600)
             return response_payload
 
         err = data.get("status", "ERROR")
@@ -581,116 +608,43 @@ async def driving_route(
     """
     Server-side Google Directions leg for fare + map (distance, duration, polyline).
 
-    Mobile apps often use **Android/iOS-restricted** Maps keys that cannot call the
-    Directions REST API from JavaScript. This proxy uses ``GOOGLE_MAPS_API_KEY`` on
-    the backend so pricing always receives road distance when the key is configured.
+    Uses the same route cache chain as ``POST /fare/estimate`` and trip request.
     """
-    if not GOOGLE_MAPS_API_KEY:
-        raise HTTPException(status_code=503, detail="Google Maps API key not configured on server")
-
     try:
-        await _ensure_places_cache_indexes()
-        key = _cache_key(
-            "driving_route",
-            {
-                "plat": round(pickup_lat, 5),
-                "plng": round(pickup_lng, 5),
-                "dlat": round(dropoff_lat, 5),
-                "dlng": round(dropoff_lng, 5),
-                **(
-                    {"slat": round(stop_lat, 5), "slng": round(stop_lng, 5)}
-                    if stop_lat is not None and stop_lng is not None
-                    else {}
-                ),
-            },
+        from routers.payments import get_directions_from_google
+        from routing_quality import is_directions_road_route
+
+        route_data = await get_directions_from_google(
+            pickup_lat,
+            pickup_lng,
+            dropoff_lat,
+            dropoff_lng,
+            stop_lat=stop_lat,
+            stop_lng=stop_lng,
         )
-        cached = await _get_cache(key)
-        if cached:
-            return cached["response"]
-
-        url = "https://maps.googleapis.com/maps/api/directions/json"
-        params = {
-            "origin": f"{pickup_lat},{pickup_lng}",
-            "destination": f"{dropoff_lat},{dropoff_lng}",
-            "mode": "driving",
-            "key": GOOGLE_MAPS_API_KEY,
-            "departure_time": "now",
-        }
-        if stop_lat is not None and stop_lng is not None:
-            params["waypoints"] = f"{stop_lat},{stop_lng}"
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, params=params, timeout=12.0)
-            data = response.json()
-
-        status = data.get("status")
-        if status != "OK" or not data.get("routes"):
-            # Retry without traffic param (some keys reject departure_time=now)
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    url,
-                    params={
-                        "origin": f"{pickup_lat},{pickup_lng}",
-                        "destination": f"{dropoff_lat},{dropoff_lng}",
-                        "mode": "driving",
-                        "key": GOOGLE_MAPS_API_KEY,
-                    },
-                    timeout=12.0,
-                )
-                data = response.json()
-            status = data.get("status")
-
-        if status != "OK" or not data.get("routes"):
+        if not is_directions_road_route(route_data):
             raise HTTPException(
                 status_code=503,
-                detail=f"Google Directions unavailable: {status}",
+                detail="Google Directions unavailable or driving route not resolved",
             )
 
-        route = data["routes"][0]
-        legs = route.get("legs") or []
-        if not legs:
-            raise HTTPException(status_code=503, detail="Google Directions unavailable: no legs")
-        distance_m = sum(int((leg.get("distance") or {}).get("value", 0)) for leg in legs)
-        duration_s = sum(int((leg.get("duration") or {}).get("value", 0)) for leg in legs)
-        traffic_s = sum(
-            int((leg.get("duration_in_traffic") or {}).get("value") or (leg.get("duration") or {}).get("value", 0))
-            for leg in legs
+        distance_m = int(route_data.get("distance_meters") or 0)
+        duration_s = int(route_data.get("duration_seconds") or 0)
+        traffic_s = int(
+            route_data.get("duration_in_traffic_seconds") or route_data.get("duration_seconds") or 0
         )
-        leg = legs[0]
-        dit = traffic_s
-
-        steps_out: list[dict] = []
-        for route_leg in legs:
-            for step in route_leg.get("steps") or []:
-                try:
-                    sl = step.get("start_location") or {}
-                    el = step.get("end_location") or {}
-                    dist = step.get("distance") or {}
-                    dur = step.get("duration") or {}
-                    pl = step.get("polyline") or {}
-                    steps_out.append(
-                        {
-                            "instruction": _strip_directions_html(str(step.get("html_instructions") or "")),
-                            "distance_meters": int(dist.get("value", 0)),
-                            "duration_seconds": int(dur.get("value", 0)),
-                            "start_location": {"lat": float(sl["lat"]), "lng": float(sl["lng"])},
-                            "end_location": {"lat": float(el["lat"]), "lng": float(el["lng"])},
-                            "polyline": str(pl.get("points") or ""),
-                            "maneuver": str(step.get("maneuver") or ""),
-                        }
-                    )
-                except (TypeError, ValueError, KeyError):
-                    continue
+        if distance_m < 80 or duration_s < 10:
+            raise HTTPException(status_code=503, detail="Google Directions unavailable: invalid leg")
 
         response_payload = {
-            "distance_meters": int(distance_m),
-            "duration_seconds": int(duration_s),
-            "duration_in_traffic_seconds": int(dit),
-            "polyline": route.get("overview_polyline", {}).get("points") or "",
-            "steps": steps_out,
-            "source": "google_directions_api",
+            "distance_meters": distance_m,
+            "duration_seconds": duration_s,
+            "duration_in_traffic_seconds": traffic_s,
+            "polyline": str(route_data.get("polyline") or ""),
+            "steps": [],
+            "source": str(route_data.get("source") or "google_directions_api"),
             "status": "OK",
         }
-        await _set_cache(key, response_payload, ttl_seconds=600)
         return response_payload
     except HTTPException:
         raise

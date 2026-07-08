@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { HEADER_BLUR_DEFAULT, HEADER_BLUR_INCOMING } from '@/src/components/driver/driverDockTheme';
+import { BRAND } from '@/src/constants/designSystem';
 
 export type DriverBrandHeaderVariant = 'default' | 'incoming' | 'trip-light';
 
@@ -13,6 +14,7 @@ export function DriverBrandHeaderRow({
   variant = 'default',
   onMenuPress,
   onInboxPress,
+  inboxUnread = 0,
 }: {
   topInset: number;
   variant?: DriverBrandHeaderVariant;
@@ -20,6 +22,7 @@ export function DriverBrandHeaderRow({
   onMenuPress?: () => void;
   /** Incoming ride: opens notifications / inbox */
   onInboxPress?: () => void;
+  inboxUnread?: number;
 }) {
   if (variant === 'incoming' && onMenuPress && onInboxPress) {
     return (
@@ -75,6 +78,13 @@ export function DriverBrandHeaderRow({
             >
               <Ionicons name="chatbubble-ellipses-outline" size={19} color="#BFDBFE" />
             </LinearGradient>
+            {inboxUnread > 0 ? (
+              <View style={incomingStyles.inboxBadge}>
+                <Text style={incomingStyles.inboxBadgeTxt}>
+                  {inboxUnread > 99 ? '99+' : inboxUnread}
+                </Text>
+              </View>
+            ) : null}
           </TouchableOpacity>
         </View>
         <View style={incomingStyles.hairline} pointerEvents="none" />
@@ -127,7 +137,7 @@ export function DriverBrandHeaderRow({
         <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(4,9,18,0.96)' }]} />
       )}
       <LinearGradient
-        colors={['rgba(59,130,246,0.1)', 'transparent']}
+        colors={['rgba(34,225,128,0.08)', 'transparent']}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
         style={styles.sheenDefault}
@@ -232,6 +242,25 @@ const incomingStyles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     marginHorizontal: 16,
     backgroundColor: 'rgba(52,245,184,0.2)',
+  },
+  inboxBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 17,
+    height: 17,
+    borderRadius: 9,
+    backgroundColor: BRAND.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: '#0F172A',
+  },
+  inboxBadgeTxt: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#FFF',
   },
 });
 

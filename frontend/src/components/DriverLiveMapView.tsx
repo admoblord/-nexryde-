@@ -49,6 +49,7 @@ import Constants from 'expo-constants';
 import { useAppStore } from '@/src/store/appStore';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { startupLog } from '@/src/utils/driverStartupTrace';
+import { driverFlowLog } from '@/src/utils/driverOnlineFlowLog';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import notificationService from '@/src/services/notifications';
 import { DriverBrandHeaderRow } from '@/src/components/driver/DriverBrandChrome';
@@ -69,6 +70,7 @@ import {
   DOCK_TOP_RADIUS,
   HANDLE_GRADIENT_DEFAULT,
 } from '@/src/components/driver/driverDockTheme';
+import { BRAND, SURFACE } from '@/src/constants/designSystem';
 import { formatPickupWaitLabel } from '@/src/components/driver/driverDockUtils';
 import { driverTripProgressPercent } from '@/src/utils/driverOngoingDisplay';
 import {
@@ -336,9 +338,8 @@ interface Props {
   driverOffersWsConnected?: boolean;
   surgeActive?: boolean;
   surgeMultiplier?: number;
-  destinationActive?: boolean;
-  destinationName?: string;
-  destinationTripsRemaining?: number;
+  workZoneActive?: boolean;
+  workZoneLabel?: string;
   /** Called when driver taps GO (offline → online) */
   onGoOnline?: () => void;
   /** Called when driver taps Go Offline (online → offline) */
@@ -348,7 +349,7 @@ interface Props {
   onShieldPress?: () => void;
   /** Opens app messages (enforcement, announcements). Defaults to driver notifications tab. */
   onInboxPress?: () => void;
-  onDestination?: () => void;
+  onWorkZone?: () => void;
   /** True while the online/offline toggle is processing */
   toggling?: boolean;
   /** Verification / subscription status for offline banner */
@@ -577,16 +578,15 @@ function DriverLiveMapViewInner({
   driverOffersWsConnected = false,
   surgeActive = false,
   surgeMultiplier = 1,
-  destinationActive = false,
-  destinationName = '',
-  destinationTripsRemaining = 0,
+  workZoneActive = false,
+  workZoneLabel = '',
   onGoOnline,
   onGoOffline,
   onFeatureHub,
   onSearch,
   onShieldPress,
   onInboxPress,
-  onDestination,
+  onWorkZone,
   toggling = false,
   driverApproved = true,
   trialReady = true,
@@ -651,8 +651,8 @@ function DriverLiveMapViewInner({
   const [mapLayout, setMapLayout] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
-    if (isOnline) startupLog('MAP_INIT', { component: 'DriverLiveMapView' });
-  }, [isOnline]);
+    startupLog('MAP_INIT', { component: 'DriverLiveMapView' });
+  }, []);
 
   const logMapEvent = useCallback((event: string, extra?: Record<string, unknown>) => {
     if (!__DEV__) return;
@@ -915,7 +915,7 @@ function DriverLiveMapViewInner({
     const st = String(activeTrip?.status || '');
     const atPickupWait =
       st === 'arrived' &&
-      activeTrip?.pickup_code_required !== false &&
+      activeTrip?.pickup_code_required === true &&
       !(activeTrip?.pickup_code_verified || activeTrip?.security_code_verified);
     const pts: { latitude: number; longitude: number }[] = [];
     if (driverCoords && Number.isFinite(driverCoords.lat)) {
@@ -1056,7 +1056,8 @@ function DriverLiveMapViewInner({
   const showOnlineIdleChrome = isOnline && !activeTrip && !hasEmbeddedOffer;
   const onlineIdleMapPadBottom = useMemo(() => {
     if (!showOnlineIdleChrome) return 0;
-    return Math.round(insets.bottom + 228);
+    // Compact Uber-style idle dock (~186px content + safe area).
+    return Math.round(insets.bottom + 186);
   }, [showOnlineIdleChrome, insets.bottom]);
   const showLegacyTopBar = !showOnlineIdleChrome && !hasEmbeddedOffer && !activeTrip;
   const tripPhaseChromeTop = insets.top + 52;
@@ -1519,7 +1520,7 @@ function DriverLiveMapViewInner({
     routeCoords.length >= 3 &&
     !showPickupFullRoute;
 
-  const pickupCodeRequired = activeTrip?.pickup_code_required !== false;
+  const pickupCodeRequired = activeTrip?.pickup_code_required === true;
   const rawPickupVerifiedAtPickup = !!(
     activeTrip?.pickup_code_verified || activeTrip?.security_code_verified
   );
@@ -1929,7 +1930,7 @@ function DriverLiveMapViewInner({
       ? insets.bottom + 280
       : isOnline && !activeTrip
         ? showOnlineIdleChrome
-          ? onlineIdleMapPadBottom + 12
+          ? onlineIdleMapPadBottom + 28
           : insets.bottom + 188
         : insets.bottom + 100;
 
@@ -2159,6 +2160,7 @@ function DriverLiveMapViewInner({
         onRegionChangeComplete={onRegionChangeComplete}
         onMapReady={() => {
           startupLog('MAP_READY', { platform: Platform.OS });
+          driverFlowLog('MAP_READY', { platform: Platform.OS });
           console.log('✅ MAP READY - Google Maps initialized successfully');
           setMapReady(true);
           console.log('[NEXRYDE_MAP_SDK] onMapReady', {
@@ -2506,18 +2508,27 @@ function DriverLiveMapViewInner({
           variant={
             isHeadingToPickup
               ? 'trip-light'
-              : hasEmbeddedOffer && onFeatureHub && onInboxPress
+              : (hasEmbeddedOffer || showOnlineIdleChrome) && onFeatureHub
                 ? 'incoming'
                 : 'default'
           }
           onMenuPress={
             isHeadingToPickup && onFeatureHub
               ? onFeatureHub
-              : hasEmbeddedOffer && onFeatureHub
+              : (hasEmbeddedOffer || showOnlineIdleChrome) && onFeatureHub
                 ? onFeatureHub
                 : undefined
           }
-          onInboxPress={hasEmbeddedOffer && onInboxPress ? onInboxPress : undefined}
+          onInboxPress={
+            showOnlineIdleChrome
+              ? handleMapInboxPress
+              : hasEmbeddedOffer && onInboxPress
+                ? onInboxPress
+                : undefined
+          }
+          inboxUnread={
+            showOnlineIdleChrome || hasEmbeddedOffer ? mapInboxUnread : 0
+          }
         />
       </View>
 
@@ -2911,27 +2922,22 @@ function DriverLiveMapViewInner({
           style={[styles.mapLeftControls, { bottom: floatControlsBottom, left: Math.max(12, flow.padH) }]}
           pointerEvents="box-none"
         >
-          {onDestination ? (
+          {onWorkZone ? (
             <TouchableOpacity
-              style={[styles.oiDestMapFab, destinationActive && styles.oiDestMapFabOn]}
-              onPress={onDestination}
+              style={[styles.oiDestMapFab, workZoneActive && styles.oiDestMapFabOn]}
+              onPress={onWorkZone}
               activeOpacity={0.88}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
               accessibilityLabel={
-                destinationActive ? 'Trips toward destination — tap to manage' : 'Set trips toward destination'
+                workZoneActive ? 'Work Zone active — tap to manage' : 'Set Work Zone'
               }
             >
               <Ionicons
-                name={destinationActive ? 'navigate-circle' : 'flag'}
+                name={workZoneActive ? 'map' : 'map-outline'}
                 size={22}
-                color={destinationActive ? '#34F5B8' : '#E2E8F0'}
+                color={workZoneActive ? BRAND.primary : BRAND.textPrimary}
               />
-              {destinationActive && destinationTripsRemaining > 0 ? (
-                <View style={styles.oiMapFabBadge}>
-                  <Text style={styles.oiMapFabBadgeTxt}>{destinationTripsRemaining}</Text>
-                </View>
-              ) : null}
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity
@@ -2942,7 +2948,7 @@ function DriverLiveMapViewInner({
             accessibilityRole="button"
             accessibilityLabel="Recenter on your live location"
           >
-            <Ionicons name="locate" size={20} color="#34F5B8" />
+            <Ionicons name="locate" size={20} color={BRAND.primary} />
           </TouchableOpacity>
           <View style={styles.zoomStackLeft}>
             <ZoomButton icon="add" onPress={handleZoomIn} />
@@ -2971,42 +2977,37 @@ function DriverLiveMapViewInner({
           >
             <Ionicons name="locate" size={19} color={isHeadingToPickup ? '#2563EB' : '#34D399'} />
           </TouchableOpacity>
-          {!isReadyToStartTrip && !isOngoingTrip && onDestination ? (
+          {!isReadyToStartTrip && !isOngoingTrip && onWorkZone ? (
             <TouchableOpacity
               style={[
                 styles.destinationBtn,
                 { bottom: floatControlsBottom + 124, right: flow.padH },
-                destinationActive && styles.destinationBtnActive,
+                workZoneActive && styles.destinationBtnActive,
               ]}
-              onPress={onDestination}
+              onPress={onWorkZone}
               activeOpacity={0.82}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
-              accessibilityLabel={destinationActive ? 'Destination filter on' : 'Set destination filter'}
+              accessibilityLabel={workZoneActive ? 'Work Zone on' : 'Set Work Zone'}
             >
-              <Ionicons name="flag" size={19} color={destinationActive ? '#34D399' : '#94A3B8'} />
-              {destinationActive && destinationTripsRemaining > 0 ? (
-                <View style={styles.destinationBadge}>
-                  <Text style={styles.destinationBadgeText}>{destinationTripsRemaining}</Text>
-                </View>
-              ) : null}
+              <Ionicons name="map" size={19} color={workZoneActive ? '#34D399' : '#94A3B8'} />
             </TouchableOpacity>
           ) : null}
         </>
       )}
 
-      {/* Destination strip — legacy bar (hidden when unified idle dock is shown) */}
-      {destinationActive && destinationName && !showOnlineIdleChrome ? (
+      {/* Work Zone strip — legacy bar (hidden when unified idle dock is shown) */}
+      {workZoneActive && workZoneLabel && !showOnlineIdleChrome ? (
         <TouchableOpacity
           style={[styles.destinationStrip, { bottom: activeTrip ? insets.bottom + 228 : insets.bottom + 80 }]}
-          onPress={onDestination}
+          onPress={onWorkZone}
           activeOpacity={0.88}
         >
           <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#22E5A0' }} />
           <Text style={styles.destinationStripText} numberOfLines={1}>
-            Towards: {destinationName}
+            Zone: {workZoneLabel}
           </Text>
-          <Text style={styles.destinationStripCount}>{destinationTripsRemaining} left</Text>
+          <Text style={styles.destinationStripCount}>ON</Text>
           <Ionicons name="chevron-forward" size={14} color="#64748B" />
         </TouchableOpacity>
       ) : null}
@@ -3687,9 +3688,10 @@ function DriverLiveMapViewInner({
             pointerEvents="box-none"
           >
             <View style={styles.oiDockShell}>
+              <View style={styles.oiDockBg} />
               <BlurView intensity={DOCK_BLUR_INTENSITY} tint="dark" style={StyleSheet.absoluteFillObject} />
               <LinearGradient
-                colors={['rgba(52,245,184,0.08)', 'transparent']}
+                colors={['rgba(34,225,128,0.07)', 'transparent']}
                 start={{ x: 0.5, y: 0 }}
                 end={{ x: 0.5, y: 1 }}
                 style={styles.oiDockSheen}
@@ -3715,98 +3717,87 @@ function DriverLiveMapViewInner({
                   onPress={toggleStats}
                   activeOpacity={0.85}
                   accessibilityRole="button"
-                  accessibilityLabel="Today earnings, show breakdown"
+                  accessibilityLabel={`Today's earnings, ${todayEarnings > 0 ? earningsDisplay : '₦0.00'}`}
                 >
                   <View style={styles.oiTodayLabelRow}>
+                    <Ionicons name="wallet-outline" size={12} color={BRAND.primary} />
                     <Text style={styles.oiTodayLabel}>TODAY</Text>
-                    <Ionicons name="chevron-down" size={11} color="#93C5FD" />
+                    <Ionicons name="chevron-down" size={11} color={BRAND.textMuted} />
                   </View>
-                  <Text style={styles.oiTodayAmount} numberOfLines={1}>
-                    ₦{todayEarnings > 0 ? earningsDisplay.replace('₦', '') : '0.00'}
-                  </Text>
+                  <View style={styles.oiEarnAmountRow}>
+                    <Text style={styles.oiEarnCurrency}>₦</Text>
+                    <Text
+                      style={styles.oiTodayAmount}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.72}
+                    >
+                      {todayEarnings > 0 ? earningsDisplay.replace('₦', '') : '0.00'}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
-                <View style={styles.oiHeroRight}>
-                  <View style={styles.oiLiveChip}>
-                    <View style={[styles.oiLiveDot, mapLoaded && styles.oiLiveDotOn]} />
-                    <Text style={styles.oiLiveTxt}>LIVE</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.oiInboxBtn}
-                    onPress={handleMapInboxPress}
-                    activeOpacity={0.88}
-                    accessibilityRole="button"
-                    accessibilityLabel="Open messages and notifications"
-                  >
-                    <Ionicons name="chatbubble-ellipses-outline" size={19} color="#BFDBFE" />
-                    {mapInboxUnread > 0 ? (
-                      <View style={styles.oiInboxBadge}>
-                        <Text style={styles.oiInboxBadgeTxt}>
-                          {mapInboxUnread > 99 ? '99+' : mapInboxUnread}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </TouchableOpacity>
-                </View>
               </View>
 
-              {destinationActive && destinationName ? (
-                <TouchableOpacity style={styles.oiDestBanner} onPress={onDestination} activeOpacity={0.9}>
+              {workZoneActive && workZoneLabel ? (
+                <TouchableOpacity style={styles.oiDestBanner} onPress={onWorkZone} activeOpacity={0.9}>
                   <View style={styles.oiDestBannerIcon}>
-                    <Ionicons name="navigate-circle" size={20} color="#34F5B8" />
+                    <Ionicons name="map" size={20} color={BRAND.primary} />
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={styles.oiDestBannerEyebrow}>TRIPS TOWARDS</Text>
+                    <Text style={styles.oiDestBannerEyebrow}>WORK ZONE</Text>
                     <Text style={styles.oiDestBannerTxt} numberOfLines={2}>
-                      {destinationName}
+                      {workZoneLabel}
                     </Text>
-                    {destinationTripsRemaining > 0 ? (
-                      <Text style={styles.oiDestBannerMeta}>{destinationTripsRemaining} matched trips left today</Text>
-                    ) : null}
                   </View>
-                  <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+                  <Ionicons name="chevron-forward" size={18} color={BRAND.textMuted} />
                 </TouchableOpacity>
               ) : null}
 
               <View style={styles.oiListenCard}>
                 <View style={styles.oiListenRow}>
                   <View style={styles.oiWaitIconCol}>
-                    <Animated.View
-                      style={[
-                        styles.oiWaitSonar,
-                        {
-                          opacity: sonarAnim.interpolate({
-                            inputRange: [0, 0.5, 1],
-                            outputRange: [0.15, 0.5, 0.15],
-                          }),
-                          transform: [
-                            {
-                              scale: sonarAnim.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: [1, 1.28],
-                              }),
-                            },
-                          ],
-                        },
-                      ]}
-                    />
-                    <LinearGradient
-                      colors={['rgba(37,99,235,0.55)', 'rgba(15,23,42,0.95)']}
-                      style={styles.oiWaitCarRing}
-                    >
-                      <Ionicons name="car-sport" size={20} color={THEME_COLORS.accentMuted} />
-                    </LinearGradient>
+                    {isFindingRide ? (
+                      <Animated.View
+                        style={[
+                          styles.oiWaitSonar,
+                          {
+                            opacity: sonarAnim.interpolate({
+                              inputRange: [0, 0.5, 1],
+                              outputRange: [0.12, 0.45, 0.12],
+                            }),
+                            transform: [
+                              {
+                                scale: sonarAnim.interpolate({
+                                  inputRange: [0, 1],
+                                  outputRange: [1, 1.22],
+                                }),
+                              },
+                            ],
+                          },
+                        ]}
+                      />
+                    ) : null}
+                    <View style={styles.oiWaitCarRing}>
+                      <Ionicons
+                        name={isFindingRide ? 'radio' : 'pause-circle'}
+                        size={18}
+                        color={isFindingRide ? BRAND.primary : BRAND.textMuted}
+                      />
+                    </View>
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={styles.oiWaitTitle}>
                       {isFindingRide ? 'Listening for rides' : 'Offers paused'}
                     </Text>
-                    <Text style={styles.oiWaitSub}>
+                    <Text style={styles.oiWaitSub} numberOfLines={1}>
                       {isFindingRide
-                        ? 'Map shows your live position. Use Heatmap in the menu for busy zones.'
-                        : 'Complete account steps to receive offers.'}
+                        ? mapLoaded
+                          ? 'Live on map · tap menu for heatmap'
+                          : 'Connecting to map…'
+                        : 'Complete account steps to receive offers'}
                     </Text>
                   </View>
-                  {isFindingRide ? <SeekingDotsFour /> : null}
+                  {isFindingRide ? <OiListeningPulse /> : null}
                 </View>
               </View>
 
@@ -3818,7 +3809,7 @@ function DriverLiveMapViewInner({
                   accessibilityRole="button"
                   accessibilityLabel="Safety"
                 >
-                  <Ionicons name="shield-checkmark" size={22} color="#60A5FA" />
+                  <Ionicons name="shield-checkmark" size={22} color={BRAND.primary} />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.oiGoOfflinePill}
@@ -3844,7 +3835,7 @@ function DriverLiveMapViewInner({
                   accessibilityRole="button"
                   accessibilityLabel="Menu"
                 >
-                  <Ionicons name="menu" size={22} color="#93C5FD" />
+                  <Ionicons name="menu" size={22} color={BRAND.textSecondary} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -4063,10 +4054,10 @@ function DriverLiveMapViewInner({
         anchor="dock"
         bottom={
           insets.bottom +
-          (hasEmbeddedOffer ? 340 : isFindingRide && !destinationActive ? 220 : 78)
+          (hasEmbeddedOffer ? 340 : isFindingRide && !workZoneActive ? 220 : 78)
         }
         compact={Boolean(
-          (isFindingRide && !destinationActive) || hasEmbeddedOffer,
+          (isFindingRide && !workZoneActive) || hasEmbeddedOffer,
         )}
         unread={mapInboxUnread}
         onPress={handleMapInboxPress}
@@ -4246,7 +4237,37 @@ function DriverMapInboxBar({
   );
 }
 
-/* ─────────────────────── Seeking animation (four dots, blue accent) ───────────────────────── */
+/* ─────────────────────── Listening pulse (single green dot) ───────────────────────── */
+function OiListeningPulse() {
+  const pulse = useRef(new Animated.Value(0.4)).current;
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.4, duration: 700, useNativeDriver: true }),
+      ]),
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [pulse]);
+  return (
+    <Animated.View
+      style={[
+        styles.oiListenPulse,
+        {
+          opacity: pulse,
+          transform: [
+            {
+              scale: pulse.interpolate({ inputRange: [0.4, 1], outputRange: [0.9, 1.15] }),
+            },
+          ],
+        },
+      ]}
+    />
+  );
+}
+
+/* ─────────────────────── Seeking animation (four dots, legacy) ───────────────────────── */
 function SeekingDotsFour() {
   const d0 = useRef(new Animated.Value(0.35)).current;
   const d1 = useRef(new Animated.Value(0.35)).current;
@@ -4532,16 +4553,20 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderBottomWidth: 0,
-    borderColor: 'rgba(52,245,184,0.18)',
-    paddingTop: 8,
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-    gap: 12,
+    borderColor: SURFACE.glassBorder,
+    paddingTop: 6,
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+    gap: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -8 },
     shadowOpacity: 0.4,
     shadowRadius: 24,
     elevation: 16,
+  },
+  oiDockBg: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(13,20,32,0.96)',
   },
   oiDockSheen: {
     position: 'absolute',
@@ -4568,36 +4593,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(0,212,126,0.15)',
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+    backgroundColor: BRAND.primaryMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 999,
-    borderWidth: 1.5,
-    borderColor: 'rgba(0,212,126,0.5)',
-    shadowColor: '#00D47E',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
+    borderWidth: 1,
+    borderColor: SURFACE.glassBorder,
   },
   oiOnlineDot: {
     width: 7,
     height: 7,
     borderRadius: 4,
-    backgroundColor: '#00D47E',
+    backgroundColor: BRAND.primary,
   },
   oiOnlineTxt: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '900',
-    color: '#00D47E',
-    letterSpacing: 0.8,
+    color: BRAND.primary,
+    letterSpacing: 0.9,
   },
   oiEarnCenter: {
     flex: 1,
-    alignItems: 'center',
+    alignItems: 'flex-end',
     justifyContent: 'center',
     minWidth: 0,
-    paddingHorizontal: 4,
+    paddingLeft: 8,
   },
   oiHeroRight: {
     flexDirection: 'row',
@@ -4651,56 +4671,62 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   oiTodayLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '800',
-    color: '#93C5FD',
-    letterSpacing: 1.2,
+    color: BRAND.primary,
+    letterSpacing: 1.1,
+  },
+  oiEarnAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'flex-end',
+    maxWidth: '100%',
+  },
+  oiEarnCurrency: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: BRAND.textPrimary,
+    marginRight: 2,
   },
   oiTodayAmount: {
-    fontSize: 26,
+    fontSize: 28,
     fontWeight: '900',
-    color: '#F8FAFC',
+    color: BRAND.textPrimary,
     letterSpacing: -0.8,
     fontVariant: ['tabular-nums'],
+    flexShrink: 1,
   },
   oiDestBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    borderRadius: 16,
-    backgroundColor: 'rgba(6,78,59,0.42)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: BRAND.primaryMuted,
     borderWidth: 1,
-    borderColor: 'rgba(52,245,184,0.38)',
-    minHeight: 72,
+    borderColor: SURFACE.glassBorder,
   },
   oiDestBannerIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(52,245,184,0.14)',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(34,225,128,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   oiDestBannerEyebrow: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '900',
-    color: '#34F5B8',
+    color: BRAND.primary,
     letterSpacing: 1,
     marginBottom: 2,
   },
   oiDestBannerTxt: {
-    fontSize: 15,
-    fontWeight: '900',
-    color: '#ECFDF5',
-    lineHeight: 20,
-  },
-  oiDestBannerMeta: {
-    marginTop: 4,
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#6EE7B7',
+    fontSize: 14,
+    fontWeight: '800',
+    color: BRAND.textPrimary,
+    lineHeight: 18,
   },
   oiDestMapFab: {
     width: 52,
@@ -4718,8 +4744,8 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   oiDestMapFabOn: {
-    borderColor: 'rgba(52,245,184,0.55)',
-    backgroundColor: 'rgba(6,78,59,0.45)',
+    borderColor: SURFACE.glassBorder,
+    backgroundColor: BRAND.primaryMuted,
   },
   mapLeftControls: {
     position: 'absolute',
@@ -4826,12 +4852,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   oiListenCard: {
-    borderRadius: 18,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: 'rgba(0,212,126,0.07)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: SURFACE.tile,
     borderWidth: 1,
-    borderColor: 'rgba(0,212,126,0.22)',
+    borderColor: SURFACE.hairline,
   },
   oiListenRow: {
     flexDirection: 'row',
@@ -4846,35 +4872,42 @@ const styles = StyleSheet.create({
   },
   oiWaitSonar: {
     position: 'absolute',
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    borderWidth: 2,
-    borderColor: 'rgba(96,165,250,0.4)',
-    backgroundColor: 'rgba(37,99,235,0.1)',
-  },
-  oiWaitCarRing: {
     width: 40,
     height: 40,
     borderRadius: 20,
+    borderWidth: 2,
+    borderColor: 'rgba(34,225,128,0.35)',
+    backgroundColor: BRAND.primaryMuted,
+  },
+  oiWaitCarRing: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(147,197,253,0.45)',
+    borderWidth: 1,
+    borderColor: SURFACE.glassBorder,
+    backgroundColor: BRAND.primaryMuted,
   },
   oiWaitTitle: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#F8FAFC',
+    fontSize: 14,
+    fontWeight: '800',
+    color: BRAND.textPrimary,
     letterSpacing: -0.2,
-    lineHeight: 21,
+    lineHeight: 18,
   },
   oiWaitSub: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#64748B',
-    marginTop: 4,
-    lineHeight: 17,
+    fontSize: 11,
+    fontWeight: '500',
+    color: BRAND.textMuted,
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  oiListenPulse: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: BRAND.primary,
   },
   oiActionRow: {
     flexDirection: 'row',
@@ -4886,11 +4919,11 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 14,
-    backgroundColor: 'rgba(15,23,42,0.65)',
+    backgroundColor: SURFACE.tile,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(96,165,250,0.28)',
+    borderColor: SURFACE.hairline,
   },
   oiGoOfflinePill: {
     flex: 1,
@@ -4941,7 +4974,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#60A5FA',
+    backgroundColor: BRAND.primary,
   },
 
   offerRouteKmChip: {

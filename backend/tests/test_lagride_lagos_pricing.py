@@ -19,6 +19,8 @@ from lagride_lagos_pricing import (
     LAGRIDE_SERVICE_STANDARD,
     NORMAL_SURGE_LAGride,
     PEACE_GARDEN_TO_IKORODU_PER_KM,
+    LAGOS_IKORODU_IKEJA_CORRIDOR_PER_KM,
+    LAGOS_SANGOTEDO_IKORODU_CORRIDOR_PER_KM,
     PEAK_SURGE_LAGride,
     RAIN_SURGE_LAGride,
     TIER1_15_PLUS_RATES_BY_ZONE,
@@ -398,7 +400,7 @@ def test_peace_garden_to_ikorodu_and_ikeja_18km():
     assert f_ik["fare_bucket"] == "lagride_t2_peace_garden_to_ikorodu"
     assert f_ik["total_fare"] == 58572.0
 
-    # Peace Garden → Ikeja: ₦48,236 @ 18 km @ 1.0× Lagos
+    # Peace Garden → Ikeja: satellite corridor @ ₦950/km (was ₦48k+ @ 18 km)
     f_ikj = build_lagos_lagride_fare_breakdown(
         distance_km=18.0,
         duration_min=30,
@@ -415,5 +417,96 @@ def test_peace_garden_to_ikorodu_and_ikeja_18km():
         dropoff_lat=6.60,
         dropoff_lng=3.34,
     )
-    assert f_ikj["fare_bucket"] == "lagride_t2_peace_garden_to_ikeja"
-    assert f_ikj["total_fare"] == 49201.0
+    assert f_ikj["fare_bucket"] == "lagride_t2_ikorodu_ikeja_corridor"
+    assert f_ikj["lagride_rate_per_km"] == LAGOS_IKORODU_IKEJA_CORRIDOR_PER_KM
+    assert f_ikj["total_fare"] == round(18.0 * LAGOS_IKORODU_IKEJA_CORRIDOR_PER_KM * LAGOS_MARKET_WIDE_FARE_MULTIPLIER)
+
+
+def test_ikorodu_to_ikeja_20km():
+    """North satellite (Ikorodu / Peace Garden) → Ikeja ~₦19k @ 20 km, not ₦54k+."""
+    f = build_lagos_lagride_fare_breakdown(
+        distance_km=20.0,
+        duration_min=35,
+        traffic_duration_min=35,
+        service_key="economy",
+        demand_ratio=0.0,
+        is_raining=False,
+        pickup_lat=6.619,
+        pickup_lng=3.510,
+        max_multiplier=2.5,
+        cancellation_fee=300,
+        min_fare=0,
+        short_trip_threshold_km=5.0,
+        dropoff_lat=6.60,
+        dropoff_lng=3.34,
+    )
+    assert f["fare_bucket"] == "lagride_t2_ikorodu_ikeja_corridor"
+    assert f["lagride_rate_per_km"] == LAGOS_IKORODU_IKEJA_CORRIDOR_PER_KM
+    assert f["total_fare"] == round(20.0 * LAGOS_IKORODU_IKEJA_CORRIDOR_PER_KM * LAGOS_MARKET_WIDE_FARE_MULTIPLIER)
+
+
+def test_sangotedo_ikorodu_corridor_64km():
+    """Peace Garden City Estate / Sangotedo → Ikorodu ~₦43.5k @ 64 km (Lagride-aligned)."""
+    f = build_lagos_lagride_fare_breakdown(
+        distance_km=63.64,
+        duration_min=68,
+        traffic_duration_min=68,
+        service_key="economy",
+        demand_ratio=0.0,
+        is_raining=False,
+        pickup_lat=6.471,
+        pickup_lng=3.636,
+        max_multiplier=2.5,
+        cancellation_fee=300,
+        min_fare=0,
+        short_trip_threshold_km=5.0,
+        dropoff_lat=6.660,
+        dropoff_lng=3.550,
+    )
+    assert f["fare_bucket"] == "lagride_t1_sangotedo_ikorodu_corridor"
+    assert f["lagride_rate_per_km"] == LAGOS_SANGOTEDO_IKORODU_CORRIDOR_PER_KM
+    assert f["total_fare"] == 39_547
+
+
+def test_sangotedo_ikorodu_corridor_tier_multipliers():
+    """Standard / XL / Comfort / Premium match Lagride promo ladder on this corridor."""
+    base_kw = dict(
+        distance_km=63.64,
+        duration_min=68,
+        traffic_duration_min=68,
+        demand_ratio=0.0,
+        is_raining=False,
+        pickup_lat=6.471,
+        pickup_lng=3.636,
+        max_multiplier=2.5,
+        cancellation_fee=300,
+        min_fare=0,
+        short_trip_threshold_km=5.0,
+        dropoff_lat=6.660,
+        dropoff_lng=3.550,
+    )
+    econ = build_lagos_lagride_fare_breakdown(**base_kw, service_key="economy")
+    xl = build_lagos_lagride_fare_breakdown(**base_kw, service_key="xl")
+    comfort = build_lagos_lagride_fare_breakdown(**base_kw, service_key="comfort")
+    premium = build_lagos_lagride_fare_breakdown(**base_kw, service_key="premium")
+
+    assert econ["total_fare"] == 39_547
+    assert xl["total_fare"] == round(39_547 * 1.02)
+    assert comfort["total_fare"] == round(39_547 * 1.04)
+    assert premium["total_fare"] == 43_874
+    assert xl["total_fare"] > econ["total_fare"]
+    assert comfort["total_fare"] > xl["total_fare"]
+    assert premium["total_fare"] > comfort["total_fare"]
+    assert premium["service_multiplier"] == 1.11
+    assert comfort["service_multiplier"] == 1.04
+    assert xl["service_multiplier"] == 1.02
+
+    long_kw = {**base_kw, "distance_km": 76.0}
+    long_econ = build_lagos_lagride_fare_breakdown(**long_kw, service_key="economy")
+    long_xl = build_lagos_lagride_fare_breakdown(**long_kw, service_key="xl")
+    long_comfort = build_lagos_lagride_fare_breakdown(**long_kw, service_key="comfort")
+    long_premium = build_lagos_lagride_fare_breakdown(**long_kw, service_key="premium")
+    assert long_econ["total_fare"] == 39_547
+    assert long_xl["total_fare"] == round(39_547 * 1.02)
+    assert long_comfort["total_fare"] == round(39_547 * 1.04)
+    assert long_premium["total_fare"] == 43_874

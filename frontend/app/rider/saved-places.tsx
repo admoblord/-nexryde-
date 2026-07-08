@@ -71,10 +71,16 @@ export default function RiderSavedPlacesScreen() {
 
   const placeFor = (slot: RiderSavedSlot) => places.find((p) => p.slot === slot);
 
-  const resolvePlaceId = async (placeId: string) => {
+  const resolvePlaceId = async (placeId: string, sessionToken?: string) => {
     if (!placeId) return null;
     try {
-      const res = await fetch(`${BACKEND_URL}/api/places/details/${encodeURIComponent(placeId)}`);
+      const sessionQ =
+        sessionToken && sessionToken.trim().length > 0
+          ? `?sessiontoken=${encodeURIComponent(sessionToken.trim())}`
+          : '';
+      const res = await fetch(
+        `${BACKEND_URL}/api/places/details/${encodeURIComponent(placeId)}${sessionQ}`,
+      );
       const data = await res.json().catch(() => ({}));
       const lat = Number(data?.latitude);
       const lng = Number(data?.longitude);
@@ -91,7 +97,11 @@ export default function RiderSavedPlacesScreen() {
     return null;
   };
 
-  const handleAutocompletePick = async (place: { description: string; placeId: string }) => {
+  const handleAutocompletePick = async (place: {
+    description: string;
+    placeId: string;
+    sessionToken?: string;
+  }) => {
     if (!riderId || !canCallAuthedApi || !editingSlot) return;
     setSavingPlace(true);
     try {
@@ -101,7 +111,7 @@ export default function RiderSavedPlacesScreen() {
 
       const id = place.placeId?.trim();
       if (id) {
-        const det = await resolvePlaceId(id);
+        const det = await resolvePlaceId(id, place.sessionToken);
         if (det) {
           lat = det.lat;
           lng = det.lng;

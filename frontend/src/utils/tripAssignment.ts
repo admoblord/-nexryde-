@@ -67,6 +67,9 @@ export function isTripFindingPhase(
 }
 
 export function mapAcceptErrorMessage(detail: unknown, status?: number): string {
+  if (status === 401) {
+    return 'Session expired — sign in again to accept rides';
+  }
   const msg = String(detail || '').trim();
   if (/already accepted by another driver/i.test(msg)) {
     return 'Trip already accepted by another driver';

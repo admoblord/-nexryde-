@@ -257,22 +257,16 @@ async def on_trip_completed(trip_id: str, rider_id: str, driver_id: str, fare: f
 
 
 async def _update_driver_trial_progress(driver_id: str):
-    """Increment trial_trips_completed on the active trial subscription."""
+    """Re-evaluate trial after a completed trip (completed trips only)."""
     sub = await db.subscriptions.find_one(
         {"driver_id": driver_id, "status": "trial"},
         sort=[("created_at", -1)],
     )
     if not sub:
         return
-    completed = await db.trips.count_documents({"driver_id": driver_id, "status": "completed"})
-    target = sub.get("trial_trips_target", 20)
-    now = datetime.now(timezone.utc)
-    update: dict = {"trial_trips_completed": completed}
-    if completed >= target:
-        update["trial_completed"] = True
-        update["trial_active"] = False
-        update["status"] = "pending_payment"
-    await db.subscriptions.update_one({"id": sub["id"]}, {"$set": {**update, "updated_at": now}})
+    from driver_trial_policy import evaluate_driver_trial
+
+    await evaluate_driver_trial(driver_id, sub)
 
 
 # ── Credit application at ride checkout ──────────────────────────────────────

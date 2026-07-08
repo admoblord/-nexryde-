@@ -47,7 +47,27 @@ export const BRAND = {
   navyDeep: '#0D1420',
   white: '#F0F4FA',
   gray: '#8FA3BC',
+
+  /** Secondary brand blue (driver accent, links) */
+  accentBlue: '#0066FF',
+
+  /** Trip-dock mint highlight — derived from primary, used on map overlays */
+  primaryMint: '#6DFFC3',
 } as const;
+
+/** Glass surfaces shared across rider/driver dashboards */
+export const SURFACE = {
+  glass: 'rgba(12,18,30,0.86)',
+  glassSoft: 'rgba(15,23,42,0.72)',
+  glassBorder: 'rgba(34,225,128,0.22)',
+  hairline: 'rgba(255,255,255,0.09)',
+  tile: 'rgba(255,255,255,0.06)',
+  cardDark: '#121C2E',
+  cardElevated: '#1A2640',
+} as const;
+
+/** App display name — use everywhere user-facing */
+export const APP_DISPLAY_NAME = 'NexRyde';
 
 // ── Spacing ───────────────────────────────────────────────────────────────────
 

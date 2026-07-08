@@ -45,28 +45,29 @@ import {
 import { openSquadCheckoutUrl } from '@/src/services/squadCheckoutOpen';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { BRAND, SURFACE } from '@/src/constants/designSystem';
+import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 
-// ── Palette ──────────────────────────────────────────────────────────────────
 const C = {
-  bg: '#F0F4F8',
-  card: '#0F172A',
-  cardAlt: '#1E293B',
-  green: '#22C55E',
-  greenLight: '#4ADE80',
-  greenDark: '#15803D',
-  amber: '#F59E0B',
+  bg: BRAND.bgDeep,
+  card: SURFACE.cardDark,
+  cardAlt: SURFACE.cardElevated,
+  green: BRAND.primary,
+  greenLight: BRAND.primaryLight,
+  greenDark: BRAND.primaryDark,
+  amber: BRAND.warning,
   amberLight: '#FDE68A',
-  blue: '#3B82F6',
-  red: '#EF4444',
-  white: '#FFFFFF',
-  gray50: '#F8FAFC',
-  gray100: '#F1F5F9',
-  gray200: '#E2E8F0',
-  gray400: '#94A3B8',
-  gray600: '#475569',
-  gray900: '#0F172A',
-  border: '#E2E8F0',
-  shadow: 'rgba(15,23,42,0.12)',
+  blue: BRAND.info,
+  red: BRAND.danger,
+  white: BRAND.textPrimary,
+  gray50: SURFACE.glassSoft,
+  gray100: SURFACE.tile,
+  gray200: SURFACE.hairline,
+  gray400: BRAND.textSecondary,
+  gray600: BRAND.textMuted,
+  gray900: BRAND.textPrimary,
+  border: SURFACE.hairline,
+  shadow: 'rgba(0,0,0,0.35)',
 };
 
 const PRESETS = [500, 1_000, 2_000, 5_000, 10_000, 20_000];
@@ -410,6 +411,7 @@ export default function RiderWalletScreen() {
   return (
     <SafeAreaView style={s.root} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <TabBrandStrip role="rider" />
       <ScrollView
         contentContainerStyle={[
           s.scroll,
@@ -928,22 +930,22 @@ const s = StyleSheet.create({
   pendingVerifyText: { color: C.white, fontSize: 13, fontWeight: '800' },
 
   // Section
-  section: { backgroundColor: C.white, marginTop: 16, borderRadius: 20, padding: 20, shadowColor: C.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 1, shadowRadius: 8, elevation: 3 },
+  section: { backgroundColor: C.card, marginTop: 16, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: C.border },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
-  sectionIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#DCFCE7', alignItems: 'center', justifyContent: 'center' },
-  sectionTitle: { fontSize: 17, fontWeight: '900', color: C.gray900 },
+  sectionIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: BRAND.primaryMuted, alignItems: 'center', justifyContent: 'center' },
+  sectionTitle: { fontSize: 17, fontWeight: '900', color: C.white },
 
   // Presets
   presetsRow: { gap: 8, paddingBottom: 4, marginBottom: 12 },
   preset: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, backgroundColor: C.gray100, borderWidth: 2, borderColor: C.border },
-  presetOn: { backgroundColor: '#DCFCE7', borderColor: C.green },
-  presetText: { fontSize: 14, fontWeight: '800', color: C.gray600 },
-  presetTextOn: { color: C.greenDark },
+  presetOn: { backgroundColor: BRAND.primaryMuted, borderColor: C.green },
+  presetText: { fontSize: 14, fontWeight: '800', color: C.gray400 },
+  presetTextOn: { color: C.green },
 
   // Amount input
   amountWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.gray50, borderWidth: 2, borderColor: C.border, borderRadius: 14, paddingHorizontal: 16, marginBottom: 16 },
-  amountPrefix: { fontSize: 22, fontWeight: '900', color: C.gray900, marginRight: 4 },
-  amountInput: { flex: 1, fontSize: 22, fontWeight: '900', color: C.gray900, paddingVertical: Platform.OS === 'ios' ? 14 : 10 },
+  amountPrefix: { fontSize: 22, fontWeight: '900', color: C.white, marginRight: 4 },
+  amountInput: { flex: 1, fontSize: 22, fontWeight: '900', color: C.white, paddingVertical: Platform.OS === 'ios' ? 14 : 10 },
 
   // Pay button
   payBtn: { borderRadius: 16, overflow: 'hidden', marginBottom: 12, shadowColor: C.green, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 12, elevation: 8 },
@@ -969,8 +971,8 @@ const s = StyleSheet.create({
   // Rewards
   rewardCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.gray50, borderRadius: 14, padding: 14, borderLeftWidth: 4, marginBottom: 12 },
   rewardIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  rewardTitle: { fontSize: 14, fontWeight: '800', color: C.gray900 },
-  rewardText: { fontSize: 12, fontWeight: '600', color: C.gray600, marginTop: 2, lineHeight: 18 },
+  rewardTitle: { fontSize: 14, fontWeight: '800', color: C.white },
+  rewardText: { fontSize: 12, fontWeight: '600', color: C.gray400, marginTop: 2, lineHeight: 18 },
   rewardBadge: { backgroundColor: '#FEF3C7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   rewardBadgeText: { fontSize: 13, fontWeight: '900', color: '#92400E' },
   // Referral card (replaces old referralRow/shareBtn/codeInput)
@@ -1018,27 +1020,27 @@ const s = StyleSheet.create({
   emptyTxSub: { fontSize: 13, color: C.gray400 },
   txRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.gray100 },
   txIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  txLabel: { fontSize: 14, fontWeight: '800', color: C.gray900 },
+  txLabel: { fontSize: 14, fontWeight: '800', color: C.white },
   txMeta: { fontSize: 11, color: C.gray400, marginTop: 2 },
   txAmt: { fontSize: 15, fontWeight: '900', flexShrink: 0 },
 
   // Coming soon
   futureCard: { marginTop: 16, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#A5F3FC' },
   futureHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
-  futureTitle: { fontSize: 15, fontWeight: '900', color: C.gray900 },
-  futureSub: { fontSize: 12, fontWeight: '600', color: C.gray600, marginTop: 2 },
-  futureBadge: { backgroundColor: C.gray900, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  futureTitle: { fontSize: 15, fontWeight: '900', color: C.white },
+  futureSub: { fontSize: 12, fontWeight: '600', color: C.gray400, marginTop: 2 },
+  futureBadge: { backgroundColor: C.cardAlt, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
   futureBadgeText: { color: C.white, fontSize: 10, fontWeight: '900', letterSpacing: 1.5 },
   futureChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  futureChip: { backgroundColor: 'rgba(255,255,255,0.8)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999 },
-  futureChipText: { fontSize: 12, fontWeight: '700', color: '#0F766E' },
+  futureChip: { backgroundColor: C.gray100, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999 },
+  futureChipText: { fontSize: 12, fontWeight: '700', color: BRAND.primary },
 
   // Overlay
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,23,42,0.65)', alignItems: 'center', justifyContent: 'center', zIndex: 99 },
-  overlayCard: { backgroundColor: C.white, borderRadius: 24, padding: 32, alignItems: 'center', width: '80%', gap: 12 },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(13,20,32,0.75)', alignItems: 'center', justifyContent: 'center', zIndex: 99 },
+  overlayCard: { backgroundColor: C.card, borderRadius: 24, padding: 32, alignItems: 'center', width: '80%', gap: 12, borderWidth: 1, borderColor: C.border },
   overlayIconWrap: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  overlayTitle: { fontSize: 18, fontWeight: '900', color: C.gray900, textAlign: 'center' },
-  overlaySub: { fontSize: 13, color: C.gray600, textAlign: 'center' },
+  overlayTitle: { fontSize: 18, fontWeight: '900', color: C.white, textAlign: 'center' },
+  overlaySub: { fontSize: 13, color: C.gray400, textAlign: 'center' },
   overlayDots: { flexDirection: 'row', gap: 8, marginTop: 8 },
   overlayDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.green },
 });

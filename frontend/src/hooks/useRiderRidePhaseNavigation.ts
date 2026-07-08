@@ -4,6 +4,7 @@ import { useRouter, useSegments } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useAppStore } from '@/src/store/appStore';
 import { normalizeTripStatus } from '@/src/utils/tripStatus';
+import { safeReplace } from '@/src/utils/navigationSafe';
 
 /**
  * Global rider navigation when trip phase changes (driver arrived / trip started).
@@ -47,10 +48,10 @@ export function useRiderRidePhaseNavigation() {
               params: { tripId },
             } as any);
           } else {
-            router.replace({
+            safeReplace(router, {
               pathname: '/rider/security-code',
               params: { tripId },
-            } as any);
+            });
           }
         }
       }
@@ -64,19 +65,19 @@ export function useRiderRidePhaseNavigation() {
         if (Platform.OS !== 'web') {
           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         }
-        router.replace({
+        safeReplace(router, {
           pathname: '/rider/tracking',
           params: { tripId },
-        } as any);
+        });
       }
       return;
     }
 
     if (status === 'accepted' && prev?.status === 'arrived' && onSecurityCode) {
-      router.replace({
+      safeReplace(router, {
         pathname: '/rider/tracking',
         params: { tripId },
-      } as any);
+      });
     }
   }, [currentTrip?.id, currentTrip?.status, currentTrip?.payment_status, segments, router]);
 }

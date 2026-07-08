@@ -121,11 +121,15 @@ async def get_directions_from_google(
     try:
         if not has_stop:
             cached = await get_cached_directions(db, p_lat, p_lng, d_lat, d_lng)
-            # Never serve haversine from cache — it blocks fare estimates when the client cannot
-            # supply Directions (e.g. Android-restricted Maps keys on device REST calls).
-            if cached and is_directions_road_route(cached):
-                await log_api_call(db, call_type="directions", trip_id=trip_id, cached=True)
-                return cached
+        else:
+            cached = await get_cached_directions(
+                db, p_lat, p_lng, d_lat, d_lng, stop_lat=stop_lat, stop_lng=stop_lng
+            )
+        # Never serve haversine from cache — it blocks fare estimates when the client cannot
+        # supply Directions (e.g. Android-restricted Maps keys on device REST calls).
+        if cached and is_directions_road_route(cached):
+            await log_api_call(db, call_type="directions", trip_id=trip_id, cached=True)
+            return cached
 
         if _get_directions_fn:
             if has_stop:
@@ -133,8 +137,20 @@ async def get_directions_from_google(
             else:
                 result = await _get_directions_fn(p_lat, p_lng, d_lat, d_lng)
             if result:
-                if is_directions_road_route(result) and not has_stop:
-                    await store_cached_directions(db, p_lat, p_lng, d_lat, d_lng, result)
+                if is_directions_road_route(result):
+                    if has_stop:
+                        await store_cached_directions(
+                            db,
+                            p_lat,
+                            p_lng,
+                            d_lat,
+                            d_lng,
+                            result,
+                            stop_lat=stop_lat,
+                            stop_lng=stop_lng,
+                        )
+                    else:
+                        await store_cached_directions(db, p_lat, p_lng, d_lat, d_lng, result)
                 await log_api_call(db, call_type="directions", trip_id=trip_id, cached=False)
                 return result
 
@@ -180,6 +196,7 @@ def calculate_fare(
     pickup_lng=None,
     dropoff_lat=None,
     dropoff_lng=None,
+    has_intermediate_stop=False,
 ):
     if _calculate_fare_fn:
         try:
@@ -195,6 +212,7 @@ def calculate_fare(
                 pickup_lng,
                 dropoff_lat,
                 dropoff_lng,
+                has_intermediate_stop=bool(has_intermediate_stop),
             )
         except TypeError:
             try:
@@ -215,6 +233,7 @@ def calculate_fare(
         int(traffic),
         city=city or "lagos",
         service_type=svc_n,
+        has_intermediate_stop=bool(has_intermediate_stop),
     )
 
 def calculate_distance_haversine(lat1, lon1, lat2, lon2):
@@ -227,17 +246,11 @@ def calculate_distance_haversine(lat1, lon1, lat2, lon2):
     a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
     return R * 2 * atan2(sqrt(a), sqrt(1-a))
 
-# Subscription config
+# Subscription config (static fallbacks — live trial defaults in system_config.driver_trial_defaults)
 SUBSCRIPTION_CONFIG = {
     "monthly_fee": 18000,
-    # Activity-based trial: driver operates free until they complete TRIAL_TRIPS_TARGET trips.
-    # If < TRIAL_EXTENSION_MIN_TRIPS after TRIAL_EXTENSION_DAYS days, the trial is extended by
-    # TRIAL_EXTENSION_BONUS_TRIPS additional trips (up to TRIAL_MAX_EXTENSIONS times).
-    "trial_trips_target": 20,
-    "trial_extension_days": 7,         # Days before first extension check
-    "trial_extension_min_trips": 10,   # Must have completed this many by extension check
-    "trial_extension_bonus_trips": 5,  # Extra trips added per extension
-    "trial_max_extensions": 2,         # Maximum number of extensions (total max = 20 + 2×5 = 30)
+    "trial_trips_target": 15,
+    "trial_day_limit": 14,
     "currency": "NGN",
     "bank_details": {
         "provider": "SquadCo",
@@ -729,13 +742,7 @@ async def _credit_wallet_checkout_intent(
 
 
 async def _ensure_auto_trial_for_verified_driver(driver_id: str) -> Optional[dict]:
-    """Auto-provision an activity-based trial once driver verification is complete.
-
-    The trial is active while the driver has completed fewer than
-    SUBSCRIPTION_CONFIG['trial_trips_target'] (20) trips.
-    No time-based expiry.  After 7 days, if the driver has fewer than 10 trips
-    the trial is extended (flagged) but the driver is NOT locked out.
-    """
+    """Auto-provision trial once driver verification is complete (per-driver trial_config)."""
     existing = await db.subscriptions.find_one({"driver_id": driver_id}, sort=[("created_at", -1)])
     if existing:
         return existing
@@ -745,6 +752,9 @@ async def _ensure_auto_trial_for_verified_driver(driver_id: str) -> Optional[dic
     if not is_verified:
         return None
 
+    from driver_trial_policy import ensure_profile_trial_config
+
+    cfg = await ensure_profile_trial_config(driver_id, profile)
     now = datetime.utcnow()
     city_price = await _get_dynamic_tier_price("city_rider")
     trial_doc = {
@@ -755,10 +765,10 @@ async def _ensure_auto_trial_for_verified_driver(driver_id: str) -> Optional[dic
         "status": "trial",
         "start_date": now,
         "trial_start_date": now,
-        "trial_trips_target": SUBSCRIPTION_CONFIG["trial_trips_target"],
+        "trial_trips_target": int(cfg["trip_limit"]),
+        "trial_day_limit": cfg.get("day_limit"),
         "trial_trips_completed": 0,
         "trial_completed": False,
-        "trial_extended": False,
         "trial_active": True,
         "is_trial": True,
         "created_at": now,
@@ -766,135 +776,19 @@ async def _ensure_auto_trial_for_verified_driver(driver_id: str) -> Optional[dic
     }
     await db.subscriptions.insert_one(trial_doc)
     logger.info(
-        f"Activity-based trial activated for verified driver={driver_id} "
-        f"target={SUBSCRIPTION_CONFIG['trial_trips_target']} trips"
+        "Trial activated for verified driver=%s trips=%s days=%s",
+        driver_id,
+        cfg["trip_limit"],
+        cfg.get("day_limit"),
     )
     return trial_doc
 
 
 async def _evaluate_driver_trial(driver_id: str, subscription: dict) -> dict:
-    """Enrich a trial subscription with live trip-count state.
+    """Delegate to driver_trial_policy (trips + day limits, per-driver config)."""
+    from driver_trial_policy import evaluate_driver_trial
 
-    Counts ONLY completed trips. Persists status changes when:
-    - Trial is exhausted (completed >= target) → status = pending_payment
-    - Extension condition met (< min trips after N days) → bumps target by bonus_trips,
-      up to trial_max_extensions times, so drivers always get a fair chance.
-
-    Returns an enriched copy with all trial display fields.
-    """
-    now = datetime.utcnow()
-    target = int(subscription.get("trial_trips_target") or SUBSCRIPTION_CONFIG["trial_trips_target"])
-    extension_count = int(subscription.get("trial_extension_count") or 0)
-    completed_trips = await db.trips.count_documents(
-        {"driver_id": driver_id, "status": "completed"},
-        max_time_ms=QUERY_MAX_TIME_MS,
-    )
-
-    sub = dict(subscription)
-    sub["trial_trips_completed"] = completed_trips
-    sub["trial_trips_target"] = target
-    sub["trial_extension_count"] = extension_count
-
-    if completed_trips >= target:
-        # Trial exhausted — require subscription payment.
-        if sub.get("status") == "trial":
-            await db.subscriptions.update_one(
-                {"id": sub["id"]},
-                {"$set": {
-                    "status": "pending_payment",
-                    "trial_completed": True,
-                    "trial_active": False,
-                    "updated_at": now,
-                }},
-            )
-        sub["status"] = "pending_payment"
-        sub["trial_completed"] = True
-        sub["trial_active"] = False
-        sub["trial_trips_remaining"] = 0
-        sub["days_remaining"] = 0
-        sub["trial_message"] = (
-            f"Congratulations! You completed all {target} trial trips. "
-            "Subscribe now to keep earning with Nexryde."
-        )
-    else:
-        sub["trial_active"] = True
-        sub["days_remaining"] = 0
-        sub["trial_trips_remaining"] = max(0, target - completed_trips)
-
-        # ── Extension logic ──────────────────────────────────────────────
-        trial_start = sub.get("trial_start_date") or sub.get("start_date")
-        if isinstance(trial_start, str):
-            try:
-                trial_start = datetime.fromisoformat(trial_start.replace("Z", "+00:00")).replace(tzinfo=None)
-            except Exception:
-                trial_start = None
-
-        if trial_start:
-            days_elapsed = (now - trial_start).days
-            ext_days = SUBSCRIPTION_CONFIG["trial_extension_days"]
-            ext_min = SUBSCRIPTION_CONFIG["trial_extension_min_trips"]
-            bonus = SUBSCRIPTION_CONFIG["trial_extension_bonus_trips"]
-            max_ext = SUBSCRIPTION_CONFIG["trial_max_extensions"]
-
-            # Each extension period is ext_days long. Check if we're in a new extension window.
-            # Window N starts at ext_days * (N+1) days from trial start (N=0 is first check).
-            for ext_n in range(max_ext):
-                window_start_day = ext_days * (ext_n + 1)
-                already_extended_n = extension_count > ext_n
-                if (days_elapsed >= window_start_day
-                        and completed_trips < ext_min
-                        and not already_extended_n):
-                    new_target = target + bonus
-                    new_count = extension_count + 1
-                    await db.subscriptions.update_one(
-                        {"id": sub["id"]},
-                        {"$set": {
-                            "trial_extended": True,
-                            "trial_extension_count": new_count,
-                            "trial_trips_target": new_target,
-                            "updated_at": now,
-                        }},
-                    )
-                    sub["trial_extended"] = True
-                    sub["trial_extension_count"] = new_count
-                    sub["trial_trips_target"] = new_target
-                    sub["trial_trips_remaining"] = max(0, new_target - completed_trips)
-                    target = new_target
-                    extension_count = new_count
-                    logger.info(
-                        f"Trial extended (ext #{new_count}) for driver={driver_id}: "
-                        f"target {target - bonus} → {new_target}"
-                    )
-                    break  # Only one extension per evaluation cycle
-
-        # Urgency messaging
-        remaining = max(0, target - completed_trips)
-        pct = round(completed_trips / target * 100) if target > 0 else 0
-        if pct >= 80:
-            sub["trial_urgency"] = "critical"
-            sub["trial_message"] = f"Almost there! {remaining} trip{'s' if remaining != 1 else ''} left in your free trial."
-        elif pct >= 50:
-            sub["trial_urgency"] = "warning"
-            sub["trial_message"] = f"{remaining} free trips remaining. Keep going!"
-        else:
-            sub["trial_urgency"] = "normal"
-            sub["trial_message"] = f"You have {remaining} free trips left. Earn while it lasts!"
-
-        if sub.get("trial_extended"):
-            ext_n = extension_count
-            max_e = SUBSCRIPTION_CONFIG["trial_max_extensions"]
-            if ext_n >= max_e:
-                sub["trial_message"] = (
-                    f"Final extension active — complete your last {remaining} trips. "
-                    "After this, a subscription is required."
-                )
-            else:
-                sub["trial_message"] = (
-                    f"Trial extended! {bonus} bonus trips added. "
-                    f"{remaining} trips remaining."
-                )
-
-    return sub
+    return await evaluate_driver_trial(driver_id, subscription)
 
 
 def _extract_data_url_payload(data_url: str) -> tuple[str, bytes]:
@@ -1373,12 +1267,22 @@ async def get_subscription_config():
         "road_warrior_price": road_warrior_price,
         "road_warrior_phase": current_phase,
         "road_warrior_launch_slots_remaining": road_slots,
-        # Trial settings
-        "trial_trips_target": SUBSCRIPTION_CONFIG["trial_trips_target"],
-        "trial_extension_days": SUBSCRIPTION_CONFIG["trial_extension_days"],
-        "trial_extension_min_trips": SUBSCRIPTION_CONFIG["trial_extension_min_trips"],
         "currency": SUBSCRIPTION_CONFIG["currency"],
         "bank_details": SUBSCRIPTION_CONFIG["bank_details"],
+        **(await _trial_config_for_api()),
+    }
+
+
+async def _trial_config_for_api() -> dict:
+    from driver_trial_policy import get_trial_defaults
+
+    defaults = await get_trial_defaults()
+    return {
+        "trial_trips_target": int(defaults["default_trial_trip_limit"]),
+        "trial_day_limit": defaults.get("default_trial_day_limit"),
+        "monthly_fee_ngn": int(defaults["monthly_fee_ngn"]),
+        "early_subscribe_discount_ngn": int(defaults["early_subscribe_discount_ngn"]),
+        "early_subscribe_first_month_fee_ngn": int(defaults["early_subscribe_first_month_fee_ngn"]),
     }
 
 
@@ -1404,7 +1308,14 @@ async def create_virtual_account(request: CreateVirtualAccountRequest, http_requ
     full_name = _squad_require_customer_name_for_va(full_name_raw)
     email = _squad_require_va_email(driver.get("email") or f"{request.driver_id}@nexryde.app")
 
-    amount_expected = round(float(request.plan_amount), 2)
+    tier = request.tier or "city_rider"
+    base_amount = float(await _get_dynamic_tier_price(tier))
+    from driver_trial_policy import resolve_subscription_checkout_amount
+
+    amount_expected, _discount_meta = await resolve_subscription_checkout_amount(
+        request.driver_id, tier, base_amount
+    )
+    amount_expected = round(float(amount_expected), 2)
     amount_kobo = int(round(amount_expected * 100))
     transaction_ref = normalize_squad_transaction_ref(generate_nexryde_squad_transaction_ref())
     metadata = {
@@ -1876,10 +1787,13 @@ async def initiate_subscription_checkout(
     await _assert_subscription_tier_allowed(driver_id, tier)
 
     existing = await db.subscriptions.find_one({"driver_id": driver_id}, sort=[("created_at", -1)])
-    if existing and existing.get("status") in {"active", "trial", "grace_period"}:
+    if existing and existing.get("status") in {"active", "grace_period"}:
         raise HTTPException(status_code=400, detail="Subscription already active")
 
     amount_ngn = float(await _get_dynamic_tier_price(tier))
+    from driver_trial_policy import resolve_subscription_checkout_amount
+
+    amount_ngn, discount_meta = await resolve_subscription_checkout_amount(driver_id, tier, amount_ngn)
     amount_kobo = int(round(amount_ngn * 100))
 
     driver = await db.users.find_one({"id": driver_id}) or {}
@@ -1892,6 +1806,7 @@ async def initiate_subscription_checkout(
         tier=tier,
         amount_ngn=amount_ngn,
         amount_kobo=amount_kobo,
+        discount_meta=discount_meta,
     )
 
     init_body = _squad_initiate_inline_body(
@@ -2407,6 +2322,7 @@ async def _reserve_subscription_payment_intent(
     tier: str,
     amount_ngn: float,
     amount_kobo: int,
+    discount_meta: Optional[dict] = None,
 ) -> tuple[str, str]:
     """Persist pending driver subscription checkout before Squad initiate."""
     last_exc: Optional[Exception] = None
@@ -2428,6 +2344,8 @@ async def _reserve_subscription_payment_intent(
             "created_at": now,
             "updated_at": now,
         }
+        if discount_meta:
+            doc["discount_meta"] = discount_meta
         try:
             await db.subscription_payment_intents.insert_one(doc)
             return transaction_ref, intent_id
@@ -2832,8 +2750,14 @@ async def get_subscription(driver_id: str, request: Request):
         "bank_details": SUBSCRIPTION_CONFIG["bank_details"],
         "subscription_active": False,
         "subscription_expiry": None,
-        "message": "Complete verification to unlock your free 20-trip activity trial.",
+        "message": await _trial_unlock_message(),
     }
+
+
+async def _trial_unlock_message() -> str:
+    from driver_trial_policy import trial_unlock_message
+
+    return await trial_unlock_message()
 
 
 @payments_router.get("/driver/subscription-status")
@@ -2920,6 +2844,12 @@ async def get_driver_subscription_status(request: Request):
         "trial_completed": sub.get("trial_completed", False),
         "trial_urgency": sub.get("trial_urgency", "normal"),
         "trial_message": sub.get("trial_message", ""),
+        "trial_day_limit": sub.get("trial_day_limit"),
+        "trial_days_remaining": sub.get("trial_days_remaining", sub.get("days_remaining", 0)),
+        "trial_emphasis": sub.get("trial_emphasis", "trips"),
+        "early_subscribe_discount_ngn": sub.get("early_subscribe_discount_ngn"),
+        "early_subscribe_first_month_fee_ngn": sub.get("early_subscribe_first_month_fee_ngn"),
+        "early_subscribe_message": sub.get("early_subscribe_message"),
         "can_upgrade": can_upgrade,
         "upgrade_requirements": upgrade_requirements,
         "virtual_account": virtual_account,
@@ -3383,13 +3313,24 @@ async def start_trial(driver_id: str, request: Request):
     if not subscription:
         raise HTTPException(
             status_code=403,
-            detail="Complete verification to unlock your free 20-trip activity trial.",
+            detail=await _trial_unlock_message(),
         )
 
+    from driver_trial_policy import get_trial_defaults
+
+    defaults = await get_trial_defaults()
+    trip_limit = int(subscription.get("trial_trips_target") or defaults["default_trial_trip_limit"])
+    day_limit = subscription.get("trial_day_limit", defaults.get("default_trial_day_limit"))
+    if day_limit is not None:
+        trial_desc = f"{trip_limit} trips or {int(day_limit)} days from first go-online"
+    else:
+        trial_desc = f"{trip_limit} trips"
+
     return {
-        "message": f"Free activity trial activated! Complete {SUBSCRIPTION_CONFIG['trial_trips_target']} trips to unlock full access.",
+        "message": f"Free trial activated! {trial_desc}.",
         "subscription": subscription,
-        "trial_trips_target": SUBSCRIPTION_CONFIG["trial_trips_target"],
+        "trial_trips_target": trip_limit,
+        "trial_day_limit": day_limit,
         "trial_active": True,
     }
 
@@ -3593,19 +3534,32 @@ async def _activate_subscription(
     
     now = datetime.utcnow()
     end_date = now + timedelta(days=30)  # 30 days subscription
-    
+
+    update_fields: dict = {
+        "status": "active",
+        "start_date": now,
+        "end_date": end_date,
+        "payment_verified_at": now,
+        "transaction_id": f"TXN_{uuid.uuid4().hex[:12].upper()}",
+        "payment_reference": payment_reference or subscription.get("payment_reference"),
+        "payment_provider": provider or subscription.get("payment_provider"),
+        "paid_amount": paid_amount if paid_amount is not None else subscription.get("paid_amount"),
+        "trial_active": False,
+        "trial_completed": True,
+    }
+    if payment_reference:
+        intent = await db.subscription_payment_intents.find_one(
+            {"transaction_ref": payment_reference, "driver_id": driver_id},
+        )
+        if intent and (intent.get("discount_meta") or {}).get("early_subscribe_discount_applied"):
+            update_fields["first_subscription_discount_applied"] = True
+            from driver_trial_policy import mark_first_subscription_discount_used
+
+            await mark_first_subscription_discount_used(driver_id)
+
     await db.subscriptions.update_one(
         {"driver_id": driver_id},
-        {"$set": {
-            "status": "active",
-            "start_date": now,
-            "end_date": end_date,
-            "payment_verified_at": now,
-            "transaction_id": f"TXN_{uuid.uuid4().hex[:12].upper()}",
-            "payment_reference": payment_reference or subscription.get("payment_reference"),
-            "payment_provider": provider or subscription.get("payment_provider"),
-            "paid_amount": paid_amount if paid_amount is not None else subscription.get("paid_amount"),
-        }}
+        {"$set": update_fields},
     )
     await _sync_driver_subscription_flags(driver_id)
     
@@ -3680,18 +3634,23 @@ async def check_restrictions(driver_id: str, request: Request):
         evaluated = await _evaluate_driver_trial(driver_id, subscription)
         if evaluated.get("status") == "pending_payment":
             restrictions["show_payment_popup"] = True
-            restrictions["message"] = "You've completed your 20-trip trial. Subscribe to continue."
+            restrictions["message"] = "Your free trial has ended. Subscribe to keep receiving trips."
         else:
             trips_done = evaluated.get("trial_trips_completed", 0)
             target = evaluated.get("trial_trips_target", SUBSCRIPTION_CONFIG["trial_trips_target"])
-            extended = evaluated.get("trial_extended", False)
+            days_left = evaluated.get("trial_days_remaining")
             restrictions["can_go_online"] = True
             restrictions["can_accept_rides"] = True
             restrictions["can_withdraw_earnings"] = True
-            if extended:
-                restrictions["message"] = f"Trial extended — {trips_done}/{target} trips completed"
+            if days_left is not None:
+                restrictions["message"] = evaluated.get("trial_message") or (
+                    f"Free trial: {trips_done}/{target} trips · {days_left} days left"
+                )
             else:
-                restrictions["message"] = f"Free trial: {trips_done}/{target} trips completed"
+                remaining = max(0, target - trips_done)
+                restrictions["message"] = evaluated.get("trial_message") or (
+                    f"Free trial: {trips_done}/{target} trips · {remaining} left"
+                )
     
     elif status == "active":
         end_date = subscription.get("end_date")
@@ -3710,7 +3669,11 @@ async def check_restrictions(driver_id: str, request: Request):
     
     elif status in ["pending_payment", "expired"]:
         restrictions["show_payment_popup"] = True
-        restrictions["message"] = "Please make payment to activate your account."
+        restrictions["message"] = (
+            "Your free trial has ended. Subscribe to keep receiving trips."
+            if status == "pending_payment"
+            else "Please make payment to activate your account."
+        )
     
     return restrictions
 
@@ -3866,6 +3829,13 @@ async def estimate_fare(request: FareEstimateRequest):
     distance_km = max(0.5, distance_km)
     duration_min = max(5, duration_min)
     
+    has_stop = (
+        request.stop_lat is not None
+        and request.stop_lng is not None
+        and math.isfinite(float(request.stop_lat))
+        and math.isfinite(float(request.stop_lng))
+    )
+
     fare = calculate_fare(
         distance_km,
         duration_min,
@@ -3878,6 +3848,7 @@ async def estimate_fare(request: FareEstimateRequest):
         request.pickup_lng,
         request.dropoff_lat,
         request.dropoff_lng,
+        has_intermediate_stop=has_stop,
     )
 
     # Same hybrid surge path as driver earnings / GET /surge/check (per-service cap from FARE_CONFIG).
@@ -4023,6 +3994,9 @@ async def estimate_fare(request: FareEstimateRequest):
         "base_fare": fare["base_fare"],
         "distance_fee": fare["distance_fee"],
         "time_fee": fare["time_fee"],
+        "has_intermediate_stop": fare.get("has_intermediate_stop", False),
+        "stop_time_fee_applied": fare.get("stop_time_fee_applied", False),
+        "stop_time_per_min": fare.get("stop_time_per_min", 0),
         "traffic_fee": fare["traffic_fee"],
         "booking_fee": fare["booking_fee"],
         "subtotal": fare["subtotal"],
@@ -4066,6 +4040,9 @@ async def estimate_fare(request: FareEstimateRequest):
         "service_type": svc,
         "city": city,
         "polyline": polyline,
+        "encoded_polyline": polyline,
+        "distance_meters": int(round(distance_km * 1000)),
+        "duration_seconds": int(duration_min * 60),
         "route_preview_coordinates": preview_coords,
         "map_preview_region": map_region,
         "area_summary_line": area_line,

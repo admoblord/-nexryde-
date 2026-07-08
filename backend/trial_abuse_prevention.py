@@ -6,7 +6,7 @@ Prevents drivers from creating multiple trial accounts
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
 from motor.motor_asyncio import AsyncIOMotorClient
-import hashlib
+from pii_encryption import pii_search_hash
 import logging
 
 logger = logging.getLogger(__name__)
@@ -53,16 +53,19 @@ class TrialAbuseDetector:
         if not nin or len(nin) < 8:
             return True, "NIN validation skipped"
         
-        # Hash NIN for privacy
-        nin_hash = hashlib.sha256(nin.encode()).hexdigest()
+        # Hash NIN for privacy — HMAC keyed lookup (no plaintext storage)
+        nin_hash = pii_search_hash(nin, prefix="nin")
         
-        # Check if NIN exists in verified drivers
+        # Check if NIN exists in verified drivers or users
         existing_driver = await self.db.driver_verifications.find_one({
             "nin_hash": nin_hash,
             "status": {"$in": ["approved", "pending"]}
         })
-        
         if existing_driver:
+            return False, "This National Identity Number has already been registered"
+
+        existing_user = await self.db.users.find_one({"nin_hash": nin_hash}, {"_id": 0, "id": 1})
+        if existing_user:
             return False, "This National Identity Number has already been registered"
         
         return True, "NIN eligible"
@@ -76,7 +79,7 @@ class TrialAbuseDetector:
             return True, "License validation skipped"
         
         # Hash license for privacy
-        license_hash = hashlib.sha256(license_number.upper().encode()).hexdigest()
+        license_hash = pii_search_hash(license_number, prefix="license")
         
         # Check if license exists
         existing_driver = await self.db.driver_verifications.find_one({

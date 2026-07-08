@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Deploy backend/ to Cloud Run only (no EAS / Android builds).
+# Deploy backend/ to Cloud Run (production defaults — warm instance, right-sized).
+# Prefer declarative deploy: gcloud run services replace backend/cloudrun.service.yaml
 # Requires: gcloud auth, project (optional GCP_PROJECT), network.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,31 +11,21 @@ fi
 REGION="${GCP_REGION:-us-central1}"
 SERVICE="${CLOUD_RUN_SERVICE:-nexryde-backend}"
 echo "Deploying $SERVICE to $REGION from $ROOT/backend ..."
+GCLOUD=(gcloud)
 if [[ -n "${GCP_PROJECT:-}" ]]; then
-  gcloud --project="$GCP_PROJECT" run deploy "$SERVICE" \
-  --source="$ROOT/backend" \
-  --platform=managed \
-  --region="$REGION" \
-  --allow-unauthenticated \
-  --memory=1Gi \
-  --cpu=1 \
-  --cpu-boost \
-  --max-instances=10 \
-  --min-instances=0 \
-  --timeout=300 \
-  --quiet
-else
-  gcloud run deploy "$SERVICE" \
-  --source="$ROOT/backend" \
-  --platform=managed \
-  --region="$REGION" \
-  --allow-unauthenticated \
-  --memory=1Gi \
-  --cpu=1 \
-  --cpu-boost \
-  --max-instances=10 \
-  --min-instances=0 \
-  --timeout=300 \
-  --quiet
+  GCLOUD+=(--project="$GCP_PROJECT")
 fi
-echo "OK — Cloud Run revision deployed."
+"${GCLOUD[@]}" run deploy "$SERVICE" \
+  --source="$ROOT/backend" \
+  --platform=managed \
+  --region="$REGION" \
+  --allow-unauthenticated \
+  --memory=512Mi \
+  --cpu=1 \
+  --no-cpu-boost \
+  --cpu-throttling \
+  --max-instances=10 \
+  --min-instances=1 \
+  --timeout=300 \
+  --quiet
+echo "OK — Cloud Run revision deployed (1 vCPU, 512Mi, min-instances=1, CPU throttling on)."

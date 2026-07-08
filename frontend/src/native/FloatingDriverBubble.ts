@@ -1,11 +1,17 @@
-/** Floating bubble removed — all methods are permanent no-ops. */
+import {
+  hasNativeOverlayPermission,
+  hideNativeDriverBubble,
+  requestNativeOverlayPermission,
+  showNativeDriverBubble,
+} from '@/src/services/driverNativeExperience';
+
 export type BubbleStatus = 'online' | 'offline' | 'on_trip' | 'arrived';
-const noop = () => {};
+
 export default {
-  show: noop,
-  update: noop,
-  hide: noop,
+  show: (status: BubbleStatus = 'online', badge = 0) => showNativeDriverBubble(status, badge),
+  update: (status: BubbleStatus = 'online', badge = 0) => showNativeDriverBubble(status, badge),
+  hide: hideNativeDriverBubble,
   isRunning: () => Promise.resolve(false),
-  hasPermission: () => Promise.resolve(false),
-  requestPermission: noop,
+  hasPermission: hasNativeOverlayPermission,
+  requestPermission: requestNativeOverlayPermission,
 };

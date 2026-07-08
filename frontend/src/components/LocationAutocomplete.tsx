@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,14 @@ interface Prediction {
   };
   main_text?: string;
   secondary_text?: string;
+}
+
+const AUTOCOMPLETE_DEBOUNCE_MS = 400;
+const AUTOCOMPLETE_MIN_CHARS = 3;
+const PREDICTION_CACHE_MAX = 48;
+
+function newPlacesSessionToken(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
 }
 
 const normalizePrediction = (p: any, index: number): Prediction => {
@@ -47,10 +55,16 @@ const normalizePrediction = (p: any, index: number): Prediction => {
   };
 };
 
+export interface LocationAutocompleteSelection {
+  description: string;
+  placeId: string;
+  sessionToken?: string;
+}
+
 interface LocationAutocompleteProps {
   value: string;
   onChangeText: (text: string) => void;
-  onPlaceSelected: (place: { description: string; placeId: string }) => void;
+  onPlaceSelected: (place: LocationAutocompleteSelection) => void;
   placeholder?: string;
   /** @deprecated Unused — autocomplete uses BACKEND_URL /api/places. Kept for call-site compatibility. */
   apiKey?: string;
@@ -84,6 +98,56 @@ export default function LocationAutocomplete({
   const debounceTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const activeRequestIdRef = useRef(0);
+  const sessionTokenRef = useRef<string | null>(null);
+  const predictionCacheRef = useRef<Map<string, Prediction[]>>(new Map());
+
+  const buildCacheKey = useCallback(
+    (input: string) => {
+      const bias =
+        typeof biasLat === 'number' &&
+        typeof biasLng === 'number' &&
+        Number.isFinite(biasLat) &&
+        Number.isFinite(biasLng)
+          ? `${biasLat.toFixed(4)},${biasLng.toFixed(4)}:${Math.min(Math.max(5000, Math.round(biasRadiusM ?? 45000)), 50000)}`
+          : 'no-bias';
+      return `${countryCode}|${bias}|${input.trim().toLowerCase()}`;
+    },
+    [biasLat, biasLng, biasRadiusM, countryCode],
+  );
+
+  const ensureSessionToken = useCallback(() => {
+    if (!sessionTokenRef.current) {
+      sessionTokenRef.current = newPlacesSessionToken();
+    }
+    return sessionTokenRef.current;
+  }, []);
+
+  const discardSessionToken = useCallback(() => {
+    sessionTokenRef.current = null;
+  }, []);
+
+  const readCachedPredictions = useCallback(
+    (input: string): Prediction[] | null => {
+      const cached = predictionCacheRef.current.get(buildCacheKey(input));
+      return cached && cached.length > 0 ? cached : null;
+    },
+    [buildCacheKey],
+  );
+
+  const storeCachedPredictions = useCallback(
+    (input: string, items: Prediction[]) => {
+      const key = buildCacheKey(input);
+      const cache = predictionCacheRef.current;
+      if (cache.has(key)) cache.delete(key);
+      cache.set(key, items);
+      while (cache.size > PREDICTION_CACHE_MAX) {
+        const oldest = cache.keys().next().value;
+        if (oldest == null) break;
+        cache.delete(oldest);
+      }
+    },
+    [buildCacheKey],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -92,86 +156,117 @@ export default function LocationAutocomplete({
     };
   }, []);
 
+  const fetchPredictions = useCallback(
+    async (input: string) => {
+      const requestId = activeRequestIdRef.current + 1;
+      activeRequestIdRef.current = requestId;
+      setIsLoading(true);
+      try {
+        const session = ensureSessionToken();
+        let url = `${BACKEND_URL}/api/places/autocomplete?input=${encodeURIComponent(
+          input,
+        )}&components=country:${countryCode}&sessiontoken=${encodeURIComponent(session)}`;
+        if (
+          typeof biasLat === 'number' &&
+          typeof biasLng === 'number' &&
+          Number.isFinite(biasLat) &&
+          Number.isFinite(biasLng)
+        ) {
+          const r = Math.min(Math.max(5000, Math.round(biasRadiusM ?? 45000)), 50000);
+          url += `&location_bias=${encodeURIComponent(`${biasLat},${biasLng}`)}&radius=${r}`;
+        }
+
+        const response = await fetch(url);
+        let data: any = {};
+        try {
+          data = await response.json();
+        } catch {
+          data = {};
+        }
+        if (!mountedRef.current || requestId !== activeRequestIdRef.current) return;
+
+        if (!response.ok) {
+          setPredictions([]);
+          setShowSuggestions(false);
+          return;
+        }
+
+        if (data.status === 'OK') {
+          const normalized = (data.predictions || []).map((p: any, index: number) =>
+            normalizePrediction(p, index),
+          );
+          storeCachedPredictions(input, normalized);
+          setPredictions(normalized);
+          setShowSuggestions(normalized.length > 0);
+        } else if (data.status === 'ZERO_RESULTS') {
+          storeCachedPredictions(input, []);
+          setPredictions([]);
+          setShowSuggestions(false);
+        } else {
+          console.error('Google Places API error:', data.status, data.error_message);
+          setPredictions([]);
+          setShowSuggestions(false);
+        }
+      } catch (error) {
+        console.error('Error fetching predictions:', error);
+        if (!mountedRef.current || requestId !== activeRequestIdRef.current) return;
+        setPredictions([]);
+        setShowSuggestions(false);
+      } finally {
+        if (mountedRef.current && requestId === activeRequestIdRef.current) {
+          setIsLoading(false);
+        }
+      }
+    },
+    [
+      biasLat,
+      biasLng,
+      biasRadiusM,
+      countryCode,
+      ensureSessionToken,
+      storeCachedPredictions,
+    ],
+  );
+
   useEffect(() => {
-    // Debounce search
     if (debounceTimeout.current) {
       clearTimeout(debounceTimeout.current);
     }
 
-    if (value.length >= 2) {
-      debounceTimeout.current = setTimeout(() => {
-        fetchPredictions(value);
-      }, 140);
-    } else {
+    const trimmed = value.trim();
+    if (trimmed.length < AUTOCOMPLETE_MIN_CHARS) {
       setPredictions([]);
       setShowSuggestions(false);
+      setIsLoading(false);
+      return () => {
+        if (debounceTimeout.current) {
+          clearTimeout(debounceTimeout.current);
+        }
+      };
     }
+
+    const cached = readCachedPredictions(trimmed);
+    if (cached) {
+      setPredictions(cached);
+      setShowSuggestions(cached.length > 0);
+      setIsLoading(false);
+      return () => {
+        if (debounceTimeout.current) {
+          clearTimeout(debounceTimeout.current);
+        }
+      };
+    }
+
+    debounceTimeout.current = setTimeout(() => {
+      void fetchPredictions(trimmed);
+    }, AUTOCOMPLETE_DEBOUNCE_MS);
 
     return () => {
       if (debounceTimeout.current) {
         clearTimeout(debounceTimeout.current);
       }
     };
-  }, [value, biasLat, biasLng, biasRadiusM, countryCode]);
-
-  const fetchPredictions = async (input: string) => {
-    const requestId = activeRequestIdRef.current + 1;
-    activeRequestIdRef.current = requestId;
-    setIsLoading(true);
-    try {
-      let url = `${BACKEND_URL}/api/places/autocomplete?input=${encodeURIComponent(
-        input,
-      )}&components=country:${countryCode}`;
-      if (
-        typeof biasLat === 'number' &&
-        typeof biasLng === 'number' &&
-        Number.isFinite(biasLat) &&
-        Number.isFinite(biasLng)
-      ) {
-        const r = Math.min(Math.max(5000, Math.round(biasRadiusM ?? 45000)), 50000);
-        url += `&location_bias=${encodeURIComponent(`${biasLat},${biasLng}`)}&radius=${r}`;
-      }
-
-      const response = await fetch(url);
-      let data: any = {};
-      try {
-        data = await response.json();
-      } catch {
-        data = {};
-      }
-      if (!mountedRef.current || requestId !== activeRequestIdRef.current) return;
-
-      if (!response.ok) {
-        setPredictions([]);
-        setShowSuggestions(false);
-        return;
-      }
-
-      if (data.status === 'OK') {
-        const normalized = (data.predictions || []).map((p: any, index: number) =>
-          normalizePrediction(p, index)
-        );
-        setPredictions(normalized);
-        setShowSuggestions(true);
-      } else if (data.status === 'ZERO_RESULTS') {
-        setPredictions([]);
-        setShowSuggestions(false);
-      } else {
-        console.error('Google Places API error:', data.status, data.error_message);
-        setPredictions([]);
-        setShowSuggestions(false);
-      }
-    } catch (error) {
-      console.error('Error fetching predictions:', error);
-      if (!mountedRef.current || requestId !== activeRequestIdRef.current) return;
-      setPredictions([]);
-      setShowSuggestions(false);
-    } finally {
-      if (mountedRef.current && requestId === activeRequestIdRef.current) {
-        setIsLoading(false);
-      }
-    }
-  };
+  }, [value, fetchPredictions, readCachedPredictions]);
 
   const handleSelectPlace = (prediction: Prediction) => {
     try {
@@ -180,11 +275,14 @@ export default function LocationAutocomplete({
         prediction.main_text ||
         prediction.structured_formatting?.main_text ||
         'Selected location';
+      const sessionToken = sessionTokenRef.current ?? undefined;
       onChangeText(safeDescription);
       onPlaceSelected({
         description: safeDescription,
         placeId: prediction.place_id || '',
+        sessionToken,
       });
+      discardSessionToken();
       setPredictions([]);
       setShowSuggestions(false);
       Keyboard.dismiss();
@@ -222,6 +320,16 @@ export default function LocationAutocomplete({
           autoCapitalize="none"
           autoCorrect={false}
           onFocus={() => {
+            ensureSessionToken();
+            const trimmed = value.trim();
+            if (trimmed.length >= AUTOCOMPLETE_MIN_CHARS) {
+              const cached = readCachedPredictions(trimmed);
+              if (cached && cached.length > 0) {
+                setPredictions(cached);
+                setShowSuggestions(true);
+                return;
+              }
+            }
             if (predictions.length > 0) {
               setShowSuggestions(true);
             }

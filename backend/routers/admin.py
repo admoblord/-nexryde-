@@ -21,6 +21,20 @@ from database import db, SUBSCRIPTION_CONFIG
 from user_biometrics import get_user_biometrics, has_stored_face
 from auth_guard import require_authenticated, verify_owner_strict
 from route_cache import get_api_usage_summary
+from admin_guard import require_admin_request
+from pii_encryption import (
+    license_storage_fields,
+    mask_last4,
+    nin_storage_fields,
+    driver_nin_public_fields,
+    public_license_fields,
+    public_nin_fields,
+    resolve_license_plaintext,
+    resolve_nin_plaintext,
+    pii_search_hash,
+    strip_sensitive_pii,
+)
+from pii_audit import log_pii_access
 
 logger = logging.getLogger('server')
 admin_router = APIRouter(prefix="/api", tags=["Admin"])
@@ -98,6 +112,44 @@ class AdminLoginRequest(BaseModel):
     email: str
     password: str
 
+
+class PiiRevealRequest(BaseModel):
+    reason: str
+
+
+def _normalize_reveal_reason(reason: str) -> str:
+    cleaned = (reason or "").strip()
+    if len(cleaned) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="A reason is required (minimum 8 characters), e.g. security incident #123",
+        )
+    return cleaned
+
+
+def _sanitize_rider_for_admin(rider: dict) -> dict:
+    out = strip_sensitive_pii(rider)
+    out.update(public_nin_fields(rider))
+    return out
+
+
+def _build_rider_search_filter(search: str) -> list[dict]:
+    """Search riders without exposing or regex-matching encrypted NIN plaintext."""
+    pat = {"$regex": search.strip(), "$options": "i"}
+    clauses: list[dict] = [
+        {"name": pat},
+        {"phone": pat},
+        {"email": pat},
+        {"username": pat},
+        {"referral_code": pat},
+    ]
+    digits = re.sub(r"\D", "", search.strip())
+    if re.fullmatch(r"\d{11}", digits):
+        clauses.append({"nin_hash": pii_search_hash(digits, prefix="nin")})
+    elif re.fullmatch(r"\d{4}", digits):
+        clauses.append({"nin_last4": digits})
+    return clauses
+
 @admin_router.post("/admin/login")
 async def admin_login(request: AdminLoginRequest):
     """Admin login endpoint"""
@@ -121,6 +173,7 @@ async def admin_login(request: AdminLoginRequest):
             "success": True,
             "token": token,
             "email": request.email,
+            "role": "super_admin",
             "expires_at": expires_at.isoformat(),
         }
     return {"success": False, "detail": "Invalid credentials"}
@@ -180,11 +233,7 @@ async def admin_get_riders(limit: int = 200, skip: int = 0, search: str = ""):
     """Get all riders — single aggregation pipeline, no N+1 trip counts."""
     match_filter: dict = {"role": "rider"}
     if search and search.strip():
-        pat = {"$regex": search.strip(), "$options": "i"}
-        match_filter["$or"] = [
-            {"name": pat}, {"phone": pat}, {"email": pat},
-            {"nin": pat}, {"username": pat}, {"referral_code": pat},
-        ]
+        match_filter["$or"] = _build_rider_search_filter(search)
 
     total = await db.users.count_documents(match_filter)
 
@@ -193,14 +242,20 @@ async def admin_get_riders(limit: int = 200, skip: int = 0, search: str = ""):
         {"$sort": {"created_at": -1}},
         {"$skip": skip},
         {"$limit": limit},
-        # Strip heavy base64 blobs from list (available via /identity endpoint).
-        # NOTE: MongoDB forbids mixing exclusion projection with computed/inclusion fields.
-        {"$project": {"_id": 0, "face_image": 0, "profile_image": 0}},
+        {"$project": {
+            "_id": 0,
+            "face_image": 0,
+            "profile_image": 0,
+            "nin": 0,
+            "nin_cipher": 0,
+            "nin_hash": 0,
+        }},
         {"$addFields": {
-            "has_nin": {"$gt": [{"$strLenCP": {"$ifNull": ["$nin", ""]}}, 0]},
+            "has_nin": {
+                "$gt": [{"$strLenCP": {"$ifNull": ["$nin_last4", ""]}}, 0],
+            },
             "has_face_image": {"$gt": [{"$strLenCP": {"$ifNull": ["$face_image", ""]}}, 0]},
         }},
-        # Single $lookup for trip counts — one round-trip instead of N
         {"$lookup": {
             "from": "trips",
             "let": {"uid": "$id"},
@@ -216,23 +271,23 @@ async def admin_get_riders(limit: int = 200, skip: int = 0, search: str = ""):
         {"$project": {"_tc": 0}},
     ]
 
-    riders = await db.users.aggregate(pipeline).to_list(limit)
+    riders_raw = await db.users.aggregate(pipeline).to_list(limit)
+    riders = [_sanitize_rider_for_admin(r) for r in riders_raw]
     return {"riders": riders, "total": total, "skip": skip, "page_size": limit}
 
 
 @admin_router.get("/admin/riders/{rider_id}/identity")
-async def admin_get_rider_identity(rider_id: str, request: Request):
+async def admin_get_rider_identity(rider_id: str):
     """
-    SECURITY endpoint — returns rider's NIN + face verification photo + profile image.
-    Used by admin panel to verify identity before/after trips.
-    Access logged for audit trail.
+    Rider identity photos + masked NIN for admin verification.
+    Full NIN requires POST /admin/riders/{id}/reveal-nin with audit reason.
     """
-    admin_email = getattr(request.state, "admin_email", "unknown")
     rider = await db.users.find_one(
         {"id": rider_id},
-        {"_id": 0, "id": 1, "name": 1, "email": 1, "phone": 1, "nin": 1,
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "phone": 1,
+         "nin_last4": 1, "nin_cipher": 1, "nin_hash": 1, "nin": 1,
          "profile_image": 1, "face_verified": 1,
-         "nin_verified": 1, "nin_registry_verified": 1,
+         "nin_verified": 1, "nin_registry_verified": 1, "nin_verify_checked_at": 1, "nin_verify_method": 1,
          "face_liveness_score": 1,
          "address": 1, "gender": 1, "created_at": 1,
          "is_verified": 1, "suspended_until": 1, "blocked": 1,
@@ -243,20 +298,7 @@ async def admin_get_rider_identity(rider_id: str, request: Request):
 
     biometrics = await get_user_biometrics(rider_id)
     face_image = biometrics.get("face_image")
-
-    # Audit log: track who accessed sensitive identity data
-    await db.admin_identity_access_log.insert_one({
-        "accessed_by": admin_email,
-        "rider_id": rider_id,
-        "rider_name": rider.get("name"),
-        "accessed_at": datetime.now(timezone.utc).isoformat(),
-        "action": "view_identity",
-    })
-
-    def _mask_nin(nin_val: str | None) -> str:
-        if not nin_val or len(nin_val) < 5:
-            return nin_val or ""
-        return nin_val[:3] + "****" + nin_val[-2:]
+    nin_public = public_nin_fields(rider)
 
     return {
         "id":              rider.get("id"),
@@ -270,9 +312,9 @@ async def admin_get_rider_identity(rider_id: str, request: Request):
         "face_verified":   rider.get("face_verified"),
         "nin_verified":    rider.get("nin_verified"),
         "nin_registry_verified": rider.get("nin_registry_verified", False),
-        "nin":             rider.get("nin"),            # Full NIN for admin
-        "nin_masked":      _mask_nin(rider.get("nin")), # Masked for display
-        "has_nin":         bool(rider.get("nin")),
+        "nin_verify_checked_at": rider.get("nin_verify_checked_at"),
+        "nin_verify_method": rider.get("nin_verify_method", "nexryde" if rider.get("nin_verified") else None),
+        **nin_public,
         "face_image":      face_image,
         "profile_image":   rider.get("profile_image"),
         "has_face_image":  bool(face_image),
@@ -330,18 +372,13 @@ async def admin_get_rider_profile(rider_id: str):
         )
     )
     has_face_image = await has_stored_face(rider_id)
-
-    def _mask_nin(nin_val: str | None) -> str:
-        if not nin_val or len(nin_val) < 5:
-            return nin_val or ""
-        return nin_val[:3] + "****" + nin_val[-2:]
+    nin_public = public_nin_fields(rider)
+    rider_safe = strip_sensitive_pii(rider)
+    rider_safe.update(nin_public)
 
     return {
         "rider": {
-            **rider,
-            "nin_masked":       _mask_nin(rider.get("nin")),
-            "has_nin":          bool(rider.get("nin")),
-            "nin_verified":     rider.get("nin_verified", False),
+            **rider_safe,
             "face_verified":    rider.get("face_verified", False),
             "is_verified":      rider.get("is_verified", False),
         },
@@ -357,6 +394,155 @@ async def admin_get_rider_profile(rider_id: str):
         "has_face_image": has_face_image,
     }
 
+
+@admin_router.post("/admin/riders/{rider_id}/reveal-nin")
+async def admin_reveal_rider_nin(
+    rider_id: str,
+    body: PiiRevealRequest,
+    request: Request,
+    admin_email: str = Depends(require_admin_request),
+):
+    """Reveal full rider NIN — requires admin auth, reason, and audit log entry."""
+    reason = _normalize_reveal_reason(body.reason)
+    rider = await db.users.find_one(
+        {"id": rider_id, "role": "rider"},
+        {"_id": 0, "id": 1, "name": 1, "nin_cipher": 1, "nin": 1},
+    )
+    if not rider:
+        raise HTTPException(status_code=404, detail="Rider not found")
+
+    plaintext = resolve_nin_plaintext(rider)
+    if not plaintext:
+        raise HTTPException(status_code=404, detail="No NIN on file for this rider")
+
+    await log_pii_access(
+        admin_email=admin_email,
+        subject_user_id=rider_id,
+        subject_role="rider",
+        pii_type="nin",
+        action="reveal",
+        reason=reason,
+        request=request,
+        subject_name=rider.get("name"),
+    )
+    return {
+        "nin": plaintext,
+        "subject_user_id": rider_id,
+        "subject_name": rider.get("name"),
+        "revealed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@admin_router.post("/admin/drivers/{driver_id}/reveal-nin")
+async def admin_reveal_driver_nin(
+    driver_id: str,
+    body: PiiRevealRequest,
+    request: Request,
+    admin_email: str = Depends(require_admin_request),
+):
+    """Reveal full driver NIN — requires admin auth, reason, and audit log entry."""
+    reason = _normalize_reveal_reason(body.reason)
+    user = await db.users.find_one(
+        {"id": driver_id, "role": "driver"},
+        {"_id": 0, "id": 1, "name": 1, "nin_cipher": 1, "nin": 1},
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    docs = await db.driver_documents.find_one(
+        {"driver_id": driver_id},
+        {"_id": 0, "nin_cipher": 1, "nin_number": 1, "nin_last4": 1},
+    ) or {}
+    plaintext = resolve_nin_plaintext(docs) or resolve_nin_plaintext(user)
+    if not plaintext:
+        raise HTTPException(status_code=404, detail="No NIN on file for this driver")
+
+    await log_pii_access(
+        admin_email=admin_email,
+        subject_user_id=driver_id,
+        subject_role="driver",
+        pii_type="nin",
+        action="reveal",
+        reason=reason,
+        request=request,
+        subject_name=user.get("name"),
+    )
+    return {
+        "nin": plaintext,
+        "subject_user_id": driver_id,
+        "subject_name": user.get("name"),
+        "revealed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@admin_router.post("/admin/drivers/{driver_id}/reveal-license")
+async def admin_reveal_driver_license(
+    driver_id: str,
+    body: PiiRevealRequest,
+    request: Request,
+    admin_email: str = Depends(require_admin_request),
+):
+    """Reveal driver license number when stored — requires admin auth, reason, and audit."""
+    reason = _normalize_reveal_reason(body.reason)
+    user = await db.users.find_one(
+        {"id": driver_id, "role": "driver"},
+        {"_id": 0, "id": 1, "name": 1},
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    docs = await db.driver_documents.find_one(
+        {"driver_id": driver_id},
+        {"_id": 0, "license_number_cipher": 1, "license_number": 1},
+    ) or {}
+    profile = await db.driver_profiles.find_one(
+        {"user_id": driver_id},
+        {"_id": 0, "license_number_cipher": 1, "license_number": 1},
+    ) or {}
+    plaintext = resolve_license_plaintext(docs) or resolve_license_plaintext(profile)
+    if not plaintext:
+        raise HTTPException(status_code=404, detail="No license number on file for this driver")
+
+    await log_pii_access(
+        admin_email=admin_email,
+        subject_user_id=driver_id,
+        subject_role="driver",
+        pii_type="drivers_license",
+        action="reveal",
+        reason=reason,
+        request=request,
+        subject_name=user.get("name"),
+    )
+    return {
+        "license_number": plaintext,
+        "subject_user_id": driver_id,
+        "subject_name": user.get("name"),
+        "revealed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@admin_router.get("/admin/pii-access-log")
+async def admin_get_pii_access_log(
+    limit: int = 100,
+    skip: int = 0,
+    subject_user_id: str = "",
+    pii_type: str = "",
+):
+    """NIN / government ID access audit trail for admin panel."""
+    query: dict = {}
+    if subject_user_id.strip():
+        query["subject_user_id"] = subject_user_id.strip()
+    if pii_type.strip():
+        query["pii_type"] = pii_type.strip()
+
+    total = await db.admin_pii_access_log.count_documents(query)
+    rows = await db.admin_pii_access_log.find(
+        query,
+        {"_id": 0},
+    ).sort("accessed_at", -1).skip(skip).limit(min(limit, 500)).to_list(min(limit, 500))
+    return {"entries": rows, "total": total, "skip": skip, "page_size": limit}
+
+
 @admin_router.get("/admin/drivers")
 async def admin_get_drivers(limit: int = 100, skip: int = 0):
     """Get all drivers with their details"""
@@ -369,14 +555,20 @@ async def admin_get_drivers(limit: int = 100, skip: int = 0):
     enriched_drivers = []
     for driver in drivers:
         profile = await db.driver_profiles.find_one({"user_id": driver["id"]}, {"_id": 0})
+        docs_row = await db.driver_documents.find_one(
+            {"driver_id": driver["id"]},
+            {"_id": 0, "nin_hash": 1, "nin_last4": 1, "nin_capture_mode": 1, "nin_number": 1, "documents.nin": 1},
+        ) or {}
         subscription = await db.subscriptions.find_one(
             {"driver_id": driver["id"]},
             {"_id": 0},
             sort=[("created_at", -1)]
         )
         
+        driver_safe = strip_sensitive_pii(driver)
+        driver_safe.update(driver_nin_public_fields(docs_row, driver, profile or {}))
         enriched_drivers.append({
-            **driver,
+            **driver_safe,
             "vehicle": {
                 "make": profile.get("vehicle_type") if profile else None,
                 "model": profile.get("vehicle_model") if profile else None,
@@ -404,7 +596,15 @@ async def admin_get_driver_full_profile(driver_id: str):
     # Admin profile view lists document metadata only; the binary is fetched
     # on demand via /admin/drivers/{id}/document/{type}. Never load blobs here.
     docs = await db.driver_documents.find_one(
-        {"driver_id": driver_id}, {"_id": 0, "documents.data": 0}
+        {"driver_id": driver_id},
+        {
+            "_id": 0,
+            "documents.data": 0,
+            "nin_number": 0,
+            "nin_cipher": 0,
+            "license_number": 0,
+            "license_number_cipher": 0,
+        },
     ) or {}
     violations = await db.violations.find({"user_id": driver_id}).sort("created_at", -1).to_list(50)
     for v in violations:
@@ -414,7 +614,7 @@ async def admin_get_driver_full_profile(driver_id: str):
 
     doc_list = []
     for key, doc_data in (docs.get("documents") or {}).items():
-        doc_list.append({
+        entry = {
             "document_type": key,
             "filename": doc_data.get("filename"),
             "content_type": doc_data.get("content_type"),
@@ -422,10 +622,14 @@ async def admin_get_driver_full_profile(driver_id: str):
             "uploaded_at": doc_data.get("uploaded_at"),
             "expiry_date": doc_data.get("expiry_date"),
             "capture_mode": doc_data.get("capture_mode"),
-            # data is projected out for performance — presence is inferred from
-            # stored size or a GCS file key (post-migration), never the blob itself.
             "has_data": bool(doc_data.get("size_bytes") or doc_data.get("file_key") or doc_data.get("gcs_key")),
-        })
+        }
+        if key == "nin" and doc_data.get("capture_mode") == "number_only":
+            entry["has_encrypted_nin"] = bool(doc_data.get("nin_cipher"))
+        doc_list.append(entry)
+
+    nin_public = public_nin_fields({**docs, **user})
+    license_public = public_license_fields(docs)
 
     return {
         "driver": {
@@ -472,7 +676,9 @@ async def admin_get_driver_full_profile(driver_id: str):
             "total_submitted": len(doc_list),
             "submitted_at": docs.get("submitted_at"),
             "nin_capture_mode": docs.get("nin_capture_mode"),
-            "nin_number_stored": bool(docs.get("nin_number")),
+            "nin_number_stored": nin_public.get("has_nin", False),
+            **nin_public,
+            **license_public,
             "items": doc_list,
         },
         "violations": {
@@ -485,7 +691,7 @@ async def admin_get_driver_full_profile(driver_id: str):
             "subscription_status": subscription.get("status") if subscription else "none",
             "subscription_plan": subscription.get("tier") if subscription else None,
             "trial_trips_completed": (subscription or {}).get("trial_trips_completed", trips_count),
-            "trial_trips_target": (subscription or {}).get("trial_trips_target", 20),
+            "trial_trips_target": (subscription or {}).get("trial_trips_target", 15),
             "trial_active": (subscription or {}).get("trial_active", False),
         },
     }
@@ -970,7 +1176,10 @@ async def admin_get_sos_alerts():
 @admin_router.get("/admin-panel")
 async def serve_admin_via_api():
     """Serve admin panel via API route"""
-    admin_file = ADMIN_DIR / "index.html"
+    spa_file = ADMIN_DIR / "dist" / "index.html"
+    legacy_file = ADMIN_DIR / "index.legacy.html"
+    fallback_file = ADMIN_DIR / "index.html"
+    admin_file = spa_file if spa_file.exists() else (legacy_file if legacy_file.exists() else fallback_file)
     if admin_file.exists():
         return FileResponse(admin_file, media_type="text/html")
     raise HTTPException(status_code=404, detail="Admin panel not found")
@@ -1939,6 +2148,9 @@ async def admin_force_approve_driver(driver_id: str, request: Request):
         {"driver_id": driver_id, "status": {"$in": ["active", "trial", "grace_period"]}}
     )
     if not existing_sub:
+        from driver_trial_policy import ensure_profile_trial_config
+
+        cfg = await ensure_profile_trial_config(driver_id)
         trial_end = (datetime.utcnow() + timedelta(days=3650)).isoformat()  # 10-year trial for test accounts
         await db.subscriptions.insert_one({
             "id": str(_uuid.uuid4()),
@@ -1946,7 +2158,8 @@ async def admin_force_approve_driver(driver_id: str, request: Request):
             "status": "trial",
             "plan": "force_approved_trial",
             "trial_trips_completed": 0,
-            "trial_trips_target": 20,
+            "trial_trips_target": int(cfg["trip_limit"]),
+            "trial_day_limit": cfg.get("day_limit"),
             "start_date": now_iso,
             "end_date": trial_end,
             "created_at": now_iso,

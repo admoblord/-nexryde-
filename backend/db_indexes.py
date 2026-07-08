@@ -11,12 +11,15 @@ async def ensure_indexes(db):
         await db.users.create_index("phone", unique=True, sparse=True)
         await db.users.create_index("email", unique=True, sparse=True)
         await db.users.create_index("role")
+        await db.users.create_index("nin_hash", sparse=True)
+        await db.users.create_index("nin_last4", sparse=True)
         
         # Driver profiles — geospatial index for $geoNear dispatch queries
         await db.driver_profiles.create_index("user_id", unique=True)
         await db.driver_profiles.create_index("is_online")
         await db.driver_profiles.create_index([("current_location", "2dsphere")])
         await db.driver_profiles.create_index([("is_online", 1), ("current_location", "2dsphere")])
+        await db.driver_profiles.create_index([("is_online", 1), ("online_session_started_at", 1)])
         
         # Trips
         await db.trips.create_index("rider_id")
@@ -97,6 +100,8 @@ async def ensure_indexes(db):
         
         # Driver documents archive
         await db.driver_documents.create_index("driver_id", unique=True)
+        await db.driver_documents.create_index("nin_hash", sparse=True)
+        await db.driver_documents.create_index("license_hash", sparse=True)
         await db.driver_documents.create_index([("documents.nin.sha256", 1)], sparse=True)
         await db.driver_documents.create_index([("documents.drivers_license.sha256", 1)], sparse=True)
         await db.driver_documents.create_index([("documents.passport_photo.sha256", 1)], sparse=True)
@@ -151,6 +156,12 @@ async def ensure_indexes(db):
         await db.ab_experiments.create_index("key", unique=True)
         await db.admin_broadcasts.create_index([("created_at", -1)])
 
+        # Encrypted PII access audit (NIN / license reveal trail)
+        await db.admin_pii_access_log.create_index([("accessed_at", -1)])
+        await db.admin_pii_access_log.create_index([("subject_user_id", 1), ("accessed_at", -1)])
+        await db.admin_pii_access_log.create_index([("accessed_by", 1), ("accessed_at", -1)])
+        await db.admin_pii_access_log.create_index("pii_type")
+
         await db.daily_notification_slot_log.create_index([("day", 1), ("slot_id", 1)], unique=True)
 
         # NEXRYDE Shield — disputes & encrypted trip audio (48h TTL)
@@ -180,6 +191,16 @@ async def ensure_indexes(db):
         # admin_sessions: 30-day TTL
         try:
             await db.admin_sessions.create_index("created_at", expireAfterSeconds=30 * 24 * 3600)
+        except Exception:
+            pass
+        # Admin audit log & announcements
+        try:
+            await db.admin_audit_log.create_index([("created_at", -1)])
+            await db.admin_audit_log.create_index("admin_email")
+            await db.admin_announcements.create_index([("created_at", -1)])
+            await db.admin_announcements.create_index("active")
+            await db.admin_driver_notes.create_index([("driver_id", 1), ("created_at", -1)])
+            await db.admin_rider_notes.create_index([("rider_id", 1), ("created_at", -1)])
         except Exception:
             pass
         # notification_events: 30-day TTL

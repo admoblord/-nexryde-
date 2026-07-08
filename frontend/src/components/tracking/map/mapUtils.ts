@@ -50,24 +50,6 @@ export function bearingDeg(
   return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
 }
 
-export function buildFallbackPolyline(
-  pickup: { lat: number; lng: number },
-  dropoff: { lat: number; lng: number },
-  driver?: { lat: number; lng: number } | null,
-): TrackingRoutePoint[] {
-  const pts: TrackingRoutePoint[] = [
-    { latitude: pickup.lat, longitude: pickup.lng },
-  ];
-  if (driver) {
-    pts.push({ latitude: driver.lat, longitude: driver.lng });
-  }
-  const midLat = (pickup.lat + dropoff.lat) / 2 + 0.008;
-  const midLng = (pickup.lng + dropoff.lng) / 2 - 0.012;
-  pts.push({ latitude: midLat, longitude: midLng });
-  pts.push({ latitude: dropoff.lat, longitude: dropoff.lng });
-  return pts;
-}
-
 /** Place "5 km" labels along the polyline at 5 km intervals. */
 export function distanceMarkersAlongRoute(
   coords: TrackingRoutePoint[],

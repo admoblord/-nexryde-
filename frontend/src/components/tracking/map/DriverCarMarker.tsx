@@ -1,8 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Platform, Animated, Easing } from 'react-native';
-import { MarkerAnimated, AnimatedRegion, Circle } from 'react-native-maps';
+import { MarkerAnimated, AnimatedRegion } from 'react-native-maps';
 import { PERFECT_TRACKING } from '@/src/components/tracking/trackingMapTokens';
-import { isValidMapCoord } from '@/src/components/tracking/map/mapUtils';
+import { bearingDeg, isValidMapCoord } from '@/src/components/tracking/map/mapUtils';
+import {
+  DRIVER_STATIONARY_THRESHOLD,
+  driverMovedEnough,
+} from '@/src/components/tracking/map/driverMapAnimation';
+import {
+  trackVerifyGlide,
+  trackVerifyMarkerMount,
+  trackVerifyPropsChanged,
+  trackVerifyRotation,
+} from '@/src/components/tracking/map/trackVerifyLog';
 
 type Props = {
   lat: number;
@@ -10,30 +20,36 @@ type Props = {
   heading?: number | null;
   moving?: boolean;
   tracksViewChanges?: boolean;
+  /** Glide duration between GPS pings — match stream throttle (~4s). */
+  moveDurationMs?: number;
 };
 
-const HALO_RADIUS_M = 20;
-const ROTATION_MS = 300;
-const MOVE_MS = 750;
+const DEFAULT_MOVE_MS = 4000;
 const ANDROID = Platform.OS === 'android';
 
-/** Yellow taxi 🚕 + green direction arrow — native MapView marker. */
+/** Yellow taxi + green direction arrow — glides and rotates like Bolt. */
 export function DriverCarMarker({
   lat,
   lng,
-  heading = 0,
+  heading = null,
   moving = true,
   tracksViewChanges = !ANDROID,
+  moveDurationMs = DEFAULT_MOVE_MS,
 }: Props) {
-  const headingDeg = Number.isFinite(Number(heading)) ? Number(heading) : 0;
-  const rotateAnim = useRef(new Animated.Value(headingDeg)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
   const carBright = useRef(new Animated.Value(1)).current;
-  const lastCoord = useRef({ lat, lng });
+  const lastCoord = useRef<{ lat: number; lng: number } | null>(null);
+  const lastHeadingRef = useRef(0);
+  const [displayHeading, setDisplayHeading] = useState(0);
+  const propSeqRef = useRef(0);
+  const mountedRef = useRef(false);
 
-  // Smooth glide between GPS pings on BOTH platforms. Updating the plain
-  // `coordinate` prop teleports the marker before any animate call runs, so
-  // we render through an AnimatedRegion and tween it instead.
+  useEffect(() => {
+    if (mountedRef.current) return;
+    mountedRef.current = true;
+    trackVerifyMarkerMount('MarkerAnimated', true);
+  }, []);
+
   const animatedCoord = useRef(
     new AnimatedRegion({
       latitude: lat,
@@ -43,8 +59,6 @@ export function DriverCarMarker({
     }),
   ).current;
 
-  // Android snapshots custom marker views once — reopen capture whenever the
-  // car moves so late-mounting markers (first driver ping) still paint.
   const [selfCapture, setSelfCapture] = useState(ANDROID);
   useEffect(() => {
     if (!ANDROID) return;
@@ -52,16 +66,6 @@ export function DriverCarMarker({
     const t = setTimeout(() => setSelfCapture(false), 3000);
     return () => clearTimeout(t);
   }, [lat, lng]);
-
-  useEffect(() => {
-    if (ANDROID) return;
-    Animated.timing(rotateAnim, {
-      toValue: headingDeg,
-      duration: ROTATION_MS,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [headingDeg, rotateAnim]);
 
   useEffect(() => {
     if (ANDROID) return;
@@ -98,23 +102,55 @@ export function DriverCarMarker({
   useEffect(() => {
     if (!isValidMapCoord(lat, lng)) return;
     const prev = lastCoord.current;
-    const moved =
-      Math.abs(prev.lat - lat) > 1e-6 || Math.abs(prev.lng - lng) > 1e-6;
+    const moved = driverMovedEnough(prev, lat, lng);
+    const movedM =
+      prev == null
+        ? 999
+        : Math.sqrt((prev.lat - lat) ** 2 + (prev.lng - lng) ** 2) * 111_000;
+
+    if (!moved) {
+      trackVerifyRotation(lastHeadingRef.current, false, movedM);
+      return;
+    }
+
+    propSeqRef.current += 1;
+    trackVerifyPropsChanged(lat, lng, propSeqRef.current);
+
+    let nextHeading = lastHeadingRef.current;
+    if (heading != null && Number.isFinite(Number(heading))) {
+      nextHeading = Number(heading);
+    } else if (prev) {
+      nextHeading = bearingDeg(prev.lat, prev.lng, lat, lng);
+    }
+    lastHeadingRef.current = nextHeading;
     lastCoord.current = { lat, lng };
-    if (!moved) return;
+
+    const dist =
+      prev == null
+        ? DRIVER_STATIONARY_THRESHOLD * 2
+        : Math.abs(prev.lat - lat) + Math.abs(prev.lng - lng);
+    if (dist > DRIVER_STATIONARY_THRESHOLD) {
+      setDisplayHeading(nextHeading);
+      trackVerifyRotation(nextHeading, true, movedM);
+    } else {
+      trackVerifyRotation(nextHeading, false, movedM);
+    }
+
+    const duration = Math.min(Math.max(moveDurationMs, 900), 5500);
+    trackVerifyGlide(lat, lng, duration, moveDurationMs);
     animatedCoord
       .timing({
         latitude: lat,
         longitude: lng,
         latitudeDelta: 0,
         longitudeDelta: 0,
-        duration: MOVE_MS,
+        duration,
         easing: Easing.linear,
         useNativeDriver: false,
-        toValue: 0, // ignored by AnimatedRegion — required by the TS config type
+        toValue: 0,
       })
       .start();
-  }, [lat, lng, animatedCoord]);
+  }, [lat, lng, heading, animatedCoord, moveDurationMs]);
 
   if (!isValidMapCoord(lat, lng)) return null;
 
@@ -152,52 +188,21 @@ export function DriverCarMarker({
           ]}
         />
       )}
-      {ANDROID ? (
-        // Heading comes from the native `rotation` prop on Android — the
-        // snapshotted view itself must stay unrotated or it doubles up.
-        <View style={styles.rotator}>{rotatorInner}</View>
-      ) : (
-        <Animated.View
-          style={[
-            styles.rotator,
-            {
-              transform: [
-                {
-                  rotate: rotateAnim.interpolate({
-                    inputRange: [0, 360],
-                    outputRange: ['0deg', '360deg'],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          {rotatorInner}
-        </Animated.View>
-      )}
+      <View style={styles.rotator}>{rotatorInner}</View>
     </View>
   );
 
   return (
-    <>
-      <Circle
-        center={{ latitude: lat, longitude: lng }}
-        radius={HALO_RADIUS_M}
-        fillColor="rgba(255,215,0,0.14)"
-        strokeColor="rgba(255,215,0,0.42)"
-        zIndex={27}
-      />
-      <MarkerAnimated
-        coordinate={animatedCoord}
-        anchor={{ x: 0.5, y: 0.5 }}
-        tracksViewChanges={tracksViewChanges || selfCapture}
-        zIndex={30}
-        flat={moving}
-        rotation={ANDROID ? headingDeg : undefined}
-      >
-        {markerBody}
-      </MarkerAnimated>
-    </>
+    <MarkerAnimated
+      coordinate={animatedCoord}
+      anchor={{ x: 0.5, y: 0.5 }}
+      tracksViewChanges={tracksViewChanges || selfCapture}
+      zIndex={30}
+      flat
+      rotation={displayHeading}
+    >
+      {markerBody}
+    </MarkerAnimated>
   );
 }
 

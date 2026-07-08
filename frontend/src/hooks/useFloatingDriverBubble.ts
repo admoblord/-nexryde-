@@ -1,12 +1,19 @@
-/** Floating bubble removed — hook returns permanent no-ops. */
-const noop = () => {};
-const asyncNoop = async () => false;
+import {
+  hasNativeOverlayPermission,
+  hideNativeDriverBubble,
+  requestNativeOverlayPermission,
+  showNativeDriverBubble,
+} from '@/src/services/driverNativeExperience';
+
 export function useFloatingDriverBubble() {
   return {
-    enable: noop,
-    disable: noop,
-    updateStatus: noop,
-    requestPermission: asyncNoop,
-    hasPermission: asyncNoop,
+    enable: () => showNativeDriverBubble('online', 0),
+    disable: hideNativeDriverBubble,
+    updateStatus: (status = 'online', badge = 0) => showNativeDriverBubble(status, badge),
+    requestPermission: async () => {
+      requestNativeOverlayPermission();
+      return hasNativeOverlayPermission();
+    },
+    hasPermission: hasNativeOverlayPermission,
   };
 }

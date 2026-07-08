@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useAppStore } from '@/src/store/appStore';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
+import { BRAND, SURFACE } from '@/src/constants/designSystem';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useFlowLayout } from '@/src/constants/flowLayout';
@@ -56,14 +57,14 @@ function TripCardSkeleton() {
 }
 const skStyles = StyleSheet.create({
   skCard: {
-    backgroundColor: '#FFF',
+    backgroundColor: SURFACE.cardDark,
     borderRadius: 16,
     padding: 14,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: '#F1F5F9',
+    borderColor: SURFACE.hairline,
   },
-  skBox: { backgroundColor: '#E2E8F0', borderRadius: 6, height: 16 },
+  skBox: { backgroundColor: SURFACE.cardElevated, borderRadius: 6, height: 16 },
 });
 
 type TripStatus = 'completed' | 'cancelled' | 'ongoing' | 'accepted' | 'arrived' | 'pending' | 'pending_payment';
@@ -81,18 +82,18 @@ function isActive(status: string) {
 }
 
 function statusColor(status: string): string {
-  if (status === 'completed') return '#16A34A';
-  if (status === 'cancelled') return '#EF4444';
-  if (status === 'pending_payment') return '#7C3AED';
-  if (isActive(status)) return '#2563EB';
-  return '#6B7280';
+  if (status === 'completed') return BRAND.primary;
+  if (status === 'cancelled') return BRAND.danger;
+  if (status === 'pending_payment') return BRAND.accentPurple;
+  if (isActive(status)) return BRAND.info;
+  return BRAND.textMuted;
 }
 function statusBg(status: string): string {
-  if (status === 'completed') return '#D1FAE5';
-  if (status === 'cancelled') return '#FEE2E2';
-  if (status === 'pending_payment') return '#EDE9FE';
-  if (isActive(status)) return '#DBEAFE';
-  return '#F3F4F6';
+  if (status === 'completed') return 'rgba(34,225,128,0.14)';
+  if (status === 'cancelled') return 'rgba(239,68,68,0.14)';
+  if (status === 'pending_payment') return 'rgba(139,92,246,0.14)';
+  if (isActive(status)) return 'rgba(56,189,248,0.14)';
+  return SURFACE.tile;
 }
 function statusLabel(status: string): string {
   if (status === 'pending_payment') return 'Awaiting Payment';
@@ -540,8 +541,8 @@ export default function DriverTripsTab() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#2563EB"
-              colors={['#2563EB']}
+              tintColor={BRAND.primary}
+              colors={[BRAND.primary]}
             />
           }
           ItemSeparatorComponent={() => <View style={{ height: Math.max(10, Math.round(flow.sectionGap * 0.5)) }} />}
@@ -552,49 +553,44 @@ export default function DriverTripsTab() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  container: { flex: 1, backgroundColor: BRAND.bgDeep },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: SPACING.md,
-    backgroundColor: COLORS.white,
+    backgroundColor: SURFACE.cardDark,
     borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-    ...Platform.select({
-      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4 },
-    }),
-    elevation: 2,
+    borderBottomColor: SURFACE.hairline,
   },
-  headerTitle: { fontSize: FONT_SIZE.xl, fontWeight: '900', color: '#0F172A' },
-  headerSubtitle: { fontSize: FONT_SIZE.xs, color: '#64748B', fontWeight: '500', marginTop: 2 },
+  headerTitle: { fontSize: FONT_SIZE.xl, fontWeight: '900', color: BRAND.textPrimary },
+  headerSubtitle: { fontSize: FONT_SIZE.xs, color: BRAND.textSecondary, fontWeight: '500', marginTop: 2 },
   operationsBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: '#EFF6FF',
+    backgroundColor: BRAND.primaryMuted,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     borderRadius: BORDER_RADIUS.full,
     borderWidth: 1,
-    borderColor: '#BFDBFE',
+    borderColor: SURFACE.glassBorder,
   },
-  operationsBtnText: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: '#2563EB' },
+  operationsBtnText: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: BRAND.primary },
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
-    backgroundColor: '#FEF2F2',
+    backgroundColor: 'rgba(239,68,68,0.12)',
     paddingVertical: SPACING.sm,
     borderBottomWidth: 1,
-    borderBottomColor: '#FECACA',
+    borderBottomColor: 'rgba(239,68,68,0.25)',
   },
-  errorText: { flex: 1, fontSize: FONT_SIZE.sm, color: '#EF4444', fontWeight: '600' },
-  retryText: { fontSize: FONT_SIZE.sm, color: '#2563EB', fontWeight: '700' },
+  errorText: { flex: 1, fontSize: FONT_SIZE.sm, color: BRAND.danger, fontWeight: '600' },
+  retryText: { fontSize: FONT_SIZE.sm, color: BRAND.primary, fontWeight: '700' },
   loadingCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: SPACING.md },
-  loadingText: { fontSize: FONT_SIZE.sm, color: '#94A3B8' },
+  loadingText: { fontSize: FONT_SIZE.sm, color: BRAND.textSecondary },
   listContent: { flexGrow: 1 },
-  // Active trip banner
   activeTripBanner: {
     marginBottom: SPACING.md,
     borderRadius: BORDER_RADIUS.xl,
@@ -607,30 +603,30 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     gap: SPACING.sm,
   },
-  activeTripTitle: { fontSize: FONT_SIZE.md, fontWeight: '800', color: COLORS.white },
-  activeTripSub: { fontSize: FONT_SIZE.xs, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
+  activeTripTitle: { fontSize: FONT_SIZE.md, fontWeight: '800', color: BRAND.textPrimary },
+  activeTripSub: { fontSize: FONT_SIZE.xs, color: BRAND.textSecondary, marginTop: 2 },
   activeTripArrow: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: SURFACE.tile,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // Stats strip
   statsStrip: {
     flexDirection: 'row',
-    backgroundColor: COLORS.white,
+    backgroundColor: SURFACE.cardDark,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: SURFACE.hairline,
     ...SHADOWS.sm,
   },
   statItem: { flex: 1, alignItems: 'center' },
-  statValue: { fontSize: FONT_SIZE.lg, fontWeight: '900', color: '#0F172A' },
-  statLabel: { fontSize: 10, color: '#94A3B8', fontWeight: '600', marginTop: 2, textAlign: 'center' },
-  statDivider: { width: 1, backgroundColor: '#F1F5F9', marginVertical: 4 },
-  // Filter tabs
+  statValue: { fontSize: FONT_SIZE.lg, fontWeight: '900', color: BRAND.textPrimary },
+  statLabel: { fontSize: 10, color: BRAND.textSecondary, fontWeight: '600', marginTop: 2, textAlign: 'center' },
+  statDivider: { width: 1, backgroundColor: SURFACE.hairline, marginVertical: 4 },
   filterRow: {
     flexDirection: 'row',
     gap: SPACING.xs,
@@ -643,18 +639,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.sm,
     paddingVertical: 6,
     borderRadius: BORDER_RADIUS.full,
-    backgroundColor: COLORS.white,
+    backgroundColor: SURFACE.cardDark,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: SURFACE.hairline,
   },
   filterTabActive: {
-    backgroundColor: '#2563EB',
-    borderColor: '#2563EB',
+    backgroundColor: BRAND.primary,
+    borderColor: BRAND.primary,
   },
-  filterTabText: { fontSize: 12, fontWeight: '700', color: '#64748B' },
-  filterTabTextActive: { color: COLORS.white },
+  filterTabText: { fontSize: 12, fontWeight: '700', color: BRAND.textSecondary },
+  filterTabTextActive: { color: BRAND.textInverse },
   filterCount: {
-    backgroundColor: '#F1F5F9',
+    backgroundColor: SURFACE.tile,
     borderRadius: BORDER_RADIUS.full,
     minWidth: 18,
     height: 18,
@@ -662,23 +658,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
-  filterCountActive: { backgroundColor: 'rgba(255,255,255,0.25)' },
-  filterCountText: { fontSize: 10, fontWeight: '800', color: '#64748B' },
-  filterCountTextActive: { color: COLORS.white },
-  // Trip card
+  filterCountActive: { backgroundColor: 'rgba(13,20,32,0.25)' },
+  filterCountText: { fontSize: 10, fontWeight: '800', color: BRAND.textSecondary },
+  filterCountTextActive: { color: BRAND.textInverse },
   tripCard: {
-    backgroundColor: COLORS.white,
+    backgroundColor: SURFACE.cardDark,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     borderWidth: 1,
-    borderColor: '#F1F5F9',
+    borderColor: SURFACE.hairline,
     ...SHADOWS.sm,
     marginTop: SPACING.sm,
   },
   tripCardActive: {
-    borderColor: '#93C5FD',
+    borderColor: SURFACE.glassBorder,
     borderWidth: 1.5,
-    backgroundColor: '#FAFEFF',
+    backgroundColor: SURFACE.cardElevated,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -697,13 +692,13 @@ const styles = StyleSheet.create({
   },
   statusText: { fontSize: 12, fontWeight: '700' },
   liveLabel: {
-    backgroundColor: '#EF4444',
+    backgroundColor: BRAND.danger,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: BORDER_RADIUS.full,
   },
-  liveLabelText: { fontSize: 9, fontWeight: '900', color: COLORS.white, letterSpacing: 0.5 },
-  fareText: { fontSize: FONT_SIZE.lg, fontWeight: '900', color: '#0F172A' },
+  liveLabelText: { fontSize: 9, fontWeight: '900', color: BRAND.textPrimary, letterSpacing: 0.5 },
+  fareText: { fontSize: FONT_SIZE.lg, fontWeight: '900', color: BRAND.primary },
   riderRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -714,92 +709,90 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#E0E7FF',
+    backgroundColor: BRAND.primaryMuted,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  riderName: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '700', color: '#374151' },
-  dateText: { fontSize: FONT_SIZE.xs, color: '#94A3B8', fontWeight: '500' },
+  riderName: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '700', color: BRAND.textPrimary },
+  dateText: { fontSize: FONT_SIZE.xs, color: BRAND.textSecondary, fontWeight: '500' },
   routeWrap: {
     flexDirection: 'row',
     gap: SPACING.sm,
     marginBottom: SPACING.sm,
     paddingTop: SPACING.sm,
     borderTopWidth: 1,
-    borderTopColor: '#F8FAFC',
+    borderTopColor: SURFACE.hairline,
   },
   routeLineColumn: { alignItems: 'center', paddingTop: 4, width: 12 },
   routeDot: { width: 8, height: 8, borderRadius: 4 },
   routeConnector: {
     width: 1.5,
     flex: 1,
-    backgroundColor: '#E2E8F0',
+    backgroundColor: SURFACE.hairline,
     marginVertical: 3,
     minHeight: 16,
   },
-  routeLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.5 },
-  routeAddress: { fontSize: FONT_SIZE.sm, fontWeight: '600', color: '#1E293B', marginTop: 1 },
+  routeLabel: { fontSize: 10, fontWeight: '700', color: BRAND.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 },
+  routeAddress: { fontSize: FONT_SIZE.sm, fontWeight: '600', color: BRAND.textPrimary, marginTop: 1 },
   metaRow: {
     flexDirection: 'row',
     gap: SPACING.xs,
     flexWrap: 'wrap',
     paddingTop: SPACING.sm,
     borderTopWidth: 1,
-    borderTopColor: '#F8FAFC',
+    borderTopColor: SURFACE.hairline,
   },
   metaChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: SURFACE.tile,
     paddingHorizontal: SPACING.sm,
     paddingVertical: 3,
     borderRadius: BORDER_RADIUS.full,
   },
-  metaChipText: { fontSize: 11, fontWeight: '600', color: '#6B7280' },
+  metaChipText: { fontSize: 11, fontWeight: '600', color: BRAND.textSecondary },
   manageTripBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: SPACING.xs,
-    backgroundColor: '#2563EB',
+    backgroundColor: BRAND.primary,
     padding: SPACING.sm,
     borderRadius: BORDER_RADIUS.lg,
     marginTop: SPACING.sm,
   },
-  manageTripBtnText: { fontSize: FONT_SIZE.sm, fontWeight: '800', color: COLORS.white },
-  // Completed trip actions
+  manageTripBtnText: { fontSize: FONT_SIZE.sm, fontWeight: '800', color: BRAND.textInverse },
   completedActions: {
     flexDirection: 'row', gap: SPACING.xs, marginTop: SPACING.xs,
-    paddingTop: SPACING.xs, borderTopWidth: 1, borderTopColor: '#F1F5F9',
+    paddingTop: SPACING.xs, borderTopWidth: 1, borderTopColor: SURFACE.hairline,
   },
   completedActionBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
     paddingVertical: 8, borderRadius: BORDER_RADIUS.lg,
-    backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0',
+    backgroundColor: SURFACE.tile, borderWidth: 1, borderColor: SURFACE.hairline,
   },
   completedActionTxt: { fontSize: 12, fontWeight: '800' },
-  // Empty state
   emptyState: { alignItems: 'center', paddingVertical: 48, gap: SPACING.md, paddingHorizontal: SPACING.xl },
   emptyIconWrap: {
     width: 96, height: 96, borderRadius: 48,
     alignItems: 'center', justifyContent: 'center',
   },
-  emptyTitle: { fontSize: FONT_SIZE.xl, fontWeight: '800', color: '#1E293B', textAlign: 'center' },
+  emptyTitle: { fontSize: FONT_SIZE.xl, fontWeight: '800', color: BRAND.textPrimary, textAlign: 'center' },
   emptySubtitle: {
-    fontSize: FONT_SIZE.sm, color: '#64748B',
+    fontSize: FONT_SIZE.sm, color: BRAND.textSecondary,
     textAlign: 'center', lineHeight: 22,
   },
   goOnlineBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
-    backgroundColor: '#2563EB',
+    backgroundColor: BRAND.primary,
     paddingHorizontal: SPACING.xl,
     paddingVertical: SPACING.md,
     borderRadius: BORDER_RADIUS.xl,
     marginTop: SPACING.sm,
     ...SHADOWS.md,
   },
-  goOnlineBtnText: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.white },
+  goOnlineBtnText: { fontSize: FONT_SIZE.md, fontWeight: '700', color: BRAND.textInverse },
 });

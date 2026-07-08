@@ -31,8 +31,22 @@ function isExpired(token: string, skewSec = 30): boolean {
   return Date.now() / 1000 >= exp - skewSec;
 }
 
+/** True when a non-empty JWT is present and not within expiry skew. */
+export function isAccessTokenValid(token: string | null | undefined, skewSec = 30): boolean {
+  return !!token && !isExpired(token, skewSec);
+}
+
 function tokenAgeSec(token: string): number | null {
   const exp = jwtExpSec(token);
+  if (!exp) return null;
+  return Math.max(0, exp - Math.floor(Date.now() / 1000));
+}
+
+/** Seconds until JWT exp (0 if expired/missing). */
+export function getAccessTokenTtlSec(token?: string | null): number | null {
+  const t = token ?? accessToken;
+  if (!t) return null;
+  const exp = jwtExpSec(t);
   if (!exp) return null;
   return Math.max(0, exp - Math.floor(Date.now() / 1000));
 }
@@ -40,6 +54,15 @@ function tokenAgeSec(token: string): number | null {
 /** Sync read of in-memory cache only — may be null until warmTokenCache/getValidToken. */
 export function getCachedToken(): string | null {
   return accessToken;
+}
+
+export async function hasStoredRefreshToken(): Promise<boolean> {
+  try {
+    const refresh = await SecureStore.getItemAsync(REFRESH_KEY);
+    return Boolean(refresh?.trim());
+  } catch {
+    return false;
+  }
 }
 
 export async function setTokens(access: string, refresh?: string | null): Promise<void> {
@@ -80,7 +103,18 @@ export async function getValidToken(): Promise<string | null> {
     }
   }
   if (accessToken && !isExpired(accessToken)) return accessToken;
-  return forceRefresh();
+
+  const refreshed = await forceRefresh();
+  if (refreshed) return refreshed;
+
+  // Refresh can fail (no refresh token, offline) while the access JWT is still valid
+  // on the server — client expiry skew is 30s ahead of real exp. Keep accepting rides
+  // instead of sending unauthenticated PUTs that always 401.
+  if (accessToken) {
+    const exp = jwtExpSec(accessToken);
+    if (exp && Date.now() / 1000 < exp) return accessToken;
+  }
+  return null;
 }
 
 export async function forceRefresh(): Promise<string | null> {

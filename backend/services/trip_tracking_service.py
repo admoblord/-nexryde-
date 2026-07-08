@@ -168,21 +168,18 @@ def build_trip_route_response(trip: dict, driver_location: Optional[dict] = None
             haversine_km(waypoints[i]["lat"], waypoints[i]["lng"], waypoints[i + 1]["lat"], waypoints[i + 1]["lng"])
             for i in range(len(waypoints) - 1)
         )
-    segment_to_target: list[dict] = []
-    target = trip_tracking_target(trip)
-    if driver_location and target:
-        try:
-            segment_to_target = [
-                {"lat": float(driver_location["lat"]), "lng": float(driver_location["lng"])},
-                {"lat": target[0], "lng": target[1]},
-            ]
-        except (KeyError, TypeError, ValueError):
-            segment_to_target = []
+    # Live driver→target geometry is rendered client-side via Google Directions.
+    # Do not expose a 2-point chord — it reads as a broken road route on the map.
     return {
         "polyline": polyline if isinstance(polyline, str) else None,
         "distance_km": round(distance_km, 3) if distance_km else None,
         "duration_seconds": duration_seconds or None,
         "waypoints": waypoints,
-        "segment_to_target": segment_to_target,
+        "segment_to_target": [],
         "trip_status": trip.get("status"),
     }
+
+
+# Re-export pickup wait helpers (tests + WS payloads import from here).
+from fare_config import PICKUP_FREE_WAIT_SECONDS  # noqa: E402
+from trip_fare_adjustments import compute_pickup_wait_payload  # noqa: E402

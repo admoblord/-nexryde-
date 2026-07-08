@@ -1,26 +1,23 @@
 /**
  * Shared visual tokens for driver trip docks + related modals.
- * Keeps pickup / arrived / start / ongoing / offer surfaces aligned.
  */
+import { BRAND } from '@/src/constants/designSystem';
 
 export const DOCK_TOP_RADIUS = 32;
-/** expo-blur intensity for dock shells */
 export const DOCK_BLUR_INTENSITY = 56;
-/** Brand header (DriverBrandChrome) — slightly softer when not in offer mode */
 export const HEADER_BLUR_DEFAULT = 48;
 export const HEADER_BLUR_INCOMING = 56;
 
-/** Drag handle — mint + subtle blue (matches ongoing / “live” family) */
 export const HANDLE_GRADIENT_DEFAULT: readonly [string, string, string] = [
-  'rgba(52,245,184,0.52)',
-  'rgba(59,130,246,0.26)',
-  'rgba(52,245,184,0.48)',
+  'rgba(109,255,195,0.52)',
+  'rgba(0,102,255,0.26)',
+  'rgba(109,255,195,0.48)',
 ];
 
 export const HANDLE_GRADIENT_ONGOING: readonly [string, string, string] = [
-  'rgba(57,255,20,0.55)',
-  'rgba(59,130,246,0.32)',
-  'rgba(57,255,20,0.5)',
+  'rgba(34,225,128,0.55)',
+  'rgba(0,102,255,0.32)',
+  'rgba(34,225,128,0.5)',
 ];
 
 export const PHASE_CHROME_BLUR = 52;
@@ -28,28 +25,28 @@ export const PHASE_CHROME_RADIUS = 20;
 
 export const DOCK_PHASE_COLORS = {
   heading_pickup: {
-    border: 'rgba(52,245,184,0.28)',
-    sheen: 'rgba(52,245,184,0.14)',
-    kicker: '#4ADE80',
-    dot: '#34F5B8',
+    border: BRAND.primaryMuted,
+    sheen: 'rgba(34,225,128,0.14)',
+    kicker: BRAND.primaryLight,
+    dot: BRAND.primary,
   },
   arrived: {
-    border: 'rgba(52,245,184,0.38)',
-    sheen: 'rgba(52,245,184,0.16)',
-    kicker: '#4ADE80',
-    dot: '#34F5B8',
+    border: 'rgba(34,225,128,0.38)',
+    sheen: 'rgba(34,225,128,0.16)',
+    kicker: BRAND.primaryLight,
+    dot: BRAND.primary,
   },
   rider_in_car: {
-    border: 'rgba(52,245,184,0.32)',
-    sheen: 'rgba(52,245,184,0.12)',
-    kicker: '#4ADE80',
-    dot: '#34F5B8',
+    border: 'rgba(34,225,128,0.32)',
+    sheen: 'rgba(34,225,128,0.12)',
+    kicker: BRAND.primaryLight,
+    dot: BRAND.primary,
   },
   ongoing: {
     border: 'rgba(96,165,250,0.35)',
     sheen: 'rgba(59,130,246,0.14)',
     kicker: '#93C5FD',
-    dot: '#60A5FA',
+    dot: BRAND.info,
   },
 } as const;
 

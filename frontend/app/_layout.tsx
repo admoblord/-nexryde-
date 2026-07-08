@@ -1,9 +1,6 @@
 // Fix for react-native-google-places-autocomplete web compatibility
 import 'react-native-get-random-values';
 
-// Register background GPS task before TaskManager can trigger it.
-import '@/src/tasks/backgroundLocationTask';
-
 import * as SplashScreen from 'expo-splash-screen';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -18,20 +15,29 @@ import { LanguageProvider } from '@/src/i18n/LanguageContext';
 import { ErrorToastProvider } from '@/src/components/shared/ErrorToast';
 import { QueryProvider } from '@/src/providers/QueryProvider';
 import { useNotifications } from '@/src/hooks/useNotifications';
+import { useDriverOfferBackgroundAlert } from '@/src/hooks/useDriverOfferBackgroundAlert';
 import { useOfflineQueueFlush } from '@/src/hooks/useOfflineQueueFlush';
+import { useConnectivityRecovery } from '@/src/hooks/useConnectivityRecovery';
 import { useAppStore } from '@/src/store/appStore';
 import React, { useEffect, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { registerLoginNavigator } from '@/src/utils/sessionRefresh';
+import { safeReplace } from '@/src/utils/navigationSafe';
 import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
 import { warmBackendConnection } from '@/src/utils/warmBackend';
-import { initSentry, wrapWithSentry } from '@/src/utils/sentry';
+import { initSentry, wrapWithSentry, installGlobalErrorHandler } from '@/src/utils/sentry';
+import { initializeOfflineMode } from '@/src/services/offlineMode';
 
 // Initialize crash reporting as early as possible — before the root component
 // mounts — so startup crashes (rider + driver) are captured. No-op without a DSN.
 initSentry();
+try {
+  installGlobalErrorHandler();
+} catch (err) {
+  console.warn('[startup] Global error handler install failed:', err);
+}
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -41,6 +47,7 @@ export const REFERRAL_CODE_STORAGE_KEY = '@nexryde_pending_referral';
 // ── Action deep-link routes ───────────────────────────────────────────────────
 const ACTION_ROUTES: Record<string, string> = {
   go_online: '/(driver-tabs)/driver-home?action=go_online',
+  go_offline: '/(driver-tabs)/driver-home?action=go_offline',
   open_app:  '/(driver-tabs)/driver-home',
   my_trips:  '/(driver-tabs)/driver-trips',
   wallet:    '/(driver-tabs)/driver-earnings',
@@ -133,7 +140,13 @@ function RootLayout() {
   useEffect(() => {
     if (Platform.OS !== 'web') {
       warmBackendConnection(true);
+      // Register background GPS task after React mounts (still before driver goes online).
+      void import('@/src/tasks/backgroundLocationTask').catch((err) => {
+        console.warn('[startup] backgroundLocationTask registration failed:', err);
+      });
     }
+    const unsubOffline = initializeOfflineMode();
+    return () => unsubOffline();
   }, []);
 
   useEffect(() => {
@@ -154,7 +167,7 @@ function RootLayout() {
   // ── Register global login navigator (used by authedFetch outside React tree) ─
   useEffect(() => {
     registerLoginNavigator(() => {
-      try { router.replace('/(auth)/login' as any); } catch { /* router not ready */ }
+      try { safeReplace(router, '/(auth)/login' as any); } catch { /* router not ready */ }
     });
   }, [router]);
 
@@ -172,7 +185,7 @@ function RootLayout() {
       wasAuthenticated.current = false;
       // Replace current stack with login so the user sees a proper screen
       try {
-        router.replace('/(auth)/login' as any);
+        safeReplace(router, '/(auth)/login' as any);
       } catch { /* router not ready yet */ }
       return;
     }
@@ -224,7 +237,9 @@ function RootLayout() {
 
   // Hooks must be called unconditionally at the top level — not inside try/catch.
   useNotifications();
+  useDriverOfferBackgroundAlert();
   useOfflineQueueFlush();
+  useConnectivityRecovery();
 
   try {
     return (

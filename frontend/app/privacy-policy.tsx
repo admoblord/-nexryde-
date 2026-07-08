@@ -106,7 +106,7 @@ const PRIVACY_HTML = `
 <ul>
   <li><strong>Rider ↔ Driver during a trip:</strong> First name, rating, vehicle details, real-time GPS. Sharing ends when the trip completes.</li>
   <li><strong>Emergency contacts:</strong> Only when you activate SOS or Trip Sharing.</li>
-  <li><strong>Service providers:</strong> Google Maps (routing), your telco or our OTP delivery channel when you verify by phone, payment processors (e.g. Squad). All bound by data protection contracts.</li>
+  <li><strong>Service providers:</strong> Google Maps (routing), payment processors (e.g. Squad), cloud hosting, and push notification services. All bound by data protection contracts.</li>
   <li><strong>Legal requirements:</strong> Valid Nigerian court orders, law enforcement, or regulatory obligations.</li>
   <li><strong>Business transfer:</strong> In a merger or acquisition, data transfers to the successor under the same protections.</li>
 </ul>

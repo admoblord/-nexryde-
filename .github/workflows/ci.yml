@@ -181,6 +181,16 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: admin-web/package-lock.json
+
+      - name: Build admin panel SPA
+        working-directory: admin-web
+        run: npm ci && npm run build
+
       - name: Configure Docker
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
@@ -192,17 +202,15 @@ jobs:
             ./backend
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
-      - name: Deploy to Cloud Run (staging)
+      - name: Deploy to Cloud Run (staging) via service YAML
         run: |
-          gcloud run services update-traffic ${{ env.CLOUD_RUN_STAGING }} \
-            --region ${{ env.REGION }} \
-            --image "${{ env.IMAGE }}" || \
-          gcloud run deploy ${{ env.CLOUD_RUN_STAGING }} \
-            --image "${{ env.IMAGE }}" \
-            --region ${{ env.REGION }} \
-            --platform managed \
-            --allow-unauthenticated \
-            --set-env-vars NEXRYDE_ENV=staging
+          sed -i "s|nexryde-backend:staging-latest|staging-${{ github.sha }}|g" \
+            backend/cloudrun.staging.yaml
+          # Tag image as staging-latest for manual rollbacks
+          gcloud artifacts docker tags add "${{ env.IMAGE }}" \
+            "${{ env.ARTIFACT_REGISTRY }}:staging-latest" || true
+          gcloud run services replace backend/cloudrun.staging.yaml \
+            --region ${{ env.REGION }}
 
       - name: Health check (staging)
         run: |
@@ -241,6 +249,16 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: admin-web/package-lock.json
+
+      - name: Build admin panel SPA
+        working-directory: admin-web
+        run: npm ci && npm run build
 
       - name: Configure Docker
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet

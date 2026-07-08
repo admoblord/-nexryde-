@@ -33,6 +33,11 @@ export async function fetchDrivingRoute(
   dropoffLat: number,
   dropoffLng: number,
   stop?: { lat: number; lng: number } | null,
+  options?: {
+    /** Ordered intermediate waypoints (preferred over single `stop`). */
+    stops?: Array<{ lat: number; lng: number }>;
+    signal?: AbortSignal;
+  },
 ): Promise<DrivingRouteResult | null> {
   const base = String(BACKEND_URL || '')
     .trim()
@@ -45,14 +50,22 @@ export async function fetchDrivingRoute(
     dropoff_lat: String(dropoffLat),
     dropoff_lng: String(dropoffLng),
   });
-  if (stop && Number.isFinite(stop.lat) && Number.isFinite(stop.lng)) {
-    q.set('stop_lat', String(stop.lat));
-    q.set('stop_lng', String(stop.lng));
+  const waypoints =
+    options?.stops?.filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng)) ??
+    (stop && Number.isFinite(stop.lat) && Number.isFinite(stop.lng) ? [stop] : []);
+  if (waypoints.length === 1) {
+    q.set('stop_lat', String(waypoints[0]!.lat));
+    q.set('stop_lng', String(waypoints[0]!.lng));
+  } else if (waypoints.length > 1) {
+    // Backend currently accepts one stop; pass first for API compat (multi-stop via repeated calls later).
+    q.set('stop_lat', String(waypoints[0]!.lat));
+    q.set('stop_lng', String(waypoints[0]!.lng));
   }
 
   try {
     const res = await fetch(`${base}/api/places/driving-route?${q.toString()}`, {
       headers: { Accept: 'application/json' },
+      signal: options?.signal,
     });
     if (!res.ok) return null;
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;

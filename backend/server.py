@@ -98,7 +98,9 @@ from openai import OpenAI
 # rate_limit (SlowAPI) removed — using security_advanced.RateLimiter
 from fare_config import FARE_CONFIG, SHORT_TRIP_KM_THRESHOLD, normalize_fare_city_key, resolve_fare_rate_card
 from nexryde_pricing import (
+    append_stop_time_breakdown_suffix,
     core_components_from_rate_card,
+    intermediate_stop_time_components,
     nexryde_route_location_multiplier,
     nexryde_route_time_minutes,
     nexryde_service_multiplier,
@@ -140,6 +142,10 @@ from routers.community import community_router, seed_community_groups, seed_comm
 from routers.safety import safety_router, seed_danger_zones
 from routers.ai_features import ai_router
 from routers.admin import admin_router, require_admin_access
+from routers.admin_ops import admin_ops_router
+from routers.admin_driver_profile import admin_driver_profile_router
+from routers.admin_ops_center import admin_ops_center_router
+from routers.admin_rider_profile import admin_rider_profile_router
 from routers.admin_notifications import admin_notifications_router
 from routers.trips import trips_router, set_fare_estimate_store, set_shared_functions
 from routers.auth import auth_router, send_otp as router_send_otp, ensure_otp_indexes
@@ -153,6 +159,7 @@ from routers.ai_intelligence import ai_intelligence_router, set_ai_intelligence_
 
 ROOT_DIR = Path(__file__).parent
 ADMIN_DIR = ROOT_DIR / 'admin'  # admin folder is inside backend/
+ADMIN_SPA_DIR = ADMIN_DIR / 'dist'
 load_dotenv(ROOT_DIR / '.env')
 
 # ── Startup environment validation ────────────────────────────────────────────
@@ -1095,7 +1102,9 @@ class LostItemResponseRequest(BaseModel):
 
 # ==================== HELPER FUNCTIONS ====================
 
-ROUTE_ESTIMATE_VERSION = "v_last_month"
+from route_cache import directions_cache_key, get_cached_directions, store_cached_directions
+from routing_quality import is_directions_road_route
+
 
 def get_cache_key(
     pickup_lat: float,
@@ -1105,16 +1114,7 @@ def get_cache_key(
     stop_lat: Optional[float] = None,
     stop_lng: Optional[float] = None,
 ) -> str:
-    stop_part = ""
-    if stop_lat is not None and stop_lng is not None:
-        stop_part = f"@{round(stop_lat, 4)},{round(stop_lng, 4)}"
-    key_str = (
-        f"{ROUTE_ESTIMATE_VERSION}:"
-        f"{round(pickup_lat, 4)},{round(pickup_lng, 4)}-"
-        f"{round(dropoff_lat, 4)},{round(dropoff_lng, 4)}"
-        f"{stop_part}"
-    )
-    return hashlib.md5(key_str.encode()).hexdigest()
+    return directions_cache_key(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, stop_lat, stop_lng)
 
 
 def _directions_route_from_google_response(route: dict) -> dict:
@@ -1269,6 +1269,17 @@ async def get_directions_from_google(
 ) -> dict:
     cache_key = get_cache_key(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, stop_lat, stop_lng)
 
+    # L0: shared fare/trip route cache (LRU + Mongo route_cache — same key as POST /fare/estimate)
+    try:
+        shared_cached = await get_cached_directions(
+            db, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, stop_lat, stop_lng
+        )
+        if shared_cached and is_directions_road_route(shared_cached):
+            route_cache[cache_key] = {"data": shared_cached, "cached_at": datetime.utcnow()}
+            return shared_cached
+    except Exception:
+        pass
+
     # L1: in-memory cache (fastest, 5-minute TTL)
     if cache_key in route_cache and is_cache_valid(route_cache[cache_key]):
         return route_cache[cache_key]["data"]
@@ -1317,6 +1328,20 @@ async def get_directions_from_google(
             route_cache[cache_key] = {"data": result, "cached_at": datetime.utcnow()}
             await _redis_set_route(cache_key, result)
             await _store_route_in_db(cache_key, result)
+            if is_directions_road_route(result):
+                try:
+                    await store_cached_directions(
+                        db,
+                        pickup_lat,
+                        pickup_lng,
+                        dropoff_lat,
+                        dropoff_lng,
+                        result,
+                        stop_lat,
+                        stop_lng,
+                    )
+                except Exception:
+                    pass
             return result
     except Exception as e:
         logger.warning(f"Directions API failed: {e}")
@@ -1372,6 +1397,7 @@ def calculate_fare(
     pickup_lng: Optional[float] = None,
     dropoff_lat: Optional[float] = None,
     dropoff_lng: Optional[float] = None,
+    has_intermediate_stop: bool = False,
 ) -> dict:
     """
     **Lagos** — NEXRYDE exact Lagride-style (see ``lagride_lagos_pricing``):
@@ -1381,8 +1407,8 @@ def calculate_fare(
 
     Road-route ``Distance`` only; no base fare / no time line item. Lagos market multiplier: ``LAGOS_MARKET_WIDE_FARE_MULTIPLIER`` in ``lagride_lagos_pricing``.
 
-    **Other cities**: (Base + Distance×PerKm + Time×PerMin) × RouteLocation × Service × Surge
-    with short/long rate cards from ``fare_config``.
+    **Other cities**: (Base + Distance×PerKm) × RouteLocation × Service × Surge for direct trips;
+    when the rider adds an intermediate stop, add Time×PerMin (same per-minute card as the service tier).
     """
     city_key = normalize_fare_city_key(city)
     city_config = FARE_CONFIG.get(city_key, FARE_CONFIG["default"])
@@ -1415,22 +1441,34 @@ def calculate_fare(
             short_trip_threshold_km=float(SHORT_TRIP_KM_THRESHOLD),
             dropoff_lat=dropoff_lat,
             dropoff_lng=dropoff_lng,
+            has_intermediate_stop=bool(has_intermediate_stop),
         )
 
     fare_bucket = "short" if float(distance_km) < SHORT_TRIP_KM_THRESHOLD else "standard"
 
     route_time_min = nexryde_route_time_minutes(duration_min, traffic_duration_min)
     rate_card = resolve_fare_rate_card(city_key, service_key, fare_bucket)
+    # Direct trips: base + distance only. Stop trips add per-minute time charge.
     line = core_components_from_rate_card(
         rate_card["base_fare"],
         rate_card["per_km"],
-        rate_card["per_min"],
+        0,
         distance_km,
-        route_time_min,
+        0,
+    )
+    stop_time = (
+        intermediate_stop_time_components(
+            city_key,
+            service_key,
+            route_time_min,
+            fare_bucket=fare_bucket,
+        )
+        if has_intermediate_stop
+        else {"time_fee": 0.0, "stop_time_per_min": 0.0, "stop_time_fee_applied": False}
     )
     base_fare = line["base_fare"]
     distance_fee = line["distance_fee"]
-    time_fee = line["time_fee"]
+    time_fee = float(stop_time["time_fee"])
     traffic_fee = 0.0
 
     location_mult, location_zone = nexryde_route_location_multiplier(
@@ -1438,7 +1476,7 @@ def calculate_fare(
     )
     service_mult = nexryde_service_multiplier(service_key)
 
-    core_before_adjust = float(line["core_presurge_pres_adjustment"])
+    core_before_adjust = float(line["core_presurge_pres_adjustment"]) + time_fee
     subtotal = round(core_before_adjust * location_mult * service_mult, 2)
 
     # Step 6–7: Max-style surge (WAT) — max of normal / high demand / rain / peak; tier cap from FARE_CONFIG
@@ -1469,6 +1507,18 @@ def calculate_fare(
     bucket_note = " · Short · city table" if fare_bucket == "short" else " · Long · Lagride-style"
     fare_rate_model = "short_city_table" if fare_bucket == "short" else "long_lagride_style"
 
+    price_breakdown = (
+        f"₦{int(base_fare)} + ₦{int(distance_fee)} ({round(distance_km,2)}km)"
+        f" × loc {round(location_mult,2)} ({location_zone}) × tier {round(service_mult,2)}{bucket_note}"
+    )
+    if time_fee > 0:
+        price_breakdown = append_stop_time_breakdown_suffix(
+            price_breakdown,
+            route_time_min,
+            time_fee,
+            float(stop_time["stop_time_per_min"]),
+        )
+
     return {
         "base_fare": base_fare,
         "distance_km": round(distance_km, 2),
@@ -1476,6 +1526,9 @@ def calculate_fare(
         "duration_min": duration_min,
         "pricing_route_minutes": route_time_min,
         "time_fee": time_fee,
+        "has_intermediate_stop": bool(has_intermediate_stop and time_fee > 0),
+        "stop_time_fee_applied": bool(stop_time.get("stop_time_fee_applied")),
+        "stop_time_per_min": float(stop_time.get("stop_time_per_min") or 0),
         "traffic_duration_min": traffic_duration_min,
         "traffic_fee": traffic_fee,
         "booking_fee": booking_fee,
@@ -1499,10 +1552,7 @@ def calculate_fare(
         "fare_bucket": fare_bucket,
         "fare_rate_model": fare_rate_model,
         "short_trip_threshold_km": SHORT_TRIP_KM_THRESHOLD,
-        "price_breakdown": (
-            f"₦{int(base_fare)} + ₦{int(distance_fee)} ({round(distance_km,2)}km) + ₦{int(time_fee)} ({route_time_min}min)"
-            f" × loc {round(location_mult,2)} ({location_zone}) × tier {round(service_mult,2)}{bucket_note}"
-        ),
+        "price_breakdown": price_breakdown,
     }
 
 def generate_otp() -> str:
@@ -1802,9 +1852,12 @@ async def route_cache_stats():
 
 @app.get("/admin/")
 async def serve_admin():
-    """Serve admin panel — always fresh, never cached."""
+    """Serve React admin SPA (dist) or legacy HTML fallback."""
     from fastapi.responses import Response as _Resp
-    admin_file = ADMIN_DIR / "index.html"
+    spa_file = ADMIN_SPA_DIR / "index.html"
+    legacy_file = ADMIN_DIR / "index.legacy.html"
+    fallback_file = ADMIN_DIR / "index.html"
+    admin_file = spa_file if spa_file.exists() else (legacy_file if legacy_file.exists() else fallback_file)
     if admin_file.exists():
         content = admin_file.read_bytes()
         return _Resp(
@@ -1849,6 +1902,10 @@ app.include_router(safety_router)
 app.include_router(safety_data_router)
 app.include_router(ai_router)
 app.include_router(admin_router)
+app.include_router(admin_ops_router)
+app.include_router(admin_driver_profile_router)
+app.include_router(admin_ops_center_router)
+app.include_router(admin_rider_profile_router)
 
 # Metrics + circuit breaker status
 try:
@@ -1878,7 +1935,9 @@ from routers.gamification import gamification_router
 app.include_router(gamification_router)
 
 from routers.drivers import drivers_router
+from routers.work_zone import work_zone_router
 app.include_router(drivers_router)
+app.include_router(work_zone_router)
 
 from routers.support import support_router
 app.include_router(support_router)
@@ -2061,16 +2120,44 @@ async def _subscription_expiry_watchdog_loop():
 
 async def _engagement_push_loop():
     """Every 5 minutes: fire engagement push notifications for any active time slot."""
+    import os
+
+    # Off by default — enable ENGAGEMENT_LOOP_ENABLED=true at 500+ active users to avoid
+    # scanning all push-token holders on every instance while the fleet is small.
+    if os.environ.get("ENGAGEMENT_LOOP_ENABLED", "").strip().lower() not in ("1", "true", "yes"):
+        logger.info("Engagement push loop disabled (set ENGAGEMENT_LOOP_ENABLED=true to enable)")
+        return
+
     await asyncio.sleep(60)  # brief warm-up delay after startup
     while True:
         try:
             from engagement_push_service import tick_engagement_pushes
+
             sent = await tick_engagement_pushes()
             if sent:
                 logger.info("Engagement pushes sent: %d", sent)
         except Exception:
             logger.exception("engagement_push_loop error")
         await asyncio.sleep(300)  # check every 5 minutes
+
+
+async def _trial_driver_idle_guardrail_loop():
+    """Trial drivers only: auto-offline after 5h online with zero trips completed today."""
+    await asyncio.sleep(180)
+    while True:
+        try:
+            from trial_driver_idle_guardrail import tick_trial_driver_idle_guardrail
+            from driver_trial_policy import tick_online_trial_expiry
+
+            n = await tick_trial_driver_idle_guardrail()
+            if n:
+                logger.info("Trial idle guardrail: offlined %d drivers", n)
+            expired = await tick_online_trial_expiry()
+            if expired:
+                logger.info("Trial expiry guard: offlined %d drivers", expired)
+        except Exception:
+            logger.exception("trial_driver_idle_guardrail_loop error")
+        await asyncio.sleep(300)
 
 
 # ==================== SEED ON STARTUP ====================
@@ -2093,6 +2180,10 @@ async def _deferred_startup():
             return
 
         await ensure_otp_indexes()
+        from driver_trial_policy import ensure_system_trial_defaults, seed_grandfathered_trial_configs
+
+        await ensure_system_trial_defaults()
+        await seed_grandfathered_trial_configs()
         from routers.admin import seed_promo_codes as _seed_promos
 
         await _seed_promos()
@@ -2123,6 +2214,7 @@ async def _deferred_startup():
         asyncio.create_task(_stranded_trip_cleanup_loop())
         asyncio.create_task(_subscription_expiry_watchdog_loop())
         asyncio.create_task(_engagement_push_loop())
+        asyncio.create_task(_trial_driver_idle_guardrail_loop())
         # One-time migration: lift all monthly_verification_overdue suspensions
         # so verified drivers are never hard-blocked by this soft reminder system
         try:
@@ -2331,9 +2423,10 @@ if _trusted_hosts_raw:
             allowed_hosts=_trusted_hosts + _probe_hosts,
         )
 
-# Mount admin static files (only if directory exists)
-if ADMIN_DIR.exists():
-    app.mount("/admin", StaticFiles(directory=str(ADMIN_DIR), html=True), name="admin")
+# Mount admin static files — prefer built React SPA in admin/dist
+_admin_static_dir = ADMIN_SPA_DIR if ADMIN_SPA_DIR.exists() else ADMIN_DIR
+if _admin_static_dir.exists():
+    app.mount("/admin", StaticFiles(directory=str(_admin_static_dir), html=True), name="admin")
 else:
     logger.warning(f"Admin directory not found at {ADMIN_DIR}, admin panel disabled")
 

@@ -158,7 +158,7 @@ export default function DriverEarningsScreen() {
   // ── Trial progress ───────────────────────────────────────────────────────
   const isOnTrial    = subscription?.status === 'trial' || subscription?.trial_active;
   const trialDone    = Number(subscription?.trial_trips_completed ?? subscription?.completed_trips ?? 0);
-  const trialTarget  = Number(subscription?.trial_trips_target ?? subscription?.trips_target ?? 20);
+  const trialTarget  = Number(subscription?.trial_trips_target ?? subscription?.trips_target ?? 15);
   const trialPct     = trialTarget > 0 ? Math.min(1, trialDone / trialTarget) : 0;
   const trialLeft    = Math.max(0, trialTarget - trialDone);
 

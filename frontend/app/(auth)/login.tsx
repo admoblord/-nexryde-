@@ -41,9 +41,9 @@ const COLORS = {
   primary: '#19253F',
   surface: '#19253F',
   surfaceLight: '#243654',
-  green: '#00D084',
-  greenLight: '#4ADE80',
-  greenSoft: 'rgba(0,208,132,0.12)',
+  green: '#22E180',
+  greenLight: '#6DFFC3',
+  greenSoft: 'rgba(34,225,128,0.12)',
   blue: '#0066FF',
   blueDark: '#1A4FCC',
   blueSoft: 'rgba(0,102,255,0.12)',
@@ -236,7 +236,7 @@ export default function LoginScreen() {
 
       const saved = await getUserSession();
       if (!saved) {
-        Alert.alert('Session Missing', 'No saved account found. Please sign in with phone or email.');
+        Alert.alert('Session Missing', 'No saved account found. Please sign in with email.');
         setBiometricReady(false);
         return;
       }

@@ -55,6 +55,11 @@ export type DriverBootState = {
   trialTripsCompleted: number;
   trialTripsTarget: number;
   trialExtended: boolean;
+  trialDaysRemaining: number | null;
+  trialDayLimit: number | null;
+  trialEmphasis: 'trips' | 'days';
+  trialMessage: string;
+  earlySubscribeMessage: string;
   lockedPendingApproval: boolean;
   retry: () => void;
   refresh: () => void;
@@ -65,7 +70,7 @@ const DEFAULT_SNAPSHOT: Omit<DriverBootSnapshot, 'driverId' | 'savedAt'> = {
   verificationStatus: 'approved',
   subscriptionStatus: 'none',
   trialTripsCompleted: 0,
-  trialTripsTarget: 20,
+  trialTripsTarget: 15,
   trialExtended: false,
   onboardingCompleted: true,
 };
@@ -107,8 +112,13 @@ export function useDriverBoot({
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
   const [trialTripsCompleted, setTrialTripsCompleted] = useState(0);
-  const [trialTripsTarget, setTrialTripsTarget] = useState(20);
+  const [trialTripsTarget, setTrialTripsTarget] = useState(15);
   const [trialExtended, setTrialExtended] = useState(false);
+  const [trialDaysRemaining, setTrialDaysRemaining] = useState<number | null>(null);
+  const [trialDayLimit, setTrialDayLimit] = useState<number | null>(14);
+  const [trialEmphasis, setTrialEmphasis] = useState<'trips' | 'days'>('trips');
+  const [trialMessage, setTrialMessage] = useState('');
+  const [earlySubscribeMessage, setEarlySubscribeMessage] = useState('');
   const [lockedPendingApproval, setLockedPendingApproval] = useState(false);
 
   const runIdRef = useRef(0);
@@ -151,12 +161,21 @@ export function useDriverBoot({
     const sub = subRes.data || {};
     const status = locked ? 'locked_until_approval' : (sub.status || 'none');
     const tripsCompleted = sub.trial_trips_completed ?? 0;
-    const tripsTarget = sub.trial_trips_target ?? 20;
+    const tripsTarget = sub.trial_trips_target ?? 15;
     const extended = sub.trial_extended ?? false;
+    const daysRemaining =
+      sub.trial_days_remaining != null ? Number(sub.trial_days_remaining) : sub.days_remaining != null ? Number(sub.days_remaining) : null;
+    const dayLimit = sub.trial_day_limit != null ? Number(sub.trial_day_limit) : null;
+    const emphasis = sub.trial_emphasis === 'days' ? 'days' : 'trips';
     if (!locked) setSubscriptionStatus(status);
     setTrialTripsCompleted(tripsCompleted);
     setTrialTripsTarget(tripsTarget);
     setTrialExtended(extended);
+    setTrialDaysRemaining(daysRemaining);
+    setTrialDayLimit(dayLimit);
+    setTrialEmphasis(emphasis);
+    setTrialMessage(String(sub.trial_message ?? ''));
+    setEarlySubscribeMessage(String(sub.early_subscribe_message ?? ''));
     startupLog('SUBSCRIPTION_VERIFY_END', { status });
 
     // Persist the freshly-verified subscription so the next cold start shows the
@@ -346,6 +365,11 @@ export function useDriverBoot({
     trialTripsCompleted,
     trialTripsTarget,
     trialExtended,
+    trialDaysRemaining,
+    trialDayLimit,
+    trialEmphasis,
+    trialMessage,
+    earlySubscribeMessage,
     lockedPendingApproval,
     retry,
     refresh,

@@ -21,16 +21,8 @@ import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { useRequireUserOrLogin } from '@/src/hooks/useRequireUserOrLogin';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
-import { getValidToken } from '@/src/lib/tokenStore';
-
-// Derive WebSocket URL from BACKEND_URL
-const getWsUrl = () => {
-  const url = BACKEND_URL.replace(/\/$/, '');
-  if (url.startsWith('https://')) return url.replace('https://', 'wss://');
-  if (url.startsWith('http://')) return url.replace('http://', 'ws://');
-  return `wss://${url}`;
-};
-const WS_URL = getWsUrl();
+import { fetchWithTimeout } from '@/src/utils/fetchWithTimeout';
+import { chatSocket, type ChatWsMessage } from '@/src/services/chatSocket';
 
 interface Message {
   id: string;
@@ -62,9 +54,7 @@ export default function ChatScreen() {
     pickTripIdParam(globalParams.tripId as string | string[] | undefined);
   const driverName = (params.driverName as string) || 'Driver';
   const flatListRef = useRef<FlatList>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reconnectAttemptsRef = useRef(0);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [activeTab, setActiveTab] = useState<ChatTab>('driver');
   const [message, setMessage] = useState('');
@@ -74,7 +64,6 @@ export default function ChatScreen() {
   const [calling, setCalling] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [otherTyping, setOtherTyping] = useState(false);
-  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const effectiveTripId = tripId || (typeof currentTrip?.id === 'string' ? currentTrip.id : '') || '';
 
   // Driver messages
@@ -114,99 +103,55 @@ export default function ChatScreen() {
     };
   }, [user?.role]);
 
-  // ==================== WebSocket Connection ====================
-  const connectWebSocket = useCallback(() => {
-    if (!effectiveTripId || !userId || !canCallAuthedApi) return;
-    void (async () => {
-      const liveToken = await getValidToken();
-      if (!liveToken) return;
-      // Cleanup existing connection
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-
-      const wsEndpoint = `${WS_URL}/api/ws/chat/${effectiveTripId}/${userId}?token=${encodeURIComponent(liveToken)}`;
-      const ws = new WebSocket(wsEndpoint);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setWsConnected(true);
-        reconnectAttemptsRef.current = 0;
-        console.log('WebSocket connected');
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-
-          if (data.type === 'history') {
-            const loaded: Message[] = (data.messages || []).map(mapBackendMsg);
-            setDriverMessages(loaded);
-            setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
-          } else if (data.type === 'new_message') {
-            const newMsg = mapBackendMsg(data);
-            setDriverMessages((prev) => {
-              if (prev.find((m) => m.id === newMsg.id)) return prev;
-              return [...prev, newMsg];
-            });
-            if (data.sender_id !== userId) {
-              ws.send(JSON.stringify({ type: 'read' }));
-            }
-            setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-          } else if (data.type === 'typing') {
-            if (data.user_id !== userId) {
-              setOtherTyping(data.is_typing);
-              if (data.is_typing) {
-                if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-                typingTimeoutRef.current = setTimeout(() => setOtherTyping(false), 3000);
-              }
-            }
-          } else if (data.type === 'messages_read') {
-            setDriverMessages((prev) =>
-              prev.map((m) => (m.sender === 'user' ? { ...m, isRead: true } : m))
-            );
-          } else if (data.type === 'connected') {
-            console.log('WS handshake confirmed:', data.message);
+  // ==================== WebSocket (singleton) ====================
+  const handleChatWsMessage = useCallback(
+    (data: ChatWsMessage) => {
+      if (data.type === 'history') {
+        const loaded: Message[] = ((data.messages as unknown[]) || []).map((m) => mapBackendMsg(m));
+        setDriverMessages(loaded);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
+      } else if (data.type === 'new_message') {
+        const newMsg = mapBackendMsg(data);
+        setDriverMessages((prev) => {
+          if (prev.find((m) => m.id === newMsg.id)) return prev;
+          return [...prev, newMsg];
+        });
+        if (data.sender_id !== userId) {
+          chatSocket.send({ type: 'read' });
+        }
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+      } else if (data.type === 'typing') {
+        if (data.user_id !== userId) {
+          setOtherTyping(Boolean(data.is_typing));
+          if (data.is_typing) {
+            if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+            typingTimeoutRef.current = setTimeout(() => setOtherTyping(false), 3000);
           }
-        } catch (e) {
-          console.error('WS message parse error:', e);
         }
-      };
+      } else if (data.type === 'messages_read') {
+        setDriverMessages((prev) =>
+          prev.map((m) => (m.sender === 'user' ? { ...m, isRead: true } : m)),
+        );
+      }
+    },
+    [mapBackendMsg, userId],
+  );
 
-      ws.onerror = (e) => {
-        console.error('WebSocket error:', e);
-      };
-
-      ws.onclose = () => {
-        setWsConnected(false);
-        wsRef.current = null;
-        const attempts = reconnectAttemptsRef.current;
-        if (attempts < 5) {
-          const delay = Math.min(1000 * Math.pow(2, attempts), 16000);
-          reconnectAttemptsRef.current = attempts + 1;
-          reconnectTimeoutRef.current = setTimeout(connectWebSocket, delay);
-        }
-      };
-    })();
-  }, [effectiveTripId, userId, user?.role, canCallAuthedApi, mapBackendMsg]);
-
-  // Connect/disconnect WebSocket based on tab and tripId
   useEffect(() => {
-    if (activeTab === 'driver' && effectiveTripId && userId && canCallAuthedApi) {
-      connectWebSocket();
+    if (activeTab !== 'driver' || !effectiveTripId || !userId || !canCallAuthedApi) {
+      setWsConnected(false);
+      return;
     }
+    chatSocket.acquire(effectiveTripId, userId);
+    const unsubMsg = chatSocket.subscribeMessages(handleChatWsMessage);
+    const unsubConn = chatSocket.subscribeConnection(setWsConnected);
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
+      unsubMsg();
+      unsubConn();
+      chatSocket.release();
+      setWsConnected(false);
     };
-  }, [activeTab, effectiveTripId, userId, canCallAuthedApi, connectWebSocket]);
+  }, [activeTab, effectiveTripId, userId, canCallAuthedApi, handleChatWsMessage]);
 
   useEffect(() => {
     if (!canCallAuthedApi) return;
@@ -271,7 +216,7 @@ export default function ChatScreen() {
     setMessage('');
 
     try {
-      const response = await fetch(`${BACKEND_URL}/api/chat/ai`, {
+      const response = await fetchWithTimeout(`${BACKEND_URL}/api/chat/ai`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -280,6 +225,7 @@ export default function ChatScreen() {
           user_role: user.role || 'rider',
           session_id: sessionId,
         }),
+        timeoutMs: 15_000,
       });
       const data = await response.json();
       if (data.success && data.message) {
@@ -310,13 +256,13 @@ export default function ChatScreen() {
     setMessage('');
 
     // Send via WebSocket if connected
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'message',
-        message: text,
-        sender_role: user.role === 'driver' ? 'driver' : 'rider',
-        message_type: 'text',
-      }));
+    if (chatSocket.send({
+      type: 'message',
+      message: text,
+      sender_role: user.role === 'driver' ? 'driver' : 'rider',
+      message_type: 'text',
+    })) {
+      // sent via WS
     } else {
       // Fallback to HTTP if WebSocket is not connected
       const userMsg: Message = {
@@ -329,7 +275,7 @@ export default function ChatScreen() {
       setDriverMessages((prev) => [...prev, userMsg]);
 
       try {
-        await fetch(`${BACKEND_URL}/api/chat/message`, {
+        await fetchWithTimeout(`${BACKEND_URL}/api/chat/message`, {
           method: 'POST',
           headers: getAuthHeaders(),
           body: JSON.stringify({
@@ -337,9 +283,10 @@ export default function ChatScreen() {
             message: text,
             message_type: 'text',
           }),
+          timeoutMs: 10_000,
         });
-      } catch (error) {
-        console.error('Send driver message error:', error);
+      } catch {
+        /* HTTP fallback failed */
       }
     }
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
@@ -348,11 +295,8 @@ export default function ChatScreen() {
   // Send typing indicator via WebSocket
   const handleTypingChange = (text: string) => {
     setMessage(text);
-    if (activeTab === 'driver' && wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'typing',
-        is_typing: text.length > 0,
-      }));
+    if (activeTab === 'driver') {
+      chatSocket.send({ type: 'typing', is_typing: text.length > 0 });
     }
   };
 
@@ -431,11 +375,10 @@ export default function ChatScreen() {
     if (activeTab === 'ai') {
       await loadAIChatHistory();
     } else {
-      // Reconnect WebSocket to get fresh data
-      connectWebSocket();
+      chatSocket.nudgeReconnect();
     }
     setRefreshing(false);
-  }, [activeTab, connectWebSocket]);
+  }, [activeTab]);
 
   const formatTime = (date: Date) =>
     date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });

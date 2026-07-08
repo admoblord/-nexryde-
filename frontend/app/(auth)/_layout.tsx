@@ -21,6 +21,7 @@ export default function AuthLayout() {
         <Stack.Screen name="login" />
         <Stack.Screen name="verify" />
         <Stack.Screen name="register" />
+        <Stack.Screen name="rider-terms" />
         <Stack.Screen name="rider-nin" />
         <Stack.Screen name="rider-verification" />
         <Stack.Screen name="driver-terms" />

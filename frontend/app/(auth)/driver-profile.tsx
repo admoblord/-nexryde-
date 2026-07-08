@@ -249,7 +249,7 @@ export default function DriverProfileScreen() {
         if (data.awaiting_approval) {
           Alert.alert(
             'Profile Saved',
-            'Your profile has been saved. Your documents are under review by the NEXRYDE team. You will be notified once approved — then your free 20-trip trial begins!',
+            'Your profile has been saved. Your documents are under review by the NEXRYDE team. You will be notified once approved — then your free trial begins (15 trips or 14 days from first go-online).',
             [{ text: 'Go to Dashboard', onPress: () => router.replace('/(driver-tabs)/driver-home') }],
           );
         } else {

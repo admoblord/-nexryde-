@@ -6,7 +6,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from fare_config import FARE_CONFIG, SHORT_TRIP_KM_THRESHOLD, normalize_fare_city_key, resolve_fare_rate_card
 from lagride_lagos_pricing import build_lagos_lagride_fare_breakdown
 from nexryde_pricing import (
+    append_stop_time_breakdown_suffix,
     core_components_from_rate_card,
+    intermediate_stop_time_components,
     nexryde_route_location_multiplier,
     nexryde_route_time_minutes,
     nexryde_service_multiplier,
@@ -154,6 +156,7 @@ def fallback_fare_breakdown(
     pickup_lng: Optional[float] = None,
     dropoff_lat: Optional[float] = None,
     dropoff_lng: Optional[float] = None,
+    has_intermediate_stop: bool = False,
 ) -> Dict[str, Any]:
     """
     Full-shaped fare dict when the injected ``calculate_fare`` is not yet wired
@@ -183,24 +186,30 @@ def fallback_fare_breakdown(
             short_trip_threshold_km=float(SHORT_TRIP_KM_THRESHOLD),
             dropoff_lat=dropoff_lat,
             dropoff_lng=dropoff_lng,
+            has_intermediate_stop=bool(has_intermediate_stop),
         )
     bucket = "short" if float(distance_km) < float(SHORT_TRIP_KM_THRESHOLD) else "standard"
     fare_rate_model = "short_city_table" if bucket == "short" else "long_lagride_style"
     route_time = nexryde_route_time_minutes(duration_min, traffic_duration_min)
     card = resolve_fare_rate_card(city_key, svc, bucket)
     line = core_components_from_rate_card(
-        card["base_fare"], card["per_km"], card["per_min"], float(distance_km), route_time
+        card["base_fare"], card["per_km"], 0, float(distance_km), 0
+    )
+    stop_time = (
+        intermediate_stop_time_components(city_key, svc, route_time, fare_bucket=bucket)
+        if has_intermediate_stop
+        else {"time_fee": 0.0, "stop_time_per_min": 0.0, "stop_time_fee_applied": False}
     )
     base_fare = line["base_fare"]
     distance_fee = line["distance_fee"]
-    time_fee = line["time_fee"]
+    time_fee = float(stop_time["time_fee"])
     traffic_fee = 0.0
     booking_fee = 0.0
     loc_m, loc_z = nexryde_route_location_multiplier(
         city_key, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng
     )
     svc_m = nexryde_service_multiplier(svc)
-    subtotal = round(float(line["core_presurge_pres_adjustment"]) * loc_m * svc_m, 2)
+    subtotal = round((float(line["core_presurge_pres_adjustment"]) + time_fee) * loc_m * svc_m, 2)
     step = 10.0 if bucket == "short" else 50.0
     floor_fare = 200.0 if bucket == "short" else 500.0
     total_fare = max(floor_fare, round(subtotal / step) * step)
@@ -208,6 +217,9 @@ def fallback_fare_breakdown(
         "base_fare": base_fare,
         "distance_fee": distance_fee,
         "time_fee": time_fee,
+        "has_intermediate_stop": bool(has_intermediate_stop and time_fee > 0),
+        "stop_time_fee_applied": bool(stop_time.get("stop_time_fee_applied")),
+        "stop_time_per_min": float(stop_time.get("stop_time_per_min") or 0),
         "traffic_fee": traffic_fee,
         "booking_fee": booking_fee,
         "pricing_route_minutes": route_time,
@@ -228,9 +240,14 @@ def fallback_fare_breakdown(
         "fare_bucket": bucket,
         "fare_rate_model": fare_rate_model,
         "short_trip_threshold_km": float(SHORT_TRIP_KM_THRESHOLD),
-        "price_breakdown": (
-            f"₦{int(base_fare)} + ₦{int(distance_fee)} ({float(distance_km):.1f}km) + "
-            f"₦{int(time_fee)} ({route_time}min) × loc {round(loc_m, 2)} ({loc_z}) · fallback"
+        "price_breakdown": append_stop_time_breakdown_suffix(
+            (
+                f"₦{int(base_fare)} + ₦{int(distance_fee)} ({float(distance_km):.1f}km)"
+                f" × loc {round(loc_m, 2)} ({loc_z}) · fallback"
+            ),
+            route_time,
+            time_fee,
+            float(stop_time.get("stop_time_per_min") or 0),
         ),
     }
 

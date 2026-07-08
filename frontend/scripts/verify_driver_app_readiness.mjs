@@ -125,8 +125,12 @@ mustInclude('P2', 'src/components/driver/DriverBootShell.tsx', [
 mustInclude('P2', 'app/(driver-tabs)/driver-home.tsx', [
   'useDriverBoot',
   'DriverBootShell',
-  'boot.isGateOpen || isOnline',
+  'boot.isGateOpen || isDashboardVisible',
   'boot.refresh',
+  'useDriverSessionStore',
+  'driverOffersSocket',
+  'beginConnecting',
+  'syncOnlineStatusBackground',
 ]);
 mustNotInclude('P2', 'app/(driver-tabs)/driver-home.tsx', [
   'checkingOnboarding',
@@ -144,11 +148,11 @@ if (bootSrc.includes('openGateWithDefaults') && bootSrc.includes('fetchOnboardin
 
 // ── P3: ROUTING LAYER ───────────────────────────────────────────────────────
 console.log('\nP3 — Routing (cold start)');
-mustInclude('P3', 'src/utils/routeAuthedUser.ts', [
+mustInclude('P3', 'src/utils/sessionRouting.ts', [
   'isDriverOnboardingCached',
   'routeToHomeInstant',
   'syncAuthStatusInBackground',
-  'routeAuthedUser_background',
+  'routeAuthedUser',
 ]);
 mustInclude('P3', 'app/index.tsx', [
   'STARTUP_TIMEOUT',
@@ -261,6 +265,8 @@ const subScripts = [
   'scripts/verify_driver_session_resume.mjs',
   'scripts/test_session_refresh.mjs',
   'scripts/verify_expo_routes.mjs',
+  'scripts/test_go_online_fixes_deep.mjs',
+  'scripts/simulate_go_online_flow.mjs',
 ];
 for (const script of subScripts) {
   const res = spawnSync('node', [path.join(ROOT, script)], {

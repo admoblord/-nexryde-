@@ -1,4 +1,5 @@
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL } from '@/src/services/api';
+import { managedFetch } from '@/src/services/networkManager';
 
 export type TripTrackingLocation = {
   lat: number;
@@ -35,10 +36,13 @@ export async function postTripLocation(
   },
 ): Promise<PostTripLocationResult | null> {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/trips/${tripId}/location`, {
+    const res = await managedFetch(`${BACKEND_URL}/api/trips/${tripId}/location`, {
       method: 'POST',
-      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      authed: true,
+      timeoutMs: 10_000,
+      retries: 1,
     });
     const data = (await res.json()) as PostTripLocationResult;
     if (!res.ok) return null;
@@ -55,8 +59,10 @@ export async function fetchTripEta(tripId: string): Promise<{
   status: string;
 } | null> {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/trips/${tripId}/eta`, {
-      headers: getAuthHeaders(),
+    const res = await managedFetch(`${BACKEND_URL}/api/trips/${tripId}/eta`, {
+      authed: true,
+      timeoutMs: 10_000,
+      retries: 1,
     });
     const data = await res.json();
     if (!res.ok || !data?.success) return null;
@@ -77,8 +83,10 @@ export async function fetchTripRoute(tripId: string): Promise<{
   segment_to_target?: Array<{ lat: number; lng: number }>;
 } | null> {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/trips/${tripId}/route`, {
-      headers: getAuthHeaders(),
+    const res = await managedFetch(`${BACKEND_URL}/api/trips/${tripId}/route`, {
+      authed: true,
+      timeoutMs: 12_000,
+      retries: 1,
     });
     const data = await res.json();
     if (!res.ok || !data?.success) return null;

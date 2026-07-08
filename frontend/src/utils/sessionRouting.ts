@@ -9,17 +9,39 @@ import { fetchWithTimeout } from '@/src/utils/fetchWithTimeout';
 import {
   driverDocumentsRouteParams,
   driverProfileRouteParams,
-  driverTermsRouteParams,
   type DriverOnboardingUser,
 } from '@/src/utils/driverOnboardingNav';
+import { legalTermsRouteForRole } from '@/src/constants/legal';
+import { replaceLegalTermsIfNeeded } from '@/src/utils/navigationRouteGuard';
+import { logLegalGateCheck, syncUserLegalStatus } from '@/src/services/legalStatusSync';
 
 const ONBOARDING_SEEN_KEY = 'onboarding_complete';
 const riderVerifiedKey = (userId: string) => `@nexryde_rider_verified_${userId}`;
 const driverOnboardedKey = (userId: string) => `@nexryde_driver_onboarded_${userId}`;
 
+/** Resolve user for legal gate — prefer server-synced store user. */
+async function resolveUserForLegalGate(
+  loggedUser: AuthedUserForRouting,
+): Promise<AuthedUserForRouting> {
+  if (!loggedUser?.id) return loggedUser;
+  const synced = await syncUserLegalStatus(loggedUser.id);
+  if (synced) {
+    return { ...loggedUser, ...synced } as AuthedUserForRouting;
+  }
+  return loggedUser;
+}
+
+function needsLegalRedirect(user: AuthedUserForRouting, source: string): boolean {
+  return logLegalGateCheck(user, source);
+}
+
 export type AuthedUserForRouting = DriverOnboardingUser & {
   role?: 'rider' | 'driver' | 'admin';
   is_verified?: boolean;
+  terms_accepted?: boolean;
+  terms_version?: string | null;
+  privacy_accepted?: boolean;
+  privacy_version?: string | null;
 };
 
 export function homeRouteForRole(role?: string): '/(rider-tabs)/rider-home' | '/(driver-tabs)/driver-home' {
@@ -150,8 +172,13 @@ export async function routeAuthedUserFirstLogin(
   await markAppOnboardingSeen();
   const id = loggedUser.id;
   const headers = authHeaders(resolvedToken);
+  const legalUser = await resolveUserForLegalGate(loggedUser);
 
   if (loggedUser.role === 'driver') {
+    if (needsLegalRedirect(legalUser, 'routeAuthedUserFirstLogin:driver')) {
+      replaceLegalTermsIfNeeded(router, 'driver');
+      return;
+    }
     try {
       const st = await fetchWithTimeout(
         `${BACKEND_URL}/api/drivers/${id}/onboarding-status`,
@@ -165,10 +192,7 @@ export async function routeAuthedUserFirstLogin(
       }
       if (!st.ok || !status?.completed) {
         if (status?.step === 'terms') {
-          router.replace({
-            pathname: '/(auth)/driver-terms',
-            params: driverTermsRouteParams(loggedUser),
-          } as any);
+          replaceLegalTermsIfNeeded(router, 'driver');
           return;
         }
         if (status?.step === 'documents') {
@@ -205,6 +229,10 @@ export async function routeAuthedUserFirstLogin(
   }
 
   try {
+    if (needsLegalRedirect(legalUser, 'routeAuthedUserFirstLogin:rider')) {
+      replaceLegalTermsIfNeeded(router, loggedUser.role);
+      return;
+    }
     const st = await fetchWithTimeout(
       `${BACKEND_URL}/api/users/${id}/rider-verification-status`,
       { headers, timeoutMs: 10000 },
@@ -239,6 +267,7 @@ export async function routeAuthedUser(
 
   const role = loggedUser.role;
   const forceCheck = options?.forceStatusCheck === true;
+  const legalUser = await resolveUserForLegalGate(loggedUser);
 
   if (!forceCheck) {
     if (role === 'rider') {
@@ -251,11 +280,19 @@ export async function routeAuthedUser(
         (loggedUser as { rider_verification_completed?: boolean }).rider_verification_completed === true ||
         (loggedUser as { onboarding_complete?: boolean }).onboarding_complete === true;
       if (cached) {
+        if (needsLegalRedirect(legalUser, 'routeAuthedUser:rider-cached')) {
+          replaceLegalTermsIfNeeded(router, role);
+          return;
+        }
         routeToHomeInstant(router, role);
         syncAuthStatusInBackground(loggedUser, resolvedToken);
         return;
       }
     } else if (role === 'driver') {
+      if (needsLegalRedirect(legalUser, 'routeAuthedUser:driver')) {
+        replaceLegalTermsIfNeeded(router, 'driver');
+        return;
+      }
       if (await isDriverOnboardingCached(id)) {
         routeToHomeInstant(router, role);
         syncAuthStatusInBackground(loggedUser, resolvedToken);

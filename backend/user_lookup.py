@@ -22,6 +22,9 @@ AUTH_CONTEXT_PROJECTION: dict[str, Any] = {
     "subscription_active": 1,
     "subscription_expiry": 1,
     "terms_accepted": 1,
+    "terms_version": 1,
+    "privacy_accepted": 1,
+    "privacy_version": 1,
     "verification_status": 1,
     "is_deactivated": 1,
 }

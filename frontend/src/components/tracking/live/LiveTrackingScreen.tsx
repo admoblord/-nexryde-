@@ -42,6 +42,10 @@ import { TripMapErrorBoundary } from '@/src/components/TripMapErrorBoundary';
 import CancellationReasonModal from '@/src/components/shared/CancellationReasonModal';
 import { useThrottledValue } from '@/src/hooks/useThrottledValue';
 import { RIDER_TRACKING_DISPLAY_THROTTLE_MS } from '@/src/constants/tripRealtimeRhythm';
+import { useDevDriverMovementSim } from '@/src/components/tracking/hooks/useDevDriverMovementSim';
+import { DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
+import { getAvailableDrivers } from '@/src/services/api';
+import { trackVerifyPing } from '@/src/components/tracking/map/trackVerifyLog';
 import { TrackingLiveDebugPanel } from '@/src/components/tracking/v2/TrackingLiveDebugPanel';
 
 // After this many seconds searching with no driver matched, the finding screen
@@ -401,10 +405,23 @@ export default function LiveTrackingScreen() {
     liveDebug,
     assignedDriverId,
     isDriverAssigned,
+    awaitingDriverGps,
     lastSyncAt,
     riderId,
     actions,
   } = session;
+
+  type NearbyDriverRow = {
+    driver_id: string;
+    name?: string;
+    lat: number;
+    lng: number;
+    status?: string;
+    vehicle?: string;
+  };
+  const [nearbyDrivers, setNearbyDrivers] = useState<NearbyDriverRow[]>([]);
+
+  const showConnecting = awaitingDriverGps && tripStatus !== 'arrived';
 
   const tripSyncDebug = useMemo(
     () => ({
@@ -423,6 +440,44 @@ export default function LiveTrackingScreen() {
   const [mapMountReady, setMapMountReady] = useState(false);
   const [mapRetryKey, setMapRetryKey] = useState(0);
   const [trafficOn, setTrafficOn] = useState(true);
+  const [devSimEnabled, setDevSimEnabled] = useState(false);
+
+  const devSimRoute = useMemo(() => {
+    if (mapModel.routePolyline.length >= DIRECTIONS_ROUTE_MIN_POINTS) return mapModel.routePolyline;
+    return [];
+  }, [mapModel.routePolyline]);
+
+  const devSim = useDevDriverMovementSim(devSimRoute, devSimEnabled && isLivePhase);
+
+  const displayMapModel = useMemo(() => {
+    if (!__DEV__ || !devSimEnabled || !devSim.position) return mapModel;
+    return {
+      ...mapModel,
+      driver: devSim.position,
+      driverHeading: devSim.heading,
+    };
+  }, [mapModel, devSimEnabled, devSim.position, devSim.heading]);
+
+  const trackPingRef = useRef(0);
+  useEffect(() => {
+    if (!__DEV__) return;
+    const d = displayMapModel.driver;
+    if (!d || d.lat == null || d.lng == null) return;
+    trackPingRef.current += 1;
+    trackVerifyPing(
+      trackPingRef.current,
+      d.lat,
+      d.lng,
+      displayMapModel.driverHeading,
+      devSimEnabled && devSim.position ? 'sim' : 'stream',
+    );
+  }, [
+    displayMapModel.driver?.lat,
+    displayMapModel.driver?.lng,
+    displayMapModel.driverHeading,
+    devSimEnabled,
+    devSim.position,
+  ]);
 
   // ── Post-trip rating modal ────────────────────────────────────────────────
   // Show immediately when payment phase begins — Uber's "trip done" moment.
@@ -463,6 +518,46 @@ export default function LiveTrackingScreen() {
     }, 1000);
     return () => clearInterval(id);
   }, [isFindingPhase]);
+
+  // Real nearby supply on the finding map (same poll as book screen).
+  useEffect(() => {
+    const lat = mapModel.pickup?.lat;
+    const lng = mapModel.pickup?.lng;
+    if (!isFindingPhase || lat == null || lng == null) {
+      setNearbyDrivers([]);
+      return;
+    }
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const res = await getAvailableDrivers({ lat, lng });
+        const rows = Array.isArray(res.data?.drivers) ? res.data.drivers : [];
+        if (cancelled) return;
+        setNearbyDrivers(
+          rows
+            .map((d: Record<string, unknown>) => ({
+              driver_id: String(d.driver_id || ''),
+              name: String(d.name || 'Driver'),
+              lat: Number((d.current_location as { lat?: number } | undefined)?.lat),
+              lng: Number((d.current_location as { lng?: number } | undefined)?.lng),
+              status: d.is_online ? 'online' : 'offline',
+              vehicle: String(d.vehicle_model || d.vehicle_type || 'Car'),
+            }))
+            .filter((d: NearbyDriverRow) => Number.isFinite(d.lat) && Number.isFinite(d.lng))
+            .slice(0, 25),
+        );
+      } catch {
+        if (!cancelled) setNearbyDrivers([]);
+      }
+    };
+    void run();
+    const timer = setInterval(run, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [isFindingPhase, mapModel.pickup?.lat, mapModel.pickup?.lng]);
+
   const canMountMap = Boolean(mapModel.pickup);
   const pickupKey = mapModel.pickup
     ? `${mapModel.pickup.lat.toFixed(5)},${mapModel.pickup.lng.toFixed(5)}`
@@ -641,6 +736,7 @@ export default function LiveTrackingScreen() {
           onCancel={actions.promptCancelRide}
           onTryAgain={onFindingTryAgain}
           onUpdateBid={handleUpdateBid}
+          nearbyDrivers={nearbyDrivers}
         />
         {cancelSheet}
       </View>
@@ -709,7 +805,11 @@ export default function LiveTrackingScreen() {
             key={`live-map-${mapRetryKey}`}
             onRetry={() => setMapRetryKey((k) => k + 1)}
           >
-            <LiveTrackingMapShell ref={mapRef} model={mapModel} />
+            <LiveTrackingMapShell
+              ref={mapRef}
+              model={displayMapModel}
+              connectingToDriver={showConnecting}
+            />
           </TripMapErrorBoundary>
         ) : (
           <LiveTrackingSkeleton />
@@ -727,15 +827,29 @@ export default function LiveTrackingScreen() {
         <Ionicons name="chevron-back" size={22} color={LIVE.text} />
       </TouchableOpacity>
 
+      {/* DEV ONLY — remove before production pilot */}
+      {__DEV__ ? (
+        <TouchableOpacity
+          style={[styles.devSimBtn, { top: insets.top + 52 }]}
+          onPress={() => setDevSimEnabled((v) => !v)}
+          activeOpacity={0.88}
+        >
+          <Text style={styles.devSimBtnText}>
+            {devSimEnabled ? '⏹ Stop sim driver' : '▶ Sim driver move'}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+
       {/* ETA top card — phase-aware */}
       <LiveEtaTopCard
         topInset={insets.top}
         title={etaCardTitle}
         phase={etaPhase}
-        etaMinutes={tripStatus === 'arrived' ? null : displayEtaMinutes}
-        distanceKm={tripStatus === 'arrived' ? null : displayDistanceKm}
+        connecting={showConnecting}
+        etaMinutes={showConnecting || tripStatus === 'arrived' ? null : displayEtaMinutes}
+        distanceKm={showConnecting || tripStatus === 'arrived' ? null : displayDistanceKm}
         arrived={tripStatus === 'arrived'}
-        destEtaMinutes={tripStatus === 'ongoing' ? displayEtaMinutes : null}
+        destEtaMinutes={showConnecting ? null : tripStatus === 'ongoing' ? displayEtaMinutes : null}
       />
 
       {/* Driver Arrived alert banner */}
@@ -752,7 +866,7 @@ export default function LiveTrackingScreen() {
         <TripAcceptBanner
           visible={acceptedBanner && tripStatus !== 'arrived' && tripStatus !== 'ongoing'}
           driverName={driverName}
-          etaMin={displayEtaMinutes}
+          etaMin={showConnecting ? null : displayEtaMinutes}
         />
       </View>
 
@@ -800,8 +914,8 @@ export default function LiveTrackingScreen() {
         rating={driverRating}
         totalTrips={totalTrips}
         verified={verified}
-        etaMinutes={tripStatus === 'arrived' ? 0 : displayEtaMinutes}
-        distanceKm={tripStatus === 'arrived' ? 0 : displayDistanceKm}
+        etaMinutes={showConnecting || tripStatus === 'arrived' ? 0 : displayEtaMinutes}
+        distanceKm={showConnecting || tripStatus === 'arrived' ? 0 : displayDistanceKm}
         arrived={tripStatus === 'arrived'}
         hydrated={driverHydrated}
         pickupCode={pickupCode}
@@ -814,7 +928,7 @@ export default function LiveTrackingScreen() {
         onShare={actions.onShareTrip}
         onPickupCode={actions.onOpenPickupCode}
         onSos={actions.onEmergency}
-        destEtaMinutes={tripStatus === 'ongoing' ? displayEtaMinutes : null}
+        destEtaMinutes={showConnecting ? null : tripStatus === 'ongoing' ? displayEtaMinutes : null}
         destAddress={tripStatus === 'ongoing' ? destinationLabel : null}
       />
 
@@ -857,6 +971,23 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 10,
     elevation: 8,
+  },
+  devSimBtn: {
+    position: 'absolute',
+    left: LIVE.edge,
+    zIndex: 61,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(127,29,29,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.65)',
+  },
+  devSimBtnText: {
+    color: '#FEE2E2',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
   tripTimerPill: {
     position: 'absolute',

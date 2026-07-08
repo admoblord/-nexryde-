@@ -1,0 +1,178 @@
+import { AppState, Platform, Vibration } from 'react-native';
+import { Audio } from 'expo-av';
+import * as Notifications from 'expo-notifications';
+import {
+  getDriverOfferSoundModule,
+  driverOfferAndroidRawSound,
+  driverOfferIosSoundFile,
+  type DriverOfferRingtoneId,
+} from '@/src/constants/driverOfferSounds';
+import { loadDriverOfferSoundPrefs } from '@/src/services/driverOfferSoundPrefs';
+import { configureDriverOfferAudioMode } from '@/src/services/driverOfferAudioSession';
+import {
+  showNativeRideOfferAlert,
+  stopNativeRideAlert,
+} from '@/src/services/driverNativeExperience';
+
+/** Must match backend notification_catalog.py ride_request channel_id. */
+export const DRIVER_OFFERS_CHANNEL = 'driver_offers';
+
+const ALERT_DURATION_MS = 45_000;
+
+let soundRef: Audio.Sound | null = null;
+let activeKey: string | null = null;
+let stopTimer: ReturnType<typeof setTimeout> | null = null;
+let iosVibRef: ReturnType<typeof setInterval> | null = null;
+
+function clearStopTimer() {
+  if (stopTimer) {
+    clearTimeout(stopTimer);
+    stopTimer = null;
+  }
+}
+
+export function isDriverOfferBackgroundAlertActive(): boolean {
+  return Boolean(activeKey && soundRef);
+}
+
+export async function stopDriverOfferBackgroundAlert(): Promise<void> {
+  clearStopTimer();
+  activeKey = null;
+  stopNativeRideAlert();
+  if (Platform.OS === 'android') {
+    try {
+      Vibration.cancel();
+    } catch {
+      /* ignore */
+    }
+  }
+  if (iosVibRef) {
+    clearInterval(iosVibRef);
+    iosVibRef = null;
+  }
+  const snd = soundRef;
+  soundRef = null;
+  if (snd) {
+    try {
+      await snd.stopAsync();
+    } catch {
+      /* ignore */
+    }
+    try {
+      await snd.unloadAsync();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** Android 8+: channel sound is what the OS plays when app is backgrounded or killed. */
+export async function ensureDriverOfferPushChannel(
+  ringtoneId?: DriverOfferRingtoneId
+): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const id = ringtoneId ?? (await loadDriverOfferSoundPrefs()).ringtoneId;
+  const rawSound = driverOfferAndroidRawSound(id);
+  await Notifications.setNotificationChannelAsync(DRIVER_OFFERS_CHANNEL, {
+    name: 'Ride Offers',
+    description: 'Incoming ride requests while you are online',
+    importance: Notifications.AndroidImportance.MAX,
+    sound: rawSound,
+    vibrationPattern: [0, 800, 400, 800, 400, 800, 400, 800],
+    enableLights: true,
+    lightColor: '#FFD700',
+    showBadge: true,
+    enableVibrate: true,
+  });
+}
+
+export type DriverOfferAlertParams = {
+  offerKey: string;
+  title?: string;
+  body?: string;
+  tripId?: string;
+  offerId?: string;
+  source: 'push' | 'socket' | 'poll';
+};
+
+/**
+ * Loop offer ringtone + haptics while the driver is online but outside the app.
+ * Foreground alerts are owned by useDriverOfferAlert once the offer modal mounts.
+ */
+export async function triggerDriverOfferBackgroundAlert(
+  params: DriverOfferAlertParams
+): Promise<void> {
+  if (Platform.OS === 'web') return;
+  if (!params.offerKey) return;
+  if (AppState.currentState === 'active') return;
+
+  if (activeKey === params.offerKey && soundRef) return;
+
+  await stopDriverOfferBackgroundAlert();
+  activeKey = params.offerKey;
+
+  const prefs = await loadDriverOfferSoundPrefs();
+  await ensureDriverOfferPushChannel(prefs.ringtoneId);
+  showNativeRideOfferAlert({
+    id: params.tripId,
+    offer_id: params.offerId,
+    rider_name: 'Rider',
+    pickup_address: params.body || 'New ride request',
+  });
+
+  if (Platform.OS === 'android') {
+    Vibration.vibrate([0, 450, 200, 500, 200, 550, 200, 550], true);
+  } else {
+    Vibration.vibrate(450);
+    iosVibRef = setInterval(() => Vibration.vibrate(380), 2350);
+  }
+
+  if (prefs.soundEnabled) {
+    try {
+      await configureDriverOfferAudioMode(true);
+      const { sound } = await Audio.Sound.createAsync(getDriverOfferSoundModule(prefs.ringtoneId), {
+        shouldPlay: false,
+        isLooping: true,
+        volume: 1,
+      });
+      soundRef = sound;
+      await sound.playAsync();
+    } catch {
+      /* OS push channel sound is the fallback when JS audio fails */
+    }
+  }
+
+  stopTimer = setTimeout(() => void stopDriverOfferBackgroundAlert(), ALERT_DURATION_MS);
+}
+
+/** Heads-up when socket delivers an offer but FCM was delayed or dropped. */
+export async function presentDriverOfferLocalNotification(params: {
+  title: string;
+  body: string;
+  tripId?: string;
+  offerId?: string;
+}): Promise<void> {
+  if (AppState.currentState === 'active') return;
+  const prefs = await loadDriverOfferSoundPrefs();
+  await ensureDriverOfferPushChannel(prefs.ringtoneId);
+  const iosSound = driverOfferIosSoundFile(prefs.ringtoneId);
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: params.title,
+        body: params.body,
+        data: {
+          type: 'ride_request',
+          trip_id: params.tripId,
+          offer_id: params.offerId,
+        },
+        sound: Platform.OS === 'ios' ? iosSound : true,
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        ...(Platform.OS === 'android' ? { channelId: DRIVER_OFFERS_CHANNEL } : {}),
+      },
+      trigger: null,
+    });
+  } catch {
+    /* best effort */
+  }
+}

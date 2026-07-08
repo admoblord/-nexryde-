@@ -18,7 +18,12 @@ DEFAULT_ANDROID_CHANNEL = "default"
 
 NOTIFICATION_KIND_META: dict[str, dict[str, Any]] = {
     # Trip / dispatch (high visibility)
-    "ride_request": {"channel_id": "rides", "urgent": True, "audience": "driver"},
+    "ride_request": {
+        "channel_id": "driver_offers",
+        "sound": "driver_offer_1.m4a",
+        "urgent": True,
+        "audience": "driver",
+    },
     "trip_accepted": {"channel_id": "rides", "urgent": True, "audience": "rider"},
     "driver_arrived": {"channel_id": "rides", "urgent": True, "audience": "rider"},
     "trip_started": {"channel_id": "rides", "urgent": False, "audience": "both"},
@@ -52,9 +57,8 @@ NOTIFICATION_KIND_META: dict[str, dict[str, Any]] = {
     "daily_slot_night": {"channel_id": "marketing", "urgent": False, "audience": "both"},
     # Rider favourites onboarding (favorite_driver_notifications.py)
     "favorite_driver_nudge": {"channel_id": "default", "urgent": False, "audience": "rider"},
-    # Destination caps / misc
-    "destination_limit_reached": {"channel_id": "default", "urgent": False, "audience": "driver"},
-    "destination_trip_counted": {"channel_id": "default", "urgent": False, "audience": "driver"},
+    # Work Zone (optional future reminders)
+    "work_zone_expiring": {"channel_id": "default", "urgent": False, "audience": "driver"},
 }
 
 
@@ -67,6 +71,8 @@ def enrich_push_data(data: Optional[dict]) -> dict[str, Any]:
         out["channel_id"] = meta["channel_id"]
     elif "channel_id" not in out:
         out["channel_id"] = DEFAULT_ANDROID_CHANNEL
+    if "sound" not in out and meta.get("sound"):
+        out["sound"] = meta["sound"]
     return out
 
 

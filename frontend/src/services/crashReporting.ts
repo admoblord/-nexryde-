@@ -6,14 +6,21 @@ class CrashReporter {
   private static async sendToSink(payload: Record<string, unknown>) {
     if (!this.endpoint) return;
     try {
-      await fetch(this.endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.apiKey ? { 'x-crash-key': this.apiKey } : {}),
-        },
-        body: JSON.stringify(payload),
-      });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      try {
+        await fetch(this.endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(this.apiKey ? { 'x-crash-key': this.apiKey } : {}),
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
     } catch {
       // Keep local fallback only; telemetry must never crash the app.
     }
@@ -30,7 +37,6 @@ class CrashReporter {
     console.error('[CrashReporter]', entry.error);
     void this.sendToSink({ level: 'error', ...entry });
 
-    // Keep only last 50 errors in memory
     if (this.errors.length > 50) {
       this.errors = this.errors.slice(-50);
     }

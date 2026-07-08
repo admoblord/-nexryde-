@@ -37,6 +37,8 @@ import { setTokens } from '@/src/lib/tokenStore';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { saveUserSession } from '@/utils/authStorage';
 import { autoApplyPendingReferral, resolvePendingReferrer, type ReferrerInfo } from '@/src/services/referralService';
+import { markRiderVerificationCached } from '@/src/utils/sessionRouting';
+import { NEXRYDE_TERMS_VERSION, NEXRYDE_PRIVACY_VERSION } from '@/src/constants/legal';
 
 export default function RiderNINScreen() {
   const router = useRouter();
@@ -58,6 +60,9 @@ export default function RiderNINScreen() {
   const email = params.email as string;
   const googleId = params.google_id as string;
   const profileImage = params.picture as string;
+  const termsAccepted = params.terms_accepted === 'true';
+  const termsAcceptedAt = params.terms_accepted_at as string;
+  const termsVersion = (params.terms_version as string) || NEXRYDE_TERMS_VERSION;
 
   const handleContinue = async () => {
     // Validate NIN (Nigerian NIN is 11 digits)
@@ -76,6 +81,15 @@ export default function RiderNINScreen() {
       return;
     }
 
+    if (!termsAccepted) {
+      Alert.alert('Terms required', 'Please accept the Rider Terms and Conditions first.');
+      router.replace({
+        pathname: '/(auth)/rider-terms',
+        params: { phone, name, email, google_id: googleId, picture: profileImage },
+      });
+      return;
+    }
+
     setLoading(true);
     try {
       const response = await fetch(`${BACKEND_URL}/api/auth/register`, {
@@ -89,6 +103,12 @@ export default function RiderNINScreen() {
           google_id: googleId || null,
           profile_image: profileImage || null,
           nin: nin,
+          terms_accepted: true,
+          terms_accepted_at: termsAcceptedAt || new Date().toISOString(),
+          terms_version: termsVersion,
+          privacy_accepted: true,
+          privacy_accepted_at: termsAcceptedAt || new Date().toISOString(),
+          privacy_version: (params.privacy_version as string) || NEXRYDE_PRIVACY_VERSION,
         }),
       });
 
@@ -111,6 +131,7 @@ export default function RiderNINScreen() {
           });
           const riderStatus = await rs.json().catch(() => ({}));
           if (rs.ok && riderStatus?.completed) {
+            await markRiderVerificationCached(data.user.id);
             router.replace('/(rider-tabs)/rider-home');
           } else {
             router.replace('/(auth)/rider-verification');

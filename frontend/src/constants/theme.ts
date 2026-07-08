@@ -11,8 +11,8 @@ export const COLORS = {
   primaryLight: '#1E293B',      // Lighter navy
   primarySoft: 'rgba(15, 23, 42, 0.08)',
   
-  // Accent Green — Nexryde signature (primary interaction / success motion)
-  accentGreen: '#00D46A',
+  // Accent Green — canonical NexRyde green (see designSystem.BRAND.primary)
+  accentGreen: '#22E180',
   accentGreenLight: '#4ADE80',  // Bright lime green
   accentGreenDark: '#16A34A',   // Darker green
   accentGreenSoft: 'rgba(34, 197, 94, 0.15)',
@@ -67,7 +67,7 @@ export const COLORS = {
   // Legacy support (grids / home cards)
   secondary: '#64748B',
   secondaryDark: '#475569',
-  accent: '#00D46A',
+  accent: '#22E180',
   accentLight: '#4ADE80',
   accentDark: '#16A34A',
   accentSoft: 'rgba(34, 197, 94, 0.15)',

@@ -29,9 +29,9 @@ const { width, height } = Dimensions.get('window');
 const C = {
   bg: '#0D1420',
   bgMid: '#19253F',
-  green: '#00D084',
-  greenLight: '#4ADE80',
-  greenNeon: '#00D084',
+  green: '#22E180',
+  greenLight: '#6DFFC3',
+  greenNeon: '#22E180',
   blue: '#0066FF',
   blueDark: '#1A4FCC',
   white: '#FFFFFF',
@@ -211,14 +211,6 @@ export default function SplashScreen() {
           void setTokens(userData.token || '', userData.refresh_token);
           void warmTokenCache();
 
-          const authedUser = {
-            id: userData.id,
-            phone: userData.phone,
-            name: userData.name,
-            email: userData.email,
-            role: userData.role as 'rider' | 'driver',
-          };
-
           if (userData.role === 'driver') {
             const driverState = await loadDriverState(userData.id).catch(() => null);
             if (driverState?.activeTripId) {
@@ -228,7 +220,7 @@ export default function SplashScreen() {
             }
           }
 
-          void routeAuthedUser(router, authedUser, userData.token || null);
+          void routeAuthedUser(router, userData, userData.token || null);
           setChecking(false);
           return;
         }

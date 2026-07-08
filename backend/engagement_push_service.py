@@ -1,7 +1,9 @@
 """
 Daily engagement push notifications — location-aware, Nigeria-specific.
 
-Runs via the server background loop every 5 minutes.
+Started from server._engagement_push_loop() only when ENGAGEMENT_LOOP_ENABLED=true.
+Leave disabled below ~500 active users to avoid scanning all push-token holders every 5 min.
+
 For each active time slot the service:
   1. Looks up every user of that role who has a push token
   2. Resolves their last known GPS to a Nigerian neighborhood

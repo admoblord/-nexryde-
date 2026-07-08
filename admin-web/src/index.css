@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body { font-family: 'Inter', system-ui, sans-serif; }
+
+.card {
+  @apply rounded-2xl border border-white/10 bg-nx-card/80 backdrop-blur p-5 shadow-lg;
+}
+
+.btn-primary {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-2.5 text-sm font-bold text-white hover:opacity-90 transition;
+}
+
+.btn-ghost {
+  @apply inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-300 hover:bg-white/5;
+}
+
+.input {
+  @apply w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none;
+}
+
+.badge-ok { @apply rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-xs font-bold text-emerald-400; }
+.badge-warn { @apply rounded-full bg-amber-500/20 px-2.5 py-0.5 text-xs font-bold text-amber-400; }
+.badge-err { @apply rounded-full bg-red-500/20 px-2.5 py-0.5 text-xs font-bold text-red-400; }

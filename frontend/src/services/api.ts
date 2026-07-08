@@ -148,6 +148,17 @@ export const getAuthHeaders = (): Record<string, string> => {
   return base;
 };
 
+/** Prefer apiFetch/authedFetch — refreshes token and avoids stale-session 401 on mutations. */
+export async function resolveAuthHeaders(): Promise<Record<string, string>> {
+  const token = (await getValidToken()) ?? getCachedToken();
+  const base: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...SECURITY_HEADERS,
+  };
+  if (token) base.Authorization = `Bearer ${token}`;
+  return base;
+}
+
 /** User-facing copy when POST /payment/wallet/initiate-checkout returns 502 { success: false }. */
 export const WALLET_CHECKOUT_USER_ERROR =
   'Unable to start payment. Please try again.';
@@ -238,10 +249,12 @@ export function messageFromAxiosError(e: unknown, fallback: string): string {
 }
 
 // Auth APIs
-export const sendOTP = (phone: string) => 
+/** @deprecated Phone SMS OTP removed — use email sign-in + register. */
+export const sendOTP = (phone: string) =>
   api.post('/auth/send-otp', { phone });
 
-export const verifyOTP = (phone: string, otp: string) => 
+/** @deprecated Phone SMS OTP removed — use email sign-in + register. */
+export const verifyOTP = (phone: string, otp: string) =>
   api.post('/auth/verify-otp', { phone, otp });
 
 export const register = (data: { phone: string; name: string; email?: string; role?: string }) => 
@@ -323,6 +336,9 @@ export const updateUser = (userId: string, data: { name?: string; email?: string
 export const getRiderVerificationStatus = (userId: string) =>
   api.get(`/users/${userId}/rider-verification-status`);
 
+export const getUserLegalStatus = (userId: string) =>
+  api.get(`/users/${userId}/legal-status`);
+
 export const verifyRiderNin = (userId: string, nin: string, fullName: string) =>
   api.post(`/users/${userId}/verify-rider-nin`, {
     nin: nin.trim(),
@@ -331,8 +347,14 @@ export const verifyRiderNin = (userId: string, nin: string, fullName: string) =>
 
 export const completeRiderVerification = (
   userId: string,
-  data: { name: string; phone: string; address: string; nin?: string }
+  data: { name: string; phone: string; address?: string; nin?: string }
 ) => api.post(`/users/${userId}/complete-rider-verification`, data);
+
+export const acceptTerms = (userId: string, termsVersion: string, privacyVersion: string) =>
+  api.post(`/users/${userId}/accept-terms`, {
+    terms_version: termsVersion,
+    privacy_version: privacyVersion,
+  });
 
 export const deleteUserAccount = (userId: string) =>
   api.delete(`/users/${userId}`);
@@ -559,6 +581,10 @@ export interface FareEstimateResponse {
   service_type: string;
   city?: string;
   polyline: string | null;
+  /** Aliases returned by POST /fare/estimate for polyline + metrics */
+  encoded_polyline?: string | null;
+  distance_meters?: number;
+  duration_seconds?: number;
   pickup_address?: string;
   dropoff_address?: string;
   price_breakdown?: string;
@@ -579,6 +605,10 @@ export interface FareEstimateResponse {
   /** Backend surge identifier, e.g. `max_of_factors`. */
   surge_model?: string | null;
   driver_payout_policy_note?: string | null;
+  /** Lagos: time charge applied because rider added an intermediate stop. */
+  has_intermediate_stop?: boolean;
+  stop_time_fee_applied?: boolean;
+  stop_time_per_min?: number;
 }
 
 export const estimateFare = (data: FareEstimateRequest) =>
@@ -655,6 +685,19 @@ export const startTrip = (tripId: string) =>
 
 export const completeTrip = (tripId: string) => 
   api.put(`/trips/${tripId}/complete`);
+
+/** Mid-trip destination change or add-stop — fare recalculated server-side. */
+export const updateTripRoute = (
+  tripId: string,
+  payload: {
+    update_type: 'destination' | 'stop';
+    lat: number;
+    lng: number;
+    address?: string;
+    driver_lat?: number;
+    driver_lng?: number;
+  }
+) => api.post(`/trips/${tripId}/route-update`, payload);
 
 export const confirmTripPayment = (tripId: string) =>
   api.put(`/trips/${tripId}/confirm-payment`);

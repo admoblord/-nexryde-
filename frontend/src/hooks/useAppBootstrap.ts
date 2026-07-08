@@ -28,6 +28,14 @@ type SessionPayload = {
   refresh_token?: string | null;
   is_verified?: boolean;
   face_verified?: boolean;
+  terms_accepted?: boolean;
+  terms_version?: string | null;
+  terms_accepted_at?: string | null;
+  privacy_accepted?: boolean;
+  privacy_version?: string | null;
+  privacy_accepted_at?: string | null;
+  rider_verification_completed?: boolean;
+  onboarding_complete?: boolean;
 };
 
 export function useAppBootstrap(router: Pick<Router, 'replace' | 'push'>) {
@@ -95,6 +103,14 @@ export function useAppBootstrap(router: Pick<Router, 'replace' | 'push'>) {
         refresh_token: (secure as { refresh_token?: string })?.refresh_token ?? null,
         is_verified: store.user.is_verified,
         face_verified: (store.user as { face_verified?: boolean }).face_verified,
+        terms_accepted: store.user.terms_accepted,
+        terms_version: store.user.terms_version,
+        terms_accepted_at: store.user.terms_accepted_at,
+        privacy_accepted: store.user.privacy_accepted,
+        privacy_version: store.user.privacy_version,
+        privacy_accepted_at: store.user.privacy_accepted_at,
+        rider_verification_completed: store.user.rider_verification_completed,
+        onboarding_complete: store.user.onboarding_complete,
       };
     }
     if (!secure?.id) return null;
@@ -108,6 +124,14 @@ export function useAppBootstrap(router: Pick<Router, 'replace' | 'push'>) {
       refresh_token: (secure as { refresh_token?: string }).refresh_token || null,
       is_verified: secure.is_verified,
       face_verified: secure.face_verified,
+      terms_accepted: secure.terms_accepted,
+      terms_version: secure.terms_version,
+      terms_accepted_at: secure.terms_accepted_at,
+      privacy_accepted: secure.privacy_accepted,
+      privacy_version: secure.privacy_version,
+      privacy_accepted_at: secure.privacy_accepted_at,
+      rider_verification_completed: secure.rider_verification_completed,
+      onboarding_complete: secure.onboarding_complete,
     };
   }, []);
 

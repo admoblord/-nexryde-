@@ -11,19 +11,29 @@ import React, {
 import { StyleSheet, InteractionManager } from 'react-native';
 import MapView, { Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
-import { fetchDirections } from '@/src/navigation/navUtils';
+import { DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
+import { fetchDirectionsResilient } from '@/src/navigation/fetchDirectionsResilient';
 import type { TrackingMapModel } from '@/src/components/tracking/types';
 import {
   PERFECT_TRACKING,
   PERFECT_TRACKING_MAP_STYLE,
 } from '@/src/components/tracking/trackingMapTokens';
 import {
-  buildFallbackPolyline,
   bearingDeg,
   isValidMapCoord,
   sanitizeMapCoords,
 } from '@/src/components/tracking/map/mapUtils';
+import {
+  cameraCenterForDriverAndTarget,
+  driverMovedEnough,
+  splitRouteAtDriver,
+} from '@/src/components/tracking/map/driverMapAnimation';
 import { DriverCarMarker } from '@/src/components/tracking/map/DriverCarMarker';
+import { RIDER_TRACKING_LOCATION_THROTTLE_MS } from '@/src/constants/tripRealtimeRhythm';
+import {
+  trackVerifyCamera,
+  trackVerifyLog,
+} from '@/src/components/tracking/map/trackVerifyLog';
 import { useMapMarkerTracksChanges } from '@/src/components/tracking/map/useMapMarkerTracksChanges';
 import {
   PickupMarker,
@@ -31,6 +41,7 @@ import {
   UserLocationMarker,
 } from '@/src/components/tracking/map/MapMarkers';
 import { LIVE } from '@/src/components/tracking/live/liveTrackingTheme';
+import { DriverConnectingOverlay } from '@/src/components/tracking/map/DriverConnectingOverlay';
 
 export type LiveTrackingMapHandle = {
   recenter: () => void;
@@ -40,6 +51,7 @@ export type LiveTrackingMapHandle = {
 
 export type LiveTrackingMapProps = {
   model: TrackingMapModel;
+  connectingToDriver?: boolean;
 };
 
 function regionFromCoords(coords: Array<{ latitude: number; longitude: number }>, pad = 0.012) {
@@ -65,7 +77,7 @@ function regionFromCoords(coords: Array<{ latitude: number; longitude: number }>
 }
 
 const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapProps>(
-  function LiveTrackingMap({ model }, ref) {
+  function LiveTrackingMap({ model, connectingToDriver = false }, ref) {
     const mapRef = useRef<MapView>(null);
     const mapReadyRef = useRef(false);
     const [mapReady, setMapReady] = useState(false);
@@ -117,34 +129,39 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
     useEffect(() => {
       const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
       if (!key || !pickup || !dropoff) return;
+      const cacheKey = model.tripId ? `trip-${model.tripId}-pickup-dropoff` : undefined;
       let cancelled = false;
-      void fetchDirections(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng, key).then((dir) => {
+      void fetchDirectionsResilient(
+        pickup.lat,
+        pickup.lng,
+        dropoff.lat,
+        dropoff.lng,
+        key,
+        cacheKey,
+      ).then((result) => {
         if (cancelled) return;
-        if (dir?.overviewCoords?.length) {
-          setTripRoute(dir.overviewCoords);
+        if (result?.coords?.length) {
+          setTripRoute(result.coords);
           return;
         }
-        if (model.routePolyline.length >= 2) {
+        if (model.routePolyline.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
           setTripRoute(model.routePolyline);
         } else {
-          setTripRoute(
-            buildFallbackPolyline(
-              { lat: pickup.lat, lng: pickup.lng },
-              { lat: dropoff.lat, lng: dropoff.lng },
-              null,
-            ),
-          );
+          setTripRoute([]);
         }
       });
       return () => {
         cancelled = true;
       };
-    }, [pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng, model.routePolyline]);
+    }, [pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng, model.routePolyline, model.tripId]);
 
     // driver → pickup (live approach leg)
     useEffect(() => {
       const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-      if (!key || !isEnRoute || !driver || !pickup) return;
+      if (!key || !isEnRoute || !driver || !pickup) {
+        if (!isEnRoute) setApproachRoute([]);
+        return;
+      }
       const prev = lastApproachFetchRef.current;
       const now = Date.now();
       const moved =
@@ -154,32 +171,37 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
       if (!moved && !stale) return;
       lastApproachFetchRef.current = { lat: driver.lat, lng: driver.lng, at: now };
 
+      const cacheKey = model.tripId ? `trip-${model.tripId}-approach` : undefined;
       let cancelled = false;
-      void fetchDirections(driver.lat, driver.lng, pickup.lat, pickup.lng, key).then((dir) => {
+      void fetchDirectionsResilient(
+        driver.lat,
+        driver.lng,
+        pickup.lat,
+        pickup.lng,
+        key,
+        cacheKey,
+      ).then((result) => {
         if (cancelled) return;
-        if (dir?.overviewCoords?.length) {
-          setApproachRoute(dir.overviewCoords);
+        if (result?.coords?.length) {
+          setApproachRoute(result.coords);
         } else {
-          setApproachRoute(
-            buildFallbackPolyline(
-              { lat: driver.lat, lng: driver.lng },
-              { lat: pickup.lat, lng: pickup.lng },
-              null,
-            ),
-          );
+          setApproachRoute([]);
         }
       });
       return () => {
         cancelled = true;
       };
-    }, [isEnRoute, driver?.lat, driver?.lng, pickup?.lat, pickup?.lng]);
+    }, [isEnRoute, driver?.lat, driver?.lng, pickup?.lat, pickup?.lng, model.tripId]);
 
     // ongoing: driver → destination — only re-fetch when driver deviates >150 m
     // from the last fetch origin to avoid a Directions API call every 3 s.
     const lastOngoingFetchRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
     useEffect(() => {
       const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-      if (!key || !isOngoing || !driver || !dropoff) return;
+      if (!key || !isOngoing || !driver || !dropoff) {
+        if (!isOngoing) setApproachRoute([]);
+        return;
+      }
       const prev = lastOngoingFetchRef.current;
       const now = Date.now();
       // ~150 m in degrees ≈ 0.00135 — only refetch on meaningful deviation
@@ -191,18 +213,46 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
       if (!movedEnough && !stale) return;
       lastOngoingFetchRef.current = { lat: driver.lat, lng: driver.lng, at: now };
 
+      const cacheKey = model.tripId ? `trip-${model.tripId}-ongoing` : undefined;
       let cancelled = false;
-      void fetchDirections(driver.lat, driver.lng, dropoff.lat, dropoff.lng, key).then((dir) => {
+      void fetchDirectionsResilient(
+        driver.lat,
+        driver.lng,
+        dropoff.lat,
+        dropoff.lng,
+        key,
+        cacheKey,
+      ).then((result) => {
         if (cancelled) return;
-        if (dir?.overviewCoords?.length) setApproachRoute(dir.overviewCoords);
+        if (result?.coords?.length) setApproachRoute(result.coords);
       });
       return () => {
         cancelled = true;
       };
-    }, [isOngoing, driver?.lat, driver?.lng, dropoff?.lat, dropoff?.lng]);
+    }, [isOngoing, driver?.lat, driver?.lng, dropoff?.lat, dropoff?.lng, model.tripId]);
 
     const approachCoords = useMemo(() => sanitizeMapCoords(approachRoute), [approachRoute]);
     const tripCoords = useMemo(() => sanitizeMapCoords(tripRoute), [tripRoute]);
+
+    const activeRoute = useMemo(() => {
+      if (isOngoing && approachCoords.length >= DIRECTIONS_ROUTE_MIN_POINTS) return approachCoords;
+      if (isEnRoute && approachCoords.length >= DIRECTIONS_ROUTE_MIN_POINTS) return approachCoords;
+      if (tripCoords.length >= DIRECTIONS_ROUTE_MIN_POINTS) return tripCoords;
+      return [];
+    }, [isOngoing, isEnRoute, approachCoords, tripCoords]);
+
+    const routeRemaining = useMemo(() => {
+      const driverForSplit =
+        driver && isValidMapCoord(driver.lat, driver.lng) ? driver : null;
+      if (!driverForSplit || activeRoute.length < 2) {
+        return { approach: approachCoords, trip: tripCoords };
+      }
+      const split = splitRouteAtDriver(activeRoute, driverForSplit);
+      if (isOngoing || isEnRoute) {
+        return { approach: sanitizeMapCoords(split.remaining), trip: tripCoords };
+      }
+      return { approach: approachCoords, trip: tripCoords };
+    }, [activeRoute, approachCoords, tripCoords, isOngoing, isEnRoute, driver]);
 
     const lastHeadingRef = useRef(0);
     const driverHeading = useMemo(() => {
@@ -212,19 +262,42 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
       }
       const prev = lastDriverRef.current;
       if (driver && prev) {
-        const moved =
-          Math.abs(prev.lat - driver.lat) > 0.00003 || Math.abs(prev.lng - driver.lng) > 0.00003;
-        if (moved) {
+        if (driverMovedEnough(prev, driver.lat, driver.lng)) {
           lastHeadingRef.current = bearingDeg(prev.lat, prev.lng, driver.lat, driver.lng);
         }
         return lastHeadingRef.current;
       }
+      if (driver && activeRoute.length >= 2) {
+        let best = 0;
+        let bestD = Infinity;
+        for (let i = 0; i < activeRoute.length; i += 1) {
+          const dLat = activeRoute[i].latitude - driver.lat;
+          const dLng = activeRoute[i].longitude - driver.lng;
+          const d = dLat * dLat + dLng * dLng;
+          if (d < bestD) {
+            bestD = d;
+            best = i;
+          }
+        }
+        const next = activeRoute[Math.min(best + 1, activeRoute.length - 1)];
+        lastHeadingRef.current = bearingDeg(driver.lat, driver.lng, next.latitude, next.longitude);
+        return lastHeadingRef.current;
+      }
       return lastHeadingRef.current;
-    }, [model.driverHeading, driver]);
+    }, [model.driverHeading, driver, activeRoute]);
 
     useEffect(() => {
       if (driver) lastDriverRef.current = { lat: driver.lat, lng: driver.lng };
     }, [driver?.lat, driver?.lng]);
+
+    const mapPingRef = useRef(0);
+    useEffect(() => {
+      if (!__DEV__ || !driver || !isValidMapCoord(driver.lat, driver.lng)) return;
+      mapPingRef.current += 1;
+      trackVerifyLog(
+        `map layer received driver #${mapPingRef.current} lat=${driver.lat.toFixed(6)},lng=${driver.lng.toFixed(6)} heading=${model.driverHeading ?? '—'}`,
+      );
+    }, [driver?.lat, driver?.lng, model.driverHeading]);
 
     const fitCoords = useMemo(() => {
       const pts = [...tripCoords, ...approachCoords];
@@ -245,10 +318,22 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
 
     const initialRegion = useMemo(() => regionFromCoords(fitCoords), [fitCoords]);
     const followRef = useRef(true);
+    const followResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastFollowFitRef = useRef<{ lat: number; lng: number } | null>(null);
+
+    const pauseAutoFollow = useCallback(() => {
+      followRef.current = false;
+      trackVerifyCamera('paused', 'user pan');
+      if (followResumeTimerRef.current) clearTimeout(followResumeTimerRef.current);
+      followResumeTimerRef.current = setTimeout(() => {
+        followRef.current = true;
+        trackVerifyCamera('resumed', 'followEnabled=true');
+      }, 12_000);
+    }, []);
 
     const recenter = useCallback(() => {
       if (!mapRef.current || !mapReadyRef.current || fitCoords.length < 1) return;
+      if (followResumeTimerRef.current) clearTimeout(followResumeTimerRef.current);
       followRef.current = true;
       try {
         mapRef.current.fitToCoordinates(fitCoords, {
@@ -270,18 +355,36 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
         !prev || Math.abs(prev.lat - driver.lat) + Math.abs(prev.lng - driver.lng) > 0.0008;
       if (!movedEnough) return;
       lastFollowFitRef.current = { lat: driver.lat, lng: driver.lng };
+      const frame = cameraCenterForDriverAndTarget(
+        { lat: driver.lat, lng: driver.lng },
+        { lat: target.lat, lng: target.lng },
+      );
       try {
-        mapRef.current.fitToCoordinates(
-          [
-            { latitude: driver.lat, longitude: driver.lng },
-            { latitude: target.lat, longitude: target.lng },
-          ],
-          { edgePadding: { top: 130, right: 70, bottom: 240, left: 70 }, animated: true },
+        mapRef.current.animateCamera(
+          {
+            center: { latitude: frame.latitude, longitude: frame.longitude },
+            zoom: frame.zoom,
+            heading: 0,
+            pitch: 0,
+          },
+          { duration: 520 },
+        );
+        const targetLabel = isOngoing ? 'dropoff' : 'pickup';
+        trackVerifyCamera(
+          'follow',
+          `framing driver+${targetLabel} center=${frame.latitude.toFixed(5)},${frame.longitude.toFixed(5)} zoom=${frame.zoom}`,
         );
       } catch {
         /* native map not ready */
       }
     }, [driver?.lat, driver?.lng, mapReady, isOngoing, isEnRoute, pickup, dropoff]);
+
+    useEffect(
+      () => () => {
+        if (followResumeTimerRef.current) clearTimeout(followResumeTimerRef.current);
+      },
+      [],
+    );
 
     useImperativeHandle(
       ref,
@@ -306,6 +409,7 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
     if (!canRender) return null;
 
     return (
+      <>
       <MapView
         ref={mapRef}
         style={styles.map}
@@ -318,15 +422,13 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
         showsTraffic={trafficOn}
         rotateEnabled
         pitchEnabled={false}
-        onPanDrag={() => {
-          followRef.current = false;
-        }}
+        onPanDrag={pauseAutoFollow}
         onMapReady={() => {
           mapReadyRef.current = true;
           setMapReady(true);
         }}
       >
-        {tripCoords.length >= 2 ? (
+        {tripCoords.length >= DIRECTIONS_ROUTE_MIN_POINTS ? (
           <Polyline
             coordinates={tripCoords}
             strokeColor="rgba(0,208,132,0.22)"
@@ -337,9 +439,9 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
           />
         ) : null}
 
-        {approachCoords.length >= 2 ? (
+        {routeRemaining.approach.length >= DIRECTIONS_ROUTE_MIN_POINTS ? (
           <Polyline
-            coordinates={approachCoords}
+            coordinates={routeRemaining.approach}
             strokeColor={LIVE.green}
             strokeWidth={9}
             lineCap="round"
@@ -382,9 +484,12 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
             heading={driverHeading}
             moving={isEnRoute || isOngoing}
             tracksViewChanges={markerTracks}
+            moveDurationMs={RIDER_TRACKING_LOCATION_THROTTLE_MS}
           />
         ) : null}
       </MapView>
+      <DriverConnectingOverlay visible={connectingToDriver} />
+      </>
     );
   },
 );

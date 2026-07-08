@@ -3,6 +3,9 @@
  * Pure utilities for turn-by-turn navigation.
  * No external deps — just Google Directions API (called once per segment).
  */
+import { fetchWithTimeout } from '@/src/utils/fetchWithTimeout';
+
+const DIRECTIONS_TIMEOUT_MS = 15_000;
 
 export interface NavStep {
   instruction: string;   // cleaned plain text
@@ -248,11 +251,11 @@ export async function fetchDirections(
       };
     };
 
-    let res = await fetch(`${base}&departure_time=now`);
+    let res = await fetchWithTimeout(`${base}&departure_time=now`, { timeoutMs: DIRECTIONS_TIMEOUT_MS });
     let data = await res.json();
     let out = parse(data);
     if (!out && data?.status && data.status !== 'OK') {
-      res = await fetch(base);
+      res = await fetchWithTimeout(base, { timeoutMs: DIRECTIONS_TIMEOUT_MS });
       data = await res.json();
       out = parse(data);
     }
@@ -282,15 +285,25 @@ export async function fetchGoogleDrivingRoutes(
   destLat: number,
   destLng: number,
   apiKey: string,
-  options?: { alternatives?: boolean; stop?: { lat: number; lng: number } | null },
+  options?: {
+    alternatives?: boolean;
+    stop?: { lat: number; lng: number } | null;
+    /** Ordered intermediate waypoints (preferred over single `stop`). */
+    stops?: Array<{ lat: number; lng: number }>;
+    signal?: AbortSignal;
+  },
 ): Promise<{ routes: GoogleDrivingRouteOverview[] } | null> {
   if (!apiKey) return null;
 
   const alt = options?.alternatives ? '&alternatives=true' : '';
-  const stop = options?.stop;
+  const waypointStops =
+    options?.stops?.filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng)) ??
+    (options?.stop && Number.isFinite(options.stop.lat) && Number.isFinite(options.stop.lng)
+      ? [options.stop]
+      : []);
   const waypoint =
-    stop && Number.isFinite(stop.lat) && Number.isFinite(stop.lng)
-      ? `&waypoints=${stop.lat},${stop.lng}`
+    waypointStops.length > 0
+      ? `&waypoints=${waypointStops.map((s) => `${s.lat},${s.lng}`).join('|')}`
       : '';
   const base =
     `https://maps.googleapis.com/maps/api/directions/json` +
@@ -336,13 +349,13 @@ export async function fetchGoogleDrivingRoutes(
 
   try {
     // Prefer traffic-aware ETA when the key/billing supports it.
-    let res = await fetch(`${base}&departure_time=now`);
+    let res = await fetchWithTimeout(`${base}&departure_time=now`, { timeoutMs: DIRECTIONS_TIMEOUT_MS });
     let data = await res.json();
     let parsed = parse(data);
 
     // Some keys reject departure_time=now (billing/restrictions) — retry without it; geometry is unchanged.
     if (!parsed && data?.status && data.status !== 'OK') {
-      res = await fetch(base);
+      res = await fetchWithTimeout(base, { timeoutMs: DIRECTIONS_TIMEOUT_MS });
       data = await res.json();
       parsed = parse(data);
     }

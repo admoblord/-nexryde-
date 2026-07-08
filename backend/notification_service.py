@@ -173,6 +173,12 @@ async def _send_expo_push(token: str, title: str, body: str, data: Optional[dict
         ch = data.get("channel_id") or data.get("android_channel")
         if ch:
             payload["channelId"] = str(ch)
+        snd = data.get("sound")
+        if snd:
+            payload["sound"] = str(snd)
+        if str(data.get("type") or "") == "ride_request":
+            payload["priority"] = "high"
+            payload["_contentAvailable"] = True
         # Forward badge count from data if explicitly set
         badge_val = data.get("badge")
         if badge_val is not None:

@@ -110,7 +110,7 @@ async def driver_go_offline(request: Request):
 async def driver_heartbeat(request: Request):
     """Called regularly by the app to signal the driver is still active."""
     driver_id = require_authenticated(request)
-    from driver_presence import refresh_driver_presence
+    from driver_presence import refresh_driver_presence, set_driver_online
 
     try:
         body = await request.json()
@@ -135,8 +135,32 @@ async def driver_heartbeat(request: Request):
         {"$set": update},
         upsert=True,
     )
-    await refresh_driver_presence(driver_id, lat=lat_f, lng=lng_f)
-    return {"success": True}
+    profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0, "is_online": 1})
+    if profile and profile.get("is_online"):
+        await set_driver_online(driver_id, lat=lat_f or 0.0, lng=lng_f or 0.0)
+    else:
+        await refresh_driver_presence(driver_id, lat=lat_f, lng=lng_f)
+
+    access_ttl_sec = None
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        try:
+            import jwt as _jwt
+            raw = auth_header[7:].strip()
+            payload = _jwt.decode(raw, options={"verify_signature": False})
+            exp = payload.get("exp")
+            if exp is not None:
+                access_ttl_sec = max(0, int(exp) - int(datetime.now(timezone.utc).timestamp()))
+        except Exception:
+            pass
+
+    return {
+        "success": True,
+        "server_online": bool(profile and profile.get("is_online")),
+        "heartbeat_interval_sec": 60,
+        "access_token_ttl_sec": access_ttl_sec,
+        "session_refresh_recommended": access_ttl_sec is not None and access_ttl_sec < 300,
+    }
 
 
 # ── Auto-offline background task ──────────────────────────────────────────────

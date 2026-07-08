@@ -1,0 +1,37 @@
+# EAS upload tarball — keep lean (was ~221 MB before exclusions).
+node_modules/
+.expo/
+.metro-cache/
+dist/
+web-build/
+build-output/
+docs/
+.git/
+.cursor/
+*.aab
+*.apk
+*.ipa
+
+# Android local build outputs (not needed on EAS workers)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+**/.cxx/
+
+# Android AAB build: exclude iOS native tree (mirror of excluding android/ on iOS builds).
+# For iOS-only EAS builds, swap: comment ios/ and uncomment android/ below.
+ios/
+
+# iOS local artifacts (Pods installed on EAS; do not upload)
+ios/Pods/
+ios/build/
+ios/DerivedData/
+
+# Android local artifacts — keep android/ tree for AAB builds
+# android/
+
+# macOS / editor noise
+.DS_Store
+*.pem
+.env*.local

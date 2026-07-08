@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AGP resource shrinker: keep.xml must live in res/raw/ when shrinkResources=true -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@raw/nexryde_*,@xml/rn_widget_*,@xml/shortcuts,@xml/network_security_config,@mipmap/ic_launcher,@mipmap/ic_launcher_round" />

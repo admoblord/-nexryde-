@@ -17,6 +17,12 @@ from email.message import EmailMessage
 import httpx
 
 from database import db
+from pii_encryption import nin_storage_fields, public_nin_fields, strip_sensitive_pii
+from nin_registry_verify import (
+    verify_nin_with_full_name,
+    finalize_nin_verification_from_result,
+    nin_verification_audit_fields,
+)
 from user_biometrics import (
     LOGIN_MAX_TIME_MS,
     USER_BLOB_EXCLUDE_PROJECTION,
@@ -69,6 +75,14 @@ _LOGIN_USER_PROJECTION = {
     "subscription_status": 1,
     "is_suspended": 1,
     "suspension_reason": 1,
+    "terms_accepted": 1,
+    "terms_version": 1,
+    "terms_accepted_at": 1,
+    "privacy_accepted": 1,
+    "privacy_version": 1,
+    "privacy_accepted_at": 1,
+    "rider_verification_completed": 1,
+    "onboarding_complete": 1,
 }
 
 # Config
@@ -128,6 +142,10 @@ class RegisterRequest(BaseModel):
     nin: Optional[str] = None
     terms_accepted: Optional[bool] = None
     terms_accepted_at: Optional[str] = None
+    terms_version: Optional[str] = None
+    privacy_accepted: Optional[bool] = None
+    privacy_accepted_at: Optional[str] = None
+    privacy_version: Optional[str] = None
     gender: Optional[str] = None
     referral_code: Optional[str] = None
 
@@ -278,6 +296,10 @@ def create_user_dict(**kwargs):
         "nin": None,
         "terms_accepted": None,
         "terms_accepted_at": None,
+        "terms_version": None,
+        "privacy_accepted": None,
+        "privacy_accepted_at": None,
+        "privacy_version": None,
     }
     defaults.update(kwargs)
     return defaults
@@ -1349,6 +1371,15 @@ async def reconfirm_driver_after_sim_swap(request: DriverSimSwapReconfirmRequest
         "face_template_saved": True,
     }
 
+@auth_router.get("/auth/terms-current")
+async def get_current_terms():
+    """Public — current Terms / Privacy versions clients must record on acceptance."""
+    from legal_constants import CURRENT_TERMS_VERSION, CURRENT_PRIVACY_VERSION
+    return {
+        "terms_version": CURRENT_TERMS_VERSION,
+        "privacy_version": CURRENT_PRIVACY_VERSION,
+    }
+
 @auth_router.post("/auth/register")
 async def register(request: RegisterRequest, http_request: Request):
     from security_advanced import general_limiter
@@ -1362,6 +1393,8 @@ async def register(request: RegisterRequest, http_request: Request):
                 # Phone is contact-only (rider calling / NexRyde records) — no SMS OTP gate.
                 # Same number on an unfinished driver signup always resumes that account.
                 now_iso = datetime.now(timezone.utc).isoformat()
+                from legal_constants import CURRENT_TERMS_VERSION, CURRENT_PRIVACY_VERSION
+                terms_ok = bool(request.terms_accepted) or existing.get("terms_accepted")
                 await db.users.update_one(
                     {"id": existing["id"]},
                     {
@@ -1370,8 +1403,12 @@ async def register(request: RegisterRequest, http_request: Request):
                             "email": request.email.strip().lower() if request.email else existing.get("email"),
                             "google_id": request.google_id or existing.get("google_id"),
                             "profile_image": request.profile_image or existing.get("profile_image"),
-                            "terms_accepted": bool(request.terms_accepted) or existing.get("terms_accepted"),
+                            "terms_accepted": terms_ok,
                             "terms_accepted_at": request.terms_accepted_at or existing.get("terms_accepted_at") or now_iso,
+                            "terms_version": CURRENT_TERMS_VERSION if terms_ok else existing.get("terms_version"),
+                            "privacy_accepted": terms_ok,
+                            "privacy_accepted_at": request.terms_accepted_at or existing.get("privacy_accepted_at") or now_iso,
+                            "privacy_version": CURRENT_PRIVACY_VERSION if terms_ok else existing.get("privacy_version"),
                             "is_verified": True,
                         }
                     },
@@ -1408,16 +1445,33 @@ async def register(request: RegisterRequest, http_request: Request):
         raise HTTPException(status_code=400, detail="Invalid role. Only 'rider' or 'driver' allowed.")
 
     # Validate role-specific requirements
-    if request.role == "driver" and not request.terms_accepted:
-        raise HTTPException(status_code=400, detail="Drivers must accept terms and conditions")
-    
+    if request.role in ("rider", "driver") and not request.terms_accepted:
+        raise HTTPException(status_code=400, detail="You must accept the Terms and Conditions to continue")
+
     if request.role == "rider" and not request.nin:
         raise HTTPException(status_code=400, detail="Riders must provide National Identification Number")
+    stored_nin = (request.nin or "").strip() or None
+    if request.role == "rider":
+        if not re.fullmatch(r"\d{11}", stored_nin or ""):
+            raise HTTPException(
+                status_code=400,
+                detail="Riders must provide a valid 11-digit National Identification Number",
+            )
     
     # Generate unique username from name
     from routers.incentives import generate_unique_username
     tmp_id = str(uuid4())  # temporary id for uniqueness check before insertion
     generated_username = await generate_unique_username(request.name, tmp_id)
+
+    from legal_constants import CURRENT_TERMS_VERSION, CURRENT_PRIVACY_VERSION
+    terms_version = CURRENT_TERMS_VERSION if request.terms_accepted else None
+    terms_accepted_at = (
+        request.terms_accepted_at or datetime.now(timezone.utc).isoformat()
+        if request.terms_accepted
+        else None
+    )
+    privacy_version = CURRENT_PRIVACY_VERSION if request.terms_accepted else None
+    privacy_accepted_at = terms_accepted_at
 
     user = create_user_dict(
         phone=normalized_phone or "",
@@ -1427,13 +1481,51 @@ async def register(request: RegisterRequest, http_request: Request):
         is_verified=True,
         google_id=request.google_id,
         profile_image=request.profile_image,
-        nin=request.nin,
+        nin=None,
         terms_accepted=request.terms_accepted,
-        terms_accepted_at=request.terms_accepted_at,
+        terms_accepted_at=terms_accepted_at,
+        terms_version=terms_version,
+        privacy_accepted=request.terms_accepted,
+        privacy_accepted_at=privacy_accepted_at,
+        privacy_version=privacy_version,
         username=generated_username,
     )
+    if stored_nin:
+        nin_set, _ = nin_storage_fields(stored_nin)
+        user.update(nin_set)
     await db.users.insert_one(user)
     user.pop("_id", None)
+
+    if request.role == "rider":
+        has_name = bool((user.get("name") or "").strip())
+        has_phone = bool((user.get("phone") or "").strip())
+        has_nin = bool(stored_nin and re.fullmatch(r"\d{11}", stored_nin))
+        if has_name and has_phone and has_nin:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            rider_update: dict = {
+                "rider_verification_completed": True,
+                "onboarding_complete": True,
+                "updated_at": now_iso,
+            }
+            try:
+                vr = await verify_nin_with_full_name(
+                    nin=stored_nin,
+                    full_name=(request.name or "").strip(),
+                )
+                nin_verified, nin_registry_verified = finalize_nin_verification_from_result(vr)
+                rider_update.update({
+                    "nin_verified": nin_verified,
+                    "nin_registry_verified": nin_registry_verified,
+                    **nin_verification_audit_fields(vr, checked_at=now_iso),
+                })
+            except ValueError:
+                # Registration still succeeds — NIN on file; verification finalized on complete-rider-verification.
+                pass
+            await db.users.update_one(
+                {"id": user["id"]},
+                {"$set": rider_update},
+            )
+            user.update(rider_update)
     
     wallet = create_wallet_dict(user["id"])
     await db.wallets.insert_one(wallet)
@@ -1467,7 +1559,7 @@ async def register(request: RegisterRequest, http_request: Request):
         )
     return {
         "message":       "Registration successful",
-        "user":          user,
+        "user":          {**strip_sensitive_pii(user), **public_nin_fields(user)},
         "token":         access_token,
         "access_token":  access_token,
         "refresh_token": raw_refresh,

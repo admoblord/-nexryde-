@@ -2,7 +2,7 @@
   "expo": {
     "name": "NexRyde",
     "slug": "nexryde",
-    "version": "1.3.28",
+    "version": "1.3.32",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "nexryde",
@@ -21,7 +21,7 @@
       "config": {
         "googleMapsApiKey": ""
       },
-      "buildNumber": "49",
+      "buildNumber": "52",
       "associatedDomains": [
         "applinks:nexryde.app",
         "webcredentials:nexryde.app"
@@ -31,8 +31,8 @@
       "infoPlist": {
         "CFBundleDisplayName": "Nexryde",
         "CFBundleName": "Nexryde",
-        "CFBundleShortVersionString": "1.3.24",
-        "CFBundleVersion": "44",
+        "CFBundleShortVersionString": "1.3.32",
+        "CFBundleVersion": "50",
         "NSLocationWhenInUseUsageDescription": "NEXRYDE uses your location to show nearby drivers, estimate pickup times, and track your trip in real time.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "NEXRYDE uses your location in the background so drivers can share their position with riders and receive new trip requests while the app is minimised.",
         "NSLocationAlwaysUsageDescription": "NEXRYDE uses your location in the background so drivers can share their position with riders and receive new trip requests while the app is minimised.",
@@ -47,7 +47,8 @@
         "UIBackgroundModes": [
           "location",
           "fetch",
-          "remote-notification"
+          "remote-notification",
+          "audio"
         ],
         "UIStatusBarStyle": "UIStatusBarStyleLightContent",
         "UIViewControllerBasedStatusBarAppearance": false,
@@ -63,7 +64,7 @@
       }
     },
     "android": {
-      "versionCode": 148,
+      "versionCode": 174,
       "config": {
         "googleMaps": {
           "apiKey": "GOOGLE_MAPS_KEY_REDACTED"
@@ -79,9 +80,16 @@
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "FOREGROUND_SERVICE_DATA_SYNC",
         "CAMERA",
         "RECORD_AUDIO",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "SYSTEM_ALERT_WINDOW",
+        "USE_FULL_SCREEN_INTENT",
+        "VIBRATE",
+        "WAKE_LOCK"
       ],
       "intentFilters": [
         {
@@ -160,7 +168,12 @@
           "icon": "./assets/images/icon.png",
           "color": "#22E180",
           "defaultChannel": "default",
-          "sounds": [],
+          "sounds": [
+            "./assets/sounds/driver_offer_1.m4a",
+            "./assets/sounds/driver_offer_2.m4a",
+            "./assets/sounds/driver_offer_3.mp3",
+            "./assets/sounds/driver_offer_4.mp3"
+          ],
           "enableBackgroundRemoteNotifications": true
         }
       ],

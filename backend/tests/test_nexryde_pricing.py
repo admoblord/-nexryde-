@@ -99,7 +99,7 @@ def test_short_fare_differs_by_city_at_same_distance():
     lag = resolve_fare_rate_card("lagos", "economy", "short")
     abu = resolve_fare_rate_card("abuja", "economy", "short")
     assert lag["per_km"] != abu["per_km"]
-    assert abu["base_fare"] == 3500.0 and abu["per_km"] == 819.0
+    assert abu["base_fare"] == 2400.0 and abu["per_km"] == 520.0
 
 
 def test_normalize_fare_city_key_aliases():
@@ -110,28 +110,25 @@ def test_normalize_fare_city_key_aliases():
 
 
 def test_abuja_headline_base_plus_km_vs_bolt_reference():
-    """Bolt table compares base + distance only; NEXRYDE card matches that headline (time is extra)."""
+    """Bolt table compares base + distance only; NEXRYDE card matches that headline (time on stop only)."""
     card = resolve_fare_rate_card("abuja", "economy", "short")
-    assert card["base_fare"] == 3500.0 and card["per_km"] == 819.0 and card["per_min"] == 175.0
+    assert card["base_fare"] == 2400.0 and card["per_km"] == 520.0 and card["per_min"] == 120.0
     # 20 km — user Bolt ref: ₦300 + 20×₦85 = ₦2,000
     assert 300.0 + 20.0 * 85.0 == 2000.0
-    assert card["base_fare"] + 20.0 * card["per_km"] == 19880.0
+    assert card["base_fare"] + 20.0 * card["per_km"] == 12800.0
     # 5 km — Bolt: ₦300 + 5×₦85 = ₦725
     assert 300.0 + 5.0 * 85.0 == 725.0
-    assert card["base_fare"] + 5.0 * card["per_km"] == 7595.0
+    assert card["base_fare"] + 5.0 * card["per_km"] == 5000.0
 
 
-def test_abuja_core_presurge_includes_time_when_eta_nonzero():
-    """Full fare adds route minutes (e.g. 40 min × ₦175) before surge, location, rounding."""
+def test_abuja_direct_core_is_distance_only():
+    """Direct trips pass per_min=0 — no time line item before surge."""
     card = resolve_fare_rate_card("abuja", "economy", "standard")
-    line_20 = core_components_from_rate_card(
-        card["base_fare"], card["per_km"], card["per_min"], 20.0, 40
+    line = core_components_from_rate_card(
+        card["base_fare"], card["per_km"], 0, 20.0, 0
     )
-    assert line_20["core_presurge_pres_adjustment"] == 26880.0  # 3500 + 16380 + 7000
-    line_5 = core_components_from_rate_card(
-        card["base_fare"], card["per_km"], card["per_min"], 5.0, 15
-    )
-    assert line_5["core_presurge_pres_adjustment"] == 10220.0  # 3500 + 4095 + 2625
+    assert line["time_fee"] == 0.0
+    assert line["core_presurge_pres_adjustment"] == 12800.0  # 2400 + 20×520
 
 
 def test_bolt_commission_net_driver_examples():
@@ -148,42 +145,42 @@ def test_pricing_comparison_table_10km_all_states():
     """Pinned product table: 10 km headline (base + distance), all states + FCT vs Bolt reference."""
     km = 10.0
     rows: list[tuple[str, float, float]] = [
-        ("abuja", 1150.0, 11690.0),
-        ("abia", 1060.0, 5370.0),
-        ("adamawa", 1090.0, 5370.0),
-        ("akwa_ibom", 1095.0, 11020.0),
-        ("anambra", 1110.0, 11360.0),
-        ("bauchi", 1125.0, 5370.0),
-        ("bayelsa", 1080.0, 5370.0),
-        ("benue", 1110.0, 5370.0),
-        ("borno", 1150.0, 5370.0),
-        ("cross_river", 1080.0, 11020.0),
-        ("delta", 1095.0, 11690.0),
-        ("ebonyi", 1060.0, 5370.0),
-        ("edo", 1095.0, 11360.0),
-        ("ekiti", 1085.0, 5370.0),
-        ("enugu", 1150.0, 11020.0),
-        ("gombe", 1110.0, 5370.0),
-        ("imo", 1110.0, 11020.0),
-        ("jigawa", 1165.0, 5370.0),
-        ("kaduna", 1135.0, 11360.0),
-        ("kano", 1190.0, 11690.0),
-        ("katsina", 1150.0, 5370.0),
-        ("kebbi", 1125.0, 5370.0),
-        ("kogi", 1085.0, 5370.0),
-        ("kwara", 1110.0, 5370.0),
-        ("nasarawa", 1110.0, 5370.0),
-        ("niger", 1110.0, 5370.0),
-        ("ogun", 1110.0, 10690.0),
-        ("ondo", 1085.0, 5370.0),
-        ("osun", 1085.0, 5370.0),
-        ("oyo", 1110.0, 11360.0),
-        ("plateau", 1135.0, 10690.0),
-        ("rivers", 1080.0, 11690.0),
-        ("sokoto", 1150.0, 5370.0),
-        ("taraba", 1085.0, 5370.0),
-        ("yobe", 1125.0, 5370.0),
-        ("zamfara", 1150.0, 5370.0),
+        ("abuja", 1150.0, 7600.0),
+        ("abia", 1060.0, 5700.0),
+        ("adamawa", 1090.0, 5700.0),
+        ("akwa_ibom", 1095.0, 6970.0),
+        ("anambra", 1110.0, 7280.0),
+        ("bauchi", 1125.0, 5700.0),
+        ("bayelsa", 1080.0, 5700.0),
+        ("benue", 1110.0, 5700.0),
+        ("borno", 1150.0, 5700.0),
+        ("cross_river", 1080.0, 6970.0),
+        ("delta", 1095.0, 7600.0),
+        ("ebonyi", 1060.0, 5700.0),
+        ("edo", 1095.0, 7280.0),
+        ("ekiti", 1085.0, 5700.0),
+        ("enugu", 1150.0, 6970.0),
+        ("gombe", 1110.0, 5700.0),
+        ("imo", 1110.0, 6970.0),
+        ("jigawa", 1165.0, 5700.0),
+        ("kaduna", 1135.0, 7280.0),
+        ("kano", 1190.0, 7600.0),
+        ("katsina", 1150.0, 5700.0),
+        ("kebbi", 1125.0, 5700.0),
+        ("kogi", 1085.0, 5700.0),
+        ("kwara", 1110.0, 5700.0),
+        ("nasarawa", 1110.0, 5700.0),
+        ("niger", 1110.0, 5700.0),
+        ("ogun", 1110.0, 6650.0),
+        ("ondo", 1085.0, 5700.0),
+        ("osun", 1085.0, 5700.0),
+        ("oyo", 1110.0, 7280.0),
+        ("plateau", 1135.0, 6650.0),
+        ("rivers", 1080.0, 7600.0),
+        ("sokoto", 1150.0, 5700.0),
+        ("taraba", 1085.0, 5700.0),
+        ("yobe", 1125.0, 5700.0),
+        ("zamfara", 1150.0, 5700.0),
     ]
     for city, bolt_want, nx_want in rows:
         assert headline_distance_only_fare_bolt(city, km) == bolt_want, city
@@ -193,13 +190,13 @@ def test_pricing_comparison_table_10km_all_states():
 def test_pricing_comparison_table_10km_legacy_city_aliases():
     km = 10.0
     for city, bolt_want, nx_want in [
-        ("port_harcourt", 1080.0, 11690.0),
-        ("ibadan", 1110.0, 11360.0),
-        ("benin_city", 1095.0, 11360.0),
-        ("warri", 1095.0, 11690.0),
-        ("owerri", 1110.0, 11020.0),
-        ("uyo", 1095.0, 11020.0),
-        ("calabar", 1080.0, 11020.0),
+        ("port_harcourt", 1080.0, 7600.0),
+        ("ibadan", 1110.0, 7280.0),
+        ("benin_city", 1095.0, 7280.0),
+        ("warri", 1095.0, 7600.0),
+        ("owerri", 1110.0, 6970.0),
+        ("uyo", 1095.0, 6970.0),
+        ("calabar", 1080.0, 6970.0),
     ]:
         assert headline_distance_only_fare_bolt(city, km) == bolt_want, city
         assert headline_distance_only_fare_nexryde(city, km) == nx_want, city
@@ -211,8 +208,8 @@ def test_headline_bolt_none_for_lagos():
 
 def test_nationwide_positioning_bullets_shape():
     assert len(NEXRYDE_NATIONWIDE_POSITIONING_BULLETS) == 6
-    assert "6.9" in NEXRYDE_NATIONWIDE_POSITIONING_BULLETS[0]
-    assert "8×" in NEXRYDE_NATIONWIDE_POSITIONING_BULLETS[1]
+    assert "5.5" in NEXRYDE_NATIONWIDE_POSITIONING_BULLETS[0]
+    assert "0%" in NEXRYDE_NATIONWIDE_POSITIONING_BULLETS[1]
 
 
 def test_all_states_plus_fct_in_fare_config_excluding_lagos():

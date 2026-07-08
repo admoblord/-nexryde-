@@ -67,7 +67,7 @@ export function computePickupWaitState(
     billableWaitSec: billable,
     freeProgress: 1,
     headline: 'Driver is waiting',
-    subline: `Waiting ${mmSs} · trip starts after your pickup code`,
+    subline: `Waiting ${mmSs} · extra wait time may be billed after your free window`,
     mmSs,
     isUrgent: billable >= 120,
   };

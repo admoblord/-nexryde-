@@ -28,11 +28,12 @@ import { DS_COLOR, DS_SPACE } from '@/src/design/designSystem';
 import { DRIVER_OFFER_COUNTDOWN_SECONDS } from '@/src/constants/driverOffer';
 import * as Haptics from 'expo-haptics';
 import RideRequestMap from '@/src/components/RideRequestMap';
-import Constants from 'expo-constants';
-import { fetchGoogleDrivingRoutes, DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
+import { DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
+import { fetchDrivingRoute } from '@/src/services/drivingRouteApi';
 import { isShortTripFare } from '@/src/utils/farePresentation';
 import { resolvePublicMediaUri } from '@/src/utils/resolvePublicMediaUri';
 import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
+import { DriverOfferBidActions } from '@/src/components/driver/DriverOfferBidActions';
 
 const C = DS_COLOR;
 
@@ -50,12 +51,6 @@ export function computeFairTier(
   return 'low';
 }
 
-function roundFare(n: number) { return Math.max(0, Math.round(n / 50) * 50); }
-function parseFareInput(s: string) {
-  const n = Number(String(s).replace(/,/g, '').trim());
-  return Number.isFinite(n) ? n : NaN;
-}
-
 type TripOffer = Record<string, any>;
 
 type Props = {
@@ -66,17 +61,14 @@ type Props = {
   fareInput: string;
   onFareInputChange: (v: string) => void;
   accepting: boolean;
-  onAccept: () => void;
+  onAcceptRiderPrice: () => void;
+  onSendCounterPrice: () => void;
   onIgnore: () => void;
+  /** @deprecated Use onAcceptRiderPrice */
+  onAccept?: () => void;
   driverLat?: number | null;
   driverLng?: number | null;
 };
-
-const CHIP_PRESETS = [
-  { label: '+5%',  pct: 0.05 },
-  { label: '+10%', pct: 0.10 },
-  { label: '+15%', pct: 0.15 },
-] as const;
 
 /** Robust lat/lng from pickup/drop payload variants */
 function readLatLng(loc: unknown): { lat: number | null; lng: number | null } {
@@ -130,22 +122,20 @@ export default function DriverRideRequestModal({
   fareInput,
   onFareInputChange,
   accepting,
-  onAccept,
+  onAcceptRiderPrice,
+  onSendCounterPrice,
   onIgnore,
+  onAccept,
   driverLat,
   driverLng,
 }: Props) {
   const insets = useSafeAreaInsets();
-  const fareInputRef = useRef<TextInput>(null);
-  const [counterMode, setCounterMode] = useState(false);
   const [expanded, setExpanded]   = useState(false);
-  const [googleTripRoutes, setGoogleTripRoutes] = useState<
-    Array<{
-      overview: Array<{ latitude: number; longitude: number }>;
-      distanceM: number;
-      durationSec: number;
-    }>
-  >([]);
+  const [backendRoutePreview, setBackendRoutePreview] = useState<{
+    overview: Array<{ lat: number; lng: number }>;
+    distanceM: number;
+    durationSec: number;
+  } | null>(null);
 
   // Sheet slide animation
   const sheetAnim = useRef(new Animated.Value(0)).current;
@@ -162,7 +152,6 @@ export default function DriverRideRequestModal({
   // Reset on close / new offer
   useEffect(() => {
     if (!visible) {
-      setCounterMode(false);
       setExpanded(false);
     }
   }, [visible, trip?.id]);
@@ -269,14 +258,18 @@ export default function DriverRideRequestModal({
           ? trip.destination
           : (trip?.destination as { address?: string })?.address || 'Destination');
 
-  const directionsApiKey =
-    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
-    (Constants.expoConfig?.extra?.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY as string | undefined) ||
-    '';
 
   useEffect(() => {
-    if (!visible || !trip?.id || !directionsApiKey) {
-      setGoogleTripRoutes([]);
+    if (!visible || !trip?.id) {
+      setBackendRoutePreview(null);
+      return;
+    }
+    const prev =
+      Array.isArray(trip?.route_preview_coordinates) && trip.route_preview_coordinates.length >= 2
+        ? (trip.route_preview_coordinates as Array<{ lat: number; lng: number }>)
+        : null;
+    if (prev && prev.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
+      setBackendRoutePreview(null);
       return;
     }
     if (
@@ -289,50 +282,60 @@ export default function DriverRideRequestModal({
       !Number.isFinite(dLat) ||
       !Number.isFinite(dLng)
     ) {
-      setGoogleTripRoutes([]);
+      setBackendRoutePreview(null);
       return;
     }
     let cancelled = false;
-    fetchGoogleDrivingRoutes(pLat, pLng, dLat, dLng, directionsApiKey, {
-      stop:
+    void fetchDrivingRoute(pLat, pLng, dLat, dLng, null, {
+      stops:
         sLat != null && sLng != null && Number.isFinite(sLat) && Number.isFinite(sLng)
-          ? { lat: sLat, lng: sLng }
-          : null,
+          ? [{ lat: sLat, lng: sLng }]
+          : undefined,
     })
-      .then((res) => {
-        if (cancelled || !res?.routes?.length) return;
-        setGoogleTripRoutes(res.routes);
+      .then((srv) => {
+        if (cancelled || !srv) return;
+        const overview = srv.overviewMapCoords.map((p) => ({
+          lat: p.latitude,
+          lng: p.longitude,
+        }));
+        if (overview.length < 2) return;
+        setBackendRoutePreview({
+          overview,
+          distanceM: srv.distanceMeters,
+          durationSec: srv.durationSeconds,
+        });
       })
       .catch(() => {
-        if (!cancelled) setGoogleTripRoutes([]);
+        if (!cancelled) setBackendRoutePreview(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [visible, trip?.id, directionsApiKey, pLat, pLng, dLat, dLng, sLat, sLng]);
+  }, [visible, trip?.id, trip?.route_preview_coordinates, pLat, pLng, dLat, dLng, sLat, sLng]);
 
   const rideRequestRouteCoords = useMemo(() => {
     const prev =
       Array.isArray(trip?.route_preview_coordinates) && trip!.route_preview_coordinates!.length >= 2
         ? (trip!.route_preview_coordinates as Array<{ lat: number; lng: number }>)
         : null;
-    const g0 = googleTripRoutes[0]?.overview;
+    const g0 = backendRoutePreview?.overview;
     if (g0 && g0.length >= 2) {
-      const mapped = g0.map((p) => ({ lat: p.latitude, lng: p.longitude }));
-      if (mapped.length >= DIRECTIONS_ROUTE_MIN_POINTS) return mapped;
-      if (prev && prev.length >= DIRECTIONS_ROUTE_MIN_POINTS && prev.length > mapped.length) {
+      if (g0.length >= DIRECTIONS_ROUTE_MIN_POINTS) return g0;
+      if (prev && prev.length >= DIRECTIONS_ROUTE_MIN_POINTS && prev.length > g0.length) {
         return prev;
       }
-      return mapped.length >= 2 ? mapped : prev;
+      return g0.length >= 2 ? g0 : prev;
     }
     if (prev && prev.length >= 2) return prev;
     return null;
-  }, [googleTripRoutes, trip?.route_preview_coordinates]);
+  }, [backendRoutePreview, trip?.route_preview_coordinates]);
 
   const displayTripKm =
-    googleTripRoutes[0] != null ? googleTripRoutes[0].distanceM / 1000 : distanceKm;
+    backendRoutePreview != null ? backendRoutePreview.distanceM / 1000 : distanceKm;
   const displayTripMin =
-    googleTripRoutes[0] != null ? Math.ceil(googleTripRoutes[0].durationSec / 60) : durationMins;
+    backendRoutePreview != null
+      ? Math.ceil(backendRoutePreview.durationSec / 60)
+      : durationMins;
   const tripKmForFare = displayTripKm ?? distanceKm;
   const pricePerKm =
     tripKmForFare != null && tripKmForFare > 0 && riderOffer > 0
@@ -356,37 +359,6 @@ export default function DriverRideRequestModal({
   const ridePreferences = Array.isArray(trip?.ride_preferences)
     ? (trip.ride_preferences as string[]).map((item) => RIDE_PREFERENCE_LABELS[item] || item.replace(/_/g, ' ')).slice(0, 4)
     : [];
-
-  /* ── Counter bid ── */
-  const applyChip = useCallback(
-    (pct: number) => {
-      const base = riderOffer > 0 ? riderOffer : baseFare;
-      if (!base) return;
-      let next = roundFare(base * (1 + pct));
-      if (maxFare != null && maxFare > 0) next = Math.min(next, maxFare);
-      if (minFare != null && minFare > 0) next = Math.max(next, minFare);
-      if (riderOffer > 0) next = Math.max(next, riderOffer);
-      onFareInputChange(String(next));
-    },
-    [riderOffer, baseFare, maxFare, minFare, onFareInputChange]
-  );
-
-  const recommendedChipIndex = useMemo(() => {
-    const target = baseFare > 0 ? baseFare : riderOffer;
-    if (!target || !riderOffer) return 1;
-    let bestI = 0, bestScore = Infinity;
-    CHIP_PRESETS.forEach((c, i) => {
-      let v = roundFare(riderOffer * (1 + c.pct));
-      if (maxFare != null && maxFare > 0) v = Math.min(v, maxFare);
-      const score = Math.abs(v - target);
-      if (score < bestScore) { bestScore = score; bestI = i; }
-    });
-    return bestI;
-  }, [baseFare, riderOffer, maxFare]);
-
-  const selectedFare = parseFareInput(fareInput);
-  const hasCounter   = Number.isFinite(selectedFare) && selectedFare > 0 && selectedFare !== riderOffer;
-  const acceptLabelFare = Number.isFinite(selectedFare) && selectedFare > 0 ? selectedFare : riderOffer || baseFare;
 
   /* ── Smart Mode ── */
   const [smartEnabled, setSmartEnabled] = useState(false);
@@ -763,162 +735,40 @@ export default function DriverRideRequestModal({
                     </View>
                   )}
 
-                  {/* Counter section */}
-                  {counterMode && (
-                    <View style={s.counterBox}>
-                      <Text style={s.counterBoxLabel}>Your counter fare</Text>
-                      <View style={s.chipsRow}>
-                        {CHIP_PRESETS.map((c, idx) => {
-                          const best = idx === recommendedChipIndex;
-                          return (
-                            <TouchableOpacity
-                              key={c.label}
-                              style={[s.chip, best && s.chipBest, offerExpired && { opacity: 0.45 }]}
-                              onPress={() => {
-                                if (offerExpired) return;
-                                applyChip(c.pct);
-                              }}
-                              disabled={offerExpired}
-                              activeOpacity={0.85}
-                            >
-                              {best && <Ionicons name="flash-outline" size={12} color={C.primary} />}
-                              <Text style={[s.chipText, best && s.chipTextBest]}>{c.label}</Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                        <TouchableOpacity
-                          style={[s.chip, s.chipCustom, offerExpired && { opacity: 0.45 }]}
-                          onPress={() => {
-                            if (offerExpired) return;
-                            fareInputRef.current?.focus();
-                          }}
-                          disabled={offerExpired}
-                          activeOpacity={0.85}
-                        >
-                          <Ionicons name="create-outline" size={13} color={C.primary} />
-                          <Text style={s.chipCustomText}>Custom</Text>
-                        </TouchableOpacity>
-                      </View>
-                      <TextInput
-                        ref={fareInputRef}
-                        style={s.fareInput}
-                        keyboardType="number-pad"
-                        editable={!offerExpired}
-                        value={fareInput}
-                        onChangeText={onFareInputChange}
-                        placeholder={`Your fare — rider offered ₦${riderOffer.toLocaleString()}`}
-                        placeholderTextColor={C.muted}
-                      />
-                      {hasCounter && (
-                        <Text style={s.counterHint}>
-                          Counter: ₦{riderOffer.toLocaleString()} → ₦{Number(fareInput.replace(/,/g, '')).toLocaleString()}
-                          {' '}(+₦{(Number(fareInput.replace(/,/g, '')) - riderOffer).toLocaleString()})
-                        </Text>
-                      )}
-                    </View>
-                  )}
                 </>
               )}
 
             </ScrollView>
 
-            {/* ── STICKY ACTION BUTTONS ── */}
+            {/* ── STICKY ACTION BUTTONS (InDrive-style stable bid) ── */}
             <View style={[s.actions, { paddingBottom: BOTTOM_INNER }]}>
-              {/* Accept */}
+              <DriverOfferBidActions
+                key={String(trip?.offer_id ?? trip?.id ?? 'offer-modal')}
+                riderOffer={riderOffer}
+                minFare={minFare}
+                maxFare={maxFare}
+                fareInput={fareInput}
+                onFareInputChange={onFareInputChange}
+                accepting={accepting}
+                offerExpired={offerExpired}
+                onAcceptRiderPrice={onAcceptRiderPrice ?? onAccept ?? (() => {})}
+                onSendCounterPrice={onSendCounterPrice ?? onAccept ?? (() => {})}
+                onDecline={onIgnore}
+                showDecline={false}
+              />
               <TouchableOpacity
-                style={[
-                  s.acceptBtn,
-                  (accepting || offerExpired || (counterMode && !hasCounter)) && { opacity: 0.65 },
-                ]}
+                style={s.ignoreBtnWide}
                 onPress={() => {
-                  if (offerExpired || accepting) return;
-                  if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  onAccept();
+                  if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  onIgnore();
                 }}
-                disabled={accepting || offerExpired || (counterMode && !hasCounter)}
-                activeOpacity={0.92}
+                activeOpacity={0.88}
                 accessibilityRole="button"
-                accessibilityLabel={
-                  offerExpired
-                    ? 'Offer expired'
-                    : accepting
-                      ? 'Accepting ride'
-                      : counterMode && hasCounter
-                        ? `Send counter offer ${acceptLabelFare} naira`
-                        : `Accept ride for ${acceptLabelFare} naira`
-                }
+                accessibilityLabel="Ignore this ride request"
               >
-                <LinearGradient
-                  colors={
-                    counterMode && hasCounter
-                      ? ['#FBBF24', '#F59E0B', '#D97706']
-                      : ['#34F5B8', '#22E5A0', '#0D9F6E']
-                  }
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={s.acceptGrad}
-                >
-                  <Ionicons
-                    name={counterMode && hasCounter ? 'send' : 'checkmark-circle'}
-                    size={20}
-                    color={counterMode && hasCounter ? '#000' : C.primaryInk}
-                  />
-                  <Text style={[s.acceptText, counterMode && hasCounter && { color: '#000' }]}>
-                    {offerExpired
-                      ? 'Offer expired'
-                      : accepting
-                        ? 'Accepting…'
-                        : counterMode && hasCounter
-                          ? `Send Counter · ₦${acceptLabelFare.toLocaleString()}`
-                          : `Accept · ₦${acceptLabelFare.toLocaleString()}`}
-                  </Text>
-                </LinearGradient>
+                <Ionicons name="close-circle-outline" size={16} color={C.danger} />
+                <Text style={s.ignoreBtnText}>Ignore offer</Text>
               </TouchableOpacity>
-
-              {/* Secondary row */}
-              <View style={s.secRow}>
-                <TouchableOpacity
-                  style={[
-                    s.counterBtn,
-                    counterMode && s.counterBtnActive,
-                    offerExpired && { opacity: 0.45 },
-                  ]}
-                  onPress={() => {
-                    if (offerExpired) return;
-                    if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setCounterMode((v) => !v);
-                    setExpanded(true);
-                    if (!counterMode) {
-                      const base = riderOffer > 0 ? riderOffer : baseFare;
-                      onFareInputChange(base > 0 ? String(base) : '');
-                      setTimeout(() => fareInputRef.current?.focus(), 300);
-                    }
-                  }}
-                  disabled={offerExpired}
-                  activeOpacity={0.88}
-                  accessibilityRole="button"
-                  accessibilityLabel={counterMode ? 'Close counter bid editor' : 'Counter or rebid fare'}
-                >
-                  <Ionicons name="swap-vertical" size={16} color={counterMode ? '#F59E0B' : C.text} />
-                  <Text style={[s.secBtnText, counterMode && { color: '#F59E0B' }]}>
-                    {counterMode ? 'Editing bid' : 'Counter / Rebid'}
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={s.ignoreBtn}
-                  onPress={() => {
-                    if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    onIgnore();
-                  }}
-                  activeOpacity={0.88}
-                  accessibilityRole="button"
-                  accessibilityLabel="Ignore this ride request"
-                >
-                  <Ionicons name="close-circle-outline" size={16} color={C.danger} />
-                  <Text style={s.ignoreBtnText}>Ignore</Text>
-                </TouchableOpacity>
-              </View>
             </View>
           </Animated.View>
         </KeyboardAvoidingView>
@@ -1161,4 +1011,12 @@ const s = StyleSheet.create({
   },
   secBtnText:  { fontSize: 13, fontWeight: '800', color: '#CBD5E1' },
   ignoreBtnText: { fontSize: 13, fontWeight: '800', color: '#ef4444' },
+  ignoreBtnWide: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minHeight: 44,
+    marginTop: 2,
+  },
 });

@@ -27,6 +27,8 @@ export const URGENT_PUSH_TYPES = new Set<string>([
   'gps_spoofing_driver',
   'abnormal_stop',
   'trial_ended',
+  'trial_trips_low',
+  'trial_days_low',
 ]);
 
 const DRIVER_HOME = '/(driver-tabs)/driver-home';
@@ -127,7 +129,7 @@ export function resolvePushNotificationRoute(
   if (type === 'ride_request' && role === 'driver') {
     return { pathname: DRIVER_HOME };
   }
-  if (type === 'trial_ended' && role === 'driver') {
+  if ((type === 'trial_ended' || type === 'trial_trips_low' || type === 'trial_days_low') && role === 'driver') {
     return { pathname: '/driver/subscription' };
   }
   if (type === 'go_online' && role === 'driver') {
@@ -151,8 +153,8 @@ export function resolvePushNotificationRoute(
   if (type === 'earnings_update' && role === 'driver') {
     return { pathname: '/driver/withdrawal' };
   }
-  if ((type === 'destination_limit_reached' || type === 'destination_trip_counted') && role === 'driver') {
-    return { pathname: DRIVER_HOME };
+  if (type === 'work_zone_expiring' && role === 'driver') {
+    return { pathname: '/driver/work-zone' };
   }
 
   return null;

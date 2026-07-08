@@ -453,7 +453,7 @@ export default function DriverProfileScreen() {
         {(() => {
           const isOnTrial   = subStatus === 'trial' || (subscription as any)?.trial_active;
           const trialDone   = Number((subscription as any)?.trial_trips_completed ?? (subscription as any)?.completed_trips ?? 0);
-          const trialTarget = Number((subscription as any)?.trial_trips_target ?? (subscription as any)?.trips_target ?? 20);
+          const trialTarget = Number((subscription as any)?.trial_trips_target ?? (subscription as any)?.trips_target ?? 15);
           const trialLeft   = Math.max(0, trialTarget - trialDone);
           const trialPct    = trialTarget > 0 ? Math.min(1, trialDone / trialTarget) : 0;
           return (

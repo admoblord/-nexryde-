@@ -12,7 +12,9 @@
  *   rider and driver profile screens).
  */
 import Constants from 'expo-constants';
+import { ErrorUtils } from 'react-native';
 import * as Sentry from '@sentry/react-native';
+import CrashReporter from '@/src/services/crashReporting';
 
 let _initialized = false;
 
@@ -59,6 +61,26 @@ export function initSentry(): void {
  * instrumentation are active. No-op passthrough if Sentry isn't installed.
  */
 export const wrapWithSentry = Sentry.wrap;
+
+/**
+ * Capture uncaught JS exceptions (outside React error boundaries).
+ * Call once after initSentry() in app/_layout.tsx.
+ */
+export function installGlobalErrorHandler(): void {
+  const defaultHandler = ErrorUtils.getGlobalHandler();
+  ErrorUtils.setGlobalHandler((error: unknown, isFatal?: boolean) => {
+    const err = error instanceof Error ? error : new Error(String(error));
+    CrashReporter.captureException(err, { fatal: String(Boolean(isFatal)) });
+    if (_initialized) {
+      try {
+        Sentry.captureException(err, { tags: { isFatal: String(Boolean(isFatal)) } } as never);
+      } catch {
+        /* noop */
+      }
+    }
+    defaultHandler?.(error, isFatal);
+  });
+}
 
 // ─── Identity ──────────────────────────────────────────────────────────────
 

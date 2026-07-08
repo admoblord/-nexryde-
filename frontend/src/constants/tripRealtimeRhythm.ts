@@ -42,10 +42,7 @@ export function riderTripEtaFallbackPollMs(wsConnected: boolean): number {
   return wsConnected ? 18000 : 5000;
 }
 
-/** Driver home: fetch incoming offers when no modal; slower while offer WS is connected. */
-export function driverOffersFallbackPollIntervalMs(wsConnected: boolean): number {
-  return wsConnected ? 90000 : 8000;
-}
+// Driver offer fallback intervals: see `driverPollingProfiles.ts` (`driverOffersFallbackPollIntervalMs`).
 
 // ── Rider live-tracking display throttle constants ────────────────────────────
 // Consumed by LiveTrackingScreen and useRiderTrackingSession.

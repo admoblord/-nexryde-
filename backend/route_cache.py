@@ -18,9 +18,31 @@ import os
 # ──────────────────────────────────────────────────────────
 
 CACHE_TTL_MINUTES = 10          # route results expire after 10 minutes
-CACHE_COORD_PRECISION = 3       # round to 3 decimal places ≈ 110 m grid buckets
+CACHE_COORD_PRECISION = 4       # round to 4 decimal places ≈ 11 m grid buckets
 LRU_MAX_SIZE = 500              # max in-process cached routes
 ROUTE_ESTIMATE_VERSION = "v_last_month"
+
+
+def directions_cache_key(
+    lat1: float,
+    lng1: float,
+    lat2: float,
+    lng2: float,
+    stop_lat: float | None = None,
+    stop_lng: float | None = None,
+) -> str:
+    """Shared cache key for fare estimate, trip request, and driving-route proxy."""
+    p = CACHE_COORD_PRECISION
+    stop_part = ""
+    if stop_lat is not None and stop_lng is not None:
+        stop_part = f"@{round(stop_lat, p)},{round(stop_lng, p)}"
+    return (
+        f"{ROUTE_ESTIMATE_VERSION}:"
+        f"{round(lat1, p)},{round(lng1, p)}-"
+        f"{round(lat2, p)},{round(lng2, p)}"
+        f"{stop_part}"
+    )
+
 
 # ──────────────────────────────────────────────────────────
 # In-process LRU cache (plain dict with max size eviction)
@@ -28,9 +50,15 @@ ROUTE_ESTIMATE_VERSION = "v_last_month"
 
 _lru: dict = {}
 
-def _lru_key(lat1: float, lng1: float, lat2: float, lng2: float) -> str:
-    p = CACHE_COORD_PRECISION
-    return f"{ROUTE_ESTIMATE_VERSION}:{round(lat1,p)},{round(lng1,p)}-{round(lat2,p)},{round(lng2,p)}"
+def _lru_key(
+    lat1: float,
+    lng1: float,
+    lat2: float,
+    lng2: float,
+    stop_lat: float | None = None,
+    stop_lng: float | None = None,
+) -> str:
+    return directions_cache_key(lat1, lng1, lat2, lng2, stop_lat, stop_lng)
 
 def _lru_get(key: str) -> Optional[dict]:
     entry = _lru.get(key)
@@ -64,9 +92,11 @@ async def get_cached_directions(
     lng1: float,
     lat2: float,
     lng2: float,
+    stop_lat: float | None = None,
+    stop_lng: float | None = None,
 ) -> Optional[dict]:
     """Return cached route data or None (check LRU then MongoDB)."""
-    key = _lru_key(lat1, lng1, lat2, lng2)
+    key = _lru_key(lat1, lng1, lat2, lng2, stop_lat, stop_lng)
 
     # 1. in-process LRU hit
     hit = _lru_get(key)
@@ -99,9 +129,11 @@ async def store_cached_directions(
     lat2: float,
     lng2: float,
     data: dict,
+    stop_lat: float | None = None,
+    stop_lng: float | None = None,
 ) -> None:
     """Persist route data to LRU + MongoDB."""
-    key = _lru_key(lat1, lng1, lat2, lng2)
+    key = _lru_key(lat1, lng1, lat2, lng2, stop_lat, stop_lng)
     expires_at = datetime.utcnow() + timedelta(minutes=CACHE_TTL_MINUTES)
 
     _lru_set(key, data)

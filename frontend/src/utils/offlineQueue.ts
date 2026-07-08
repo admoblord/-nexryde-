@@ -78,13 +78,19 @@ export async function queueLength(): Promise<number> {
  *  - On app foreground
  *  - After login
  */
-export async function flushOfflineQueue(): Promise<{ flushed: number; failed: number; discarded: number }> {
+export async function flushOfflineQueue(): Promise<{
+  flushed: number;
+  failed: number;
+  discarded: number;
+  flushedLabels: string[];
+}> {
   const queue = await _load();
-  if (queue.length === 0) return { flushed: 0, failed: 0, discarded: 0 };
+  if (queue.length === 0) return { flushed: 0, failed: 0, discarded: 0, flushedLabels: [] };
 
   let flushed = 0;
   let failed = 0;
   let discarded = 0;
+  const flushedLabels: string[] = [];
   const remaining: QueuedAction[] = [];
 
   for (const entry of queue) {
@@ -96,17 +102,31 @@ export async function flushOfflineQueue(): Promise<{ flushed: number; failed: nu
     }
 
     try {
-      // Lazy-import api module at flush time to avoid circular dep at startup
-      const { BACKEND_URL, getAuthHeaders } = await import('@/src/services/api');
-      const res = await fetch(`${BACKEND_URL}${entry.url}`, {
+      if (entry.label === 'driver_accept_trip') {
+        const { ensureCriticalSessionReady } = await import('@/src/lib/sessionReadiness');
+        const session = await ensureCriticalSessionReady();
+        if (!session.ok) {
+          remaining.push({ ...entry, retries: entry.retries + 1 });
+          failed++;
+          continue;
+        }
+      }
+
+      const { BACKEND_URL } = await import('@/src/services/api');
+      const { managedFetch } = await import('@/src/services/networkManager');
+      const res = await managedFetch(`${BACKEND_URL}${entry.url}`, {
         method: entry.method,
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: entry.body ? JSON.stringify(entry.body) : undefined,
+        authed: true,
+        timeoutMs: 12_000,
+        retries: 0,
       });
 
       if (res.ok || res.status === 409) {
         // 409 Conflict = idempotency hit (already processed) → treat as success
         flushed++;
+        flushedLabels.push(entry.label);
       } else {
         remaining.push({ ...entry, retries: entry.retries + 1 });
         failed++;
@@ -118,5 +138,44 @@ export async function flushOfflineQueue(): Promise<{ flushed: number; failed: nu
   }
 
   await _save(remaining);
-  return { flushed, failed, discarded };
+  return { flushed, failed, discarded, flushedLabels };
+}
+
+const LEGACY_QUEUE_KEY = '@offline_queue';
+
+type LegacyQueuedRequest = {
+  id: string;
+  type: 'trip_request' | 'driver_accept_trip' | 'location_update' | 'profile_update';
+  data: Record<string, unknown>;
+  timestamp: number;
+  retries: number;
+};
+
+/** One-time migration from legacy `@offline_queue` format. */
+export async function migrateLegacyOfflineQueue(): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(LEGACY_QUEUE_KEY);
+    if (!raw) return;
+    const legacy = JSON.parse(raw) as LegacyQueuedRequest[];
+    const { queueTripRequest, queueDriverAccept } = await import('@/src/utils/offlineQueueActions');
+
+    for (const item of legacy) {
+      if (item.type === 'trip_request') {
+        const riderId = String(item.data.rider_id || '');
+        if (riderId) await queueTripRequest(riderId, item.data);
+      } else if (item.type === 'driver_accept_trip') {
+        const tripId = String(item.data.trip_id || '');
+        if (tripId) {
+          await queueDriverAccept(tripId, {
+            driver_id: String(item.data.driver_id || ''),
+            offer_id: item.data.offer_id as string | undefined,
+            proposed_fare: Number(item.data.proposed_fare || 0),
+          });
+        }
+      }
+    }
+    await AsyncStorage.removeItem(LEGACY_QUEUE_KEY);
+  } catch {
+    /* best-effort */
+  }
 }

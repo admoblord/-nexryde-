@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=430, height=932" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     1. RIDER HOME — light dashboard (rider-home.tsx)
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="screen-1" class="screen rider-home">
+  <div class="ios-status light">
+    <div class="island"></div>
+    <span class="time">9:41</span>
+    <span class="icons">
+      <span class="sig"><span></span><span></span><span></span><span></span></span>
+      <span class="wifi"></span>
+      <span class="battery"><span class="battery-fill"></span></span>
+    </span>
+  </div>
+
+  <div class="rh-header">
+    <div style="flex:1">
+      <div class="rh-greeting">Hello, Ada! 👋</div>
+      <div class="rh-sub">Where would you like to go?</div>
+    </div>
+    <div class="rh-header-actions">
+      <div class="rh-icon-btn">🔔</div>
+      <div class="rh-profile">👤</div>
+    </div>
+  </div>
+
+  <div class="rh-where">
+    <div class="rh-where-dot"></div>
+    <div class="rh-where-text">Where to?</div>
+    <div class="rh-where-cta">▶ Book</div>
+  </div>
+
+  <div class="rh-wallet">
+    <span>💳</span>
+    <span class="rh-wallet-label">Wallet balance</span>
+    <span class="rh-wallet-amt">₦12,450</span>
+    <span style="color:#00d46a;font-weight:800">›</span>
+  </div>
+
+  <div class="rh-hero">
+    <div class="rh-hero-main">
+      <div class="rh-hero-icon">🚗</div>
+      <div>
+        <div class="rh-hero-title">Book a ride</div>
+        <div class="rh-hero-sub">Tap to set pickup &amp; destination</div>
+      </div>
+      <div class="rh-hero-arrow">›</div>
+    </div>
+    <div class="rh-hero-row">
+      <div class="rh-hero-sm purple">
+        <div class="rh-hero-sm-icon">📋</div>
+        <div class="rh-hero-sm-title">My Trips</div>
+        <div class="rh-hero-sm-sub">View history</div>
+      </div>
+      <div class="rh-hero-sm orange">
+        <div class="rh-hero-sm-icon">✨</div>
+        <div class="rh-hero-sm-title">All Features</div>
+        <div class="rh-hero-sm-sub">Explore more</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rh-section">
+    <div class="rh-section-title">Saved places</div>
+    <div class="rh-section-hint">Tap a place to book instantly — add Home &amp; Work in Profile.</div>
+    <div class="rh-chips">
+      <div class="rh-chip">
+        <div class="rh-chip-icon">🏠</div>
+        <div class="rh-chip-label">Home</div>
+        <div style="font-size:12px;color:#64748b;margin-top:2px">Lekki Phase 1</div>
+      </div>
+      <div class="rh-chip">
+        <div class="rh-chip-icon">💼</div>
+        <div class="rh-chip-label">Work</div>
+        <div style="font-size:12px;color:#64748b;margin-top:2px">Victoria Island</div>
+      </div>
+      <div class="rh-chip">
+        <div class="rh-chip-icon">⭐</div>
+        <div class="rh-chip-label">Mall</div>
+        <div style="font-size:12px;color:#64748b;margin-top:2px">Palms Lekki</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rh-tab-bar">
+    <div class="rh-tab active"><span class="rh-tab-icon">🏠</span>Home</div>
+    <div class="rh-tab"><span class="rh-tab-icon">🚗</span>Trips</div>
+    <div class="rh-tab"><span class="rh-tab-icon">💳</span>Wallet</div>
+    <div class="rh-tab"><span class="rh-tab-icon">👤</span>Profile</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     2. FINDING DRIVER — FindingDriverScreenV2
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="screen-2" class="screen finding">
+  <div class="map-bg" style="background-image:url('MAP_URL_2')"></div>
+  <div class="finding-scrim-top"></div>
+  <div class="finding-scrim-bottom"></div>
+
+  <div class="ios-status dark">
+    <div class="island"></div>
+    <span class="time">9:41</span>
+    <span class="icons">
+      <span class="sig"><span></span><span></span><span></span><span></span></span>
+      <span class="wifi"></span>
+      <span class="battery"><span class="battery-fill"></span></span>
+    </span>
+  </div>
+
+  <div class="finding-pill">
+    <span class="dot"></span>
+    <span>NEXRYDE</span>
+    <span class="finding-timer">0:42</span>
+    <span class="finding-nearby">8 nearby</span>
+  </div>
+
+  <svg class="finding-route" viewBox="0 0 430 932" preserveAspectRatio="none">
+    <path d="M155,382 Q220,420 275,512" fill="none" stroke="#00d084" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+  </svg>
+  <div class="finding-radar"></div>
+  <div class="finding-pin pickup"></div>
+  <div class="finding-pin drop"></div>
+  <div class="finding-car" style="top:36%;left:28%">🚕</div>
+  <div class="finding-car" style="top:32%;left:58%">🚕</div>
+  <div class="finding-car" style="top:48%;left:72%">🚕</div>
+
+  <div class="finding-sheet">
+    <div class="finding-handle"></div>
+    <div class="finding-route-card">
+      <div class="finding-route-row">
+        <div>
+          <div class="finding-route-dot g"></div>
+          <div class="finding-route-line"></div>
+        </div>
+        <div class="finding-route-txt">12 Admiralty Way, Lekki Phase 1</div>
+      </div>
+      <div class="finding-route-row">
+        <div class="finding-route-dot r"></div>
+        <div class="finding-route-txt">The Palms Shopping Mall, Lekki</div>
+      </div>
+    </div>
+    <div class="finding-title">Finding your driver…</div>
+    <div class="finding-sub">Scanning nearby drivers in your area</div>
+    <div class="finding-progress"><div class="finding-progress-fill"></div></div>
+    <div class="finding-chips">
+      <div class="finding-chip">₦2,500</div>
+      <div class="finding-chip">4.2 km</div>
+      <div class="finding-chip">~12 min</div>
+    </div>
+    <div class="finding-cancel">Cancel request</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     3. DRIVER COMMUNITY — driver/community.tsx
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="screen-3" class="screen community">
+  <div class="ios-status dark">
+    <div class="island"></div>
+    <span class="time">9:41</span>
+    <span class="icons">
+      <span class="sig"><span></span><span></span><span></span><span></span></span>
+      <span class="wifi"></span>
+      <span class="battery"><span class="battery-fill"></span></span>
+    </span>
+  </div>
+
+  <div class="comm-header">
+    <div class="comm-back">←</div>
+    <div class="comm-header-center">
+      <div class="comm-header-title">Driver Community</div>
+      <div class="comm-header-sub">Connect with drivers across Nigeria</div>
+    </div>
+    <div style="width:40px"></div>
+  </div>
+
+  <div class="comm-tabs">
+    <div class="comm-tab active">👥 Groups</div>
+    <div class="comm-tab">📢 Announcements</div>
+  </div>
+
+  <div class="comm-body">
+    <div class="comm-search">🔍 Search groups &amp; channels…</div>
+
+    <div class="comm-label">Official Channels</div>
+    <div class="comm-sub">Updates, support &amp; tips from the Nexryde team</div>
+
+    <div class="comm-row">
+      <div class="comm-row-icon" style="background:rgba(124,58,237,0.2)">
+        📢
+        <span class="comm-unread">3</span>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div class="comm-row-name">Nexryde Announcements</div>
+        <div class="comm-row-msg">New feature: Floating driver bubble is live 🎉</div>
+      </div>
+      <div class="comm-row-meta">now</div>
+    </div>
+
+    <div class="comm-row">
+      <div class="comm-row-icon" style="background:rgba(14,165,233,0.2)">🛡️</div>
+      <div style="flex:1;min-width:0">
+        <div class="comm-row-name">Driver Support</div>
+        <div class="comm-row-msg">Wallet top-up issues resolved ✅</div>
+      </div>
+      <div class="comm-row-meta">1h</div>
+    </div>
+
+    <div class="comm-row">
+      <div class="comm-row-icon" style="background:rgba(245,158,11,0.2)">⭐</div>
+      <div style="flex:1;min-width:0">
+        <div class="comm-row-name">Driver Tips &amp; Safety</div>
+        <div class="comm-row-msg">Hot tip: Airport runs on Friday evenings 🛫</div>
+      </div>
+      <div class="comm-row-meta">30m</div>
+    </div>
+
+    <div class="comm-label" style="margin-top:16px">City Groups</div>
+    <div class="comm-sub">Connect with drivers in your city</div>
+
+    <div class="comm-row">
+      <div class="comm-row-icon" style="background:rgba(34,197,94,0.2)">
+        🚗
+        <span class="comm-unread">12</span>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div class="comm-row-name">Lagos Drivers</div>
+        <div class="comm-row-msg">Traffic on Third Mainland crazy rn 😤</div>
+      </div>
+      <div class="comm-row-meta">10m</div>
+    </div>
+
+    <div class="comm-row">
+      <div class="comm-row-icon" style="background:rgba(59,130,246,0.2)">🚗</div>
+      <div style="flex:1;min-width:0">
+        <div class="comm-row-name">Abuja Drivers</div>
+        <div class="comm-row-msg">Airport pickups picking up at Terminal 1</div>
+      </div>
+      <div class="comm-row-meta">15m</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     4. DRIVER HOME — DriverHomeImproved.tsx
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="screen-4" class="screen driver-home">
+  <div class="ios-status dark">
+    <div class="island"></div>
+    <span class="time">9:41</span>
+    <span class="icons">
+      <span class="sig"><span></span><span></span><span></span><span></span></span>
+      <span class="wifi"></span>
+      <span class="battery"><span class="battery-fill"></span></span>
+    </span>
+  </div>
+
+  <div class="dh-header">
+    <div class="dh-menu">☰</div>
+    <div class="dh-offline">
+      <span class="dh-offline-txt">OFFLINE</span>
+      <span class="dh-offline-x">✕</span>
+    </div>
+    <div class="dh-avatar">
+      👤
+      <span class="dh-avatar-dot"></span>
+    </div>
+  </div>
+
+  <div class="dh-body">
+    <div class="dh-go">▶ GO ONLINE</div>
+
+    <div class="dh-stats">
+      <div class="dh-stat">
+        <span style="font-size:18px">🚗</span>
+        <div class="dh-stat-label">Trips</div>
+        <div class="dh-stat-val">247</div>
+        <div class="dh-stat-sub">This month</div>
+      </div>
+      <div class="dh-stat">
+        <span style="font-size:18px">⭐</span>
+        <div class="dh-stat-label">Rating</div>
+        <div class="dh-stat-val">4.92</div>
+        <div class="dh-stat-sub">Excellent</div>
+      </div>
+      <div class="dh-stat">
+        <span style="font-size:18px">✓</span>
+        <div class="dh-stat-label">Acceptance</div>
+        <div class="dh-stat-val">94%</div>
+        <div class="dh-stat-sub">Last 7 days</div>
+      </div>
+    </div>
+
+    <div class="dh-map-card">
+      <div class="dh-map" style="background-image:url('MAP_URL_4')">
+        <div class="dh-live-pill"><span class="dh-live-dot"></span> LIVE</div>
+        <div class="dh-map-marker">📍</div>
+      </div>
+      <div class="dh-map-toggle">▲ Collapse map</div>
+    </div>
+
+    <div class="dh-opp">🔍 See ride opportunities</div>
+
+    <div class="dh-trial">
+      ⭐ Free trial: 3 days left — subscribe to keep earning without limits
+    </div>
+  </div>
+
+  <div class="dh-tab-bar">
+    <div class="dh-tab active"><span class="dh-tab-icon">🏠</span>Home</div>
+    <div class="dh-tab"><span class="dh-tab-icon">🚗</span>Trips</div>
+    <div class="dh-tab"><span class="dh-tab-icon">💬</span>Community</div>
+    <div class="dh-tab"><span class="dh-tab-icon">👤</span>Profile</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     5. LIVE TRACKING — driver approaching (LiveEtaTopCard + LiveDriverSheet)
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="screen-5" class="screen tracking">
+  <div class="map-bg" style="background-image:url('MAP_URL_5')"></div>
+  <div class="ios-status dark">
+    <div class="island"></div>
+    <span class="time">9:41</span>
+    <span class="icons"><span class="sig"><span></span><span></span><span></span><span></span></span><span class="wifi"></span><span class="battery"><span class="battery-fill"></span></span></span>
+  </div>
+  <div class="tracking-eta">
+    <div class="tracking-eta-badge">🚗</div>
+    <div style="flex:1">
+      <div class="tracking-eta-label">Driver approaching</div>
+      <div class="tracking-eta-time">4 min</div>
+      <div class="tracking-eta-sub">850 m away · Chidi is on the way</div>
+    </div>
+  </div>
+  <svg class="tracking-route" viewBox="0 0 430 932" preserveAspectRatio="none">
+    <path d="M224,410 Q260,480 163,540 Q120,580 292,680" fill="none" stroke="#00d084" stroke-width="5" stroke-linecap="round" opacity="0.9"/>
+  </svg>
+  <div class="tracking-car">🚕</div>
+  <div class="tracking-pin pickup"></div>
+  <div class="tracking-pin drop"></div>
+  <div class="tracking-sheet">
+    <div class="tracking-handle"></div>
+    <div class="tracking-driver-row">
+      <div class="tracking-avatar">👤</div>
+      <div>
+        <div class="tracking-driver-name">Chidi Okonkwo</div>
+        <div class="tracking-driver-meta">247 trips · Verified driver</div>
+      </div>
+      <div class="tracking-rating">
+        <div class="tracking-rating-val">★ 4.92</div>
+        <div class="tracking-rating-label">Rating</div>
+      </div>
+    </div>
+    <div class="tracking-actions">
+      <div class="tracking-action green">📞 Call</div>
+      <div class="tracking-action">💬 Message</div>
+      <div class="tracking-action">📤 Share trip</div>
+    </div>
+    <div class="tracking-vehicle">
+      <span class="tracking-vehicle-icon">🚗</span>
+      <div>
+        <div class="tracking-vehicle-txt">Toyota Corolla · Silver</div>
+      </div>
+      <div class="tracking-vehicle-plate">LAG-482-KX</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     6. RIDER WALLET — rider-wallet.tsx
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="screen-6" class="screen wallet">
+  <div class="ios-status light">
+    <div class="island"></div>
+    <span class="time">9:41</span>
+    <span class="icons"><span class="sig"><span></span><span></span><span></span><span></span></span><span class="wifi"></span><span class="battery"><span class="battery-fill"></span></span></span>
+  </div>
+  <div class="wallet-brand">NEXRYDE · Rider</div>
+  <div class="wallet-hero">
+    <div class="wallet-hero-glow"></div>
+    <div class="wallet-hero-top">
+      <div>
+        <div class="wallet-hero-label">NEXRYDE WALLET</div>
+        <div class="wallet-hero-name">Ada</div>
+      </div>
+      <div class="wallet-hero-badge">💳 Active</div>
+    </div>
+    <div class="wallet-balance-label">Available Balance</div>
+    <div class="wallet-balance">₦12,450</div>
+    <div class="wallet-promo">🎁 +₦500 promo credit available</div>
+    <div class="wallet-footer">
+      <span>🛡️ Secured by Squad</span>
+      <span>↻ Pull to refresh</span>
+    </div>
+  </div>
+  <div class="wallet-section">
+    <div class="wallet-section-title">Top up wallet</div>
+    <div class="wallet-topup">
+      <div class="wallet-amount-row">
+        <div class="wallet-amount-chip">₦1,000</div>
+        <div class="wallet-amount-chip active">₦2,000</div>
+        <div class="wallet-amount-chip">₦5,000</div>
+        <div class="wallet-amount-chip">₦10K</div>
+      </div>
+      <div class="wallet-topup-btn">Fund wallet with Squad</div>
+    </div>
+    <div class="wallet-section-title">Recent transactions</div>
+    <div class="wallet-tx">
+      <div class="wallet-tx-icon" style="background:rgba(34,197,94,0.12)">⬆️</div>
+      <div><div class="wallet-tx-title">Wallet top-up</div><div class="wallet-tx-sub">Today · Squad</div></div>
+      <div class="wallet-tx-amt plus">+₦2,000</div>
+    </div>
+    <div class="wallet-tx">
+      <div class="wallet-tx-icon" style="background:rgba(239,68,68,0.12)">🚗</div>
+      <div><div class="wallet-tx-title">Trip payment</div><div class="wallet-tx-sub">Yesterday · Lekki → VI</div></div>
+      <div class="wallet-tx-amt minus">-₦2,500</div>
+    </div>
+    <div class="wallet-tx">
+      <div class="wallet-tx-icon" style="background:rgba(34,197,94,0.12)">🎁</div>
+      <div><div class="wallet-tx-title">Referral bonus</div><div class="wallet-tx-sub">Mon · Invite reward</div></div>
+      <div class="wallet-tx-amt plus">+₦500</div>
+    </div>
+  </div>
+  <div class="wallet-tab-bar">
+    <div class="wallet-tab"><span class="wallet-tab-icon">🏠</span>Home</div>
+    <div class="wallet-tab"><span class="wallet-tab-icon">🚗</span>Trips</div>
+    <div class="wallet-tab active"><span class="wallet-tab-icon">💳</span>Wallet</div>
+    <div class="wallet-tab"><span class="wallet-tab-icon">🛡️</span>Safety</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     7. RIDER SAFETY — rider-safety.tsx
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="screen-7" class="screen safety">
+  <div class="ios-status light">
+    <div class="island"></div>
+    <span class="time">9:41</span>
+    <span class="icons"><span class="sig"><span></span><span></span><span></span><span></span></span><span class="wifi"></span><span class="battery"><span class="battery-fill"></span></span></span>
+  </div>
+  <div class="safety-brand">NEXRYDE · Rider</div>
+  <div class="safety-hero">
+    <div class="safety-hero-title">Safety Center</div>
+    <div class="safety-hero-sub">Verification, emergencies, and trip protection — organized in one screen.</div>
+  </div>
+  <div class="safety-body">
+    <div class="safety-quick-label">Quick access</div>
+    <div class="safety-quick-row">
+      <div class="safety-quick-btn"><div class="safety-quick-icon" style="background:#ef4444">⚠️</div><div class="safety-quick-txt">Emergency</div></div>
+      <div class="safety-quick-btn"><div class="safety-quick-icon" style="background:#f97316">🛡️</div><div class="safety-quick-txt">Police &amp; help</div></div>
+      <div class="safety-quick-btn"><div class="safety-quick-icon" style="background:#2563eb">👁️</div><div class="safety-quick-txt">Witness</div></div>
+      <div class="safety-quick-btn"><div class="safety-quick-icon" style="background:#475569">⚙️</div><div class="safety-quick-txt">Settings</div></div>
+    </div>
+    <div class="safety-sos">
+      <div class="safety-sos-icon">🚨</div>
+      <div class="safety-sos-title">Emergency SOS</div>
+      <div class="safety-sos-sub">Trigger a protected emergency alert during your trip</div>
+      <div class="safety-sos-btn">Send SOS Alert</div>
+    </div>
+    <div class="safety-card">
+      <div class="safety-card-title">🛡️ Nigerian Police Finder</div>
+      <div style="font-size:13px;color:#16a34a;font-weight:700;margin-bottom:10px">📍 Detected: Lagos Police</div>
+      <div style="padding:12px;background:#eff6ff;border-radius:12px;text-align:center;font-weight:800;color:#1d4ed8">Call Lagos Police · 112</div>
+    </div>
+    <div class="safety-card">
+      <div class="safety-card-title">Verification</div>
+      <div class="safety-row">
+        <div class="safety-row-icon" style="background:rgba(34,197,94,0.12)">🔢</div>
+        <div><div class="safety-row-label">Pick-up Code</div><div class="safety-row-desc">4-digit code shown to driver at pickup</div></div>
+        <div class="safety-row-chevron">›</div>
+      </div>
+      <div class="safety-row">
+        <div class="safety-row-icon" style="background:rgba(59,130,246,0.12)">📤</div>
+        <div><div class="safety-row-label">Share Trip</div><div class="safety-row-desc">Let someone follow your live trip</div></div>
+        <div class="safety-row-chevron">›</div>
+      </div>
+    </div>
+  </div>
+  <div class="safety-tab-bar">
+    <div class="safety-tab"><span class="safety-tab-icon">🏠</span>Home</div>
+    <div class="safety-tab"><span class="safety-tab-icon">🚗</span>Trips</div>
+    <div class="safety-tab active"><span class="safety-tab-icon">🛡️</span>Safety</div>
+    <div class="safety-tab"><span class="safety-tab-icon">💳</span>Wallet</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     8. DRIVER RIDE OFFER — DriverRideRequestModal
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="screen-8" class="screen driver-offer">
+  <div class="map-bg" style="background-image:url('MAP_URL_8')"></div>
+  <div class="ios-status dark">
+    <div class="island"></div>
+    <span class="time">9:41</span>
+    <span class="icons"><span class="sig"><span></span><span></span><span></span><span></span></span><span class="wifi"></span><span class="battery"><span class="battery-fill"></span></span></span>
+  </div>
+  <div class="driver-offer-header">
+    <div class="driver-offer-label">NEW RIDE REQUEST</div>
+    <div class="driver-offer-timer">0:18</div>
+  </div>
+  <svg class="driver-offer-route" viewBox="0 0 430 932" preserveAspectRatio="none">
+    <path d="M138,354 Q210,400 267,490" fill="none" stroke="#00d084" stroke-width="5" stroke-linecap="round" opacity="0.9"/>
+  </svg>
+  <div class="driver-offer-pin a">👤</div>
+  <div class="driver-offer-pin b">🚩</div>
+  <div class="driver-offer-sheet">
+    <div class="finding-handle"></div>
+    <div class="driver-offer-fare">
+      <div class="driver-offer-fare-amt">₦2,500</div>
+      <div class="driver-offer-fare-label">Rider offer · 4.2 km · ~12 min</div>
+      <div class="driver-offer-fair">✓ Good fare</div>
+    </div>
+    <div class="driver-offer-rider">
+      <div class="driver-offer-rider-avatar">👤</div>
+      <div>
+        <div class="driver-offer-rider-name">Ada O.</div>
+        <div class="driver-offer-rider-meta">★ 4.88 · 52 trips · Cashless</div>
+      </div>
+    </div>
+    <div class="driver-offer-route-card">
+      <div class="driver-offer-route-row">
+        <div class="driver-offer-route-dot g"></div>
+        <div class="driver-offer-route-txt">12 Admiralty Way, Lekki Phase 1</div>
+      </div>
+      <div class="driver-offer-route-row">
+        <div class="driver-offer-route-dot r"></div>
+        <div class="driver-offer-route-txt">The Palms Shopping Mall, Lekki</div>
+      </div>
+    </div>
+    <div class="driver-offer-actions">
+      <div class="driver-offer-ignore">Ignore</div>
+      <div class="driver-offer-accept">✓ Accept ride</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

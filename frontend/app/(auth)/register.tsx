@@ -48,7 +48,7 @@ export default function RegisterScreen() {
   const params = useLocalSearchParams();
   const canShowAuth = useRedirectIfAuthed();
   
-  // Get params - can come from phone OTP or Google auth
+  // Params from email sign-in or Google auth (phone collected on this screen — no SMS OTP).
   const phone = params.phone as string;
   const googleEmail = params.email as string;
   const googleName = params.name as string;
@@ -99,29 +99,27 @@ export default function RegisterScreen() {
     }
     
     const isEmailAuth = authType === 'email';
-    if (!isGoogleAuth && !isEmailAuth && !phoneNumber.trim()) {
+    const riderPhone = normalizePhone((phoneNumber || phone || '').trim());
+
+    if (selectedRole === 'rider') {
+      if (!/^\+234\d{10}$/.test(riderPhone)) {
+        toast.show('Enter a valid Nigerian mobile number (10 digits after +234).', 'warning');
+        return;
+      }
+    } else if (!isGoogleAuth && !isEmailAuth && !riderPhone) {
       toast.show('Enter your Nigerian mobile number so we can reach your account.', 'warning');
       return;
     }
 
-    // Drivers: Nigerian phone is required — stored for rider contact and NexRyde records.
     if (selectedRole === 'driver') {
-      const rawPhone = (phone ? String(phone) : phoneNumber).trim();
-      const np = normalizePhone(rawPhone);
-      if (!/^\+234\d{10}$/.test(np)) {
+      if (!/^\+234\d{10}$/.test(riderPhone)) {
         toast.show('Enter a valid Nigerian mobile number (10 digits after +234). This is part of driver registration.', 'warning');
         return;
       }
-    }
-
-    // Navigate to appropriate verification screen based on role
-    if (selectedRole === 'driver') {
-      const driverPhone = normalizePhone((phone ? String(phone) : phoneNumber).trim());
-      // Drivers must accept Terms & Conditions
       router.push({
         pathname: '/(auth)/driver-terms',
         params: {
-          phone: driverPhone,
+          phone: riderPhone,
           name: name,
           email: email || '',
           google_id: googleId || '',
@@ -129,11 +127,10 @@ export default function RegisterScreen() {
         },
       });
     } else {
-      // Riders must provide NIN
       router.push({
-        pathname: '/(auth)/rider-nin',
+        pathname: '/(auth)/rider-terms',
         params: {
-          phone: normalizePhone(phoneNumber),
+          phone: riderPhone,
           name: name,
           email: email || '',
           google_id: googleId || '',
@@ -248,27 +245,23 @@ export default function RegisterScreen() {
                 onChangeText={setName}
               />
 
-              {/* Show phone input only if not already provided */}
-              {!phone && (
-                <>
-                  <Text style={styles.inputLabel}>Phone Number</Text>
-                  <View style={styles.phoneInputContainer}>
-                    <View style={styles.phonePrefixContainer}>
-                      <Text style={styles.phoneFlag}>🇳🇬</Text>
-                      <Text style={styles.phonePrefix}>+234</Text>
-                    </View>
-                    <TextInput
-                      style={styles.phoneInput}
-                      placeholder="801 234 5678"
-                      placeholderTextColor={D.textMuted}
-                      value={phoneNumber}
-                      onChangeText={setPhoneNumber}
-                      keyboardType="phone-pad"
-                      maxLength={11}
-                    />
-                  </View>
-                </>
-              )}
+              <Text style={styles.inputLabel}>Phone Number</Text>
+              <Text style={styles.phoneHint}>Stored on your account — no SMS code required.</Text>
+              <View style={styles.phoneInputContainer}>
+                <View style={styles.phonePrefixContainer}>
+                  <Text style={styles.phoneFlag}>🇳🇬</Text>
+                  <Text style={styles.phonePrefix}>+234</Text>
+                </View>
+                <TextInput
+                  style={styles.phoneInput}
+                  placeholder="801 234 5678"
+                  placeholderTextColor={D.textMuted}
+                  value={phoneNumber}
+                  onChangeText={setPhoneNumber}
+                  keyboardType="phone-pad"
+                  maxLength={11}
+                />
+              </View>
 
               {/* Show email only if not from Google */}
               {!isGoogleAuth && (
@@ -318,9 +311,9 @@ export default function RegisterScreen() {
               </LinearGradient>
             </TouchableOpacity>
             <Text style={styles.termsText}>
-              By continuing, you agree to our{' '}
-              <Text style={styles.termsLink} onPress={() => openLegal('/terms-of-service')}>Terms of Service</Text> and{' '}
-              <Text style={styles.termsLink} onPress={() => openLegal('/privacy-policy')}>Privacy Policy</Text>
+              {selectedRole === 'driver'
+                ? 'Next step: review and accept Driver Terms before document upload.'
+                : 'Next step: review and accept Rider Terms before identity verification.'}
             </Text>
           </View>
         </KeyboardAvoidingView>
@@ -480,6 +473,13 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.sm,
     fontWeight: '600',
     color: D.textSecondary,
+    marginBottom: SPACING.sm,
+  },
+  phoneHint: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '600',
+    color: D.textMuted,
+    marginTop: -4,
     marginBottom: SPACING.sm,
   },
   textInput: {

@@ -2,6 +2,7 @@
 Recurring push notifications at fixed local times (daily).
 
 Default timezone: Africa/Lagos. Enable with DAILY_SLOT_NOTIFICATIONS_ENABLED=true
+(off by default — turn on at 500+ active users; scans broadcast audience on each tick).
 
 Slots (local time):
   Morning 7:30, Lunch 12:15, Evening 5:45 PM, Night 10:30 PM

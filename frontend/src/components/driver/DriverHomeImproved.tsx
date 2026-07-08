@@ -26,6 +26,7 @@ import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { getDriverStats } from '@/src/services/api';
 import { NEXRYDE_MAP_STYLE } from '@/src/components/DriverLiveMapView';
+import { buildTrialBannerText, splitTrialBannerForEmphasis } from '@/src/utils/driverTrialDisplay';
 import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 import { PrayerStripWidget } from '@/src/components/PrayerStripWidget';
 
@@ -73,6 +74,10 @@ type Props = {
   trialTripsCompleted: number;
   trialTripsTarget: number;
   trialExtended: boolean;
+  trialDaysRemaining?: number | null;
+  trialDayLimit?: number | null;
+  trialEmphasis?: 'trips' | 'days';
+  earlySubscribeMessage?: string;
   verificationStatus: string | null;
   simSwapAlert: boolean;
   toggling: boolean;
@@ -104,6 +109,10 @@ export function DriverHomeImproved({
   trialTripsCompleted,
   trialTripsTarget,
   trialExtended,
+  trialDaysRemaining = null,
+  trialDayLimit = null,
+  trialEmphasis = 'trips',
+  earlySubscribeMessage = '',
   verificationStatus,
   simSwapAlert,
   toggling,
@@ -195,8 +204,16 @@ export function DriverHomeImproved({
   }, [driverCoords?.lat, driverCoords?.lng]);
 
   const trialRemaining = Math.max(0, trialTripsTarget - trialTripsCompleted);
+  const trialBannerParts = splitTrialBannerForEmphasis({
+    completed: trialTripsCompleted,
+    target: trialTripsTarget,
+    daysRemaining: trialDaysRemaining,
+    dayLimit: trialDayLimit,
+    emphasis: trialEmphasis,
+  });
   const showTrialPromo =
     driverApproved && subscriptionStatus === 'trial' && trialTripsTarget > 0 && !promoDismissed;
+  const trialEnded = subscriptionStatus === 'pending_payment';
 
   const infoMessage = useMemo(() => {
     if (typeof surgePricing?.driver_message === 'string' && surgePricing.driver_message.trim()) {
@@ -418,10 +435,23 @@ export function DriverHomeImproved({
         {/* Free trial banner */}
         {showTrialPromo ? (
           <View style={styles.trialBanner}>
-            <Text style={styles.trialText}>
-              Free trial: {trialTripsCompleted}/{trialTripsTarget} • {trialRemaining} left
-              {trialExtended ? ' • Extended' : ''}
-            </Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.trialText}>
+                <Text style={trialBannerParts.emphasis === 'trips' ? styles.trialTextEmphasis : undefined}>
+                  {trialBannerParts.prefix}
+                  {trialBannerParts.tripsPart}
+                </Text>
+                <Text style={trialBannerParts.emphasis === 'days' ? styles.trialTextEmphasis : undefined}>
+                  {trialBannerParts.separator}
+                  {trialBannerParts.secondaryPart}
+                </Text>
+              </Text>
+              {earlySubscribeMessage ? (
+                <Text style={styles.trialSaveHint} numberOfLines={1}>
+                  {earlySubscribeMessage}
+                </Text>
+              ) : null}
+            </View>
             <TouchableOpacity
               onPress={handleDismissPromo}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -432,6 +462,15 @@ export function DriverHomeImproved({
               </View>
             </TouchableOpacity>
           </View>
+        ) : null}
+
+        {needsSubscription && trialEnded ? (
+          <TouchableOpacity style={styles.trialEndedBanner} onPress={onOpenSubscription} activeOpacity={0.88}>
+            <Ionicons name="card-outline" size={18} color="#FBBF24" />
+            <Text style={styles.trialEndedText}>
+              Your free trial has ended. Subscribe to keep receiving trips.
+            </Text>
+          </TouchableOpacity>
         ) : null}
 
         {/* Info card — collapsible, matching screenshot exactly */}
@@ -722,6 +761,20 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#0A1830',
   },
+  trialTextEmphasis: { fontWeight: '900', textDecorationLine: 'underline' },
+  trialSaveHint: { fontSize: 11, fontWeight: '700', color: '#14532D', marginTop: 4 },
+  trialEndedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(251,191,36,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.35)',
+  },
+  trialEndedText: { flex: 1, fontSize: 13, fontWeight: '700', color: '#FDE68A' },
   trialClose: {
     width: 24,
     height: 24,

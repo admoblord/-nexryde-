@@ -26,6 +26,9 @@ import {
 } from '@/src/services/api';
 import * as Location from 'expo-location';
 import { fetchTripEta, fetchTripRoute } from '@/src/services/tripTrackingApi';
+import { DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
+import { routePolylineFromTripRecord } from '@/src/utils/routePreviewCoords';
+import { isValidMapCoord } from '@/src/components/tracking/map/mapUtils';
 import { normalizeTripStatus } from '@/src/utils/tripStatus';
 import {
   parseTripCoords,
@@ -79,6 +82,8 @@ import {
 import { usePickupWaitTimer } from '@/src/hooks/usePickupWaitTimer';
 import { ETAService } from '@/src/services/etaService';
 import { fetchWithTimeout } from '@/src/utils/fetchWithTimeout';
+import { safeReplace } from '@/src/utils/navigationSafe';
+import { managedFetch } from '@/src/services/networkManager';
 
 export function useRiderTrackingSession() {
   const router = useRouter();
@@ -206,6 +211,13 @@ export function useRiderTrackingSession() {
   const isPaymentPhase = tripStatus === 'pending_payment';
   const trackingPhase = resolveTrackingScreenPhase(tripStatus, Boolean(effectiveTripId), assignedDriverId);
 
+  const driverGpsReady = useMemo(() => {
+    const d = liveDriverCoords;
+    return Boolean(d && isValidMapCoord(d.lat, d.lng));
+  }, [liveDriverCoords?.lat, liveDriverCoords?.lng]);
+
+  const awaitingDriverGps = isLivePhase && !driverGpsReady;
+
   const driverHydrated = useMemo(() => {
     if (!driverInfo || Object.keys(driverInfo).length === 0) return false;
     const name = String(driverInfo.name || '').trim();
@@ -294,12 +306,16 @@ export function useRiderTrackingSession() {
 
   const statusSubline = useMemo(() => {
     if (!isDriverAssigned) return 'Confirming your driver assignment…';
+    if (awaitingDriverGps && tripStatus !== 'arrived') {
+      return 'Connecting to your driver…';
+    }
     if (locationStale) return 'Updating live driver location…';
     if (tripStatus === 'arrived') {
       if (pickupWait.phase !== 'idle') return pickupWait.subline;
       return 'Your driver is at the pickup point. Walk out to meet them.';
     }
     if (tripStatus === 'ongoing') {
+      if (awaitingDriverGps) return 'Connecting to your driver…';
       if (liveEta.etaMinutes != null && liveEta.etaMinutes > 0) {
         const dist = distanceRemainingKm != null && Number.isFinite(Number(distanceRemainingKm))
           ? Number(distanceRemainingKm) < 1
@@ -313,6 +329,7 @@ export function useRiderTrackingSession() {
       return 'Trip in progress — enjoy your ride';
     }
     if (liveEta.status === 'arrived') return 'Your driver has arrived at pickup';
+    if (awaitingDriverGps) return 'Connecting to your driver…';
     if (liveEta.etaMinutes != null && liveEta.etaMinutes > 0) {
       const dist = distanceRemainingKm != null && Number.isFinite(Number(distanceRemainingKm))
         ? Number(distanceRemainingKm) < 1
@@ -324,7 +341,7 @@ export function useRiderTrackingSession() {
         : `Driver arriving in ${liveEta.etaMinutes} minute${liveEta.etaMinutes === 1 ? '' : 's'}`;
     }
     return liveEta.subline || 'Tracking your driver in real time';
-  }, [locationStale, liveEta, distanceRemainingKm, tripStatus, pickupWait, isDriverAssigned]);
+  }, [locationStale, liveEta, distanceRemainingKm, tripStatus, pickupWait, isDriverAssigned, awaitingDriverGps]);
 
   const destinationAddress = useMemo(() => {
     const trip = currentTrip as { dropoff_address?: string; destination?: string } | null;
@@ -333,6 +350,16 @@ export function useRiderTrackingSession() {
     const paramDest = typeof params.destination === 'string' ? params.destination : '';
     return paramDest.trim() || null;
   }, [currentTrip, params.destination]);
+
+  // Seed finding-phase route from fare estimate / trip preview (don't wait for live phase).
+  useEffect(() => {
+    if (!currentTrip) return;
+    const seeded = routePolylineFromTripRecord(
+      currentTrip as { route_preview_coordinates?: unknown; polyline?: unknown },
+    );
+    if (seeded.length < DIRECTIONS_ROUTE_MIN_POINTS) return;
+    setSnappedPolyline((prev) => (prev.length >= seeded.length ? prev : seeded));
+  }, [effectiveTripId, currentTrip]);
 
   const mapModel: TrackingMapModel = useMemo(
     () => ({
@@ -372,7 +399,7 @@ export function useRiderTrackingSession() {
       navigateOnce(`cancelled-${effectiveTripId}`, () => {
         const byDriver = String(payload?.cancelled_by_role ?? '') === 'driver';
         const reason = String(payload?.cancellation_reason ?? '').trim();
-        router.replace('/(rider-tabs)/rider-home');
+        safeReplace(router, '/(rider-tabs)/rider-home');
         if (!byDriver) return;
         // Let the home screen mount before surfacing the native alert.
         setTimeout(() => {
@@ -462,6 +489,14 @@ export function useRiderTrackingSession() {
       }
 
       setCurrentTrip({ ...merged, status: uiStatus } as typeof merged);
+      const routeSeed = routePolylineFromTripRecord({
+        ...merged,
+        route_preview_coordinates: (data as { route_preview_coordinates?: unknown }).route_preview_coordinates,
+        polyline: (data as { polyline?: unknown }).polyline,
+      });
+      if (routeSeed.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
+        setSnappedPolyline((prev) => (prev.length >= routeSeed.length ? prev : routeSeed));
+      }
 
       if (uiStatus === 'cancelled') {
         handleRemoteCancelled(data as Record<string, unknown>);
@@ -469,10 +504,10 @@ export function useRiderTrackingSession() {
       }
       if (screenStatus === 'completed') {
         navigateOnce(`receipt-${effectiveTripId}`, () =>
-          router.replace({
+          safeReplace(router, {
             pathname: '/rider/trip-receipt',
             params: { tripId: effectiveTripId },
-          } as any),
+          }),
         );
       }
     } catch {
@@ -605,10 +640,10 @@ export function useRiderTrackingSession() {
         handleRemoteCancelled({ ...(msg as unknown as Record<string, unknown>), ...t });
       } else if (screenStatus === 'completed') {
         navigateOnce(`receipt-${effectiveTripId}`, () =>
-          router.replace({
+          safeReplace(router, {
             pathname: '/rider/trip-receipt',
             params: { tripId: effectiveTripId },
-          } as any),
+          }),
         );
       }
     },
@@ -682,7 +717,7 @@ export function useRiderTrackingSession() {
             Number.isFinite(c.longitude) &&
             !(Math.abs(c.latitude) < 1e-6 && Math.abs(c.longitude) < 1e-6),
         );
-      if (segmentPts.length >= 2) {
+      if (segmentPts.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
         setSnappedPolyline(segmentPts);
         setLiveDebug((d) => ({ ...d, routePoints: segmentPts.length }));
         return;
@@ -695,7 +730,7 @@ export function useRiderTrackingSession() {
             Number.isFinite(c.longitude) &&
             !(Math.abs(c.latitude) < 1e-6 && Math.abs(c.longitude) < 1e-6),
         );
-      if (pts.length >= 2) {
+      if (pts.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
         setSnappedPolyline(pts);
         setLiveDebug((d) => ({ ...d, routePoints: pts.length }));
       }
@@ -910,11 +945,11 @@ export function useRiderTrackingSession() {
     // For terminal / payment states don't cancel — just close tracking safely
     if (tripStatus === 'pending_payment') {
       // Trip is over but payment pending — go to receipt; do not trigger a cancel
-      router.replace({ pathname: '/rider/trip-receipt', params: { tripId: effectiveTripId } } as any);
+      safeReplace(router, { pathname: '/rider/trip-receipt', params: { tripId: effectiveTripId } });
       return;
     }
     if (['completed', 'cancelled'].includes(tripStatus)) {
-      router.replace({ pathname: '/rider/trip-receipt', params: { tripId: effectiveTripId } } as any);
+      safeReplace(router, { pathname: '/rider/trip-receipt', params: { tripId: effectiveTripId } });
       return;
     }
     if (tripStatus === 'ongoing') {
@@ -924,10 +959,13 @@ export function useRiderTrackingSession() {
     }
     setCancellingRide(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/trips/${effectiveTripId}/cancel`, {
+      const res = await managedFetch(`${BACKEND_URL}/api/trips/${effectiveTripId}/cancel`, {
         method: 'PUT',
-        headers: getAuthHeaders(),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cancelled_by: riderId, ...(reason ? { reason } : {}) }),
+        authed: true,
+        timeoutMs: 10_000,
+        retries: 1,
       });
       const data = await res.json();
       if (!res.ok) {
@@ -936,7 +974,7 @@ export function useRiderTrackingSession() {
         if (res.status === 400 && /cannot cancel|already cancel/i.test(detail)) {
           setCancelModalOpen(false);
           setCurrentTrip(null);
-          router.replace('/(rider-tabs)/rider-home');
+          safeReplace(router, '/(rider-tabs)/rider-home');
           return;
         }
         setCancelModalOpen(false);
@@ -994,6 +1032,8 @@ export function useRiderTrackingSession() {
     isFindingPhase,
     isLivePhase,
     isPaymentPhase,
+    driverGpsReady,
+    awaitingDriverGps,
     financialPaymentPending,
     tripPaymentMethod,
     paymentStatus,

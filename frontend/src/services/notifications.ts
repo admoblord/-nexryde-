@@ -2,6 +2,7 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ensureDriverOfferPushChannel } from '@/src/services/driverOfferBackgroundAlert';
 
 /** Android 8+: remote pushes reference channelId — register before first marketing/ride notification. */
 export async function ensureAndroidPushChannels(): Promise<void> {
@@ -13,6 +14,7 @@ export async function ensureAndroidPushChannels(): Promise<void> {
     lightColor: '#FFD700',
     showBadge: true,
   });
+  await ensureDriverOfferPushChannel();
   await Notifications.setNotificationChannelAsync('rides', {
     name: 'Ride Updates',
     importance: Notifications.AndroidImportance.MAX,

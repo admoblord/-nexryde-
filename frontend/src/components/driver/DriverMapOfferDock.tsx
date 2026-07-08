@@ -9,14 +9,11 @@
  * • Counter offer is progressive — hidden by default, expandable
  * • Route is scannable in 1 second: pickup → destination
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
-  TextInput,
-  ActivityIndicator,
   Animated,
   Easing,
   Platform,
@@ -24,9 +21,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import * as Haptics from 'expo-haptics';
 import { DOCK_BLUR_INTENSITY, DOCK_TOP_RADIUS } from '@/src/components/driver/driverDockTheme';
 import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
+import { DriverOfferBidActions } from '@/src/components/driver/DriverOfferBidActions';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 const G   = '#00D47E';   // NexRyde green
@@ -144,9 +141,6 @@ function DriverMapOfferDock({
   onAcceptCounterPrice,
   onDecline,
 }: Props) {
-  const [counterOpen, setCounterOpen] = useState(false);
-  const counterAnim = useRef(new Animated.Value(0)).current;
-
   const riderName  = trip?.rider_name || trip?.rider?.name || 'Rider';
   const riderPhoto = trip?.rider_photo || trip?.rider?.profile_image || null;
   const rating     = trip?.shield?.rider_reputation_avg != null
@@ -186,43 +180,8 @@ function DriverMapOfferDock({
   const urgentCountdown= countdownSeconds <= 8;
   const warnCountdown  = countdownSeconds <= 15;
 
-  const counterParsed  = Math.round(Number(fareInput.replace(/,/g, '').trim()) || 0);
-  const counterValid   = counterParsed > riderOffer;
-
-  // Animate counter expand
-  const toggleCounter = () => {
-    if (offerExpired) return;
-    const next = !counterOpen;
-    setCounterOpen(next);
-    Animated.timing(counterAnim, {
-      toValue: next ? 1 : 0,
-      duration: 240,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-    if (Platform.OS !== 'web') void Haptics.selectionAsync();
-  };
-
-  const counterOpacity = counterAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
-  const counterTranslateY = counterAnim.interpolate({ inputRange: [0, 1], outputRange: [8, 0] });
-
-  const handleAccept = () => {
-    if (accepting || offerExpired) return;
-    if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    onAcceptRiderPrice();
-  };
-
-  const handleCounter = () => {
-    if (accepting || offerExpired || !counterValid) return;
-    if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    onAcceptCounterPrice();
-  };
-
-  const handleDecline = () => {
-    if (accepting) return;
-    if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onDecline();
-  };
+  const minFare = trip?.min_price != null ? Math.round(Number(trip.min_price)) : null;
+  const maxFare = trip?.max_price != null ? Math.round(Number(trip.max_price)) : null;
 
   // Countdown bar progress
   const barProgress = Math.max(0, Math.min(1, countdownSeconds / Math.max(1, countdownTotal)));
@@ -354,100 +313,19 @@ function DriverMapOfferDock({
         </View>
       </View>
 
-      {/* ── Counter offer (expandable) ─────────────────────────────── */}
-      <TouchableOpacity
-        style={s.counterToggle}
-        onPress={toggleCounter}
-        activeOpacity={0.78}
-        disabled={offerExpired}
-      >
-        <Ionicons name={counterOpen ? 'chevron-up' : 'chevron-down'} size={14} color={counterOpen ? G2 : MUT} />
-        <Text style={[s.counterToggleTxt, counterOpen && { color: G2 }]}>
-          {counterOpen ? 'Hide counter offer' : 'Make a counter offer'}
-        </Text>
-      </TouchableOpacity>
-
-      <View style={s.counterPanelSlot}>
-      <Animated.View
-        style={[
-          s.counterPanel,
-          {
-            opacity: counterOpacity,
-            transform: [{ translateY: counterTranslateY }],
-          },
-        ]}
-        pointerEvents={counterOpen ? 'auto' : 'none'}
-      >
-        <View style={s.counterInputRow}>
-          <Text style={s.currencySign}>₦</Text>
-          <TextInput
-            style={s.counterInput}
-            keyboardType="number-pad"
-            placeholder={String(riderOffer)}
-            placeholderTextColor={MUT}
-            value={fareInput}
-            onChangeText={onFareInputChange}
-            editable={!offerExpired && !accepting}
-          />
-          {counterParsed > 0 && counterParsed !== riderOffer && (
-            <Text style={[s.counterDelta, { color: counterValid ? G : RED }]}>
-              {counterValid ? `+₦${(counterParsed - riderOffer).toLocaleString()}` : 'Too low'}
-            </Text>
-          )}
-        </View>
-        <TouchableOpacity
-          style={[s.counterSubmitBtn, (!counterValid || accepting || offerExpired) && s.btnDisabled]}
-          onPress={handleCounter}
-          disabled={!counterValid || accepting || offerExpired}
-          activeOpacity={0.85}
-        >
-          <Text style={s.counterSubmitTxt}>Send Counter Offer — {fmtFare(counterParsed || riderOffer)}</Text>
-        </TouchableOpacity>
-      </Animated.View>
-      </View>
-
-      {/* ── Action buttons ─────────────────────────────────────────── */}
-      <View style={s.actions}>
-        {/* Primary: Accept */}
-        <TouchableOpacity
-          style={[s.acceptBtn, (accepting || offerExpired) && s.btnDisabled]}
-          onPress={handleAccept}
-          disabled={accepting || offerExpired}
-          activeOpacity={0.88}
-          accessibilityRole="button"
-          accessibilityLabel={`Accept trip for ${fmtFare(riderOffer)}`}
-        >
-          <LinearGradient
-            colors={offerExpired ? ['#334155', '#334155'] : ['#00E087', G, '#00B368']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={s.acceptGrad}
-          >
-            {accepting ? (
-              <ActivityIndicator color="#022C22" size="small" />
-            ) : (
-              <View style={s.acceptInner}>
-                <Ionicons name="checkmark" size={22} color="#022C22" />
-                <Text style={s.acceptTxt}>
-                  {offerExpired ? 'Offer Expired' : `Accept  ·  ${fmtFare(riderOffer)}`}
-                </Text>
-              </View>
-            )}
-          </LinearGradient>
-        </TouchableOpacity>
-
-        {/* Secondary: Decline */}
-        <TouchableOpacity
-          style={s.declineBtn}
-          onPress={handleDecline}
-          disabled={accepting}
-          activeOpacity={0.75}
-          accessibilityRole="button"
-          accessibilityLabel="Decline ride"
-        >
-          <Text style={s.declineTxt}>Decline</Text>
-        </TouchableOpacity>
-      </View>
+      <DriverOfferBidActions
+        key={String(trip?.offer_id ?? trip?.id ?? 'offer')}
+        riderOffer={riderOffer}
+        minFare={minFare}
+        maxFare={maxFare}
+        fareInput={fareInput}
+        onFareInputChange={onFareInputChange}
+        accepting={accepting}
+        offerExpired={offerExpired}
+        onAcceptRiderPrice={onAcceptRiderPrice}
+        onSendCounterPrice={onAcceptCounterPrice}
+        onDecline={onDecline}
+      />
     </View>
   );
 }

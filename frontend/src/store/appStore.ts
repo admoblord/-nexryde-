@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { shouldApplyTripUpdate } from '@/src/utils/rideState';
 
 export interface User {
   id: string;
@@ -23,6 +24,14 @@ export interface User {
   plate_number: string | null;
   is_online: boolean;
   created_at: string;
+  terms_accepted?: boolean;
+  terms_version?: string | null;
+  terms_accepted_at?: string | null;
+  privacy_accepted?: boolean;
+  privacy_version?: string | null;
+  privacy_accepted_at?: string | null;
+  rider_verification_completed?: boolean;
+  onboarding_complete?: boolean;
 }
 
 export interface DriverProfile {
@@ -99,6 +108,13 @@ export interface Trip {
   security_code_verified?: boolean;
   /** When false, driver can start without entering a code (rider preference at booking). */
   pickup_code_required?: boolean;
+  /** Fare-estimate / booking route for finding-phase map (Directions polyline). */
+  route_preview_coordinates?: Array<{ lat: number; lng: number }>;
+  polyline?: string;
+  ride_version?: number;
+  state_sequence?: number;
+  state_updated_at?: string;
+  updated_at?: string;
 }
 
 export interface Location {
@@ -174,7 +190,12 @@ export const useAppStore = create<AppState>()(
       setDriverProfile: (profile) => set({ driverProfile: profile }),
       setSubscription: (subscription) => set({ subscription }),
       setIsOnline: (value) => set({ isOnline: value }),
-      setCurrentTrip: (trip) => set({ currentTrip: trip }),
+      setCurrentTrip: (trip) => set((state) => {
+        if (!shouldApplyTripUpdate(state.currentTrip, trip)) {
+          return {};
+        }
+        return { currentTrip: trip };
+      }),
       setPendingTrips: (trips) => set({ pendingTrips: trips }),
       setCurrentLocation: (location) => set({ currentLocation: location }),
       setPickupLocation: (location) => set({ pickupLocation: location }),

@@ -74,27 +74,6 @@ function fmtElapsed(sec: number): string {
   return `${Math.floor(sec / 60)}m ${sec % 60}s`;
 }
 
-// Generate deterministic ambient cars around a pickup coord
-function generateAmbientCars(
-  lat: number,
-  lng: number,
-  count = 5,
-): Array<{ driver_id: string; lat: number; lng: number; name: string }> {
-  const cars: Array<{ driver_id: string; lat: number; lng: number; name: string }> = [];
-  const seed = Math.round(Math.abs(lat * 1000 + lng * 100));
-  for (let i = 0; i < count; i++) {
-    const angle = ((seed * (i + 1) * 137.508) % 360) * (Math.PI / 180);
-    const dist = 0.003 + ((seed * (i + 1) * 17) % 100) / 20000; // ~300m–800m
-    cars.push({
-      driver_id: `ambient_${i}`,
-      lat: lat + dist * Math.cos(angle),
-      lng: lng + dist * Math.sin(angle),
-      name: 'Driver',
-    });
-  }
-  return cars;
-}
-
 type NearbyDriver = {
   driver_id: string;
   name?: string;

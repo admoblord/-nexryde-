@@ -9,6 +9,7 @@ import {
   saveDriverOfferSoundEnabled,
   subscribeDriverOfferSoundPrefs,
 } from '@/src/services/driverOfferSoundPrefs';
+import { ensureDriverOfferPushChannel } from '@/src/services/driverOfferBackgroundAlert';
 
 export function useDriverOfferSoundPrefs() {
   const [ringtoneId, setRingtoneId] = useState<DriverOfferRingtoneId>(DEFAULT_DRIVER_OFFER_RINGTONE_ID);
@@ -30,6 +31,7 @@ export function useDriverOfferSoundPrefs() {
   const setRingtone = useCallback(async (id: DriverOfferRingtoneId) => {
     setRingtoneId(id);
     await saveDriverOfferRingtone(id);
+    await ensureDriverOfferPushChannel(id);
   }, []);
 
   const setSoundEnabledPersisted = useCallback(async (enabled: boolean) => {

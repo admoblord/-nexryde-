@@ -2,10 +2,10 @@
 Nexryde road-based fare model (premium vs Lagride).
 
 Formula (before surge):
-  (Base + Distance×PerKm + Time×PerMin) × Service × Location
+  Direct: (Base + Distance×PerKm) × Service × Location
+  With intermediate stop: add Time×PerMin (service tier card) before location/service/surge.
 
-Location multiplier uses **pickup** coordinates only (Lagos zones).
-Time uses max(scheduled duration, traffic-aware duration) when both are provided.
+Lagos direct trips use Lagride distance×area only; stop trips add per-minute time like other states.
 """
 
 from __future__ import annotations
@@ -146,6 +146,62 @@ def core_components_from_rate_card(
         "core_presurge_pres_adjustment": round(core_presurge, 2),
         "route_time_minutes": t,
     }
+
+
+def intermediate_stop_time_components(
+    city_key: str,
+    service_key: str,
+    route_time_min: int,
+    *,
+    fare_bucket: str = "standard",
+) -> dict[str, float | bool]:
+    """
+    Time charge for trips with an intermediate stop (all Nigerian cities).
+
+    Direct trips omit this; Lagride Lagos stays distance-only until a stop is added.
+    Other states use base+distance normally, then add route minutes × per_min when stopped.
+    """
+    from fare_config import normalize_fare_city_key, resolve_fare_rate_card
+
+    ck = normalize_fare_city_key(city_key or "lagos")
+    sk = (service_key or "economy").strip().lower()
+    if sk == "standard":
+        sk = "economy"
+    if sk == "pro":
+        sk = "premium"
+    mins = max(0, int(route_time_min))
+    if mins <= 0:
+        return {"time_fee": 0.0, "stop_time_per_min": 0.0, "stop_time_fee_applied": False}
+
+    if ck == "lagos":
+        from lagride_lagos_pricing import lagos_stop_time_fee, lagos_stop_time_per_min
+
+        per_min = lagos_stop_time_per_min(sk)
+        fee = lagos_stop_time_fee(sk, mins)
+    else:
+        card = resolve_fare_rate_card(ck, sk, fare_bucket)
+        per_min = float(card.get("per_min", 80))
+        fee = round(mins * per_min, 2)
+
+    return {
+        "time_fee": float(fee),
+        "stop_time_per_min": float(per_min),
+        "stop_time_fee_applied": fee > 0,
+    }
+
+
+def append_stop_time_breakdown_suffix(
+    price_breakdown: str,
+    route_time_min: int,
+    time_fee: float,
+    per_min: float,
+) -> str:
+    if time_fee <= 0 or route_time_min <= 0:
+        return price_breakdown
+    return (
+        f"{price_breakdown} + ₦{int(round(time_fee))} stop time "
+        f"({route_time_min}min × ₦{int(round(per_min))}/min)"
+    )
 
 
 def nexryde_core_components(distance_km: float, route_time_min: int) -> dict:

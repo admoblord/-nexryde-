@@ -1,14 +1,16 @@
-/** NEXRYDE loading / splash brand tokens — use only these on the boot screen. */
+/** NexRyde loading / splash brand tokens — sourced from designSystem. */
+import { BRAND, SURFACE } from '@/src/constants/designSystem';
+
 export const NEX_LOADING = {
-  green: '#00D084',
-  blue: '#0066FF',
-  bg: '#0F1419',
-  bgCard: 'rgba(26, 35, 50, 0.65)',
-  white: '#FFFFFF',
-  textGray: '#9CA3AF',
-  darkGray: '#6B7280',
-  borderGray: '#4B5563',
-  track: '#2d3e52',
+  green: BRAND.primary,
+  blue: BRAND.accentBlue,
+  bg: BRAND.bgDeep,
+  bgCard: SURFACE.glassSoft,
+  white: BRAND.textPrimary,
+  textGray: BRAND.textSecondary,
+  darkGray: BRAND.textMuted,
+  borderGray: 'rgba(148,163,184,0.22)',
+  track: SURFACE.cardElevated,
 } as const;
 
 export type NexLoadingStepId = 'session' | 'loading' | 'preparing';

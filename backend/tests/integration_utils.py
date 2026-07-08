@@ -36,10 +36,19 @@ def register_rider(
 ) -> Tuple[str, str, str]:
     base = (base_url or get_base_url()).rstrip("/")
     phone = random_ng_phone()
-    nin = f"NIN{uuid.uuid4().hex[:16]}"
+    nin = "".join(str(i % 10) for i in range(11))
     r = requests.post(
         f"{base}/api/auth/register",
-        json={"phone": phone, "name": name, "role": "rider", "nin": nin},
+        json={
+            "phone": phone,
+            "name": name,
+            "role": "rider",
+            "nin": nin,
+            "terms_accepted": True,
+            "terms_accepted_at": datetime.now(timezone.utc).isoformat(),
+            "privacy_accepted": True,
+            "privacy_accepted_at": datetime.now(timezone.utc).isoformat(),
+        },
         timeout=timeout,
     )
     r.raise_for_status()
@@ -63,6 +72,8 @@ def register_driver(
             "role": "driver",
             "terms_accepted": True,
             "terms_accepted_at": datetime.now(timezone.utc).isoformat(),
+            "privacy_accepted": True,
+            "privacy_accepted_at": datetime.now(timezone.utc).isoformat(),
         },
         timeout=timeout,
     )

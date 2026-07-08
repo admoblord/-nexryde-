@@ -5,11 +5,17 @@
 #   gcloud run services replace backend/cloudrun.staging.yaml \
 #     --region us-central1
 #
-# This service uses the same secrets as production but with:
-#   - Fewer instances (0-2)
+# This service uses staging-only config:
+#   - minScale 0 (scales to zero when idle)
 #   - NEXRYDE_ENV=staging
-#   - Separate MONGODB_URI pointing to a staging Atlas cluster (recommended)
+#   - MONGODB_URI from Secret Manager secret MONGODB_URI_STAGING (Atlas M0 — never prod)
 #   - /docs enabled (not hidden)
+#
+# First-time staging Mongo secret:
+#   echo -n "mongodb+srv://USER:PASS@STAGING_CLUSTER.mongodb.net/?appName=nexryde-staging" \
+#     | gcloud secrets create MONGODB_URI_STAGING --data-file=- \
+#     || gcloud secrets versions add MONGODB_URI_STAGING --data-file=-
+#   # Grant nexryde-backend-staging SA: roles/secretmanager.secretAccessor on MONGODB_URI_STAGING
 ##############################################################################
 
 apiVersion: serving.knative.dev/v1
@@ -25,8 +31,8 @@ spec:
       annotations:
         autoscaling.knative.dev/minScale: "0"
         autoscaling.knative.dev/maxScale: "2"
-        run.googleapis.com/startup-cpu-boost: "true"
-        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/startup-cpu-boost: "false"
+        run.googleapis.com/cpu-throttling: "true"
     spec:
       containerConcurrency: 80
       timeoutSeconds: 300
@@ -63,17 +69,26 @@ spec:
               value: "https://nexryde-backend-staging-993913300770.us-central1.run.app"
             - name: TRUSTED_HOSTS
               value: "nexryde-backend-staging-993913300770.us-central1.run.app,staging.nexryde.app"
-            # Staging shares secrets with production for now.
-            # Replace MONGODB_URI with a staging-specific Atlas cluster when available.
+            - name: ENGAGEMENT_LOOP_ENABLED
+              value: "false"
+            - name: DAILY_SLOT_NOTIFICATIONS_ENABLED
+              value: "false"
+            - name: NIN_REGISTRY_ENABLED
+              value: "false"
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: JWT_SECRET
                   key: latest
+            - name: NIN_FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: NIN_FERNET_KEY
+                  key: latest
             - name: MONGODB_URI
               valueFrom:
                 secretKeyRef:
-                  name: MONGODB_URI
+                  name: MONGODB_URI_STAGING
                   key: latest
             - name: SQUAD_SECRET_KEY
               valueFrom:
@@ -133,7 +148,7 @@ spec:
             httpGet:
               path: /api/health/ready
               port: 8080
-            periodSeconds: 10
+            periodSeconds: 30
             failureThreshold: 3
 
           startupProbe:

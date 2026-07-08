@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useSegments } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,12 +23,14 @@ import { useAppStore } from '@/src/store/appStore';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders, getDriverOfMonth, voteDriverOfMonth } from '@/src/services/api';
+import { logLegalGateCheck, syncUserLegalStatus } from '@/src/services/legalStatusSync';
+import { replaceLegalTermsIfNeeded } from '@/src/utils/navigationRouteGuard';
 import { normalizeTripStatus } from '@/src/utils/tripStatus';
 import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRiderTripRealtime';
 import { FeatureHubDrawer } from '@/src/components/FeatureHubDrawer';
 import { RiderSavedSlotPremiumIcon } from '@/src/components/RiderSavedSlotPremiumIcon';
 import { COLORS } from '@/src/constants/theme';
-import { BRAND, HOME_PALETTE } from '@/src/constants/designSystem';
+import { BRAND, SURFACE, HOME_PALETTE } from '@/src/constants/designSystem';
 import {
   RIDER_HOME_DEST_BAR_BORDER,
   RIDER_HOME_WALLET_BORDER,
@@ -56,6 +58,7 @@ const FEAT_SAFETY = '#F59E0B';
 
 export default function ModernRiderHome() {
   const router = useRouter();
+  const segments = useSegments();
   const { canCallAuthedApi } = useAuthedApiReady();
   const { userId: riderId } = useAuthedUserId();
   const { user, currentTrip, setCurrentTrip } = useAppStore();
@@ -149,6 +152,12 @@ export default function ModernRiderHome() {
   useEffect(() => {
     const enforceRiderVerification = async () => {
       if (!canCallAuthedApi || !riderId || user?.role !== 'rider') return;
+      await syncUserLegalStatus(riderId);
+      const effectiveUser = useAppStore.getState().user ?? user;
+      if (logLegalGateCheck(effectiveUser, 'rider-home')) {
+        replaceLegalTermsIfNeeded(router, 'rider', segments);
+        return;
+      }
       try {
         const res = await fetch(`${BACKEND_URL}/api/users/${riderId}/rider-verification-status`, {
           headers: getAuthHeaders(),
@@ -174,7 +183,7 @@ export default function ModernRiderHome() {
       }
     };
     void enforceRiderVerification();
-  }, [canCallAuthedApi, router, riderId, user?.role]);
+  }, [canCallAuthedApi, router, riderId, segments, user?.role, user?.terms_accepted, user?.terms_version, user?.privacy_accepted, user?.privacy_version]);
 
   useFocusEffect(
     useCallback(() => {
@@ -300,9 +309,13 @@ export default function ModernRiderHome() {
       if (!prev || String(prev.id) !== String(msg.trip_id)) return;
       setCurrentTrip({
         ...prev,
+        ...t,
         status: norm as typeof prev.status,
         driver_id: (t.driver_id as string) || prev.driver_id,
         fare: t.fare != null ? Number(t.fare) : prev.fare,
+        ride_version: typeof msg.ride_version === 'number' ? msg.ride_version : (t.ride_version as number | undefined),
+        state_sequence: typeof msg.state_sequence === 'number' ? msg.state_sequence : (t.state_sequence as number | undefined),
+        state_updated_at: (msg.state_updated_at as string | undefined) || (t.state_updated_at as string | undefined),
       });
     },
     [setCurrentTrip]
@@ -336,7 +349,7 @@ export default function ModernRiderHome() {
 
   return (
     <SafeAreaView style={[styles.container, hasActiveTrip && styles.containerActiveTrip]} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor={hasActiveTrip ? '#F0FDF4' : COLORS.gray50} />
+      <StatusBar barStyle="light-content" backgroundColor={BRAND.bgDeep} />
       
       {/* HEADER */}
       <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
@@ -369,7 +382,7 @@ export default function ModernRiderHome() {
             accessibilityLabel="Open feature hub"
             accessibilityRole="button"
           >
-            <Ionicons name="menu" size={24} color={COLORS.lightTextPrimary} />
+            <Ionicons name="menu" size={24} color={BRAND.textPrimary} />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => setShowLangPicker(true)}
@@ -415,7 +428,7 @@ export default function ModernRiderHome() {
       {/* Language Picker Modal */}
       <Modal visible={showLangPicker} transparent animationType="fade">
         <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-start', paddingTop: 100 }} activeOpacity={1} onPress={() => setShowLangPicker(false)}>
-          <View style={{ marginHorizontal: flow.padH, backgroundColor: '#FFF', borderRadius: 16, padding: 8, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 10, elevation: 5 }}>
+          <View style={{ marginHorizontal: flow.padH, backgroundColor: SURFACE.cardDark, borderRadius: 16, padding: 8, borderWidth: 1, borderColor: SURFACE.hairline }}>
             <Text style={{ fontSize: 13, fontWeight: '800', color: '#6B7280', paddingHorizontal: 12, paddingVertical: 8 }}>SELECT LANGUAGE</Text>
             {SUPPORTED_LANGUAGES.map((lang) => (
               <TouchableOpacity
@@ -803,10 +816,10 @@ export default function ModernRiderHome() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.gray50,
+    backgroundColor: BRAND.bgDeep,
   },
   containerActiveTrip: {
-    backgroundColor: '#F0FDF4',
+    backgroundColor: '#071525',
   },
   liveHeaderBadge: {
     flexDirection: 'row',
@@ -815,20 +828,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 999,
-    backgroundColor: '#DCFCE7',
+    backgroundColor: BRAND.primaryMuted,
     borderWidth: 1,
-    borderColor: '#BBF7D0',
+    borderColor: SURFACE.glassBorder,
   },
   liveHeaderDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#16A34A',
+    backgroundColor: BRAND.primary,
   },
   liveHeaderTxt: {
     fontSize: 9,
     fontWeight: '900',
-    color: '#15803D',
+    color: BRAND.primary,
     letterSpacing: 0.8,
   },
   header: {
@@ -840,45 +853,35 @@ const styles = StyleSheet.create({
   greeting: {
     fontSize: 22,
     fontWeight: '900',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     marginBottom: 4,
     letterSpacing: 0.2,
   },
   subtitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    color: BRAND.textSecondary,
     letterSpacing: 0.2,
   },
   headerIconBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: SURFACE.glassSoft,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(15,23,42,0.08)',
-    shadowColor: HOME_PALETTE.cardShadowColor,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    elevation: 2,
+    borderColor: SURFACE.hairline,
   },
   headerIconBtnSm: {
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: SURFACE.glassSoft,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(15,23,42,0.08)',
-    shadowColor: HOME_PALETTE.cardShadowColor,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
+    borderColor: SURFACE.hairline,
   },
   profileButton: {
     width: 48,
@@ -904,34 +907,25 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFF',
+    backgroundColor: SURFACE.glassSoft,
     borderRadius: 18,
     paddingHorizontal: 18,
     paddingVertical: 16,
     borderWidth: 1.5,
     borderColor: RIDER_HOME_DEST_BAR_BORDER,
-    shadowColor: BRAND.primaryNeon,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.14,
-    shadowRadius: 14,
-    elevation: 4,
   },
   whereToBarDot: {
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: COLORS.accentGreen,
+    backgroundColor: BRAND.primary,
     marginRight: 14,
-    shadowColor: COLORS.accentGreen,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 6,
   },
   whereToBarText: {
     flex: 1,
     fontSize: 16,
     fontWeight: '700',
-    color: '#94A3B8',
+    color: BRAND.textSecondary,
     letterSpacing: 0.2,
   },
   whereToBarCta: {
@@ -942,12 +936,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderWidth: 1,
-    borderColor: 'rgba(2,44,34,0.12)',
+    borderColor: SURFACE.glassBorder,
   },
   whereToBarCtaText: {
     fontSize: 13,
     fontWeight: '900',
-    color: '#022C22',
+    color: BRAND.primary,
     letterSpacing: 0.5,
   },
   walletStrip: {
@@ -955,21 +949,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 16,
-    backgroundColor: '#FFF',
+    backgroundColor: SURFACE.cardDark,
     borderWidth: 1.5,
     borderColor: RIDER_HOME_WALLET_BORDER,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 8,
-    elevation: 1,
   },
   walletStripLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
-  walletStripLabel: { fontSize: 13, fontWeight: '700', color: '#64748B' },
-  walletStripBalance: { fontSize: 17, fontWeight: '900', color: '#0F172A', letterSpacing: 0.2 },
+  walletStripLabel: { fontSize: 13, fontWeight: '700', color: BRAND.textSecondary },
+  walletStripBalance: { fontSize: 17, fontWeight: '900', color: BRAND.textPrimary, letterSpacing: 0.2 },
   firstRideBanner: {
     marginBottom: 8,
     borderRadius: 16,
@@ -1103,27 +1092,27 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 22,
     fontWeight: '900',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     marginBottom: 16,
     letterSpacing: 0.5,
   },
   sectionTitleInline: {
     fontSize: 22,
     fontWeight: '900',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     marginBottom: 0,
     letterSpacing: 0.5,
   },
   seeAll: {
     fontSize: 15,
-    color: COLORS.accentGreen,
+    color: BRAND.primary,
     fontWeight: '800',
     letterSpacing: 0.3,
   },
   savedPlacesHint: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#64748B',
+    color: BRAND.textSecondary,
     lineHeight: 18,
     marginBottom: 14,
     marginTop: -8,
@@ -1137,21 +1126,16 @@ const styles = StyleSheet.create({
   },
   savedPlaceChip: {
     width: 152,
-    backgroundColor: COLORS.white,
+    backgroundColor: SURFACE.cardDark,
     borderRadius: 20,
     padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.28)',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.07,
-    shadowRadius: 14,
-    elevation: 3,
+    borderColor: SURFACE.hairline,
   },
   savedPlaceChipEmpty: {
     borderStyle: 'dashed',
-    borderColor: 'rgba(100,116,139,0.42)',
-    backgroundColor: '#FAFBFD',
+    borderColor: SURFACE.glassBorder,
+    backgroundColor: SURFACE.glassSoft,
   },
   savedPlaceIconWrap: {
     marginBottom: 10,
@@ -1160,23 +1144,23 @@ const styles = StyleSheet.create({
   savedPlaceLabel: {
     fontSize: 15,
     fontWeight: '900',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     letterSpacing: -0.2,
   },
   savedPlaceLabelMuted: {
-    color: '#64748B',
+    color: BRAND.textSecondary,
   },
   savedPlaceAddr: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#64748B',
+    color: BRAND.textMuted,
     marginTop: 6,
     lineHeight: 14,
   },
   savedPlaceTap: {
     fontSize: 11,
     fontWeight: '700',
-    color: COLORS.accentGreen,
+    color: BRAND.primary,
     marginTop: 8,
   },
   quickGrid: {
@@ -1202,19 +1186,16 @@ const styles = StyleSheet.create({
   quickLabel: {
     fontSize: 12,
     fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     textAlign: 'center',
     letterSpacing: 0.2,
   },
   driverOfMonthCard: {
-    backgroundColor: COLORS.white,
+    backgroundColor: SURFACE.cardDark,
     borderRadius: 24,
     overflow: 'hidden',
-    shadowColor: HOME_PALETTE.cardShadowColor,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 10,
-    elevation: 3,
+    borderWidth: 1,
+    borderColor: SURFACE.hairline,
   },
   driverOfMonthHero: {
     padding: 20,
@@ -1276,13 +1257,13 @@ const styles = StyleSheet.create({
   driverOfMonthReward: {
     fontSize: 14,
     fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     lineHeight: 20,
   },
   driverOfMonthHook: {
     fontSize: 13,
     fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    color: BRAND.textSecondary,
     marginTop: 8,
     lineHeight: 18,
   },
@@ -1295,11 +1276,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: SURFACE.glassSoft,
     borderRadius: 16,
     padding: 14,
     borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderColor: SURFACE.hairline,
   },
   driverOfMonthCandidateMeta: {
     flex: 1,
@@ -1313,8 +1294,8 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     textAlign: 'center',
     textAlignVertical: 'center',
-    backgroundColor: COLORS.accentGreenSoft,
-    color: COLORS.accentGreenDark,
+    backgroundColor: BRAND.primaryMuted,
+    color: BRAND.primary,
     fontSize: 13,
     fontWeight: '900',
     overflow: 'hidden',
@@ -1323,16 +1304,16 @@ const styles = StyleSheet.create({
   driverOfMonthCandidateName: {
     fontSize: 15,
     fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
   },
   driverOfMonthCandidateInfo: {
     fontSize: 12,
     fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    color: BRAND.textSecondary,
     marginTop: 2,
   },
   driverOfMonthVoteBtn: {
-    backgroundColor: COLORS.accentGreen,
+    backgroundColor: BRAND.primary,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -1343,14 +1324,11 @@ const styles = StyleSheet.create({
     color: '#FFF',
   },
   tripsCard: {
-    backgroundColor: COLORS.white,
+    backgroundColor: SURFACE.cardDark,
     borderRadius: 20,
     padding: 32,
-    shadowColor: HOME_PALETTE.cardShadowColor,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 8,
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: SURFACE.hairline,
   },
   emptyState: {
     alignItems: 'center',
@@ -1366,7 +1344,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     marginBottom: 8,
   },
   emptyButton: {
@@ -1383,27 +1361,24 @@ const styles = StyleSheet.create({
     color: '#FFF',
   },
   moreList: {
-    backgroundColor: COLORS.white,
+    backgroundColor: SURFACE.cardDark,
     borderRadius: 20,
     overflow: 'hidden',
-    shadowColor: HOME_PALETTE.cardShadowColor,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 8,
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: SURFACE.hairline,
   },
   moreItem: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.lightBorder,
+    borderBottomColor: SURFACE.hairline,
   },
   moreIcon: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: COLORS.accentGreenSoft,
+    backgroundColor: BRAND.primaryMuted,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -1412,7 +1387,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
   },
   // ALL FEATURES GRID
   allFeaturesGrid: {
@@ -1443,7 +1418,7 @@ const styles = StyleSheet.create({
   featureLabel: {
     fontSize: 12,
     fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     textAlign: 'center',
     letterSpacing: 0.2,
     lineHeight: 14,

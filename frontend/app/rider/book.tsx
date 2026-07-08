@@ -52,23 +52,23 @@ import {
   inferFareCitySlugFromAddress,
   pickFareCitySlugFromCoords,
 } from '@/src/constants/nigeriaFareCity';
-
-/** Lagos NEXRYDE distance×area×tier model (no legacy base + per-minute stack). */
-function isLagosRouteDistanceFare(fd: FareEstimateResponse | null | undefined): boolean {
-  if (!fd) return false;
-  if (fd.fare_rate_model === 'lagride_lagos_exact_v1') return true;
-  const city = String(fd.city || '').toLowerCase();
-  return city === 'lagos' && Number(fd.base_fare) === 0 && Number(fd.time_fee) === 0;
-}
 import { fetchRouteSafety, type RouteSafetyResponse } from '@/src/services/crimeSafetyData';
 import {
   DIRECTIONS_ROUTE_MIN_POINTS,
-  fetchGoogleDrivingRoutes,
-  type GoogleDrivingRouteOverview,
 } from '@/src/navigation/navUtils';
 import { decodePolyline } from '@/src/utils/polylineDecoder';
 import { resolvePublicMediaUri } from '@/src/utils/resolvePublicMediaUri';
-import { fetchDrivingRoute } from '@/src/services/drivingRouteApi';
+import {
+  beginRouteRecalc,
+  commitFare,
+  commitRouteMetrics,
+  EMPTY_TRIP_DRAFT,
+  getCurrentRouteRequestId,
+  ignoreStaleRouteResponse,
+  tripDraftRouteSignature,
+  type TripDraft,
+  type TripDraftLocation,
+} from '@/src/utils/bookingTripDraft';
 import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRiderTripRealtime';
 import { isRiderMapLiveTripStatus } from '@/src/constants/tripRealtimeRhythm';
 import { tripLocationRecord } from '@/src/utils/tripCoords';
@@ -76,7 +76,7 @@ import { TrafficAI, type TrafficRoute } from '@/src/services/trafficAI';
 import MapComponent from '@/src/components/MapComponent';
 import { ErrorBoundary } from '@/src/components/ErrorBoundary';
 import { RiderPostRequestOverlay, type RiderMatchedDriver } from '@/src/components/rider/RiderPostRequestOverlay';
-import { getRecentLocations, cacheRecentLocation } from '@/src/services/offlineMode';
+import { getRecentLocations, cacheRecentLocation, createOfflineBooking, checkOnlineStatus } from '@/src/services/offlineMode';
 import { authedFetch } from '@/src/utils/sessionRefresh';
 import * as Haptics from 'expo-haptics';
 import { geocodeAddressForRider } from '@/src/services/riderSavedPlaces';
@@ -90,6 +90,26 @@ import {
 /** Set `EXPO_PUBLIC_BOOKING_PROMO=false` to hide the booking promo strip entirely. */
 const BOOKING_PROMO_ENABLED = String(process.env.EXPO_PUBLIC_BOOKING_PROMO ?? 'true').toLowerCase() !== 'false';
 const BOOKING_PROMO_DISMISS_KEY = '@nexryde_booking_promo_dismissed_v1';
+
+/** Distance/base fare only — time line appears when rider adds a stop (all cities). */
+function isDistanceOnlyFare(fd: FareEstimateResponse | null | undefined): boolean {
+  if (!fd) return false;
+  if (fd.fare_rate_model === 'lagride_lagos_exact_v1') {
+    return !(fd.stop_time_fee_applied || Number(fd.time_fee) > 0);
+  }
+  return Number(fd.time_fee) === 0 && !fd.stop_time_fee_applied;
+}
+
+function stopTimeFeeLabel(fd: FareEstimateResponse | null | undefined): string | null {
+  if (!fd?.stop_time_fee_applied && !(Number(fd?.time_fee) > 0 && fd?.has_intermediate_stop)) {
+    return null;
+  }
+  const mins = Number(fd.pricing_route_minutes ?? fd.duration_min ?? 0);
+  const perMin = Number(fd.stop_time_per_min ?? 80);
+  const fee = Number(fd.time_fee ?? 0);
+  if (!Number.isFinite(fee) || fee <= 0) return null;
+  return `Stop time · ${Math.round(mins)} min × ₦${Math.round(perMin)}/min = ₦${Math.round(fee).toLocaleString()}`;
+}
 
 /** True when the pickup label is still raw "lat, lng" (geocode not applied yet or failed). */
 function isRawLatLngLabel(s: string): boolean {
@@ -160,17 +180,6 @@ function normalizeFareEstimatePayload(data: unknown): FareEstimateResponse {
       ? pvu
       : new Date(Date.now() + 600_000).toISOString();
   return { ...o, estimate_id, price_valid_until } as FareEstimateResponse;
-}
-
-/** Key for Directions REST (must match a GCP key with Directions API enabled). */
-function resolveGoogleDirectionsApiKey(): string {
-  const extra = Constants.expoConfig?.extra as Record<string, string> | undefined;
-  return (
-    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
-    extra?.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
-    extra?.googleMapsDirectionsKey ||
-    ''
-  );
 }
 
 async function reverseGeocodeViaBackend(
@@ -801,6 +810,8 @@ function BookInDriveStyle() {
   const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [destinationCoords, setDestinationCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [stopCoords, setStopCoords] = useState<{ lat: number; lng: number } | null>(null);
+  /** Single source of truth for route geometry + metrics (pickup → stops[] → destination). */
+  const [tripDraft, setTripDraft] = useState<TripDraft>(EMPTY_TRIP_DRAFT);
   const [currentLocation, setCurrentLocation] = useState<any>(null);
   const [gpsStatus, setGpsStatus] = useState<'detecting' | 'locked' | 'error'>('detecting');
 
@@ -928,22 +939,119 @@ function BookInDriveStyle() {
     return {};
   }, [stopCoords?.lat, stopCoords?.lng, stop]);
 
+  /** Ordered intermediate stops — first-class waypoints for routing/fare. */
+  const tripStops = useMemo((): TripDraftLocation[] => {
+    if (
+      stopCoords &&
+      Number.isFinite(stopCoords.lat) &&
+      Number.isFinite(stopCoords.lng) &&
+      stop?.trim()
+    ) {
+      return [{ address: stop.trim(), lat: stopCoords.lat, lng: stopCoords.lng }];
+    }
+    return [];
+  }, [stop, stopCoords?.lat, stopCoords?.lng]);
+
+  const tripDraftRouteKey = useMemo(
+    () =>
+      tripDraftRouteSignature({
+        pickup:
+          pickupCoords && Number.isFinite(pickupCoords.lat)
+            ? { address: pickup.trim(), lat: pickupCoords.lat, lng: pickupCoords.lng }
+            : null,
+        stops: tripStops,
+        destination:
+          destinationCoords && Number.isFinite(destinationCoords.lat)
+            ? {
+                address: destination.trim(),
+                lat: destinationCoords.lat,
+                lng: destinationCoords.lng,
+              }
+            : null,
+      }),
+    [
+      pickup,
+      pickupCoords?.lat,
+      pickupCoords?.lng,
+      destination,
+      destinationCoords?.lat,
+      destinationCoords?.lng,
+      tripStops,
+    ],
+  );
+
+  const applyTripDraftRoute = useCallback(
+    (
+      requestId: number,
+      patch: Partial<Pick<TripDraft, 'polyline' | 'distanceKm' | 'durationMinutes' | 'estimatedFare'>>,
+    ) => {
+      if (ignoreStaleRouteResponse(requestId, 'applyTripDraftRoute')) return;
+      setTripDraft((prev) => ({
+        ...prev,
+        pickup:
+          pickupCoords && pickup?.trim()
+            ? { address: pickup.trim(), lat: pickupCoords.lat, lng: pickupCoords.lng }
+            : prev.pickup,
+        stops: tripStops,
+        destination:
+          destinationCoords && destination?.trim()
+            ? {
+                address: destination.trim(),
+                lat: destinationCoords.lat,
+                lng: destinationCoords.lng,
+              }
+            : prev.destination,
+        polyline: patch.polyline ?? prev.polyline,
+        distanceKm: patch.distanceKm ?? prev.distanceKm,
+        durationMinutes: patch.durationMinutes ?? prev.durationMinutes,
+        estimatedFare: patch.estimatedFare ?? prev.estimatedFare,
+      }));
+      if (patch.polyline && patch.polyline.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
+        setBookingRouteCoords(patch.polyline);
+      }
+      if (patch.durationMinutes != null && patch.durationMinutes > 0) {
+        setBookingRouteEtaMin(patch.durationMinutes);
+      }
+    },
+    [
+      pickup,
+      pickupCoords?.lat,
+      pickupCoords?.lng,
+      destination,
+      destinationCoords?.lat,
+      destinationCoords?.lng,
+      tripStops,
+    ],
+  );
+
   const invalidateRoutePricing = useCallback(() => {
-    pricingEpochRef.current += 1;
+    const requestId = getCurrentRouteRequestId();
+    pricingEpochRef.current = requestId;
+    fareDetailsEpochRef.current = requestId;
+    setTripDraft((prev) => ({
+      ...prev,
+      stops: tripStops,
+      distanceKm: null,
+      durationMinutes: null,
+      estimatedFare: null,
+      polyline: [],
+    }));
     setFareDetails(null);
     setCurrentFare(0);
     setFareMatrix({});
     setFareMatrixOriginal({});
+    setBookingRouteCoords([]);
     setBookingRouteEtaMin(null);
     setBookingRouteLoading(true);
     setOptimizedRoute(null);
-  }, []);
+  }, [tripStops]);
 
   /** Only real road geometry — never a pickup→drop straight segment. */
   const routeForMapDisplay = useMemo(() => {
+    if (tripDraft.polyline.length >= DIRECTIONS_ROUTE_MIN_POINTS) return tripDraft.polyline;
     if (bookingRouteCoords.length >= DIRECTIONS_ROUTE_MIN_POINTS) return bookingRouteCoords;
     return [];
-  }, [bookingRouteCoords]);
+  }, [tripDraft.polyline, bookingRouteCoords]);
 
   const arriveByClockLabel = useMemo(() => {
     if (bookingRouteEtaMin == null || !destinationCoords) return null;
@@ -951,10 +1059,10 @@ function BookInDriveStyle() {
   }, [bookingRouteEtaMin, destinationCoords]);
 
   const routeDistanceLabel = useMemo(() => {
-    const km = Number(fareDetails?.distance_km);
+    const km = Number(tripDraft.distanceKm ?? fareDetails?.distance_km);
     if (!Number.isFinite(km) || km <= 0) return null;
     return km >= 10 ? `${km.toFixed(1)} km` : `${km.toFixed(2)} km`;
-  }, [fareDetails?.distance_km]);
+  }, [tripDraft.distanceKm, fareDetails?.distance_km]);
 
   const routeQualityLabel = useMemo(() => {
     const src = String(fareDetails?.route_metrics_source || '').toLowerCase();
@@ -962,6 +1070,11 @@ function BookInDriveStyle() {
     if (bookingRouteCoords.length > 14) return 'Turn-by-turn roads';
     return null;
   }, [fareDetails?.route_metrics_source, bookingRouteCoords.length]);
+
+  const stopTimeFeeHint = useMemo(
+    () => stopTimeFeeLabel(fareDetails),
+    [fareDetails?.time_fee, fareDetails?.stop_time_fee_applied, fareDetails?.has_intermediate_stop],
+  );
 
   useEffect(() => {
     bookingSheetScrolledRef.current = false;
@@ -1333,7 +1446,7 @@ function BookInDriveStyle() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [pickupCoords?.lat, pickupCoords?.lng, currentLocation?.lat, currentLocation?.lng, selectedVehicle]);
+  }, [pickupCoords?.lat, pickupCoords?.lng, currentLocation?.lat, currentLocation?.lng, selectedVehicle, tripDraftRouteKey]);
 
   /** Instant path when backend pushes trip_update over WebSocket (replaces slow polling). */
   const applyAcceptedFromRealtime = useCallback(
@@ -1615,11 +1728,17 @@ function BookInDriveStyle() {
     };
   }, [showLocationModal, editingField, pickupCoords?.lat, pickupCoords?.lng, pickup]);
 
-  const fetchPlaceDetails = async (placeId: string) => {
+  const fetchPlaceDetails = async (placeId: string, sessionToken?: string) => {
     const id = String(placeId || '').trim();
     if (!id) return null;
     try {
-      const res = await fetch(`${BACKEND_URL}/api/places/details/${encodeURIComponent(id)}`);
+      const sessionQ =
+        sessionToken && sessionToken.trim().length > 0
+          ? `?sessiontoken=${encodeURIComponent(sessionToken.trim())}`
+          : '';
+      const res = await fetch(
+        `${BACKEND_URL}/api/places/details/${encodeURIComponent(id)}${sessionQ}`,
+      );
       const data = await res.json().catch(() => ({}));
       const lat = Number(data?.latitude);
       const lng = Number(data?.longitude);
@@ -1799,67 +1918,24 @@ function BookInDriveStyle() {
     rider_id?: string;
     preferred_driver_id?: string;
   }): Promise<FareEstimateResponse> => {
-    const mapsKey = resolveGoogleDirectionsApiKey();
-    let googleDm: number | undefined;
-    let googleDs: number | undefined;
-    const routeStop =
+    const routeStops =
       payload.stop_lat != null &&
       payload.stop_lng != null &&
       Number.isFinite(payload.stop_lat) &&
       Number.isFinite(payload.stop_lng)
-        ? { lat: payload.stop_lat, lng: payload.stop_lng }
-        : null;
+        ? [{ lat: payload.stop_lat, lng: payload.stop_lng }]
+        : [];
 
-    const serverRoute = await fetchDrivingRoute(
-      payload.pickup_lat,
-      payload.pickup_lng,
-      payload.dropoff_lat,
-      payload.dropoff_lng,
-      routeStop,
-    );
-    if (serverRoute) {
-      googleDm = serverRoute.distanceMeters;
-      const trafficSec =
-        typeof serverRoute.durationInTrafficSeconds === 'number' &&
-        serverRoute.durationInTrafficSeconds > 0
-          ? serverRoute.durationInTrafficSeconds
-          : serverRoute.durationSeconds;
-      googleDs = Math.max(serverRoute.durationSeconds, trafficSec);
-    }
-
-    if (mapsKey && (googleDm == null || googleDs == null)) {
-      try {
-        const gr = await fetchGoogleDrivingRoutes(
-          payload.pickup_lat,
-          payload.pickup_lng,
-          payload.dropoff_lat,
-          payload.dropoff_lng,
-          mapsKey,
-          { stop: routeStop },
-        );
-        const leg = gr?.routes?.[0];
-        if (leg && leg.distanceM >= 80 && leg.durationSec >= 10) {
-          googleDm = leg.distanceM;
-          const trafficSec =
-            typeof leg.durationInTrafficSec === 'number' && leg.durationInTrafficSec > 0
-              ? leg.durationInTrafficSec
-              : leg.durationSec;
-          googleDs = Math.max(leg.durationSec, trafficSec);
-        }
-      } catch {
-        /* optional client hint */
-      }
-    }
     try {
       const { data } = await estimateFare({
         pickup_lat: payload.pickup_lat,
         pickup_lng: payload.pickup_lng,
         dropoff_lat: payload.dropoff_lat,
         dropoff_lng: payload.dropoff_lng,
-        ...(routeStop
+        ...(routeStops.length === 1
           ? {
-              stop_lat: routeStop.lat,
-              stop_lng: routeStop.lng,
+              stop_lat: routeStops[0]!.lat,
+              stop_lng: routeStops[0]!.lng,
               stop_address: payload.stop_address,
             }
           : {}),
@@ -1871,9 +1947,6 @@ function BookInDriveStyle() {
         ...(payload.preferred_driver_id
           ? { preferred_driver_id: payload.preferred_driver_id }
           : {}),
-        ...(googleDm != null && googleDs != null
-          ? { google_route_distance_meters: googleDm, google_route_duration_seconds: googleDs }
-          : {}),
       });
       return normalizeFareEstimatePayload(data);
     } catch (e: any) {
@@ -1882,20 +1955,13 @@ function BookInDriveStyle() {
     }
   };
 
-  // Google Directions on device — curved road line + ETA as soon as pickup & dropoff are set.
+  // Route preview polyline comes from POST /fare/estimate (no client-side Directions).
   useEffect(() => {
-    let cancelled = false;
-    const epoch = pricingEpochRef.current;
     const pLat = pickupCoords?.lat;
     const pLng = pickupCoords?.lng;
     const dLat = destinationCoords?.lat;
     const dLng = destinationCoords?.lng;
-    const sLat = stopCoords?.lat;
-    const sLng = stopCoords?.lng;
-    const routeStop =
-      sLat != null && sLng != null && Number.isFinite(sLat) && Number.isFinite(sLng)
-        ? { lat: sLat, lng: sLng }
-        : null;
+
     if (
       !Number.isFinite(Number(pLat)) ||
       !Number.isFinite(Number(pLng)) ||
@@ -1908,150 +1974,89 @@ function BookInDriveStyle() {
       return undefined;
     }
 
-    const applyRouteMetrics = (
-      overview: Array<{ latitude: number; longitude: number }> | undefined,
-      durationSec: number,
-      durationInTrafficSec?: number,
-    ) => {
-      if (cancelled || epoch !== pricingEpochRef.current) return;
-      if (overview && overview.length >= 2) {
-        setBookingRouteCoords(overview);
-      }
-      const sec = Math.max(
-        durationSec || 0,
-        typeof durationInTrafficSec === 'number' && durationInTrafficSec > 0
-          ? durationInTrafficSec
-          : durationSec || 0,
-      );
-      if (sec >= 60) {
-        setBookingRouteEtaMin(Math.max(1, Math.ceil(sec / 60)));
-      }
-    };
-
-    const mapsKey = resolveGoogleDirectionsApiKey();
-
+    const { requestId } = beginRouteRecalc('route-deps-changed');
+    pricingEpochRef.current = requestId;
+    fareDetailsEpochRef.current = requestId;
     setBookingRouteLoading(true);
-    void (async () => {
-      try {
-        // With a stop, always trust backend Directions (waypoint-aware, same key as fare).
-        if (routeStop) {
-          const srv = await fetchDrivingRoute(
-            Number(pLat),
-            Number(pLng),
-            Number(dLat),
-            Number(dLng),
-            routeStop,
-          );
-          if (srv && epoch === pricingEpochRef.current && !cancelled) {
-            applyRouteMetrics(
-              srv.overviewMapCoords,
-              srv.durationSeconds,
-              srv.durationInTrafficSeconds,
-            );
-            return;
-          }
-        }
-
-        let leg: GoogleDrivingRouteOverview | null = null;
-        if (mapsKey) {
-          const gr = await fetchGoogleDrivingRoutes(
-            Number(pLat),
-            Number(pLng),
-            Number(dLat),
-            Number(dLng),
-            mapsKey,
-            { stop: routeStop },
-          );
-          leg = gr?.routes?.[0] ?? null;
-        }
-        if (!cancelled && epoch === pricingEpochRef.current && leg?.overview && leg.overview.length >= 2) {
-          const trafficSec =
-            typeof leg.durationInTrafficSec === 'number' && leg.durationInTrafficSec > 0
-              ? leg.durationInTrafficSec
-              : leg.durationSec;
-          applyRouteMetrics(leg.overview, leg.durationSec, trafficSec);
-          return;
-        }
-        const srv = await fetchDrivingRoute(
-          Number(pLat),
-          Number(pLng),
-          Number(dLat),
-          Number(dLng),
-          routeStop,
-        );
-        if (cancelled || epoch !== pricingEpochRef.current || !srv) return;
-        applyRouteMetrics(
-          srv.overviewMapCoords,
-          srv.durationSeconds,
-          srv.durationInTrafficSeconds,
-        );
-      } catch {
-        /* wait for fare polyline */
-      } finally {
-        if (!cancelled && epoch === pricingEpochRef.current) setBookingRouteLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    return undefined;
   }, [
     pickupCoords?.lat,
     pickupCoords?.lng,
     destinationCoords?.lat,
     destinationCoords?.lng,
-    stopCoords?.lat,
-    stopCoords?.lng,
+    tripStops,
+    tripDraftRouteKey,
   ]);
 
-  // When estimate returns encoded polyline, use it so the drawn path matches server / fare distance.
+  // Fare polyline from estimate only when it matches the active route request (never revert stops).
   useEffect(() => {
     const fd = fareDetails;
     if (!fd) return;
-    if (fareDetailsEpochRef.current !== pricingEpochRef.current) return;
+    const requestId = getCurrentRouteRequestId();
+    if (fareDetailsEpochRef.current !== requestId) return;
+    if (ignoreStaleRouteResponse(requestId, 'fare-polyline')) return;
+    if (tripStops.length > 0 && !routeStopFields.stop_lat) return;
 
-    const etaCandidate = Number(
-      fd.pricing_route_minutes ??
-        fd.traffic_duration_min ??
-        fd.duration_min ??
-        fd.estimated_time_minutes ??
-        fd.duration_mins ??
-        0,
+    const distanceMeters = Number(
+      (fd as { distance_meters?: number }).distance_meters ??
+        (Number(fd.distance_km) > 0 ? Number(fd.distance_km) * 1000 : NaN),
     );
-    if (Number.isFinite(etaCandidate) && etaCandidate > 0) {
-      setBookingRouteEtaMin(Math.round(etaCandidate));
+    const durationSeconds = Number(
+      (fd as { duration_seconds?: number }).duration_seconds ??
+        (Number(fd.duration_min ?? fd.estimated_time_minutes) > 0
+          ? Number(fd.duration_min ?? fd.estimated_time_minutes) * 60
+          : NaN),
+    );
+    if (Number.isFinite(distanceMeters) && Number.isFinite(durationSeconds)) {
+      const metrics = commitRouteMetrics(requestId, distanceMeters, durationSeconds);
+      if (metrics) {
+        setBookingRouteEtaMin(metrics.durationMinutes);
+      }
     }
 
-    if (typeof fd.polyline === 'string' && fd.polyline.length > 8) {
+    let appliedPolyline = false;
+    const encoded: string =
+      (typeof fd.polyline === 'string' && fd.polyline) ||
+      (typeof (fd as { encoded_polyline?: string }).encoded_polyline === 'string'
+        ? String((fd as { encoded_polyline?: string }).encoded_polyline)
+        : '') ||
+      '';
+    if (encoded.length > 8) {
       try {
-        const dec = decodePolyline(fd.polyline);
-        // Do not replace a real road path with a 2-point “preview” line.
+        const dec = decodePolyline(encoded);
         if (dec.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
-          setBookingRouteCoords(dec.map((c) => ({ latitude: c.lat, longitude: c.lng })));
-          return;
+          applyTripDraftRoute(requestId, {
+            polyline: dec.map((c) => ({ latitude: c.lat, longitude: c.lng })),
+          });
+          appliedPolyline = true;
         }
       } catch {
         /* fall through */
       }
     }
 
-    const preview = parseRoutePreviewToMapCoords(fd.route_preview_coordinates);
-    if (preview.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
-      setBookingRouteCoords(preview);
+    if (!appliedPolyline) {
+      const preview = parseRoutePreviewToMapCoords(fd.route_preview_coordinates);
+      if (preview.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
+        applyTripDraftRoute(requestId, { polyline: preview });
+        appliedPolyline = true;
+      }
+    }
+
+    if (!ignoreStaleRouteResponse(requestId, 'fare-polyline-done')) {
+      setBookingRouteLoading(false);
     }
   }, [
     fareDetails?.estimate_id,
     fareDetails?.polyline,
     fareDetails?.route_preview_coordinates,
-    fareDetails?.pricing_route_minutes,
-    fareDetails?.traffic_duration_min,
-    fareDetails?.duration_min,
-    fareDetails?.estimated_time_minutes,
-    fareDetails?.duration_mins,
+    tripStops.length,
+    routeStopFields.stop_lat,
+    applyTripDraftRoute,
   ]);
 
   const calculateAllVehiclePrices = async () => {
-    const epoch = pricingEpochRef.current;
+    const requestId = getCurrentRouteRequestId();
     try {
       let pLat = pickupCoords?.lat || currentLocation?.lat;
       let pLng = pickupCoords?.lng || currentLocation?.lng;
@@ -2105,7 +2110,7 @@ function BookInDriveStyle() {
         })
       );
 
-      if (epoch !== pricingEpochRef.current) return;
+      if (ignoreStaleRouteResponse(requestId, 'fare-matrix')) return;
 
       const nextMatrix = Object.fromEntries(results.map(([id, price]) => [id, price]));
       const nextOrig: Record<string, number> = {};
@@ -2134,18 +2139,35 @@ function BookInDriveStyle() {
       const detail = row?.[2];
       const vehPrice = Number(nextMatrix[veh] ?? 0);
       if (detail) {
-        fareDetailsEpochRef.current = epoch;
+        fareDetailsEpochRef.current = requestId;
         setFareDetails(detail);
         const etaFromEstimate = Number(
           detail.duration_min ??
             detail.estimated_time_minutes ??
             detail.traffic_duration_min ??
             detail.pricing_route_minutes ??
+            tripDraft.durationMinutes ??
             0,
         );
-        if (Number.isFinite(etaFromEstimate) && etaFromEstimate > 0) {
-          setBookingRouteEtaMin(Math.round(etaFromEstimate));
-        }
+        const distanceKm = Number(
+          detail.distance_km ?? tripDraft.distanceKm ?? 0,
+        );
+        const vehFare = Math.round(Number(detail.total_fare ?? detail.fare ?? vehPrice ?? 0));
+        commitFare(requestId, vehFare, {
+          vehicleId: veh,
+          distanceKm: Number(detail.distance_km ?? tripDraft.distanceKm ?? 0),
+          durationMinutes: Number(
+            detail.duration_min ?? detail.estimated_time_minutes ?? tripDraft.durationMinutes ?? 0,
+          ),
+        });
+        applyTripDraftRoute(requestId, {
+          durationMinutes:
+            Number.isFinite(etaFromEstimate) && etaFromEstimate > 0
+              ? Math.round(etaFromEstimate)
+              : tripDraft.durationMinutes,
+          distanceKm: Number.isFinite(distanceKm) && distanceKm > 0 ? distanceKm : tripDraft.distanceKm,
+          estimatedFare: vehFare > 0 ? vehFare : null,
+        });
         syncFareLockSnapshot(
           pLat!,
           pLng!,
@@ -2154,13 +2176,9 @@ function BookInDriveStyle() {
           routeStopFields.stop_lat,
           routeStopFields.stop_lng,
         );
-        const minP = Math.round(Number(detail.min_price ?? 0));
-        const maxP = Math.round(Number(detail.max_price ?? 1e15));
-        const sug = Math.round(Number(detail.base_price ?? detail.total_fare ?? row?.[1] ?? 0));
         setCurrentFare((prev) => {
-          if (epoch !== pricingEpochRef.current) return prev;
-          if (prev >= minP && prev <= maxP) return prev;
-          return Math.max(minP, sug || vehPrice || 0);
+          if (ignoreStaleRouteResponse(requestId, 'current-fare')) return prev;
+          return vehFare > 0 ? vehFare : prev;
         });
       } else if (vehPrice > 0) {
         syncFareLockSnapshot(
@@ -2171,7 +2189,10 @@ function BookInDriveStyle() {
           routeStopFields.stop_lat,
           routeStopFields.stop_lng,
         );
-        setCurrentFare(vehPrice);
+        applyTripDraftRoute(requestId, { estimatedFare: vehPrice });
+        if (!ignoreStaleRouteResponse(requestId, 'current-fare-fallback')) {
+          setCurrentFare(vehPrice);
+        }
       }
     } catch {
       /* matrix calc failed — keep prior fares; avoid crashing booking sheet */
@@ -2274,8 +2295,20 @@ function BookInDriveStyle() {
         const hi = data.max_price != null ? Math.round(Number(data.max_price)) : rounded;
         const clamped = Math.min(Math.max(rounded, lo), Math.max(lo, hi));
         setCurrentFare(clamped);
-        fareDetailsEpochRef.current = pricingEpochRef.current;
+        const requestId = getCurrentRouteRequestId();
+        fareDetailsEpochRef.current = requestId;
         setFareDetails({ ...data, service_type: serviceType, city: inferredCity });
+        applyTripDraftRoute(requestId, {
+          estimatedFare: clamped,
+          distanceKm: Number(data.distance_km) || tripDraft.distanceKm,
+          durationMinutes:
+            Number(
+              data.duration_min ??
+                data.estimated_time_minutes ??
+                data.traffic_duration_min ??
+                tripDraft.durationMinutes,
+            ) || tripDraft.durationMinutes,
+        });
         syncFareLockSnapshot(
           pLat,
           pLng,
@@ -2334,15 +2367,10 @@ function BookInDriveStyle() {
     pickupCoords?.lng,
     destinationCoords?.lat,
     destinationCoords?.lng,
-    stopCoords?.lat,
-    stopCoords?.lng,
-    routeStopFields.stop_lat,
-    routeStopFields.stop_lng,
+    tripDraftRouteKey,
+    tripDraft.distanceKm,
     selectedVehicle,
     availableVehicles,
-    // Re-run when on-device Directions finishes so client leg metrics reach /fare/estimate.
-    bookingRouteLoading,
-    bookingRouteEtaMin,
     riderId,
     requestedDriverId,
   ]);
@@ -2473,7 +2501,7 @@ function BookInDriveStyle() {
           preferred_driver_id: requestedDriverId || undefined,
         });
         fareForBid = fresh;
-        fareDetailsEpochRef.current = pricingEpochRef.current;
+        fareDetailsEpochRef.current = getCurrentRouteRequestId();
         setFareDetails(fresh);
         syncFareLockSnapshot(
           pLatEarly,
@@ -2555,56 +2583,55 @@ function BookInDriveStyle() {
     }
     offerInFlightRef.current = true;
     setIsLoading(true);
+    const pLat = pLatEarly;
+    const pLng = pLngEarly;
+    const dLat = dLatEarly;
+    const dLng = dLngEarly;
+    const lockId = lockIdEarly;
+    const city =
+      inferCityFromCoords(pLat, pLng) ||
+      inferCityFromCoords(dLat, dLng) ||
+      inferCity(pickup, destination) ||
+      'default';
+    const normalizedService = selectedVehicle === 'standard' ? 'economy' : selectedVehicle;
+    const idempotencyKey = (() => {
+      try {
+        const c = globalThis.crypto as Crypto | undefined;
+        return c?.randomUUID ? c.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      } catch {
+        return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      }
+    })();
+    const requestBody = {
+      pickup_lat: pLat,
+      pickup_lng: pLng,
+      pickup_address: pickup.trim(),
+      dropoff_lat: dLat,
+      dropoff_lng: dLng,
+      dropoff_address: destination.trim(),
+      ...routeStopFields,
+      service_type: normalizedService,
+      city,
+      payment_method: payMethod,
+      offered_fare: bid,
+      recommended_fare:
+        Number(fareForBid?.base_price || fareForBid?.total_fare || 0) || undefined,
+      fare_estimate_id: lockId,
+      idempotency_key: idempotencyKey,
+      ...(fareForBid?.demand_ratio != null && Number.isFinite(Number(fareForBid.demand_ratio))
+        ? { demand_ratio: Number(fareForBid.demand_ratio) }
+        : {}),
+      ...(fareForBid?.rain_applied === true ? { rain: true } : {}),
+      trip_type: 'intra',
+      preferred_driver_id: requestedDriverId || undefined,
+      ride_preferences: ridePreferences,
+      estate_name: (includeGateCode && estateName.trim()) ? estateName.trim() : undefined,
+      estate_gate_code: (includeGateCode && estateGateCode.trim()) ? estateGateCode.trim() : undefined,
+    };
     try {
-      const pLat = pLatEarly;
-      const pLng = pLngEarly;
-      const dLat = dLatEarly;
-      const dLng = dLngEarly;
-      const lockId = lockIdEarly;
-      const city =
-        inferCityFromCoords(pLat, pLng) ||
-        inferCityFromCoords(dLat, dLng) ||
-        inferCity(pickup, destination) ||
-        'default';
-      const normalizedService = selectedVehicle === 'standard' ? 'economy' : selectedVehicle;
-
-      const idempotencyKey = (() => {
-        try {
-          const c = globalThis.crypto as Crypto | undefined;
-          return c?.randomUUID ? c.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-        } catch {
-          return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-        }
-      })();
-
       const res = await authedFetch(`${BACKEND_URL}/api/trips/request?rider_id=${riderId}`, {
         method: 'POST',
-        body: JSON.stringify({
-          pickup_lat: pLat,
-          pickup_lng: pLng,
-          pickup_address: pickup.trim(),
-          dropoff_lat: dLat,
-          dropoff_lng: dLng,
-          dropoff_address: destination.trim(),
-          ...routeStopFields,
-          service_type: normalizedService,
-          city,
-          payment_method: payMethod,
-          offered_fare: bid,
-          recommended_fare:
-            Number(fareForBid?.base_price || fareForBid?.total_fare || 0) || undefined,
-          fare_estimate_id: lockId,
-          idempotency_key: idempotencyKey,
-          ...(fareForBid?.demand_ratio != null && Number.isFinite(Number(fareForBid.demand_ratio))
-            ? { demand_ratio: Number(fareForBid.demand_ratio) }
-            : {}),
-          ...(fareForBid?.rain_applied === true ? { rain: true } : {}),
-          trip_type: 'intra',
-          preferred_driver_id: requestedDriverId || undefined,
-          ride_preferences: ridePreferences,
-          estate_name: (includeGateCode && estateName.trim()) ? estateName.trim() : undefined,
-          estate_gate_code: (includeGateCode && estateGateCode.trim()) ? estateGateCode.trim() : undefined,
-        }),
+        body: JSON.stringify(requestBody),
       });
       const result = await res.json().catch(() => ({}));
       if (res.ok && (result.trip || result.success)) {
@@ -2667,7 +2694,12 @@ function BookInDriveStyle() {
         toast.show(toStr(result?.detail || result?.message, 'Could not request ride. Please try again in a moment.'), 'error');
       }
     } catch {
-      toast.show('Could not reach server. Check your connection.', 'error');
+      const online = await checkOnlineStatus();
+      if (!online && riderId) {
+        await createOfflineBooking(riderId, requestBody);
+      } else {
+        toast.show('Could not reach server. Check your connection.', 'error');
+      }
     } finally {
       offerInFlightRef.current = false;
       setIsLoading(false);
@@ -2923,7 +2955,7 @@ function BookInDriveStyle() {
     const cityPretty =
       rawCity.length > 0 ? rawCity.charAt(0).toUpperCase() + rawCity.slice(1).replace(/_/g, ' ') : null;
     const hideCity =
-      isLagosRouteDistanceFare(fd) || String(rawCity).toLowerCase() === 'lagos';
+      isDistanceOnlyFare(fd) || String(rawCity).toLowerCase() === 'lagos';
     const cityLabel = cityPretty && !hideCity ? cityPretty : null;
     return { routeLabel, surgeCompact, shortTrip, cityLabel };
   }, [fareDetails]);
@@ -3183,6 +3215,11 @@ function BookInDriveStyle() {
                   </>
                 ) : null}
               </View>
+              {stopCoords && stopTimeFeeHint ? (
+                <Text style={s.routeSummaryStopTime} numberOfLines={2}>
+                  {stopTimeFeeHint} included in fare
+                </Text>
+              ) : null}
             </LinearGradient>
           </View>
         ) : null}
@@ -3788,7 +3825,7 @@ function BookInDriveStyle() {
                         <Ionicons name="rocket-outline" size={20} color="#a78bfa" />
                       </TouchableOpacity>
                     ) : null}
-                    {!isLagosRouteDistanceFare(fareDetails) ? (
+                    {!isDistanceOnlyFare(fareDetails) ? (
                       <TouchableOpacity onPress={() => setFareExplainModal('short')} accessibilityLabel="About short trip rates" accessibilityRole="button">
                         <Ionicons name="map-outline" size={20} color="#94a3b8" />
                       </TouchableOpacity>
@@ -4131,7 +4168,7 @@ function BookInDriveStyle() {
                   ) : null}
                   {fareExplainModal === 'short' ? (
                     <Text style={{ color: COLORS.muted, fontSize: 14, lineHeight: 22 }}>
-                      {isLagosRouteDistanceFare(fareDetails)
+                      {isDistanceOnlyFare(fareDetails)
                         ? 'In Lagos, your estimate uses the driving distance on the route. Vehicle tier adjusts the rate, and demand, peak windows, or rain can apply a surge multiplier. Open the fare breakdown for the line-item view.'
                         : `Trips under about ${fareDetails?.short_trip_threshold_km ?? 5} km use the short-trip rate card (base, per km, and per minute). Booking fee, minimum fare, surge cap, and cancellation fee still follow your city and service tier.`}
                     </Text>
@@ -4145,9 +4182,11 @@ function BookInDriveStyle() {
                         ? `${humanizeFareBreakdownLine(String(fareDetails.price_breakdown))}\n\n`
                         : ''}
                       {fareDetails
-                        ? isLagosRouteDistanceFare(fareDetails)
+                        ? isDistanceOnlyFare(fareDetails)
                           ? `Lagos route fare · Distance line ₦${Number(fareDetails.distance_fee ?? 0).toLocaleString()} (area and vehicle tier before surge) · Surge ${fareDetails.surge_multiplier ?? 1}×\nTotal ₦${Number(fareDetails.total_fare ?? 0).toLocaleString()}`
-                          : `Base ₦${Number(fareDetails.base_fare ?? 0).toLocaleString()} · Distance ₦${Number(fareDetails.distance_fee ?? 0).toLocaleString()} · Time ₦${Number(fareDetails.time_fee ?? 0).toLocaleString()} · Traffic ₦${Number(fareDetails.traffic_fee ?? 0).toLocaleString()} · Booking ₦${Number(fareDetails.booking_fee ?? 0).toLocaleString()}\nSubtotal ₦${Number(fareDetails.subtotal ?? 0).toLocaleString()} · Surge ${fareDetails.surge_multiplier ?? 1}×\nTotal ₦${Number(fareDetails.total_fare ?? 0).toLocaleString()}`
+                          : stopTimeFeeLabel(fareDetails)
+                            ? `Route fare · Base ₦${Number(fareDetails.base_fare ?? 0).toLocaleString()} · Distance ₦${Number(fareDetails.distance_fee ?? 0).toLocaleString()} · ${stopTimeFeeLabel(fareDetails)} · Surge ${fareDetails.surge_multiplier ?? 1}×\nTotal ₦${Number(fareDetails.total_fare ?? 0).toLocaleString()}`
+                            : `Base ₦${Number(fareDetails.base_fare ?? 0).toLocaleString()} · Distance ₦${Number(fareDetails.distance_fee ?? 0).toLocaleString()} · Time ₦${Number(fareDetails.time_fee ?? 0).toLocaleString()} · Traffic ₦${Number(fareDetails.traffic_fee ?? 0).toLocaleString()} · Booking ₦${Number(fareDetails.booking_fee ?? 0).toLocaleString()}\nSubtotal ₦${Number(fareDetails.subtotal ?? 0).toLocaleString()} · Surge ${fareDetails.surge_multiplier ?? 1}×\nTotal ₦${Number(fareDetails.total_fare ?? 0).toLocaleString()}`
                         : 'Get a fare estimate to see the breakdown.'}
                     </Text>
                   ) : null}
@@ -4219,7 +4258,7 @@ function BookInDriveStyle() {
                   const syntheticPlaceId = !placeId || placeId.startsWith('prediction-');
 
                   if (placeId && !syntheticPlaceId) {
-                    const details = await fetchPlaceDetails(placeId);
+                    const details = await fetchPlaceDetails(placeId, loc.sessionToken);
                     if (details && Number.isFinite(details.lat) && Number.isFinite(details.lng)) {
                       coords = { lat: details.lat, lng: details.lng };
                       if (details.description) desc = details.description;
@@ -4497,6 +4536,16 @@ const s = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     letterSpacing: -0.2,
+  },
+  routeSummaryStopTime: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(148,163,184,0.22)',
+    color: 'rgba(167,243,208,0.95)',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
   },
   routeSummaryVsep: {
     width: 1,

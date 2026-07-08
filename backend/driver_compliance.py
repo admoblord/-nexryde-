@@ -33,6 +33,117 @@ DOCUMENT_NAMES = {
     "insurance": "Vehicle Insurance",
 }
 
+
+def _grace_map(profile: dict | None) -> dict:
+    raw = (profile or {}).get("document_graces") or {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _active_grace_until(profile: dict | None, doc_key: str) -> Optional[datetime]:
+    entry = _grace_map(profile).get(doc_key) or {}
+    raw = entry.get("grace_until")
+    if not raw:
+        return None
+    try:
+        if isinstance(raw, datetime):
+            dt = raw
+        else:
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt if dt > datetime.now(timezone.utc) else None
+    except (ValueError, TypeError):
+        return None
+
+
+async def grant_document_grace(
+    driver_id: str,
+    document_type: str,
+    *,
+    days: int = 7,
+    reason: str = "admin_grace",
+    granted_by: str = "admin",
+    notify: bool = True,
+) -> dict:
+    """Grant temporary grace for an expired document — driver can keep operating until grace_until."""
+    import uuid
+
+    if document_type not in DOCUMENT_NAMES:
+        raise ValueError(f"Invalid document type: {document_type}")
+
+    user = await db.users.find_one({"id": driver_id}, {"_id": 0, "name": 1, "email": 1})
+    if not user:
+        raise ValueError("Driver not found")
+
+    now = datetime.now(timezone.utc)
+    grace_until = now + timedelta(days=max(1, days))
+    doc_label = DOCUMENT_NAMES[document_type]
+    grace_doc = {
+        "grace_until": grace_until.isoformat(),
+        "granted_at": now.isoformat(),
+        "granted_by": granted_by,
+        "reason": reason,
+        "document_label": doc_label,
+    }
+
+    await db.driver_profiles.update_one(
+        {"user_id": driver_id},
+        {
+            "$set": {f"document_graces.{document_type}": grace_doc},
+            "$unset": {"suspended_reason": ""},
+        },
+        upsert=True,
+    )
+    await db.users.update_one(
+        {"id": driver_id},
+        {"$unset": {"suspended_until": "", "suspension_reason": ""}},
+    )
+
+    grace_end_local = grace_until.strftime("%d %b %Y")
+    title = f"{doc_label} expired — 1 week grace granted"
+    message = (
+        f"Your {doc_label} has expired. NexRyde has granted you a 1-week grace period "
+        f"until {grace_end_local} to upload your renewed document. "
+        f"After that date you will not be able to go online or accept trips until renewal is approved."
+    )
+
+    if notify:
+        now_iso = now.isoformat()
+        await db.notifications.insert_one(
+            {
+                "id": str(uuid.uuid4()),
+                "user_id": driver_id,
+                "type": "document_grace",
+                "title": title,
+                "message": message,
+                "read": False,
+                "created_at": now_iso,
+                "data": {
+                    "document_type": document_type,
+                    "grace_until": grace_until.isoformat(),
+                    "screen": "/(auth)/driver-documents",
+                },
+            }
+        )
+        await send_push_notification(
+            driver_id,
+            title,
+            message,
+            {"type": "document_grace", "document_type": document_type, "grace_until": grace_until.isoformat()},
+            source="compliance",
+        )
+
+    return {
+        "driver_id": driver_id,
+        "driver_name": user.get("name"),
+        "driver_email": user.get("email"),
+        "document_type": document_type,
+        "document_label": doc_label,
+        "grace_until": grace_until.isoformat(),
+        "days": days,
+        "notified": notify,
+    }
+
 # Never pull base64 blobs — driver_documents can be multi-MB per driver.
 DOC_EXPIRY_PROJECTION: dict[str, int] = {"_id": 0}
 for _doc_key in DOCUMENT_NAMES:
@@ -68,6 +179,8 @@ async def check_driver_document_expiry(driver_id: str):
     if not doc_record:
         return {"compliant": False, "reason": "No documents on file", "expired": [], "expiring_soon": []}
 
+    profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"document_graces": 1, "_id": 0}) or {}
+
     now = datetime.now(timezone.utc)
     expired = []
     expiring_soon = []
@@ -84,6 +197,17 @@ async def check_driver_document_expiry(driver_id: str):
         days_remaining = (expiry - now).days
 
         if days_remaining <= 0:
+            grace_until = _active_grace_until(profile, doc_key)
+            if grace_until:
+                expiring_soon.append({
+                    "document": doc_name,
+                    "type": doc_key,
+                    "expiry_date": doc_data["expiry_date"],
+                    "days_remaining": 0,
+                    "grace_until": grace_until.isoformat(),
+                    "on_grace": True,
+                })
+                continue
             expired.append({"document": doc_name, "type": doc_key, "expiry_date": doc_data["expiry_date"], "days_overdue": abs(days_remaining)})
             all_valid = False
         elif days_remaining <= 30:

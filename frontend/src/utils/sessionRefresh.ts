@@ -1,5 +1,5 @@
 import { BACKEND_URL } from '@/src/services/api';
-import { forceRefresh, getValidToken } from '@/src/lib/tokenStore';
+import { forceRefresh, getCachedToken, getValidToken } from '@/src/lib/tokenStore';
 import { useAppStore } from '@/src/store/appStore';
 
 /** Default API cap — fail fast; warm Cloud Run should respond well under this. */
@@ -8,6 +8,11 @@ export const API_REQUEST_TIMEOUT_MS = 10000;
 export type AuthedFetchOptions = RequestInit & {
   /** Override default timeout (e.g. trip request). */
   timeoutMs?: number;
+  /**
+   * InDrive/Uber pattern: return 401 to caller without logging out.
+   * Use on driver accept/bid and other in-progress critical actions.
+   */
+  preserveSessionOn401?: boolean;
 };
 
 export class ApiTimeoutError extends Error {
@@ -55,11 +60,13 @@ export async function refreshAuthToken(): Promise<boolean> {
 
 /** Fire-and-forget on foreground — warms cache via first api call path. */
 export async function proactiveTokenRefresh(): Promise<void> {
-  await getValidToken();
+  const { ensureCriticalSessionReady } = await import('@/src/lib/sessionReadiness');
+  await ensureCriticalSessionReady();
 }
 
 export async function ensureFreshAuthSession(): Promise<void> {
-  await getValidToken();
+  const { ensureCriticalSessionReady } = await import('@/src/lib/sessionReadiness');
+  await ensureCriticalSessionReady();
 }
 
 /**
@@ -71,8 +78,8 @@ export async function authedFetch(
   options: AuthedFetchOptions = {},
   retry = true,
 ): Promise<Response> {
-  const { timeoutMs = API_REQUEST_TIMEOUT_MS, ...fetchInit } = options;
-  const token = await getValidToken();
+  const { timeoutMs = API_REQUEST_TIMEOUT_MS, preserveSessionOn401 = false, ...fetchInit } = options;
+  const token = (await getValidToken()) ?? getCachedToken();
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -97,12 +104,14 @@ export async function authedFetch(
       console.log('[API_401_RETRY]', { path });
       const fresh = await forceRefresh();
       if (fresh) return authedFetch(url, options, false);
-      try {
-        await useAppStore.getState().logout();
-      } catch {
-        /* silent */
+      if (!preserveSessionOn401) {
+        try {
+          await useAppStore.getState().logout();
+        } catch {
+          /* silent */
+        }
+        forceNavigateToLogin();
       }
-      forceNavigateToLogin();
     }
 
     return res;
@@ -120,7 +129,11 @@ export async function authedFetch(
 export const fetchAuthed = authedFetch;
 
 /** Path-relative authenticated fetch against Cloud Run API. */
-export async function apiFetch(path: string, init: RequestInit = {}, retry = true): Promise<Response> {
+export async function apiFetch(
+  path: string,
+  init: AuthedFetchOptions = {},
+  retry = true,
+): Promise<Response> {
   const normalized = path.startsWith('/') ? path : `/${path}`;
   const url = normalized.startsWith('/api')
     ? `${BACKEND_URL}${normalized}`

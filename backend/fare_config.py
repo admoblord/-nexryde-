@@ -11,30 +11,28 @@ SHORT_TRIP_KM_THRESHOLD = 5.0
 # One card per city; Comfort / Premium / XL / Executive scale via ``nexryde_service_multiplier``
 # (1.0 / 1.15 / 1.3 / 1.5). Bolt reference in product spec; NEXRYDE targets materially higher driver value.
 #
-# Marketing vs engine (Abuja economy, 1.0× surge, no location uplift):
-#   • Bolt-style headline (base + km only): 20 km → ₦300+20×₦85 = ₦2,000 | NEXRYDE → ₦2,400+20×₦560 = ₦13,600.
-#   • 5 km → ₦725 vs ₦2,400+5×₦560 = ₦5,200 (NEXRYDE still adds route minutes × ₦120 before surge/rounding).
+# Marketing vs engine (Abuja economy, 1.0× surge, direct trip — base + km only; time on stop):
+#   • Bolt-style headline (base + km only): 10 km → ₦300+10×₦85 = ₦1,150 | NEXRYDE → ₦2,400+10×₦520 = ₦7,600 (~6.6×).
+#   • 20 km → ₦2,000 vs ₦2,400+20×₦520 = ₦12,800 (~6.4×). Stop trips add route minutes × per_min.
 #   • Driver net at 15% commission on Bolt vs 0% on NEXRYDE is a product/policy setting, not encoded here.
 #
 # Competitive positioning (nationwide premium, excluding Lagos — see tests for 10 km headline ratio):
-#   - Headline base+distance fares vs Bolt reference are ~6.9–7.0× (city-dependent; pinned in tests).
-#   - High base + high per-minute rates: reward drivers in traffic vs discount competitors.
-#   - Ultra-premium tier: attract and retain top drivers; sustainable income assumes 0% take on driver payout (policy).
-#   - “Drivers earn ~8× more” is illustrative (trip + commission assumptions); not a guaranteed minimum.
+#   - Headline base+distance fares vs Bolt reference are ~5.5–6.6× (city-dependent; pinned in tests).
+#   - Per-minute applies only when the rider adds an intermediate stop (traffic / detour fairness).
+#   - Premium tier multipliers + 0% driver commission target sustainable driver income without 10×+ sticker shock.
 NEXRYDE_NATIONWIDE_POSITIONING_SUMMARY = (
-    "Nexryde nationwide (outside Lagos) is deliberately premium: headline trips land about 6.9–7.0× above "
-    "Bolt reference cards on base+distance examples, with industry-leading base and per-minute rates so "
-    "drivers earn fairly in traffic. Zero platform commission on driver payouts is the target model—built "
-    "to attract top drivers and keep incomes sustainable."
+    "Nexryde nationwide (outside Lagos) is premium but bookable: headline direct trips land about 5.5–6.6× above "
+    "Bolt reference cards on base+distance examples. Per-minute charges apply when a stop is added. Zero platform "
+    "commission on driver payouts is the target model—built to attract top drivers and keep incomes sustainable."
 )
 
-# Rider/driver education (non-Lagos estimates). “Highest in Nigeria” is product language—not verified in code.
+# Rider/driver education (non-Lagos estimates).
 NEXRYDE_NATIONWIDE_POSITIONING_BULLETS: tuple[str, ...] = (
-    "Nexryde is 6.9–7.0× more expensive than Bolt (headline base+distance vs reference card).",
-    "Drivers earn about 8× more with 0% commission on driver payouts.",
-    "Ultra-premium positioning attracts top drivers.",
-    "Highest per-minute rates in Nigeria reward drivers for traffic.",
-    "Highest base fares ensure maximum driver earnings.",
+    "Nexryde is about 5.5–6.6× above Bolt on headline base+distance (direct trips, reference card).",
+    "Drivers earn materially more with 0% commission on driver payouts.",
+    "Premium positioning attracts quality drivers.",
+    "Per-minute rates apply when you add a stop — not on every direct trip.",
+    "Balanced base + per-km rates keep short and long trips fair in every state.",
     "Sustainable driver income model with 0% commission.",
 )
 
@@ -47,50 +45,61 @@ NEXRYDE_DRIVER_PAYOUT_POLICY_NOTE = (
 )
 
 # All Nigerian states + FCT (Lagos excluded — Lagride-style engine).
-# Higher-activity states: base split ₦3500 (major) → ₦3200 (least in band); km/min/min_fare scale from ₦2000 anchor row.
-# Other states: single lower card (₦1600 base).
-_HIGH_BASE_ANCHOR_REF = 2000
-_HIGH_ANCHOR_PER_KM = 468
-_HIGH_ANCHOR_PER_MIN = 100
-_HIGH_ANCHOR_MIN_FARE = 2500
+# Balanced premium card (Jul 2026): bookable vs Bolt (~5.5–6.6× headline) while staying driver-first.
+# Tier-1 metros anchor: ₦2,400 base + ₦520/km + ₦120/min (stop only) + ₦3,200 min fare.
+# High-activity states: base ₦2,400 (major) → ₦2,100 (least in band); km/min/min_fare scale from anchor.
+# Other states: single lower card (₦1,800 base).
+_BALANCED_ANCHOR_BASE = 2400
+_BALANCED_ANCHOR_PER_KM = 520
+_BALANCED_ANCHOR_PER_MIN = 120
+_BALANCED_ANCHOR_MIN_FARE = 3200
 
-# Major commercial / revenue hubs → 3500; stepped down to 3200 for the rest of the high band (14 states).
+# ── Targeted time billing (pickup wait, traffic excess, route change) ─────────
+# Direct-trip estimates stay base+distance; these apply at pickup wait / completion / route change.
+PICKUP_FREE_WAIT_SECONDS = 180  # 3 minutes — matches rider app (pickupWaitPolicy.ts)
+TRAFFIC_EXCESS_BUFFER_MIN = 15
+TRAFFIC_EXCESS_MAX_SPEED_KMH = 12.0
+TRAFFIC_EXCESS_CAP_NGN = 2500
+ROUTE_CHANGE_FEE_NGN = 300
+MIN_TRIP_KM_FOR_TRAFFIC_EXCESS = 5.0
+
+# Major commercial / revenue hubs → 2400; stepped down to 2100 for the rest of the high band (14 states).
 _NATIONWIDE_PREMIUM_HIGH_BASE_BY_STATE: dict[str, int] = {
-    "abuja": 3500,
-    "delta": 3500,
-    "kano": 3500,
-    "rivers": 3500,
-    "anambra": 3400,
-    "edo": 3400,
-    "kaduna": 3400,
-    "oyo": 3400,
-    "akwa_ibom": 3300,
-    "cross_river": 3300,
-    "enugu": 3300,
-    "imo": 3300,
-    "ogun": 3200,
-    "plateau": 3200,
+    "abuja": 2400,
+    "delta": 2400,
+    "kano": 2400,
+    "rivers": 2400,
+    "anambra": 2300,
+    "edo": 2300,
+    "kaduna": 2300,
+    "oyo": 2300,
+    "akwa_ibom": 2200,
+    "cross_river": 2200,
+    "enugu": 2200,
+    "imo": 2200,
+    "ogun": 2100,
+    "plateau": 2100,
 }
 
 _NATIONWIDE_PREMIUM_HIGH_STATES: frozenset[str] = frozenset(_NATIONWIDE_PREMIUM_HIGH_BASE_BY_STATE.keys())
 
 
-def _nationwide_high_row_from_base(base_fare: int) -> dict[str, int]:
+def _nationwide_balanced_row_from_base(base_fare: int) -> dict[str, int]:
     b = int(base_fare)
-    ref = float(_HIGH_BASE_ANCHOR_REF)
+    ref = float(_BALANCED_ANCHOR_BASE)
     return {
         "base_fare": b,
-        "per_km": max(1, round(_HIGH_ANCHOR_PER_KM * b / ref)),
-        "per_min": max(1, round(_HIGH_ANCHOR_PER_MIN * b / ref)),
-        "min_fare": max(1, round(_HIGH_ANCHOR_MIN_FARE * b / ref)),
+        "per_km": max(1, round(_BALANCED_ANCHOR_PER_KM * b / ref)),
+        "per_min": max(1, round(_BALANCED_ANCHOR_PER_MIN * b / ref)),
+        "min_fare": max(1, round(_BALANCED_ANCHOR_MIN_FARE * b / ref)),
     }
 
 
 _NATIONWIDE_ROW_PREMIUM_LOWER: dict[str, int] = {
-    "base_fare": 1600,
-    "per_km": 377,
-    "per_min": 80,
-    "min_fare": 2037,
+    "base_fare": 1800,
+    "per_km": 390,
+    "per_min": 90,
+    "min_fare": 2400,
 }
 
 _NATIONWIDE_STATE_KEYS_ORDERED: tuple[str, ...] = (
@@ -134,7 +143,7 @@ _NATIONWIDE_STATE_KEYS_ORDERED: tuple[str, ...] = (
 
 _NATIONWIDE_PREMIUM_ECONOMY: dict[str, dict[str, int]] = {
     k: (
-        dict(_nationwide_high_row_from_base(_NATIONWIDE_PREMIUM_HIGH_BASE_BY_STATE[k]))
+        dict(_nationwide_balanced_row_from_base(_NATIONWIDE_PREMIUM_HIGH_BASE_BY_STATE[k]))
         if k in _NATIONWIDE_PREMIUM_HIGH_BASE_BY_STATE
         else dict(_NATIONWIDE_ROW_PREMIUM_LOWER)
     )
@@ -456,3 +465,31 @@ def headline_distance_only_fare_bolt(city_key: str, distance_km: float) -> float
     b, k = row
     d = max(0.0, float(distance_km))
     return float(b + d * float(k))
+
+
+def resolve_pickup_wait_per_min(city_key: str, service_key: str = "economy") -> float:
+    """Billable pickup wait rate (lower than stop/traffic rates)."""
+    ck = normalize_fare_city_key(city_key)
+    if ck == "lagos":
+        return 40.0
+    card = resolve_fare_rate_card(ck, service_key, "short")
+    base = float(card["base_fare"])
+    if base >= 2400:
+        return 60.0
+    if base >= 2100:
+        return 50.0
+    return 45.0
+
+
+def resolve_traffic_excess_per_min(city_key: str) -> float:
+    """Per-minute rate for proven jam time above estimate + buffer (capped at completion)."""
+    ck = normalize_fare_city_key(city_key)
+    if ck == "lagos":
+        return 40.0
+    card = resolve_fare_rate_card(ck, "economy", "short")
+    base = float(card["base_fare"])
+    if base >= 2400:
+        return 45.0
+    if base >= 2100:
+        return 40.0
+    return 35.0

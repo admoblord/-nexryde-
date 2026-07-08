@@ -135,7 +135,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from nexryde_pricing import nexryde_route_time_minutes
+from nexryde_pricing import append_stop_time_breakdown_suffix, nexryde_route_time_minutes
 from fare_config import FARE_CONFIG
 from surge_pricing import SURGE_CONFIG
 
@@ -158,7 +158,46 @@ TIER1_15_PLUS_RATES_BY_ZONE: dict[str, float] = {
 TIER2_FLAT_PER_KM = 3255.0
 # Peace Garden pickup × destination (Lagride premium samples @ 18 km)
 PEACE_GARDEN_TO_IKORODU_PER_KM = 57424 / 18.0
-PEACE_GARDEN_TO_IKEJA_PER_KM = 48236 / 18.0
+PEACE_GARDEN_TO_IKEJA_PER_KM = 48236 / 18.0  # legacy reference; live Ikeja corridor uses satellite rate below
+# North satellite (Ikorodu / Peace Garden) ↔ Ikeja — ~₦19k @ 20 km vs legacy ₦54k+
+LAGOS_IKORODU_IKEJA_CORRIDOR_PER_KM = 950.0
+
+# City-wide fare factor (all zones, all service tiers) — applied after distance×area×service, before surge.
+LAGOS_MARKET_WIDE_FARE_MULTIPLIER = 1.02
+
+# Sangotedo / Ajah axis ↔ Ikorodu — calibrated to Lagride std ₦39,547 @ 63.64 km.
+_LAGRIDE_SANGOTEDO_IKORODU_SAMPLE_KM = 63.64
+_LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN = 39_547.0
+_LAGRIDE_SANGOTEDO_IKORODU_PRO_NGN = 43_874.0
+_LAGRIDE_SANGOTEDO_IKORODU_OMNI_NGN = 12_675.0
+LAGOS_SANGOTEDO_IKORODU_CORRIDOR_PER_KM = _LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN / (
+    _LAGRIDE_SANGOTEDO_IKORODU_SAMPLE_KM * LAGOS_MARKET_WIDE_FARE_MULTIPLIER
+)
+# Lagride-aligned tier spread on this corridor only (not global 1.25 / 1.125 / 1.5×).
+LAGOS_SANGOTEDO_IKORODU_SERVICE_MULTIPLIERS: dict[str, float] = {
+    "economy": 1.0,
+    "standard": 1.0,
+    "ev": 1.0,
+    "xl": 1.02,
+    "comfort": 1.04,
+    "premium": 1.11,
+    "pro": 1.11,
+    "executive": 1.11,
+    "omni": 0.32,
+    "budget": 0.32,
+}
+LAGOS_SANGOTEDO_IKORODU_TIER_CEILINGS: dict[str, float] = {
+    "economy": _LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN,
+    "standard": _LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN,
+    "ev": _LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN,
+    "xl": round(_LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN * 1.02),
+    "comfort": round(_LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN * 1.04),
+    "premium": _LAGRIDE_SANGOTEDO_IKORODU_PRO_NGN,
+    "pro": _LAGRIDE_SANGOTEDO_IKORODU_PRO_NGN,
+    "executive": _LAGRIDE_SANGOTEDO_IKORODU_PRO_NGN,
+    "omni": _LAGRIDE_SANGOTEDO_IKORODU_OMNI_NGN,
+    "budget": _LAGRIDE_SANGOTEDO_IKORODU_OMNI_NGN,
+}
 
 # SERVICE MULTIPLIERS — legacy Lagride “Pro” card (1.1×); NEXRYDE Lagos uses FARE_CONFIG ratios.
 LAGRIDE_SERVICE_PRO = 1.1
@@ -172,11 +211,26 @@ HIGH_DEMAND_SURGE = 1.3
 RAIN_SURGE_LAGride = 1.4
 PEAK_SURGE_LAGride = 1.0
 
-# City-wide fare factor (all zones, all service tiers) — applied after distance×area×service, before surge.
-LAGOS_MARKET_WIDE_FARE_MULTIPLIER = 1.02
-
 # Hard ceiling on Lagos trip total (economy baseline); surge applied before cap in breakdown.
 LAGOS_MAX_TRIP_FARE_NGN = 100_000.0
+
+# When rider adds an intermediate stop, bill driving time at the service tier per-minute card
+# (distance×area Lagride formula unchanged; time is additive only for stop trips).
+def lagos_stop_time_per_min(service_key: str) -> float:
+    sk = (service_key or "economy").strip().lower()
+    if sk == "standard":
+        sk = "economy"
+    if sk == "pro":
+        sk = "premium"
+    row = FARE_CONFIG.get("lagos", {}).get(sk) or FARE_CONFIG["lagos"]["economy"]
+    return float(row.get("per_min", 80))
+
+
+def lagos_stop_time_fee(service_key: str, route_time_min: int) -> float:
+    mins = max(0, int(route_time_min))
+    if mins <= 0:
+        return 0.0
+    return round(mins * lagos_stop_time_per_min(service_key), 2)
 
 # Above this ₦/km, long trips (>20 km) taper toward Tier-1 15+ band.
 LAGOS_LONG_HAUL_TAPER_KM = 20.0
@@ -332,6 +386,47 @@ def classify_lagos_lagride_pickup(pickup_lat: float | None, pickup_lng: float | 
     return 2, "lagride_t2_mainland"
 
 
+def _north_satellite_zone(lat: float, lng: float) -> bool:
+    """Ikorodu axis + Peace Garden (overlapping north-mainland pickup band)."""
+    return _t2_ikorodu(lat, lng) or _t2_peace_garden(lat, lng)
+
+
+def sangotedo_ikorodu_corridor_rate_per_km(
+    pickup_lat: float | None,
+    pickup_lng: float | None,
+    dropoff_lat: float | None,
+    dropoff_lng: float | None,
+) -> float | None:
+    """Bidirectional Sangotedo / Ajah ↔ Ikorodu at Lagride-aligned long-haul ₦/km."""
+    if pickup_lat is None or pickup_lng is None or dropoff_lat is None or dropoff_lng is None:
+        return None
+    plat, plng = float(pickup_lat), float(pickup_lng)
+    dlat, dlng = float(dropoff_lat), float(dropoff_lng)
+    if (_t1_ajah_sangotedo(plat, plng) and _t2_ikorodu(dlat, dlng)) or (
+        _t2_ikorodu(plat, plng) and _t1_ajah_sangotedo(dlat, dlng)
+    ):
+        return LAGOS_SANGOTEDO_IKORODU_CORRIDOR_PER_KM
+    return None
+
+
+def ikorodu_ikeja_corridor_rate_per_km(
+    pickup_lat: float | None,
+    pickup_lng: float | None,
+    dropoff_lat: float | None,
+    dropoff_lng: float | None,
+) -> float | None:
+    """Bidirectional Ikorodu / Peace Garden ↔ Ikeja at bookable satellite ₦/km."""
+    if pickup_lat is None or pickup_lng is None or dropoff_lat is None or dropoff_lng is None:
+        return None
+    plat, plng = float(pickup_lat), float(pickup_lng)
+    dlat, dlng = float(dropoff_lat), float(dropoff_lng)
+    if (_north_satellite_zone(plat, plng) and _t2_ikeja(dlat, dlng)) or (
+        _t2_ikeja(plat, plng) and _north_satellite_zone(dlat, dlng)
+    ):
+        return LAGOS_IKORODU_IKEJA_CORRIDOR_PER_KM
+    return None
+
+
 def peace_garden_destination_rate_per_km(
     dropoff_lat: float | None, dropoff_lng: float | None
 ) -> float | None:
@@ -342,7 +437,7 @@ def peace_garden_destination_rate_per_km(
     if _t2_ikorodu(lat, lng):
         return PEACE_GARDEN_TO_IKORODU_PER_KM
     if _t2_ikeja(lat, lng):
-        return PEACE_GARDEN_TO_IKEJA_PER_KM
+        return LAGOS_IKORODU_IKEJA_CORRIDOR_PER_KM
     return None
 
 
@@ -357,16 +452,15 @@ def peace_garden_corridor_rate_per_km(
         return None
     plat, plng = float(pickup_lat), float(pickup_lng)
     dlat, dlng = float(dropoff_lat), float(dropoff_lng)
+    ikeja_corridor = ikorodu_ikeja_corridor_rate_per_km(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+    if ikeja_corridor is not None:
+        return ikeja_corridor
     pg_pick = _t2_peace_garden(plat, plng)
     pg_drop = _t2_peace_garden(dlat, dlng)
     if pg_pick and _t2_ikorodu(dlat, dlng):
         return PEACE_GARDEN_TO_IKORODU_PER_KM
     if pg_drop and _t2_ikorodu(plat, plng):
         return PEACE_GARDEN_TO_IKORODU_PER_KM
-    if pg_pick and _t2_ikeja(dlat, dlng):
-        return PEACE_GARDEN_TO_IKEJA_PER_KM
-    if pg_drop and _t2_ikeja(plat, plng):
-        return PEACE_GARDEN_TO_IKEJA_PER_KM
     return None
 
 
@@ -407,6 +501,11 @@ def _one_way_lagos_area_rate_per_km(
     """₦/km for one direction: this end is pickup, other end is dropoff."""
     z = (zone_label or "").strip()
     d = max(0.0, float(distance_km))
+    sangotedo_corridor = sangotedo_ikorodu_corridor_rate_per_km(
+        pickup_lat, pickup_lng, dropoff_lat, dropoff_lng
+    )
+    if sangotedo_corridor is not None:
+        return sangotedo_corridor
     corridor = peace_garden_corridor_rate_per_km(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
     if corridor is not None and (z == "lagride_t2_peace_garden" or z == "lagride_t2_ikorodu" or z == "lagride_t2_ikeja"):
         return _apply_lagos_long_haul_taper(d, corridor)
@@ -641,18 +740,47 @@ def build_lagride_profile_payload(
     }
 
 
-def lagride_lagos_service_multiplier(service_key: str) -> float:
+def _normalize_lagos_service_key(service_key: str) -> str:
+    k = (service_key or "economy").strip().lower()
+    if k == "standard":
+        return "economy"
+    if k == "pro":
+        return "premium"
+    return k
+
+
+def sangotedo_ikorodu_corridor_service_multiplier(service_key: str) -> float:
+    """Service tier multiplier on Sangotedo ↔ Ikorodu corridor only."""
+    k = _normalize_lagos_service_key(service_key)
+    return float(LAGOS_SANGOTEDO_IKORODU_SERVICE_MULTIPLIERS.get(k, 1.0))
+
+
+def sangotedo_ikorodu_corridor_tier_ceiling(service_key: str) -> float | None:
+    k = _normalize_lagos_service_key(service_key)
+    cap = LAGOS_SANGOTEDO_IKORODU_TIER_CEILINGS.get(k)
+    return float(cap) if cap is not None else None
+
+
+def lagride_lagos_service_multiplier(
+    service_key: str,
+    *,
+    pickup_lat: float | None = None,
+    pickup_lng: float | None = None,
+    dropoff_lat: float | None = None,
+    dropoff_lng: float | None = None,
+) -> float:
     """
     Scale the distance×area line by NEXRYDE Lagos tier, using the same **per_km ratios**
     as ``FARE_CONFIG['lagos']`` (economy = 1.0×).
 
+    Sangotedo ↔ Ikorodu corridor uses tighter local multipliers (Premium ≤ ₦55k).
+
     ``standard`` → economy. ``pro`` → premium. ``budget`` / ``omni`` → 0.35×. ``ev`` → 1.0×.
     """
-    k = (service_key or "economy").strip().lower()
-    if k == "standard":
-        k = "economy"
-    if k == "pro":
-        k = "premium"
+    if sangotedo_ikorodu_corridor_rate_per_km(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng) is not None:
+        return sangotedo_ikorodu_corridor_service_multiplier(service_key)
+
+    k = _normalize_lagos_service_key(service_key)
     if k in ("omni", "budget"):
         return float(LAGRIDE_SERVICE_OMNI)
     if k == "ev":
@@ -733,15 +861,21 @@ def lagride_fare_bucket_label(
     zone_label: str = "",
     dropoff_lat: float | None = None,
     dropoff_lng: float | None = None,
+    pickup_lat: float | None = None,
+    pickup_lng: float | None = None,
 ) -> str:
     d = float(distance_km)
     z = (zone_label or "").strip()
+    if sangotedo_ikorodu_corridor_rate_per_km(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng) is not None:
+        return "lagride_t1_sangotedo_ikorodu_corridor"
+    if ikorodu_ikeja_corridor_rate_per_km(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng) is not None:
+        return "lagride_t2_ikorodu_ikeja_corridor"
     if tier == 2 and z == "lagride_t2_peace_garden":
         pg = peace_garden_destination_rate_per_km(dropoff_lat, dropoff_lng)
         if pg == PEACE_GARDEN_TO_IKORODU_PER_KM:
             return "lagride_t2_peace_garden_to_ikorodu"
-        if pg == PEACE_GARDEN_TO_IKEJA_PER_KM:
-            return "lagride_t2_peace_garden_to_ikeja"
+        if pg == LAGOS_IKORODU_IKEJA_CORRIDOR_PER_KM:
+            return "lagride_t2_ikorodu_ikeja_corridor"
     if tier == 1:
         if d < 3.0:
             return "lagride_t1_0_3_km"
@@ -771,6 +905,7 @@ def build_lagos_lagride_fare_breakdown(
     short_trip_threshold_km: float,
     dropoff_lat: float | None = None,
     dropoff_lng: float | None = None,
+    has_intermediate_stop: bool = False,
 ) -> dict[str, Any]:
     """Full-shaped dict compatible with ``server.calculate_fare`` / fare estimate."""
     route_time_min = nexryde_route_time_minutes(duration_min, traffic_duration_min)
@@ -804,7 +939,19 @@ def build_lagos_lagride_fare_breakdown(
             "dropoff_zone": None,
         }
     _drop_tier, drop_zone = classify_lagos_lagride_pickup(dropoff_lat, dropoff_lng)
-    svc_m = lagride_lagos_service_multiplier(service_key)
+    svc_m = lagride_lagos_service_multiplier(
+        service_key,
+        pickup_lat=pickup_lat,
+        pickup_lng=pickup_lng,
+        dropoff_lat=dropoff_lat,
+        dropoff_lng=dropoff_lng,
+    )
+    corridor_tier_ceiling = (
+        sangotedo_ikorodu_corridor_tier_ceiling(service_key)
+        if sangotedo_ikorodu_corridor_rate_per_km(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+        is not None
+        else None
+    )
 
     wat_now = datetime.utcnow() + timedelta(hours=1)
     current_hour = wat_now.hour
@@ -826,15 +973,23 @@ def build_lagos_lagride_fare_breakdown(
 
     d = max(0.0, float(distance_km))
     distance_line = round(d * rate, 2)
-    subtotal = round(distance_line * svc_m * float(LAGOS_MARKET_WIDE_FARE_MULTIPLIER), 2)
+    distance_subtotal = round(distance_line * svc_m * float(LAGOS_MARKET_WIDE_FARE_MULTIPLIER), 2)
+    time_fee = (
+        lagos_stop_time_fee(service_key, route_time_min) if has_intermediate_stop else 0.0
+    )
+    subtotal = round(distance_subtotal + time_fee, 2)
     total_raw = subtotal * dynamic_multiplier
     total_fare = max(200.0, round(total_raw))
+    if corridor_tier_ceiling is not None and total_fare > corridor_tier_ceiling:
+        total_fare = round(corridor_tier_ceiling)
     fare_capped = False
     if total_fare > LAGOS_MAX_TRIP_FARE_NGN:
         total_fare = round(LAGOS_MAX_TRIP_FARE_NGN)
         fare_capped = True
 
-    fare_bucket = lagride_fare_bucket_label(tier, d, zone, dropoff_lat, dropoff_lng)
+    fare_bucket = lagride_fare_bucket_label(
+        tier, d, zone, dropoff_lat, dropoff_lng, pickup_lat=pickup_lat, pickup_lng=pickup_lng
+    )
     if tier == 1 and d < 3:
         if zone == "lagride_t1_sky_mall":
             band_note = f"0–3 km @ ₦{round(rate)}/km (Sky Mall · ₦4,896 @ 2.7 km)"
@@ -848,13 +1003,16 @@ def build_lagos_lagride_fare_breakdown(
             if zone in TIER1_15_PLUS_RATES_BY_ZONE
             else f"15+ km @ ₦{int(TIER1_RATE_15_PLUS_KM)}/km"
         )
+    elif sangotedo_ikorodu_corridor_rate_per_km(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng) is not None:
+        band_note = f"Sangotedo / Ajah ↔ Ikorodu @ ₦{round(rate)}/km (satellite corridor)"
+        if sym_meta.get("symmetric_fare"):
+            band_note += f" (was ₦{round(sym_meta['rate_forward_km'])}/km one-way)"
+    elif ikorodu_ikeja_corridor_rate_per_km(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng) is not None:
+        band_note = f"Ikorodu / Peace Garden ↔ Ikeja @ ₦{round(rate)}/km (satellite corridor)"
+        if sym_meta.get("symmetric_fare"):
+            band_note += f" (was ₦{round(sym_meta['rate_forward_km'])}/km one-way)"
     elif peace_garden_corridor_rate_per_km(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng) is not None:
-        dest = (
-            "Ikorodu"
-            if rate == PEACE_GARDEN_TO_IKORODU_PER_KM
-            else ("Ikeja" if rate == PEACE_GARDEN_TO_IKEJA_PER_KM else "corridor")
-        )
-        band_note = f"Peace Garden ↔ {dest} @ ₦{round(rate)}/km (symmetric corridor)"
+        band_note = f"Peace Garden ↔ Ikorodu @ ₦{round(rate)}/km (symmetric corridor)"
         if sym_meta.get("symmetric_fare"):
             band_note += f" (was ₦{round(sym_meta['rate_forward_km'])}/km one-way)"
     elif tier == 2 and d < 3:
@@ -888,6 +1046,11 @@ def build_lagos_lagride_fare_breakdown(
     lagride_profile["dropoff_zone_key"] = drop_zone
     lagride_profile["fare_capped"] = fare_capped
     lagride_profile["lagos_max_fare_ngn"] = LAGOS_MAX_TRIP_FARE_NGN
+    if has_intermediate_stop and time_fee > 0:
+        lagride_profile["has_intermediate_stop"] = True
+        lagride_profile["stop_time_fee_applied"] = True
+        lagride_profile["stop_time_per_min"] = lagos_stop_time_per_min(service_key)
+        lagride_profile["stop_route_minutes"] = route_time_min
 
     lm_pb = float(LAGOS_MARKET_WIDE_FARE_MULTIPLIER)
     price_breakdown = (
@@ -898,6 +1061,11 @@ def build_lagos_lagride_fare_breakdown(
             f"surge {round(dynamic_multiplier, 2)} [{zone}]"
         )
     )
+    if time_fee > 0:
+        per_min = lagos_stop_time_per_min(service_key)
+        price_breakdown = append_stop_time_breakdown_suffix(
+            price_breakdown, route_time_min, time_fee, per_min
+        )
 
     return {
         "base_fare": 0.0,
@@ -905,7 +1073,10 @@ def build_lagos_lagride_fare_breakdown(
         "distance_fee": distance_line,
         "duration_min": duration_min,
         "pricing_route_minutes": route_time_min,
-        "time_fee": 0.0,
+        "time_fee": float(time_fee),
+        "has_intermediate_stop": bool(has_intermediate_stop and time_fee > 0),
+        "stop_time_fee_applied": bool(has_intermediate_stop and time_fee > 0),
+        "stop_time_per_min": lagos_stop_time_per_min(service_key) if has_intermediate_stop else 0.0,
         "traffic_duration_min": traffic_duration_min,
         "traffic_fee": 0.0,
         "booking_fee": 0.0,

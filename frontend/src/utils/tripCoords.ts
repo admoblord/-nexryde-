@@ -128,6 +128,14 @@ export function mergeTripFromStatusPayload(
       null,
     safe_arrival_check:
       (data.safe_arrival_check as Trip['safe_arrival_check']) ?? prev?.safe_arrival_check ?? null,
+    route_preview_coordinates: (() => {
+      const raw = data.route_preview_coordinates ?? prev?.route_preview_coordinates;
+      return Array.isArray(raw) ? (raw as Trip['route_preview_coordinates']) : prev?.route_preview_coordinates;
+    })(),
+    polyline: (() => {
+      const raw = data.polyline ?? prev?.polyline;
+      return typeof raw === 'string' && raw.trim() ? raw : prev?.polyline;
+    })(),
   };
 }
 

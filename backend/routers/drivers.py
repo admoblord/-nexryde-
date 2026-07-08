@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 
 from database import db
+from pii_encryption import encrypt_pii_value, nin_storage_fields, resolve_nin_plaintext
 from user_biometrics import get_reference_face_image, has_stored_face
 from user_lookup import find_user_by_id, QUERY_MAX_TIME_MS
 from surge_pricing import SURGE_CONFIG
@@ -389,7 +390,7 @@ async def get_driver_profile(user_id: str, request: Request):
     profile["_id"] = str(profile["_id"])
 
     # Derive nin_verified: driver has a NIN number AND their documents were approved.
-    nin_raw = str(profile.get("nin_number") or profile.get("nin") or "").strip()
+    nin_raw = resolve_nin_plaintext(profile) or str(profile.get("nin_number") or "").strip() or None
     is_approved = profile.get("verification_status") == "approved"
     nin_verified = bool(nin_raw) and is_approved
     profile["nin_verified"] = nin_verified
@@ -727,6 +728,11 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
     )
 
     if is_online:
+        from legal_guards import LEGAL_USER_PROJECTION, assert_user_legal_compliance
+
+        driver_user = await db.users.find_one({"id": user_id}, LEGAL_USER_PROJECTION)
+        assert_user_legal_compliance(driver_user, role="driver")
+
         # Idempotent: already online → refresh TTL and succeed (no error on double-tap).
         if await is_driver_online(user_id):
             await refresh_driver_presence(user_id, lat=lat or None, lng=lng or None)
@@ -820,12 +826,21 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
             except Exception as compliance_error:
                 logger.warning(f"Document expiry pre-check warning for {user_id}: {compliance_error}")
 
+        from driver_trial_policy import record_first_go_online
+        from routers.payments import _ensure_auto_trial_for_verified_driver, _evaluate_driver_trial
+
+        await _ensure_auto_trial_for_verified_driver(user_id)
+        await record_first_go_online(user_id)
+
         subscription = await db.subscriptions.find_one(
             {"driver_id": user_id},
-            {"_id": 0, "id": 1, "status": 1, "end_date": 1, "trial_active": 1},
+            {"_id": 0},
             sort=[("created_at", -1)],
             max_time_ms=QUERY_MAX_TIME_MS,
         )
+        if subscription and subscription.get("status") == "trial":
+            subscription = await _evaluate_driver_trial(user_id, subscription)
+
         if not subscription or subscription.get("status") not in {"active", "grace_period", "trial"}:
             await db.driver_profiles.update_one(
                 {"user_id": user_id},
@@ -836,17 +851,21 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
                 {"id": user_id},
                 {"$set": {"subscription_active": False}},
             )
+            if subscription and subscription.get("status") == "pending_payment":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Your free trial has ended. Subscribe to keep receiving trips.",
+                )
             raise HTTPException(
                 status_code=403,
                 detail="No active plan. Start your verified-driver trial or subscribe to go online.",
             )
 
-        # Trial gate: trust persisted subscription status on the hot path.
-        # Live trip re-count runs on the subscription screen, not every go-online tap.
+        # Trial gate: live evaluation above; block exhausted trials.
         if subscription.get("status") == "pending_payment":
             raise HTTPException(
                 status_code=403,
-                detail="Your free trial trips are used up. Subscribe to a plan to go online.",
+                detail="Your free trial has ended. Subscribe to keep receiving trips.",
             )
 
         now = datetime.utcnow()
@@ -913,10 +932,14 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
                 )
                 return {"message": "Driver is now offline", "already_offline": True}
 
-    await db.driver_profiles.update_one(
-        {"user_id": user_id},
-        {"$set": {"is_online": is_online}},
-    )
+    profile_online_update: dict = {"$set": {"is_online": is_online}}
+    if is_online:
+        profile_online_update["$set"]["online_session_started_at"] = datetime.now(
+            timezone.utc
+        ).isoformat()
+    else:
+        profile_online_update["$unset"] = {"online_session_started_at": ""}
+    await db.driver_profiles.update_one({"user_id": user_id}, profile_online_update)
 
     if is_online:
         await set_driver_online(user_id, lat=lat, lng=lng)
@@ -1090,15 +1113,16 @@ async def verify_driver_documents(
                     doc_meta["storage"] = "inline"
                 stored_docs[doc_key] = doc_meta
 
-        # NIN digits-only: store under documents.nin so admin lists / archive checks match slip uploads.
+        # NIN digits-only: store encrypted metadata — never plaintext in Mongo.
         if nin_number_ok and "nin" not in stored_docs:
-            nin_bytes = normalized_nin_number.encode("utf-8")
+            enc = encrypt_pii_value(normalized_nin_number, kind="nin")
             stored_docs["nin"] = {
                 "filename": "nin_number.txt",
                 "content_type": "application/x-nexryde-nin+v1",
-                "data": base64.b64encode(nin_bytes).decode("utf-8"),
-                "size_bytes": len(nin_bytes),
-                "sha256": _sha256_bytes(nin_bytes),
+                "nin_cipher": enc["cipher"],
+                "nin_last4": enc["last4"],
+                "size_bytes": 0,
+                "sha256": hashlib.sha256(enc["search_hash"].encode()).hexdigest(),
                 "uploaded_at": datetime.now(timezone.utc).isoformat(),
                 "expiry_date": None,
                 "capture_mode": "number_only",
@@ -1119,48 +1143,56 @@ async def verify_driver_documents(
         queue_status = "approved" if automated_approved else "pending"
         now_iso = datetime.now(timezone.utc).isoformat()
 
+        nin_set, nin_unset = nin_storage_fields(normalized_nin_number if nin_number_ok else None)
         doc_archive = {
             "driver_id": driver_id,
             "documents": stored_docs,
             "submitted_at": now_iso,
             "status": verification_status,
             "document_count": len(stored_docs),
-            "nin_number": normalized_nin_number if nin_number_ok else None,
             "nin_capture_mode": "number_only" if (nin_number_ok and not doc_files.get("nin")) else "document_upload",
             "vehicle_license_capture_mode": "document_upload",
             "document_hashes": doc_hashes,
             "duplicate_hashes": duplicate_hashes,
             "forgery_flags": fraud_flags,
+            **nin_set,
         }
         await db.driver_documents.update_one(
             {"driver_id": driver_id},
-            {"$set": doc_archive},
+            {"$set": doc_archive, "$unset": {**nin_unset, "nin_number": ""}},
             upsert=True,
         )
 
+        profile_nin_set = {"nin_last4": nin_set.get("nin_last4"), "nin_hash": nin_set.get("nin_hash")} if nin_set else {}
         await db.driver_profiles.update_one(
             {"user_id": driver_id},
-            {"$set": {
-                "verification_status": verification_status,
-                "documents_verified": automated_approved,
-                "documents_submitted": True,
-                "document_count": len(stored_docs),
-                "submitted_at": now_iso,
-                "documents_approved_at": now_iso if automated_approved else None,
-                "onboarding_step": "profile" if automated_approved else "documents",
-                "verification_fraud_flags": fraud_flags,
-                "nin_number": normalized_nin_number if nin_number_ok else None,
-                "nin_verified": automated_approved,
-                "license_uploaded": bool(drivers_license),
-                "vehicle_docs_uploaded": bool(vehicle_registration and vehicle_license and road_worthiness and insurance),
-                "selfie_verified": bool(passport_photo),
-            }},
+            {
+                "$set": {
+                    "verification_status": verification_status,
+                    "documents_verified": automated_approved,
+                    "documents_submitted": True,
+                    "document_count": len(stored_docs),
+                    "submitted_at": now_iso,
+                    "documents_approved_at": now_iso if automated_approved else None,
+                    "onboarding_step": "profile" if automated_approved else "documents",
+                    "verification_fraud_flags": fraud_flags,
+                    **profile_nin_set,
+                    "nin_verified": automated_approved,
+                    "license_uploaded": bool(drivers_license),
+                    "vehicle_docs_uploaded": bool(vehicle_registration and vehicle_license and road_worthiness and insurance),
+                    "selfie_verified": bool(passport_photo),
+                },
+                "$unset": {"nin_number": ""},
+            },
             upsert=True,
         )
-        await db.users.update_one(
-            {"id": driver_id},
-            {"$set": {"documents_verified": automated_approved, "verification_status": verification_status, "nin": normalized_nin_number if nin_number_ok else None}}
-        )
+        user_nin_update: dict = {"$set": {"documents_verified": automated_approved, "verification_status": verification_status}}
+        if nin_set:
+            user_nin_update["$set"].update(nin_set)
+            user_nin_update["$unset"] = nin_unset
+        elif nin_unset:
+            user_nin_update["$unset"] = nin_unset
+        await db.users.update_one({"id": driver_id}, user_nin_update)
 
         # Ensure admin verification queue always has a row linked to this archived submission.
         existing_verification = await db.driver_verifications.find_one({"user_id": driver_id}, {"_id": 0, "id": 1, "status": 1})
@@ -1181,9 +1213,10 @@ async def verify_driver_documents(
                         "document_count": len(stored_docs),
                         "required_docs_complete": True,
                         "nin_capture_mode": "number_only" if (nin_number_ok and not doc_files.get("nin")) else "document_upload",
-                        "nin_last4": normalized_nin_number[-4:] if nin_number_ok else None,
+                        "nin_last4": nin_set.get("nin_last4") if nin_set else None,
                         "vehicle_license_capture_mode": "document_upload",
                     },
+                    "nin_hash": nin_set.get("nin_hash") if nin_set else None,
                     "documents_archive_ref": {
                         "driver_id": driver_id,
                         "submitted_at": doc_archive["submitted_at"],
@@ -1239,10 +1272,22 @@ async def verify_driver_documents(
 async def get_driver_onboarding_status(driver_id: str, request: Request):
     try:
         verify_owner_strict(request, driver_id)
-        user = await find_user_by_id(driver_id, {"_id": 0, "id": 1, "terms_accepted": 1})
+        user = await find_user_by_id(
+            driver_id,
+            {
+                "_id": 0,
+                "id": 1,
+                "terms_accepted": 1,
+                "terms_version": 1,
+                "privacy_accepted": 1,
+                "privacy_version": 1,
+            },
+        )
         if not user:
             return {"step": "not_found", "completed": False}
-        if not user.get("terms_accepted"):
+        from legal_constants import user_legal_current
+
+        if not user_legal_current(user):
             return {"step": "terms", "completed": False}
         # Lean projection — never pull the full (bloated) profile doc here. A slow
         # full-document fetch was timing out against the frontend's startup budget,
@@ -3341,175 +3386,3 @@ async def provider_withdrawal_callback(payload: WithdrawalProviderCallbackReques
         update_doc["reversed_at"] = datetime.utcnow()
 
     await db.transactions.update_one({"id": payload.transaction_id}, {"$set": update_doc})
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TRIPS TOWARDS DESTINATION — Driver destination mode
-# ═══════════════════════════════════════════════════════════════════════════════
-
-DESTINATION_TRIP_DAILY_LIMIT = 3      # Max trips per day in destination mode
-DESTINATION_MAX_DETOUR_MIN = 10        # Max detour allowed (minutes)
-DESTINATION_ROUTE_RADIUS_KM = 2.5     # Pickup must be within Xkm of the driver→dest corridor
-
-
-class DestinationRequest(BaseModel):
-    destination_lat: float
-    destination_lng: float
-    destination_name: str
-    polyline_coords: Optional[list] = None
-    duration_mins: Optional[float] = None
-    distance_km: Optional[float] = None
-    saved_label: Optional[str] = None   # "home" | "favourite" | custom
-
-
-@drivers_router.post("/drivers/{user_id}/destination")
-async def set_driver_destination(user_id: str, body: DestinationRequest, request: Request):
-    """Activate 'Trips towards destination' mode for a driver."""
-    verify_owner_strict(request, user_id)
-
-    profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0})
-    if not profile:
-        raise HTTPException(status_code=404, detail="Driver profile not found")
-
-    # ── Check/reset daily counter ──
-    today = datetime.now().strftime("%Y-%m-%d")
-    last_reset = profile.get("destination_last_reset_date", "")
-    daily_trips = int(profile.get("daily_destination_trips", 0) or 0)
-    if last_reset != today:
-        daily_trips = 0  # new day — reset
-
-    if daily_trips >= DESTINATION_TRIP_DAILY_LIMIT:
-        return {
-            "blocked": True,
-            "daily_trips": daily_trips,
-            "limit": DESTINATION_TRIP_DAILY_LIMIT,
-            "trips_remaining": 0,
-            "message": f"Daily limit reached ({DESTINATION_TRIP_DAILY_LIMIT} trips). Resets at midnight.",
-        }
-
-    # ── Activate destination mode ──
-    await db.driver_profiles.update_one(
-        {"user_id": user_id},
-        {"$set": {
-            "destination_mode": True,
-            "destination_lat": body.destination_lat,
-            "destination_lng": body.destination_lng,
-            "destination_name": body.destination_name,
-            "destination_polyline": body.polyline_coords or [],
-            "destination_duration_mins": body.duration_mins,
-            "destination_distance_km": body.distance_km,
-            "destination_saved_label": body.saved_label or "",
-            "destination_set_at": datetime.now(timezone.utc).isoformat(),
-            "destination_last_reset_date": today,
-            "daily_destination_trips": daily_trips,
-        }}
-    )
-
-    return {
-        "success": True,
-        "active": True,
-        "daily_trips": daily_trips,
-        "limit": DESTINATION_TRIP_DAILY_LIMIT,
-        "trips_remaining": DESTINATION_TRIP_DAILY_LIMIT - daily_trips,
-        "destination_name": body.destination_name,
-    }
-
-
-@drivers_router.delete("/drivers/{user_id}/destination")
-async def cancel_driver_destination(user_id: str, request: Request):
-    """Cancel destination mode."""
-    verify_owner_strict(request, user_id)
-    await db.driver_profiles.update_one(
-        {"user_id": user_id},
-        {"$set": {"destination_mode": False, "destination_cancelled_at": datetime.now(timezone.utc).isoformat()}}
-    )
-    return {"success": True, "active": False}
-
-
-@drivers_router.get("/drivers/{user_id}/destination")
-async def get_driver_destination(user_id: str, request: Request):
-    """Get current destination mode state + daily trip count."""
-    verify_owner_strict(request, user_id)
-
-    profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0})
-    if not profile:
-        raise HTTPException(status_code=404, detail="Driver profile not found")
-
-    # ── Reset daily counter if new day ──
-    today = datetime.now().strftime("%Y-%m-%d")
-    last_reset = profile.get("destination_last_reset_date", "")
-    daily_trips = int(profile.get("daily_destination_trips", 0) or 0)
-    if last_reset != today:
-        daily_trips = 0
-        await db.driver_profiles.update_one(
-            {"user_id": user_id},
-            {"$set": {"daily_destination_trips": 0, "destination_last_reset_date": today}}
-        )
-
-    limit_reached = daily_trips >= DESTINATION_TRIP_DAILY_LIMIT
-    mode_active = bool(profile.get("destination_mode")) and not limit_reached
-
-    # Auto-disable if limit reached
-    if limit_reached and profile.get("destination_mode"):
-        await db.driver_profiles.update_one(
-            {"user_id": user_id},
-            {"$set": {"destination_mode": False}}
-        )
-
-    return {
-        "active": mode_active,
-        "limit_reached": limit_reached,
-        "daily_trips": daily_trips,
-        "daily_limit": DESTINATION_TRIP_DAILY_LIMIT,
-        "trips_remaining": max(0, DESTINATION_TRIP_DAILY_LIMIT - daily_trips),
-        "destination_name": profile.get("destination_name") or "",
-        "destination_lat": profile.get("destination_lat"),
-        "destination_lng": profile.get("destination_lng"),
-        "destination_distance_km": profile.get("destination_distance_km"),
-        "destination_duration_mins": profile.get("destination_duration_mins"),
-        "destination_set_at": profile.get("destination_set_at"),
-        "destination_saved_label": profile.get("destination_saved_label") or "",
-    }
-
-
-@drivers_router.post("/drivers/{user_id}/destination/saved")
-async def save_driver_destination_location(user_id: str, request: Request):
-    """Save a Home or Favourite destination for quick access."""
-    verify_owner_strict(request, user_id)
-    body = await request.json()
-    label = body.get("label", "home")   # "home" | "favourite" | custom name
-    name = body.get("name", "")
-    lat = body.get("lat")
-    lng = body.get("lng")
-    if not lat or not lng or not name:
-        raise HTTPException(status_code=400, detail="lat, lng and name are required")
-
-    field = f"destination_saved_{label.lower()[:20]}"
-    await db.users.update_one(
-        {"id": user_id},
-        {"$set": {field: {"name": name, "lat": lat, "lng": lng, "updated_at": datetime.now(timezone.utc).isoformat()}}}
-    )
-    return {"success": True, "label": label, "name": name}
-
-
-@drivers_router.get("/drivers/{user_id}/destination/saved")
-async def get_driver_saved_destinations(user_id: str, request: Request):
-    """Get saved Home/Favourite destinations for quick access."""
-    verify_owner_strict(request, user_id)
-    user = await db.users.find_one({"id": user_id}, {"_id": 0}) or {}
-    saved = []
-    for key, val in user.items():
-        if key.startswith("destination_saved_") and isinstance(val, dict):
-            label = key.replace("destination_saved_", "")
-            saved.append({"label": label, **val})
-    return {"saved": saved}
-
-
-@drivers_router.delete("/drivers/{user_id}/destination/saved/{label}")
-async def delete_driver_saved_destination(user_id: str, label: str, request: Request):
-    """Delete a saved destination (home, favourite, etc.)."""
-    verify_owner_strict(request, user_id)
-    safe_label = label.lower()[:20]
-    field = f"destination_saved_{safe_label}"
-    await db.users.update_one({"id": user_id}, {"$unset": {field: ""}})
-    return {"success": True, "label": safe_label}

@@ -32,10 +32,9 @@ type Props = {
   sonarAnim?: unknown;
   listenCarouselIndex?: number;
   // Active props
-  destinationActive: boolean;
-  destinationName: string;
-  destinationTripsRemaining: number;
-  onDestination?: () => void;
+  workZoneActive: boolean;
+  workZoneLabel: string;
+  onWorkZone?: () => void;
   isFindingRide: boolean;
   onShield: () => void;
   onGoOffline: () => void;
@@ -47,10 +46,9 @@ type Props = {
 export function DriverMapHybridIdleDock({
   paddingBottom,
   paddingHorizontal,
-  destinationActive,
-  destinationName,
-  destinationTripsRemaining,
-  onDestination,
+  workZoneActive,
+  workZoneLabel,
+  onWorkZone,
   isFindingRide,
   onShield,
   onGoOffline,
@@ -95,11 +93,11 @@ export function DriverMapHybridIdleDock({
               <Text style={styles.onlineTxt}>ONLINE</Text>
             </View>
 
-            {destinationActive && destinationName && onDestination ? (
-              <TouchableOpacity style={styles.destBannerCompact} onPress={onDestination} activeOpacity={0.9}>
-                <Ionicons name="navigate-circle" size={16} color={HYBRID.teal} />
+            {workZoneActive && workZoneLabel && onWorkZone ? (
+              <TouchableOpacity style={styles.destBannerCompact} onPress={onWorkZone} activeOpacity={0.9}>
+                <Ionicons name="map" size={16} color={HYBRID.teal} />
                 <Text style={styles.destTxtCompact} numberOfLines={1}>
-                  {destinationName}{destinationTripsRemaining > 0 ? ` · ${destinationTripsRemaining} left` : ''}
+                  Zone: {workZoneLabel} · ON
                 </Text>
                 <Ionicons name="chevron-forward" size={14} color={HYBRID.muted} />
               </TouchableOpacity>

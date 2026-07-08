@@ -27,7 +27,9 @@ echo "Project: $PROJECT_ID"
 
 SECRETS=(
   JWT_SECRET
+  NIN_FERNET_KEY
   MONGODB_URI
+  MONGODB_URI_STAGING
   SQUAD_SECRET_KEY
   SQUAD_PUBLIC_KEY
   SQUAD_WEBHOOK_SECRET
@@ -71,12 +73,14 @@ _add_version_if_empty() {
 echo ""
 echo "── Auto-generated secrets ────────────────────────────────────────────────"
 _add_version_if_empty JWT_SECRET       "$(openssl rand -hex 32)"
+_add_version_if_empty NIN_FERNET_KEY   "$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
 _add_version_if_empty NEXRYDE_OPS_KEY  "$(openssl rand -hex 32)"
 
 echo ""
 echo "── Secrets requiring your values ────────────────────────────────────────"
 MANUAL=(
   MONGODB_URI
+  MONGODB_URI_STAGING
   SQUAD_SECRET_KEY
   SQUAD_PUBLIC_KEY
   SQUAD_WEBHOOK_SECRET

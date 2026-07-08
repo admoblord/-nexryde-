@@ -116,7 +116,7 @@ export default function PickUpCodeScreen() {
 
   const applyTripPayload = useCallback(
     (trip: Record<string, any>, statusPayload?: Record<string, any>) => {
-      const required = trip.pickup_code_required !== false;
+      const required = trip.pickup_code_required === true;
       setPickupCodeRequired(required);
       if (!required) {
         setPickupCode('');

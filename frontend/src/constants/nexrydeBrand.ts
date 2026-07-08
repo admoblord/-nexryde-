@@ -1,11 +1,13 @@
 /**
- * Canonical NEXRYDE brand — logo, wordmark, colors (single source of truth).
+ * Canonical NexRyde brand — re-exports designSystem tokens (single source of truth).
  */
+import { APP_DISPLAY_NAME, BRAND } from '@/src/constants/designSystem';
+
 export const NEXRYDE_BRAND = {
-  name: 'NEXRYDE',
-  green: '#00D084',
-  greenEnd: '#00B85C',
-  blue: '#0066FF',
+  name: APP_DISPLAY_NAME.toUpperCase(),
+  green: BRAND.primary,
+  greenEnd: BRAND.primaryDark,
+  blue: BRAND.accentBlue,
   wordmark: {
     fontSize: 17,
     fontWeight: '900' as const,

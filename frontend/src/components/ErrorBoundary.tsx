@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from '@/src/constants/theme';
 import CrashReporter from '@/src/services/crashReporting';
+import { sentryError } from '@/src/utils/sentryBreadcrumbs';
 
 interface Props {
   children: ReactNode;
@@ -48,6 +49,10 @@ export class ErrorBoundary extends Component<Props, State> {
     console.error('Component stack:', errorInfo.componentStack);
 
     CrashReporter.captureException(error, { component: errorInfo?.componentStack?.slice(0, 200) || 'unknown' });
+    sentryError(error, {
+      boundary: 'ErrorBoundary',
+      componentStack: errorInfo?.componentStack?.slice(0, 500),
+    });
 
     // Log to help identify the issue
     if (error.message) {

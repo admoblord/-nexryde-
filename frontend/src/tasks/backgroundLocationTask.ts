@@ -9,6 +9,8 @@
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import { getAuthHeaders, BACKEND_URL } from '@/src/services/api';
+import { fetchWithTimeout } from '@/src/utils/fetchWithTimeout';
+import { updateDriverHeartbeatCoords } from '@/src/services/driverHeartbeat';
 
 export const DRIVER_LOCATION_TASK = 'DRIVER_BACKGROUND_LOCATION';
 
@@ -32,7 +34,9 @@ TaskManager.defineTask(DRIVER_LOCATION_TASK, async ({ data, error }: TaskManager
     const userId = state.user?.id;
     if (!userId) return;
 
-    await fetch(`${BACKEND_URL}/api/drivers/${userId}/location`, {
+    updateDriverHeartbeatCoords(latitude, longitude);
+
+    await fetchWithTimeout(`${BACKEND_URL}/api/drivers/${userId}/location`, {
       method: 'PUT',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -41,6 +45,7 @@ TaskManager.defineTask(DRIVER_LOCATION_TASK, async ({ data, error }: TaskManager
         heading: heading ?? null,
         speed_kmh: speed != null ? speed * 3.6 : null,
       }),
+      timeoutMs: 10_000,
     });
   } catch {
     // Background task — never crash the app

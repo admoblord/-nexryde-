@@ -1,6 +1,8 @@
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { fetchAuthed } from '@/src/utils/sessionRefresh';
 import { debugSessionLog } from '@/src/utils/debugSessionLog';
+import { isNetworkReachable } from '@/src/services/networkManager';
+import { queueTripRequest } from '@/src/utils/offlineQueueActions';
 
 export type RideRequestPayload = Record<string, unknown>;
 
@@ -105,6 +107,14 @@ export async function requestRideWithRetry(
         transient ? 'H-A' : 'H-B',
       );
       if (attempt >= maxRetries || !isTransientRequestError(err)) {
+        if (isTransientRequestError(err)) {
+          const online = await isNetworkReachable().catch(() => false);
+          if (!online) {
+            await queueTripRequest(riderId, body);
+            debugSessionLog('rideRequestService.ts:queued', 'trip_request_offline_queued', { riderId }, 'H-A');
+            return { tripId: null, trip: null, eligibleDrivers: 0 };
+          }
+        }
         throw err;
       }
       const delayMs = 2000 * (attempt + 1);

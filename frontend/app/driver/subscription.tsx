@@ -25,6 +25,7 @@ import { ScreenShell } from '@/src/components/ScreenShell';
 import {
   fetchSubscriptionScreenData,
 } from '@/src/services/subscriptionScreenData';
+import { buildTrialBannerText } from '@/src/utils/driverTrialDisplay';
 import {
   initiateSubscriptionCheckout,
   verifyPendingSubscriptionCheckout,
@@ -455,84 +456,66 @@ export default function SubscriptionScreen() {
                   </Text>
                   {subscription.trial_active && (() => {
                     const completed = subscription.trial_trips_completed ?? 0;
-                    const target = subscription.trial_trips_target ?? 20;
+                    const target = subscription.trial_trips_target ?? 15;
                     const remaining = Math.max(0, target - completed);
+                    const daysLeft = subscription.trial_days_remaining;
                     const pct = Math.min(100, target > 0 ? (completed / target) * 100 : 0);
-                    const urgency = (subscription as any).trial_urgency ?? 'normal';
-                    const barColor = urgency === 'critical' ? '#EF4444' : urgency === 'warning' ? '#F59E0B' : '#22C55E';
-                    const extCount = (subscription as any).trial_extension_count ?? 0;
-                    const maxExt = 2;
-
-                    // Milestone markers: 25%, 50%, 75%, 100%
-                    const milestones = [5, 10, 15, target];
+                    const urgency = subscription.trial_urgency ?? 'normal';
+                    const barColor = urgency === 'critical' || urgency === 'expired' ? '#EF4444' : urgency === 'warning' ? '#F59E0B' : '#22C55E';
+                    const bannerText = buildTrialBannerText({
+                      completed,
+                      target,
+                      daysRemaining: daysLeft,
+                      dayLimit: subscription.trial_day_limit,
+                      serverMessage: subscription.trial_message,
+                    });
+                    const monthlyFee = subscription.monthly_price;
+                    const firstMonthFee = subscription.early_subscribe_first_month_fee_ngn;
 
                     return (
                       <View style={styles.trialProgressContainer}>
-                        {/* Badge row */}
                         <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
                           <View style={styles.trialBadge}>
                             <Ionicons name="flash" size={13} color="#FFFFFF" />
-                            <Text style={styles.trialBadgeText}>
-                              {subscription.trial_extended ? `Extended ×${extCount}` : 'Free Trial'}
-                            </Text>
+                            <Text style={styles.trialBadgeText}>Free Trial</Text>
                           </View>
-                          {remaining <= 5 && remaining > 0 && (
+                          {(remaining <= 3 || (daysLeft != null && daysLeft <= 3)) && (
                             <View style={[styles.trialBadge, { backgroundColor: '#EF4444' }]}>
                               <Ionicons name="alert-circle" size={13} color="#FFF" />
-                              <Text style={styles.trialBadgeText}>Almost done!</Text>
-                            </View>
-                          )}
-                          {subscription.trial_extended && extCount < maxExt && (
-                            <View style={[styles.trialBadge, { backgroundColor: 'rgba(245,158,11,0.8)' }]}>
-                              <Ionicons name="time-outline" size={13} color="#FFF" />
-                              <Text style={styles.trialBadgeText}>{maxExt - extCount} ext. left</Text>
+                              <Text style={styles.trialBadgeText}>Ending soon</Text>
                             </View>
                           )}
                         </View>
 
-                        {/* Progress numbers */}
+                        <Text style={[styles.trialProgressLabel, { marginBottom: 8, fontWeight: '800' }]}>
+                          {bannerText}
+                        </Text>
+
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
                           <Text style={styles.trialProgressLabel}>{completed} trips completed</Text>
-                          <Text style={[styles.trialProgressLabel, { fontWeight: '800' }]}>{remaining} left</Text>
+                          <Text style={[styles.trialProgressLabel, { fontWeight: '800' }]}>
+                            {daysLeft != null ? `${daysLeft} days left` : `${remaining} trips left`}
+                          </Text>
                         </View>
 
-                        {/* Progress bar with milestone ticks */}
                         <View style={{ position: 'relative', marginBottom: 14 }}>
                           <View style={styles.trialProgressBarBg}>
                             <View style={[styles.trialProgressBarFill, { width: `${pct}%` as any, backgroundColor: barColor }]} />
                           </View>
-                          {/* Milestone tick marks */}
-                          {milestones.filter(m => m < target).map((m) => {
-                            const tickPct = (m / target) * 100;
-                            return (
-                              <View
-                                key={m}
-                                style={{
-                                  position: 'absolute',
-                                  left: `${tickPct}%` as any,
-                                  top: -3,
-                                  width: 1,
-                                  height: 10,
-                                  backgroundColor: 'rgba(255,255,255,0.4)',
-                                }}
-                              />
-                            );
-                          })}
                         </View>
 
-                        {/* Context message */}
-                        {(subscription as any).trial_message ? (
-                          <Text style={[styles.trialExtendedNote, { color: urgency === 'critical' ? '#FCA5A5' : 'rgba(255,255,255,0.75)' }]}>
-                            {(subscription as any).trial_message}
+                        {subscription.early_subscribe_message ? (
+                          <Text style={[styles.trialExtendedNote, { color: '#86EFAC', fontWeight: '700' }]}>
+                            {subscription.early_subscribe_message}
                           </Text>
                         ) : null}
 
-                        {/* What happens next */}
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
                           <Ionicons name="information-circle-outline" size={13} color="rgba(255,255,255,0.55)" />
                           <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', flex: 1 }}>
-                            After {target} trips, subscribe for ₦18,000/month to keep earning.
-                            {extCount < maxExt ? ` Low activity auto-extends trial (up to ${maxExt}×).` : ''}
+                            {firstMonthFee
+                              ? `Subscribe during trial: ₦${firstMonthFee.toLocaleString()} first month, then ₦${monthlyFee.toLocaleString()}/month.`
+                              : `After your trial, subscribe for ₦${monthlyFee.toLocaleString()}/month to keep earning.`}
                           </Text>
                         </View>
                       </View>
@@ -545,6 +528,18 @@ export default function SubscriptionScreen() {
                   )}
                 </View>
               </LinearGradient>
+            </Animated.View>
+          )}
+
+          {subscription && subscription.status === 'pending_payment' && subscription.trial_completed && (
+            <Animated.View style={[styles.trialEndedCard, { opacity: fadeAnim }]}>
+              <Ionicons name="checkmark-circle-outline" size={28} color="#FBBF24" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.trialEndedTitle}>Your free trial has ended</Text>
+                <Text style={styles.trialEndedBody}>
+                  Subscribe to keep receiving trips. You can still view earnings, history, and profile.
+                </Text>
+              </View>
             </Animated.View>
           )}
 
@@ -1095,6 +1090,20 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.8)',
     marginTop: 6,
   },
+  trialEndedCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14,
+    marginHorizontal: 16,
+    marginBottom: 14,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: 'rgba(251,191,36,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.35)',
+  },
+  trialEndedTitle: { fontSize: 16, fontWeight: '800', color: '#FDE68A', marginBottom: 4 },
+  trialEndedBody: { fontSize: 13, color: 'rgba(255,255,255,0.75)', lineHeight: 18 },
   pendingTierCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',

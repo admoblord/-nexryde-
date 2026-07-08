@@ -1,19 +1,21 @@
 /**
  * NEXRYDE Full Hybrid Design System — shared across rider booking, driver home, driver map.
  */
+import { BRAND, SURFACE } from '@/src/constants/designSystem';
+
 export const HYBRID = {
-  green: '#00D084',
-  blue: '#0066FF',
-  purple: '#9D4EDD',
+  green: BRAND.primary,
+  blue: BRAND.accentBlue,
+  purple: BRAND.accentPurple,
   yellow: '#FFD700',
-  teal: '#00D9A3',
-  red: '#8B0000',
-  navy: '#0F1419',
-  card: '#1A1F2E',
-  border: '#2D3748',
-  text: '#FFFFFF',
-  muted: '#9CA3AF',
-  chipBg: '#2D3748',
+  teal: BRAND.accentCyan,
+  red: BRAND.danger,
+  navy: BRAND.bgDeep,
+  card: SURFACE.cardDark,
+  border: 'rgba(148,163,184,0.18)',
+  text: BRAND.textPrimary,
+  muted: BRAND.textSecondary,
+  chipBg: SURFACE.cardElevated,
 } as const;
 
 export const HYBRID_PAD = 16;

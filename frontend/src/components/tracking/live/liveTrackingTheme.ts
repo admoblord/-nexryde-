@@ -1,28 +1,29 @@
 /**
- * NEXRYDE Live Tracking — premium dark glass design system.
+ * NexRyde Live Tracking — premium dark glass design system.
  */
 import type { ViewStyle } from 'react-native';
+import { BRAND, SURFACE } from '@/src/constants/designSystem';
 
 export const LIVE = {
   bg: '#030810',
   mapBg: '#0A111C',
-  glass: 'rgba(6,12,22,0.92)',
-  glassSoft: 'rgba(12,18,30,0.86)',
-  glassBorder: 'rgba(0,208,132,0.22)',
-  hairline: 'rgba(255,255,255,0.09)',
-  tile: 'rgba(255,255,255,0.06)',
-  green: '#00D084',
-  greenBright: '#2BE8A6',
-  greenGlow: 'rgba(0,208,132,0.38)',
-  greenSoft: 'rgba(0,208,132,0.14)',
+  glass: SURFACE.glass,
+  glassSoft: SURFACE.glassSoft,
+  glassBorder: SURFACE.glassBorder,
+  hairline: SURFACE.hairline,
+  tile: SURFACE.tile,
+  green: BRAND.primary,
+  greenBright: BRAND.primaryLight,
+  greenGlow: BRAND.primaryMuted,
+  greenSoft: 'rgba(34,225,128,0.14)',
   greenInk: '#022C22',
-  text: '#F8FAFC',
-  sub: '#9DB0C7',
-  faint: '#5E7188',
-  gold: '#FFC93C',
-  red: '#FF5252',
-  redSoft: 'rgba(255,82,82,0.16)',
-  blue: '#38BDF8',
+  text: BRAND.textPrimary,
+  sub: BRAND.textSecondary,
+  faint: BRAND.textMuted,
+  gold: BRAND.warning,
+  red: BRAND.danger,
+  redSoft: 'rgba(239,68,68,0.16)',
+  blue: BRAND.info,
   radiusXl: 28,
   radius: 22,
   radiusSm: 14,

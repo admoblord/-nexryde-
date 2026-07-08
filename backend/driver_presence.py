@@ -1,10 +1,11 @@
 """Driver online presence — Redis-first with Mongo is_online as denormalized index.
 
 Primary store:
-  driver:presence:{driver_id}  JSON {online, lat, lng, updatedAt}  TTL 60s
+  driver:presence:{driver_id}  JSON {online, lat, lng, updatedAt}  TTL 180s
   drivers:available            GEO set (lng, lat, member=driver_id)
 
-Heartbeat (~20s) refreshes TTL so crashed drivers drop out automatically.
+Heartbeat (~60s) refreshes TTL so crashed drivers drop out automatically while
+short network switches do not randomly remove online drivers.
 """
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ from redis_store import store
 
 logger = logging.getLogger(__name__)
 
-PRESENCE_TTL_SEC = 60
+PRESENCE_TTL_SEC = 180
 PRESENCE_KEY_PREFIX = "driver:presence:"
 GEO_AVAILABLE_KEY = "drivers:available"
 

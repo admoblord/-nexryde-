@@ -22,6 +22,10 @@ android/keystore.properties
 
 # Metro
 .metro-health-check*
+.metro-cache/
+
+# Local build artifacts
+build-output/
 
 # debug
 npm-debug.*

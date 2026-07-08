@@ -12,6 +12,7 @@ import com.facebook.react.ReactHost
 import com.facebook.react.common.ReleaseLevel
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
 import com.facebook.react.defaults.DefaultReactNativeHost
+import com.nexryde.app.driver.DriverExperiencePackage
 
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
@@ -22,7 +23,9 @@ class MainApplication : Application(), ReactApplication {
       this,
       object : DefaultReactNativeHost(this) {
         override fun getPackages(): List<ReactPackage> =
-            PackageList(this).packages
+            PackageList(this).packages.apply {
+              add(DriverExperiencePackage())
+            }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"
 

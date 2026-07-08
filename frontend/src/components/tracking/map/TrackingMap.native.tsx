@@ -11,14 +11,14 @@ import { StyleSheet, InteractionManager } from 'react-native';
 import MapView, { Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useAnimatedRouteCoords } from '@/src/hooks/useAnimatedRouteCoords';
-import { fetchDirections } from '@/src/navigation/navUtils';
+import { DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
+import { fetchDirectionsResilient } from '@/src/navigation/fetchDirectionsResilient';
 import type { TrackingMapModel } from '@/src/components/tracking/types';
 import {
   PERFECT_TRACKING,
   PERFECT_TRACKING_MAP_STYLE,
 } from '@/src/components/tracking/trackingMapTokens';
 import {
-  buildFallbackPolyline,
   distanceMarkersAlongRoute,
   bearingDeg,
   isValidMapCoord,
@@ -168,9 +168,19 @@ export const TrackingMap = forwardRef<TrackingMapHandle, TrackingMapProps>(funct
     lastDirFetchRef.current = { lat: origin.lat, lng: origin.lng, at: now };
 
     let cancelled = false;
-    void fetchDirections(origin.lat, origin.lng, dest.lat, dest.lng, key).then((dir) => {
-      if (cancelled || !dir?.overviewCoords?.length) return;
-      setDirectionsRoute(dir.overviewCoords);
+    const cacheKey = model.tripId
+      ? `legacy-${model.tripId}-${model.tripStatus}`
+      : undefined;
+    void fetchDirectionsResilient(
+      origin.lat,
+      origin.lng,
+      dest.lat,
+      dest.lng,
+      key,
+      cacheKey,
+    ).then((result) => {
+      if (cancelled || !result?.coords?.length) return;
+      setDirectionsRoute(result.coords);
     });
     return () => {
       cancelled = true;
@@ -188,58 +198,19 @@ export const TrackingMap = forwardRef<TrackingMapHandle, TrackingMapProps>(funct
   const baseRoute = useMemo(() => {
     const isEnRoute = model.tripStatus === 'accepted' || model.tripStatus === 'arrived';
     const isOngoing = model.tripStatus === 'ongoing';
+    const roadDirections =
+      directionsRoute.length >= DIRECTIONS_ROUTE_MIN_POINTS
+        ? sanitizeMapCoords(directionsRoute)
+        : [];
+    const roadStored =
+      model.routePolyline.length >= DIRECTIONS_ROUTE_MIN_POINTS
+        ? sanitizeMapCoords(model.routePolyline)
+        : [];
 
-    if (isEnRoute) {
-      if (directionsRoute.length >= 2) return sanitizeMapCoords(directionsRoute);
-      if (driver && pickup && isValidMapCoord(driver.lat, driver.lng) && isValidMapCoord(pickup.lat, pickup.lng)) {
-        return sanitizeMapCoords(
-          buildFallbackPolyline(
-            { lat: driver.lat, lng: driver.lng },
-            { lat: pickup.lat, lng: pickup.lng },
-            null,
-          ),
-        );
-      }
-      return [];
-    }
-
-    if (isOngoing) {
-      let raw: Array<{ latitude: number; longitude: number }> = [];
-      if (model.routePolyline.length >= 2) raw = model.routePolyline;
-      else if (directionsRoute.length >= 2) raw = directionsRoute;
-      else if (
-        pickup &&
-        dropoff &&
-        isValidMapCoord(pickup.lat, pickup.lng) &&
-        isValidMapCoord(dropoff.lat, dropoff.lng)
-      ) {
-        raw = buildFallbackPolyline(
-          { lat: pickup.lat, lng: pickup.lng },
-          { lat: dropoff.lat, lng: dropoff.lng },
-          driver && isValidMapCoord(driver.lat, driver.lng) ? driver : null,
-        );
-      }
-      return sanitizeMapCoords(raw);
-    }
-
-    if (directionsRoute.length >= 2) return sanitizeMapCoords(directionsRoute);
-    if (model.routePolyline.length >= 2) return sanitizeMapCoords(model.routePolyline);
-    if (
-      pickup &&
-      dropoff &&
-      isValidMapCoord(pickup.lat, pickup.lng) &&
-      isValidMapCoord(dropoff.lat, dropoff.lng)
-    ) {
-      return sanitizeMapCoords(
-        buildFallbackPolyline(
-          { lat: pickup.lat, lng: pickup.lng },
-          { lat: dropoff.lat, lng: dropoff.lng },
-          driver && isValidMapCoord(driver.lat, driver.lng) ? driver : null,
-        ),
-      );
-    }
-    return [];
-  }, [model.routePolyline, model.tripStatus, directionsRoute, pickup, dropoff, driver]);
+    if (isEnRoute) return roadDirections;
+    if (isOngoing) return roadDirections.length ? roadDirections : roadStored;
+    return roadDirections.length ? roadDirections : roadStored;
+  }, [model.routePolyline, model.tripStatus, directionsRoute]);
 
   const animatedRoute = useAnimatedRouteCoords(baseRoute, baseRoute.length >= 2, 1000);
 

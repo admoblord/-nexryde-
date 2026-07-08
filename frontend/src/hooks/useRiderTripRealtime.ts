@@ -1,35 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { BACKEND_URL } from '@/src/services/api';
-import { getValidToken } from '@/src/lib/tokenStore';
+import { managedFetch } from '@/src/services/networkManager';
+import { riderTripSocket } from '@/src/services/riderTripSocket';
 
-export function getBackendWsBaseUrl(): string {
-  const url = BACKEND_URL.replace(/\/$/, '');
-  if (url.startsWith('https://')) return url.replace('https://', 'wss://');
-  if (url.startsWith('http://')) return url.replace('http://', 'ws://');
-  return `wss://${url}`;
-}
-
-export type RiderTripWsMessage = {
-  type: string;
-  trip_id?: string;
-  status?: string;
-  trip?: Record<string, unknown>;
-  driver_location?: {
-    lat: number;
-    lng: number;
-    updated_at?: string;
-    heading?: number;
-    speed_kmh?: number;
-    eta_seconds?: number;
-    distance_km?: number;
-    status?: string;
-  } | null;
-  eta_seconds?: number;
-  distance_remaining_km?: number;
-  distance_remaining?: number;
-  speed_kmh?: number;
-  timestamp?: string;
-};
+export { getBackendWsBaseUrl, type RiderTripWsMessage } from '@/src/services/riderTripTypes';
 
 type Options = {
   riderId: string | undefined;
@@ -37,11 +11,12 @@ type Options = {
   token?: string | null;
   enabled: boolean;
   watchTripId?: string | null;
-  onTripUpdate: (msg: RiderTripWsMessage) => void;
+  onTripUpdate: (msg: import('@/src/services/riderTripTypes').RiderTripWsMessage) => void;
 };
 
 /**
- * WebSocket to `/api/ws/rider/trips/{riderId}` — token fetched lazily on connect.
+ * Subscribes to the singleton rider trip WebSocket.
+ * Falls back to HTTP poll when WS is disconnected.
  */
 export function useRiderTripRealtime({
   riderId,
@@ -50,130 +25,72 @@ export function useRiderTripRealtime({
   onTripUpdate,
 }: Options): { connected: boolean } {
   const [connected, setConnected] = useState(false);
-  const attemptRef = useRef(0);
-  const wsRef = useRef<WebSocket | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const enabledRef = useRef(enabled);
   const watchRef = useRef(watchTripId);
   const cbRef = useRef(onTripUpdate);
-  enabledRef.current = enabled;
+  const pollEtagRef = useRef('');
   watchRef.current = watchTripId;
   cbRef.current = onTripUpdate;
 
   useEffect(() => {
     if (!enabled || !riderId) {
       setConnected(false);
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-      if (wsRef.current) {
-        try {
-          wsRef.current.close();
-        } catch {
-          /* ignore */
-        }
-        wsRef.current = null;
-      }
       return;
     }
 
-    let cancelled = false;
+    riderTripSocket.acquire(riderId);
 
-    const scheduleReconnect = () => {
-      if (cancelled || !enabledRef.current) return;
-      const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(attemptRef.current, 6)));
-      attemptRef.current += 1;
-      timerRef.current = setTimeout(() => void connect(), delay);
-    };
+    const unsubTrip = riderTripSocket.subscribeTrip((data) => {
+      const w = watchRef.current;
+      if (w != null && w !== '' && String(data.trip_id) !== String(w)) return;
+      cbRef.current(data);
+    });
 
-    const connect = async () => {
-      if (cancelled || !enabledRef.current || !riderId) return;
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-      if (wsRef.current) {
-        try {
-          wsRef.current.close();
-        } catch {
-          /* ignore */
-        }
-        wsRef.current = null;
-      }
-
-      const liveToken = await getValidToken();
-      if (!liveToken || cancelled || !enabledRef.current) return;
-
-      const base = getBackendWsBaseUrl();
-      const wsUrl = `${base}/api/ws/rider/trips/${encodeURIComponent(riderId)}?token=${encodeURIComponent(liveToken)}`;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (cancelled) return;
-        attemptRef.current = 0;
-        setConnected(true);
-        if (pingRef.current) clearInterval(pingRef.current);
-        pingRef.current = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            try {
-              ws.send(JSON.stringify({ type: 'ping' }));
-            } catch {
-              /* ignore */
-            }
-          }
-        }, 30_000);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data as string) as RiderTripWsMessage;
-          if (data.type !== 'trip_update') return;
-          const w = watchRef.current;
-          if (w != null && w !== '' && String(data.trip_id) !== String(w)) return;
-          cbRef.current(data);
-        } catch {
-          /* ignore */
-        }
-      };
-
-      ws.onclose = () => {
-        if (pingRef.current) {
-          clearInterval(pingRef.current);
-          pingRef.current = null;
-        }
-        if (cancelled) return;
-        setConnected(false);
-        wsRef.current = null;
-        scheduleReconnect();
-      };
-    };
-
-    void connect();
+    const unsubConn = riderTripSocket.subscribeConnection(setConnected);
 
     return () => {
-      cancelled = true;
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-      if (pingRef.current) {
-        clearInterval(pingRef.current);
-        pingRef.current = null;
-      }
-      if (wsRef.current) {
-        try {
-          wsRef.current.close();
-        } catch {
-          /* ignore */
-        }
-        wsRef.current = null;
-      }
+      unsubTrip();
+      unsubConn();
+      riderTripSocket.release();
       setConnected(false);
     };
   }, [enabled, riderId]);
+
+  // HTTP poll fallback while WS is down (backend caches last push per rider).
+  useEffect(() => {
+    if (!enabled || !riderId || connected) return;
+
+    let cancelled = false;
+
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const res = await managedFetch(`${BACKEND_URL}/api/trips/poll/${encodeURIComponent(riderId)}`, {
+          authed: true,
+          timeoutMs: 8000,
+          retries: 0,
+          headers: pollEtagRef.current ? { 'If-None-Match': pollEtagRef.current } : undefined,
+        });
+        if (res.status === 304 || res.status === 204) return;
+        if (!res.ok) return;
+        const body = (await res.json()) as { payload?: import('@/src/services/riderTripTypes').RiderTripWsMessage; etag?: string };
+        if (body.etag) pollEtagRef.current = body.etag;
+        const data = body.payload;
+        if (!data || data.type !== 'trip_update') return;
+        const w = watchRef.current;
+        if (w != null && w !== '' && String(data.trip_id) !== String(w)) return;
+        cbRef.current(data);
+      } catch {
+        /* non-fatal */
+      }
+    };
+
+    void poll();
+    const id = setInterval(() => void poll(), 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [enabled, riderId, connected]);
 
   return { connected };
 }

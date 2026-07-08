@@ -7,7 +7,6 @@
     "preview": {
       "distribution": "internal",
       "node": "20.19.4",
-      "prebuildCommand": "npx expo prebuild --platform android --no-install",
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-backend-993913300770.us-central1.run.app",
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY",
@@ -16,9 +15,11 @@
       },
       "autoIncrement": true,
       "android": {
+        "prebuildCommand": "npx expo prebuild --platform android --no-install",
         "buildType": "apk"
       },
       "ios": {
+        "prebuildCommand": "npx expo prebuild --platform ios --no-install",
         "simulator": false,
         "buildConfiguration": "Release"
       }
@@ -26,7 +27,6 @@
     "production": {
       "distribution": "store",
       "node": "20.19.4",
-      "prebuildCommand": "npx expo prebuild --platform android --no-install",
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-backend-993913300770.us-central1.run.app",
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY",
@@ -35,13 +35,16 @@
       },
       "autoIncrement": true,
       "android": {
+        "prebuildCommand": "npx expo prebuild --platform android --no-install",
         "buildType": "app-bundle",
         "gradleCommand": ":app:bundleRelease",
         "resourceClass": "medium"
       },
       "ios": {
+        "prebuildCommand": "npx expo prebuild --platform ios --no-install",
         "buildConfiguration": "Release",
-        "autoIncrement": "buildNumber"
+        "autoIncrement": "buildNumber",
+        "resourceClass": "m-medium"
       }
     },
     "simulator": {

@@ -22,6 +22,8 @@ type Props = {
   arrived: boolean;
   phase?: EtaPhase;
   destEtaMinutes?: number | null;
+  /** Live trip active but driver GPS not on map yet — honest holding state. */
+  connecting?: boolean;
 };
 
 function fmtKm(km: number | null): string {
@@ -56,7 +58,7 @@ function PulseDot({ color }: { color: string }) {
   );
 }
 
-function LiveEtaTopCardInner({ topInset, title, etaMinutes, distanceKm, arrived, phase, destEtaMinutes }: Props) {
+function LiveEtaTopCardInner({ topInset, title, etaMinutes, distanceKm, arrived, phase, destEtaMinutes, connecting }: Props) {
   const effectivePhase: EtaPhase = phase ?? (arrived ? 'arrived' : 'accepted');
 
   // Badge glow animation
@@ -110,6 +112,7 @@ function LiveEtaTopCardInner({ topInset, title, etaMinutes, distanceKm, arrived,
   }[effectivePhase];
 
   const etaLine = (() => {
+    if (connecting) return 'Connecting to your driver…';
     if (effectivePhase === 'arrived') return 'Driver is here';
     if (effectivePhase === 'ongoing') {
       if (destEtaMinutes != null && destEtaMinutes > 0) return `${destEtaMinutes} min`;
@@ -119,6 +122,7 @@ function LiveEtaTopCardInner({ topInset, title, etaMinutes, distanceKm, arrived,
   })();
 
   const distLine = (() => {
+    if (connecting) return 'Live location will appear on the map';
     if (effectivePhase === 'arrived') return 'Walk out to meet them';
     if (effectivePhase === 'ongoing') {
       const km = fmtKm(distanceKm);
@@ -128,6 +132,7 @@ function LiveEtaTopCardInner({ topInset, title, etaMinutes, distanceKm, arrived,
   })();
 
   const labelText = (() => {
+    if (connecting) return 'CONNECTING';
     if (effectivePhase === 'arrived') return 'YOUR DRIVER IS HERE';
     if (effectivePhase === 'ongoing') return 'HEADING TO DESTINATION';
     return title.toUpperCase();

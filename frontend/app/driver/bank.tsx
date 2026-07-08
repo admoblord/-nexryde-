@@ -20,6 +20,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { BRAND, SURFACE } from '@/src/constants/designSystem';
+import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import {
@@ -340,7 +342,8 @@ export default function BankDetailsScreen() {
 
   return (
     <View style={styles.root}>
-      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: BRAND.bgDeep }} edges={['top']}>
+        <TabBrandStrip role="driver" />
         {/* ── Header ── */}
         <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>

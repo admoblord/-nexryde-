@@ -19,15 +19,47 @@ export function parseDriverOfferRingtoneId(raw: string | null | undefined): Driv
 export function getDriverOfferSoundModule(id: DriverOfferRingtoneId): number {
   switch (id) {
     case 'nexryde1':
-      return require('@/assets/sounds/driver_offer_1.wav');
+      return require('@/assets/sounds/driver_offer_1.m4a');
     case 'nexryde2':
-      return require('@/assets/sounds/driver_offer_2.wav');
+      return require('@/assets/sounds/driver_offer_2.m4a');
     case 'nexryde3':
       return require('@/assets/sounds/driver_offer_3.mp3');
     case 'nexryde4':
       return require('@/assets/sounds/driver_offer_4.mp3');
     default:
-      return require('@/assets/sounds/driver_offer_1.wav');
+      return require('@/assets/sounds/driver_offer_1.m4a');
+  }
+}
+
+/** Android res/raw basename (no extension) — must match files in android/app/src/main/res/raw/ */
+export function driverOfferAndroidRawSound(id: DriverOfferRingtoneId): string {
+  switch (id) {
+    case 'nexryde1':
+      return 'nexryde_1';
+    case 'nexryde2':
+      return 'nexryde_2';
+    case 'nexryde3':
+      return 'nexryde_3';
+    case 'nexryde4':
+      return 'nexryde_4';
+    default:
+      return 'nexryde_1';
+  }
+}
+
+/** iOS push/local notification sound filename (bundled via expo-notifications plugin). */
+export function driverOfferIosSoundFile(id: DriverOfferRingtoneId): string {
+  switch (id) {
+    case 'nexryde1':
+      return 'driver_offer_1.m4a';
+    case 'nexryde2':
+      return 'driver_offer_2.m4a';
+    case 'nexryde3':
+      return 'driver_offer_3.mp3';
+    case 'nexryde4':
+      return 'driver_offer_4.mp3';
+    default:
+      return 'driver_offer_1.m4a';
   }
 }
 
