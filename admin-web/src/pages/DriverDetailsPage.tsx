@@ -61,7 +61,8 @@ export function DriverDetailsPage() {
     if (!driverId) return;
     setBusy(true);
     try {
-      await api(`/admin/drivers/${driverId}${path}`, {
+      const actionPath = path.startsWith('/admin/') ? path : `/admin/drivers/${driverId}${path}`;
+      await api(actionPath, {
         method: 'POST',
         body: body ? JSON.stringify(body) : undefined,
       });
@@ -171,7 +172,7 @@ export function DriverDetailsPage() {
             finally { setBusy(false); }
           }}>Approve</button>
           <button type="button" className="btn-ghost text-xs text-amber-400" disabled={busy} onClick={() => act('/suspend', { days: 7, reason: 'admin_suspend' }, 'Driver suspended')}>Suspend</button>
-          <button type="button" className="btn-ghost text-xs text-red-400" disabled={busy} onClick={() => api(`/admin/users/${driverId}/block?block=true`, { method: 'POST' }).then(() => load())}>Ban</button>
+          <button type="button" className="btn-ghost text-xs text-red-400" disabled={busy} onClick={() => act(`/admin/users/${driverId}/block?block=true`, undefined, 'Driver banned')}>Ban</button>
           <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => {
             const amount = Number(prompt('Credit amount ₦:') || 0);
             if (amount > 0) act('/wallet-adjust', { amount, direction: 'credit', reason: 'admin_credit' });

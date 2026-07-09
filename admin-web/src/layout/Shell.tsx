@@ -2,7 +2,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { Moon, Sun, LogOut, Menu, X } from 'lucide-react';
 import { useState } from 'react';
 import { NAV } from '@/nav';
-import { clearToken } from '@/api';
+import { clearToken, getToken } from '@/api';
 import { GlobalSearch } from '@/components/GlobalSearch';
 
 export function Shell() {
@@ -16,7 +16,13 @@ export function Shell() {
   };
 
   const logout = async () => {
-    try { await fetch('/api/admin/logout', { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('nexryde_admin_token')}` } }); } catch { /* */ }
+    try {
+      const token = getToken();
+      await fetch('/api/admin/logout', {
+        method: 'POST',
+        ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+      });
+    } catch { /* */ }
     clearToken();
     nav('/login');
   };
