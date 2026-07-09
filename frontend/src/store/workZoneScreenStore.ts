@@ -27,11 +27,13 @@ export type WorkZoneDriverState = {
   zone_running_grace?: boolean;
   included_with_driver_plan?: boolean;
   no_additional_fee?: boolean;
+  early_access?: boolean;
 };
 
 type WorkZoneScreenStore = {
   areas: WorkZoneArea[];
   driverState: WorkZoneDriverState | null;
+  hydratedDriverId: string | null;
   selected: string[];
   initialLoadDone: boolean;
   fetchInFlight: boolean;
@@ -41,7 +43,7 @@ type WorkZoneScreenStore = {
   setSaving: (saving: boolean) => void;
   setSelected: (ids: string[]) => void;
   toggleSelected: (areaId: string) => void;
-  hydrate: (areas: WorkZoneArea[], driverState: WorkZoneDriverState | null) => void;
+  hydrate: (areas: WorkZoneArea[], driverState: WorkZoneDriverState | null, driverId: string) => void;
   patchDriverState: (patch: Partial<WorkZoneDriverState>) => void;
   setFetchInFlight: (v: boolean) => void;
   setLastError: (msg: string | null) => void;
@@ -53,6 +55,7 @@ export const useWorkZoneScreenStore = create<WorkZoneScreenStore>()(
     (set, get) => ({
       areas: [],
       driverState: null,
+      hydratedDriverId: null,
       selected: [],
       initialLoadDone: false,
       fetchInFlight: false,
@@ -81,10 +84,16 @@ export const useWorkZoneScreenStore = create<WorkZoneScreenStore>()(
         if (adjacent) set({ selected: [...selected, areaId] });
       },
 
-      hydrate: (areas, driverState) => {
+      hydrate: (areas, driverState, driverId) => {
         const selected =
           driverState?.area_ids?.length ? [...driverState.area_ids] : get().selected;
-        set({ areas, driverState, selected });
+        set({
+          areas,
+          driverState,
+          hydratedDriverId: driverId,
+          selected,
+          initialLoadDone: true,
+        });
       },
 
       patchDriverState: (patch) => {
@@ -100,11 +109,17 @@ export const useWorkZoneScreenStore = create<WorkZoneScreenStore>()(
     {
       name: 'nexryde-work-zone-screen',
       storage: createJSONStorage(() => AsyncStorage),
+      version: 2,
+      migrate: (persisted) => {
+        const state = (persisted || {}) as Partial<WorkZoneScreenStore>;
+        return {
+          areas: Array.isArray(state.areas) ? state.areas : [],
+          selected: Array.isArray(state.selected) ? state.selected : [],
+        };
+      },
       partialize: (state) => ({
         areas: state.areas,
-        driverState: state.driverState,
         selected: state.selected,
-        initialLoadDone: state.initialLoadDone,
       }),
     },
   ),

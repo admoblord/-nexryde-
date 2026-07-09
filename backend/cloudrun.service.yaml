@@ -104,12 +104,14 @@ spec:
               value: "false"
             - name: WORK_ZONE_ENABLED
               value: "false"
+            - name: WORK_ZONE_ROLLOUT_MODE
+              value: "FOUNDING_DRIVERS_ONLY"
             - name: WORK_ZONE_MAX_ZONED_SHARE
               value: "0.3"
             - name: WORK_ZONE_MIN_ONLINE_DRIVERS
               value: "5"
             - name: WORK_ZONE_EARLY_ACCESS_EMAILS
-              value: "loopy9ice@gmail.com"
+              value: "loopy9ice@gmail.com,timothy_okunola@yahoo.com"
 
             # Secrets from Secret Manager
             - name: JWT_SECRET

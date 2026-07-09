@@ -6,6 +6,10 @@ from typing import Any
 
 # Feature flag — default OFF; early-access drivers can test when OFF.
 WORK_ZONE_ENABLED = os.getenv("WORK_ZONE_ENABLED", "false").lower() in ("1", "true", "yes", "on")
+WORK_ZONE_ROLLOUT_MODE = os.getenv(
+    "WORK_ZONE_ROLLOUT_MODE",
+    "PUBLIC" if WORK_ZONE_ENABLED else "FOUNDING_DRIVERS_ONLY",
+).strip().upper()
 
 # End-of-day expiry in West Africa Time (hour 0–23). Default 23:59 WAT ≈ hour 23.
 WORK_ZONE_EXPIRY_HOUR_WAT = int(os.getenv("WORK_ZONE_EXPIRY_HOUR_WAT", "23"))
@@ -17,7 +21,7 @@ WORK_ZONE_MIN_ONLINE_DRIVERS = int(os.getenv("WORK_ZONE_MIN_ONLINE_DRIVERS", "5"
 # Comma-separated emails with rollout early access (global flag OFF still allows these).
 _raw_early = os.getenv(
     "WORK_ZONE_EARLY_ACCESS_EMAILS",
-    "loopy9ice@gmail.com",
+    "loopy9ice@gmail.com,timothy_okunola@yahoo.com",
 )
 WORK_ZONE_EARLY_ACCESS_EMAILS = {
     e.strip().lower() for e in _raw_early.split(",") if e.strip()
@@ -29,6 +33,8 @@ WORK_ZONE_MAX_AREAS = int(os.getenv("WORK_ZONE_MAX_AREAS", "4"))
 def work_zone_public_config() -> dict[str, Any]:
     return {
         "enabled": WORK_ZONE_ENABLED,
+        "rollout_mode": WORK_ZONE_ROLLOUT_MODE,
+        "early_access_required": not WORK_ZONE_ENABLED,
         "included_with_subscription": True,
         "no_additional_fee": True,
         "expiry_hour_wat": WORK_ZONE_EXPIRY_HOUR_WAT,

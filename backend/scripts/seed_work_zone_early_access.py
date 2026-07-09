@@ -18,6 +18,7 @@ from database import db
 # Add Timmaj's email when known
 EARLY_ACCESS_EMAILS = [
     "loopy9ice@gmail.com",
+    "timothy_okunola@yahoo.com",
 ]
 
 

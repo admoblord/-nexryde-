@@ -13,6 +13,8 @@ Trial trips count **completed** trips only.
 from __future__ import annotations
 
 import logging
+import os
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -23,6 +25,14 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_CONFIG_KEY = "driver_trial_defaults"
 GRANDFATHER_EMAIL = "loopy9ice@gmail.com"
+GRANDFATHER_EMAILS = {
+    email.strip().lower()
+    for email in os.getenv(
+        "GRANDFATHER_TRIAL_EMAILS",
+        "loopy9ice@gmail.com,timothy_okunola@yahoo.com",
+    ).split(",")
+    if email.strip()
+}
 
 _BUILTIN_DEFAULTS: dict[str, Any] = {
     "default_trial_trip_limit": 15,
@@ -479,23 +489,55 @@ async def seed_grandfathered_trial_configs() -> int:
     One-time style seed: set grandfather trial_config for configured emails.
     Returns count of profiles updated.
     """
-    user = await db.users.find_one({"email": GRANDFATHER_EMAIL}, {"_id": 0, "id": 1})
-    if not user or not user.get("id"):
-        logger.warning("Grandfather trial seed: user %s not found", GRANDFATHER_EMAIL)
-        return 0
+    updated = 0
+    defaults = await get_trial_defaults()
+    for email in sorted(GRANDFATHER_EMAILS or {GRANDFATHER_EMAIL}):
+        user = await db.users.find_one({"email": email}, {"_id": 0, "id": 1})
+        if not user or not user.get("id"):
+            logger.warning("Grandfather trial seed: user %s not found", email)
+            continue
 
-    driver_id = user["id"]
-    await db.driver_profiles.update_one(
-        {"user_id": driver_id},
-        {"$set": {"trial_config": _GRANDFATHER_TRIAL_CONFIG}},
-        upsert=True,
-    )
-    await db.subscriptions.update_many(
-        {"driver_id": driver_id, "status": {"$in": ["trial", "pending_payment"]}},
-        {"$set": {"trial_trips_target": _GRANDFATHER_TRIAL_CONFIG["trip_limit"]}},
-    )
-    logger.info("Grandfathered trial config applied driver=%s email=%s", driver_id, GRANDFATHER_EMAIL)
-    return 1
+        driver_id = user["id"]
+        await db.users.update_one(
+            {"id": driver_id},
+            {"$set": {"work_zone_early_access": True}},
+        )
+        await db.driver_profiles.update_one(
+            {"user_id": driver_id},
+            {"$set": {"trial_config": _GRANDFATHER_TRIAL_CONFIG}},
+            upsert=True,
+        )
+        await db.subscriptions.update_many(
+            {"driver_id": driver_id, "status": {"$in": ["trial", "pending_payment"]}},
+            {"$set": {"trial_trips_target": _GRANDFATHER_TRIAL_CONFIG["trip_limit"]}},
+        )
+        existing = await db.subscriptions.find_one(
+            {"driver_id": driver_id, "status": {"$in": ["active", "trial", "grace_period"]}}
+        )
+        if not existing:
+            now = _utcnow().replace(tzinfo=None)
+            await db.subscriptions.insert_one(
+                {
+                    "id": str(uuid.uuid4()),
+                    "driver_id": driver_id,
+                    "amount": int(defaults["monthly_fee_ngn"]),
+                    "tier": "city_rider",
+                    "status": "trial",
+                    "start_date": now,
+                    "trial_start_date": now,
+                    "trial_trips_target": _GRANDFATHER_TRIAL_CONFIG["trip_limit"],
+                    "trial_day_limit": _GRANDFATHER_TRIAL_CONFIG["day_limit"],
+                    "trial_trips_completed": 0,
+                    "trial_completed": False,
+                    "trial_active": True,
+                    "is_trial": True,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            )
+        updated += 1
+        logger.info("Grandfathered trial config applied driver=%s email=%s", driver_id, email)
+    return updated
 
 
 async def ensure_system_trial_defaults() -> None:

@@ -16,18 +16,24 @@ async def main() -> None:
     await ensure_system_trial_defaults()
     n = await seed_grandfathered_trial_configs()
 
-    user = await db.users.find_one({"email": "loopy9ice@gmail.com"}, {"_id": 0, "id": 1, "email": 1})
     print(f"Grandfather trial configs updated: {n}")
     print("--- verification ---")
-    print("db.users.findOne({ email: 'loopy9ice@gmail.com' }, { id: 1 })")
-    print(user if user else "NOT FOUND")
-    if user and user.get("id"):
-        profile = await db.driver_profiles.find_one(
-            {"user_id": user["id"]},
-            {"_id": 0, "trial_config": 1},
-        )
-        print(f'db.driver_profiles.findOne({{ user_id: "{user["id"]}" }}, {{ trial_config: 1 }})')
-        print(profile if profile else "PROFILE NOT FOUND")
+    for email in ("loopy9ice@gmail.com", "timothy_okunola@yahoo.com"):
+        user = await db.users.find_one({"email": email}, {"_id": 0, "id": 1, "email": 1, "work_zone_early_access": 1})
+        print(f"db.users.findOne({{ email: '{email}' }}, {{ id: 1 }})")
+        print(user if user else "NOT FOUND")
+        if user and user.get("id"):
+            profile = await db.driver_profiles.find_one(
+                {"user_id": user["id"]},
+                {"_id": 0, "trial_config": 1},
+            )
+            sub = await db.subscriptions.find_one(
+                {"driver_id": user["id"], "status": {"$in": ["active", "trial", "grace_period"]}},
+                {"_id": 0, "status": 1, "trial_active": 1, "trial_trips_target": 1},
+            )
+            print(f'db.driver_profiles.findOne({{ user_id: "{user["id"]}" }}, {{ trial_config: 1 }})')
+            print(profile if profile else "PROFILE NOT FOUND")
+            print(sub if sub else "SUBSCRIPTION NOT FOUND")
 
 
 if __name__ == "__main__":

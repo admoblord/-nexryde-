@@ -8,6 +8,7 @@ import { workZoneScreenLog } from '@/src/utils/workZoneScreenLog';
 import {
   getWorkZoneScreenFetchPromise,
   markWorkZoneScreenFetchStarted,
+  resetWorkZoneScreenFetchGuard,
   useWorkZoneScreenStore,
   workZoneScreenFetchAlreadyStarted,
   type WorkZoneArea,
@@ -47,7 +48,7 @@ async function fetchWorkZoneScreenData(
       driverState = (await stateRes.json()) as WorkZoneDriverState;
     }
 
-    useWorkZoneScreenStore.getState().hydrate(areas, driverState);
+    useWorkZoneScreenStore.getState().hydrate(areas, driverState, driverId);
     useWorkZoneScreenStore.getState().setLastError(null);
     workZoneScreenLog('WORKZONE_FETCH_SUCCESS', {
       areas: areas.length,
@@ -66,14 +67,14 @@ async function fetchWorkZoneScreenData(
 
 function ensureWorkZoneScreenLoaded(driverId: string): Promise<void> {
   if (workZoneScreenFetchAlreadyStarted(driverId)) {
-    const store = useWorkZoneScreenStore.getState();
-    if (store.initialLoadDone) return Promise.resolve();
     return getWorkZoneScreenFetchPromise() ?? Promise.resolve();
   }
 
   const store = useWorkZoneScreenStore.getState();
-  const silent = store.initialLoadDone;
-  const promise = fetchWorkZoneScreenData(driverId, { silent });
+  const silent = store.initialLoadDone && store.hydratedDriverId === driverId;
+  const promise = fetchWorkZoneScreenData(driverId, { silent }).finally(() => {
+    resetWorkZoneScreenFetchGuard();
+  });
   markWorkZoneScreenFetchStarted(driverId, promise);
   return promise;
 }

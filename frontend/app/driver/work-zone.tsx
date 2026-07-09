@@ -8,6 +8,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  TextInput,
   ActivityIndicator,
   Alert,
   StatusBar,
@@ -69,6 +70,7 @@ export default function WorkZoneScreen() {
   workZoneScreenLog('WORKZONE_RENDER', { count: renderCount.current });
 
   const [benefitsOpen, setBenefitsOpen] = useState(false);
+  const [areaQuery, setAreaQuery] = useState('');
 
   const areas = useWorkZoneScreenStore((s) => s.areas);
   const driverState = useWorkZoneScreenStore((s) => s.driverState);
@@ -86,7 +88,7 @@ export default function WorkZoneScreen() {
   const showFirstLoadPlaceholder = !initialLoadDone && fetchInFlight;
   const canActivateWorkZone = Boolean(driverState?.entitled);
   const showSubscribeBanner =
-    initialLoadDone && !canActivateWorkZone && !driverState?.active;
+    initialLoadDone && driverState != null && !canActivateWorkZone && !driverState.active;
   const footerPad = Math.max(insets.bottom, SPACING.md);
 
   const scrollPad = useMemo(
@@ -109,6 +111,15 @@ export default function WorkZoneScreen() {
     if (names.length <= 2) return names.join(' · ');
     return `${names.slice(0, 2).join(' · ')} +${names.length - 2}`;
   }, [areas, selected]);
+
+  const filteredAreas = useMemo(() => {
+    const q = areaQuery.trim().toLowerCase();
+    if (!q) return areas;
+    return areas.filter((area) => {
+      const haystack = `${area.name} ${area.id} ${area.demand_label || ''}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [areaQuery, areas]);
 
   const canSelect = useCallback(
     (areaId: string) => {
@@ -202,11 +213,17 @@ export default function WorkZoneScreen() {
     ]);
   };
 
-  const planChip = driverState?.subscription_status === 'trial' ? 'Trial included' : 'Plan included';
+  const planChip = !driverState
+    ? 'Checking plan'
+    : canActivateWorkZone
+      ? driverState.subscription_status === 'trial'
+        ? 'Trial included'
+        : 'Plan included'
+      : 'Plan inactive';
   const featureUnavailable =
     initialLoadDone && driverState != null && !driverState.feature_available;
 
-  const ctaDisabled = saving || !canActivateWorkZone || showFirstLoadPlaceholder;
+  const ctaDisabled = saving || !canActivateWorkZone || showFirstLoadPlaceholder || selected.length === 0;
   const ctaLabel = driverState?.active ? 'Update zone' : 'Activate Work Zone';
 
   return (
@@ -350,7 +367,27 @@ export default function WorkZoneScreen() {
                     {selected.length > 0 ? `${selected.length}/4` : 'Up to 4 areas'}
                   </Text>
                 </View>
-                <Text style={styles.sectionHint}>Tap adjacent areas next to your selection.</Text>
+                <Text style={styles.sectionHint}>
+                  Search and select 1–4 available areas. Adjacent areas can be combined into one corridor.
+                </Text>
+                <View style={styles.searchBox}>
+                  <Ionicons name="search" size={17} color={BRAND.textMuted} />
+                  <TextInput
+                    value={areaQuery}
+                    onChangeText={setAreaQuery}
+                    placeholder="Search zones, corridors, landmarks"
+                    placeholderTextColor={BRAND.textMuted}
+                    style={styles.searchInput}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    editable={!showFirstLoadPlaceholder}
+                  />
+                  {areaQuery ? (
+                    <TouchableOpacity onPress={() => setAreaQuery('')} accessibilityRole="button" accessibilityLabel="Clear zone search">
+                      <Ionicons name="close-circle" size={18} color={BRAND.textMuted} />
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
 
                 {showFirstLoadPlaceholder && areas.length === 0
                   ? [0, 1, 2, 3].map((i) => (
@@ -359,7 +396,8 @@ export default function WorkZoneScreen() {
                         style={[styles.areaRow, styles.areaSkeleton, { minHeight: flow.rowMinHeight }]}
                       />
                     ))
-                  : areas.map((a) => {
+                  : filteredAreas.length > 0
+                    ? filteredAreas.map((a) => {
                       const on = selected.includes(a.id);
                       const disabled = !on && !canSelect(a.id);
                       const tone = demandTone(a);
@@ -397,7 +435,20 @@ export default function WorkZoneScreen() {
                           </View>
                         </TouchableOpacity>
                       );
-                    })}
+                    })
+                    : (
+                      <View style={styles.emptyAreasBox}>
+                        <Ionicons name="map-outline" size={22} color={BRAND.textMuted} />
+                        <Text style={styles.emptyAreasTitle}>
+                          {areas.length === 0 ? 'Zone list unavailable' : 'No matching zones'}
+                        </Text>
+                        <Text style={styles.emptyAreasBody}>
+                          {areas.length === 0
+                            ? 'Your zone picker is visible, but the latest area list did not load. Pull back and reopen once connected.'
+                            : 'Try another Lagos area or corridor name.'}
+                        </Text>
+                      </View>
+                    )}
               </>
             )}
           </ScrollView>
@@ -622,6 +673,24 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.sm + 2,
     lineHeight: 16,
   },
+  searchBox: {
+    minHeight: 46,
+    marginBottom: SPACING.sm,
+    paddingHorizontal: SPACING.sm + 2,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    borderColor: SURFACE.hairline,
+    backgroundColor: SURFACE.glassSoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  searchInput: {
+    flex: 1,
+    color: BRAND.textPrimary,
+    fontSize: 14,
+    paddingVertical: 0,
+  },
   areaRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -640,6 +709,29 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(34,225,128,0.08)',
   },
   areaDisabled: { opacity: 0.4 },
+  emptyAreasBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: SPACING.lg,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    borderColor: SURFACE.hairline,
+    backgroundColor: SURFACE.glassSoft,
+    marginBottom: SPACING.sm,
+  },
+  emptyAreasTitle: {
+    color: BRAND.textPrimary,
+    fontSize: 14,
+    fontWeight: '800',
+    marginTop: SPACING.sm,
+  },
+  emptyAreasBody: {
+    color: BRAND.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 4,
+    textAlign: 'center',
+  },
   areaAccent: {
     position: 'absolute',
     left: 0,
