@@ -4,6 +4,18 @@ apply plugin: "com.facebook.react"
 import org.gradle.api.GradleException
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
+def dedicatedGoogleMapsAndroidApiKey = System.getenv("EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY") ?: ""
+def googleMapsAndroidApiKey = dedicatedGoogleMapsAndroidApiKey ?: System.getenv("EXPO_PUBLIC_GOOGLE_MAPS_API_KEY") ?: ""
+def googleServicesFileEnv = System.getenv("GOOGLE_SERVICES_FILE") ?: ""
+def googleServicesCandidates = [
+    googleServicesFileEnv ? file(googleServicesFileEnv) : null,
+    file("google-services.json"),
+    file("../../google-services.json")
+].findAll { it != null }
+def resolvedGoogleServicesJson = googleServicesCandidates.find { it.exists() && it.isFile() }
+if (resolvedGoogleServicesJson && resolvedGoogleServicesJson.absolutePath != file("google-services.json").absolutePath) {
+    file("google-services.json").bytes = resolvedGoogleServicesJson.bytes
+}
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -73,6 +85,24 @@ def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBu
 def isGradleSigningReport = gradle.startParameter.taskNames.any { name ->
     name.toLowerCase().contains('signingreport')
 }
+/** True when the requested Gradle task actually packages or installs a release artifact. */
+def isReleaseBuildRequested = gradle.startParameter.taskNames.any { name ->
+    def lower = name.toLowerCase()
+    lower.contains('assemblerelease') ||
+        lower.contains('bundlerelease') ||
+        lower.contains('packagerelease') ||
+        lower.contains('installrelease') ||
+        lower == 'bundle' ||
+        lower.endsWith(':bundle')
+}
+
+if (isReleaseBuildRequested && !dedicatedGoogleMapsAndroidApiKey?.trim()) {
+    throw new GradleException("EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY is required for Android release maps. Use the key enabled for Maps SDK for Android and restricted to package com.nexryde.app plus the release/upload SHA-1.")
+}
+
+if (isReleaseBuildRequested && !file("google-services.json").exists()) {
+    throw new GradleException("google-services.json is required for Android release FCM. Put it at frontend/google-services.json or frontend/android/app/google-services.json, or provide GOOGLE_SERVICES_FILE in EAS/CI.")
+}
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -98,10 +128,11 @@ android {
         applicationId 'com.nexryde.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 175
-        versionName "1.3.32"
+        versionCode 196
+        versionName "1.3.33"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
+        manifestPlaceholders["GOOGLE_MAPS_ANDROID_API_KEY"] = googleMapsAndroidApiKey
     }
     signingConfigs {
         debug {
@@ -132,7 +163,7 @@ android {
         release {
             def isEasBuild = (System.getenv("EAS_BUILD") ?: "").toLowerCase() == "true"
             if (!signingConfigs.release.storeFile) {
-                if (isEasBuild || isGradleSigningReport) {
+                if (isEasBuild || isGradleSigningReport || !isReleaseBuildRequested) {
                     if (isGradleSigningReport && !isEasBuild) {
                         logger.lifecycle("signingReport: release keystore not set — release variant fingerprints match debug unless NEXRYDE_UPLOAD_* is set. Add Play/EAS upload keystore SHA-1 in Google Cloud for store builds.")
                     }
@@ -212,4 +243,10 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+}
+
+if (file("google-services.json").exists()) {
+    apply plugin: "com.google.gms.google-services"
+} else {
+    logger.warn("google-services.json not found; Firebase Cloud Messaging device tokens will not be available for this Android build.")
 }
