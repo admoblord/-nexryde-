@@ -13,17 +13,39 @@ type NativeDriverModule = {
   hideBubble?: () => void;
   hasOverlayPermission?: () => Promise<boolean>;
   requestOverlayPermission?: () => void;
+  hasFullScreenIntentPermission?: () => Promise<boolean>;
+  requestFullScreenIntentPermission?: () => void;
+  hasBatteryOptimizationExempt?: () => Promise<boolean>;
+  requestBatteryOptimizationExempt?: () => void;
 };
 
 export type DriverNativeAction = {
-  action?: 'accept_offer' | 'decline_offer' | 'open_navigation' | string;
+  action?:
+    | 'accept_offer'
+    | 'decline_offer'
+    | 'native_accept_success'
+    | 'native_decline_success'
+    | 'native_offer_expired'
+    | 'open_navigation'
+    | 'heartbeat_force_offline'
+    | string;
   tripId?: string;
   offerId?: string;
+  fare?: string;
+  tripJson?: string;
+  responseJson?: string;
+  message?: string;
+  status?: number;
+  source?: string;
+  serverOnline?: boolean;
 };
 
 type NativeOfferPayload = {
   tripId: string;
   offerId: string;
+  driverId?: string;
+  token?: string;
+  backendUrl?: string;
   riderName: string;
   pickup: string;
   fare: string;
@@ -84,11 +106,38 @@ export function requestNativeOverlayPermission(): void {
   nativeModule?.requestOverlayPermission?.();
 }
 
-export function showNativeRideOfferAlert(ride: Record<string, unknown>): void {
+export async function hasNativeFullScreenIntentPermission(): Promise<boolean> {
+  if (!isDriverNativeExperienceAvailable()) return false;
+  return nativeModule?.hasFullScreenIntentPermission?.().catch(() => false) ?? false;
+}
+
+export function requestNativeFullScreenIntentPermission(): void {
   if (!isDriverNativeExperienceAvailable()) return;
-  const payload = normalizeOfferPayload(ride);
-  nativeModule?.showRideAlert?.(payload);
-  nativeModule?.updateBubble?.('offer', 1, payload);
+  nativeModule?.requestFullScreenIntentPermission?.();
+}
+
+export async function hasNativeBatteryOptimizationExempt(): Promise<boolean> {
+  if (!isDriverNativeExperienceAvailable()) return true;
+  return nativeModule?.hasBatteryOptimizationExempt?.().catch(() => true) ?? true;
+}
+
+export function requestNativeBatteryOptimizationExempt(): void {
+  if (!isDriverNativeExperienceAvailable()) return;
+  nativeModule?.requestBatteryOptimizationExempt?.();
+}
+
+export function showNativeRideOfferAlert(ride: Record<string, unknown>, driverId?: string | null): void {
+  if (!isDriverNativeExperienceAvailable()) return;
+  const payload = normalizeOfferPayload(ride, driverId);
+  void getValidToken()
+    .catch(() => null)
+    .then((token) => {
+      nativeModule?.showRideAlert?.({
+        ...payload,
+        token: token || '',
+        backendUrl: BACKEND_URL,
+      });
+    });
 }
 
 export function updateNativeRideAcceptedState(trip: Record<string, unknown> | null | undefined): void {
@@ -107,10 +156,11 @@ export function subscribeDriverNativeActions(listener: (event: DriverNativeActio
   return () => sub.remove();
 }
 
-function normalizeOfferPayload(ride: Record<string, unknown>): NativeOfferPayload {
+function normalizeOfferPayload(ride: Record<string, unknown>, driverId?: string | null): NativeOfferPayload {
   return {
     tripId: stringValue(ride.id) || stringValue(ride.trip_id),
     offerId: stringValue(ride.offer_id),
+    driverId: driverId || stringValue(ride.driver_id) || undefined,
     riderName: stringValue(ride.rider_name) || 'Rider',
     pickup:
       stringValue(ride.pickup_address) ||

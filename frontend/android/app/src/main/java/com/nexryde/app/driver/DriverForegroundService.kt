@@ -12,7 +12,9 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.media.AudioFocusRequest
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
@@ -20,6 +22,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -30,6 +33,7 @@ import org.json.JSONObject
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 
 /**
  * Android-supported online-driver foreground service.
@@ -39,7 +43,7 @@ import java.net.URL
  * backgrounded: foreground service, Android notification, location callbacks,
  * loud alert audio/vibration, full-screen intent, and overlay bubble.
  */
-class DriverForegroundService : Service(), LocationListener {
+class DriverForegroundService : Service(), LocationListener, DriverOverlayBubbleController.OfferActionHandler {
   private val handler = Handler(Looper.getMainLooper())
   private var locationManager: LocationManager? = null
   private var lastLocation: Location? = null
@@ -47,7 +51,13 @@ class DriverForegroundService : Service(), LocationListener {
   private var backendUrl: String? = null
   private var driverId: String? = null
   private var mediaPlayer: MediaPlayer? = null
-  private var rideStatus: String = "Online"
+  private var audioManager: AudioManager? = null
+  private var audioFocusRequest: AudioFocusRequest? = null
+  private var overlayActionInFlight = false
+  private var rideStatus: String = "Listening for rides"
+  private lateinit var driverNotificationManager: DriverNotificationManager
+  private lateinit var driverAlertAudioManager: DriverAlertAudioManager
+  private lateinit var rideAlertManager: RideAlertManager
 
   override fun onBind(intent: Intent?): IBinder? = null
 
@@ -55,6 +65,11 @@ class DriverForegroundService : Service(), LocationListener {
     super.onCreate()
     createChannels(this)
     locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    driverNotificationManager = DriverNotificationManager(this)
+    driverAlertAudioManager = DriverAlertAudioManager(this)
+    rideAlertManager = RideAlertManager(this, driverAlertAudioManager, driverNotificationManager)
+    DriverOverlayBubbleController.configure(rideAlertManager)
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -64,34 +79,74 @@ class DriverForegroundService : Service(), LocationListener {
         return START_NOT_STICKY
       }
       ACTION_UPDATE_SESSION -> {
+        if (!isDriverServiceOnline) {
+          stopSelf()
+          return START_NOT_STICKY
+        }
         token = intent.getStringExtra(EXTRA_TOKEN) ?: token
         backendUrl = intent.getStringExtra(EXTRA_BACKEND_URL) ?: backendUrl
+        rideAlertManager.updateSession(driverId, token, backendUrl)
         updatePersistentNotification()
         return START_STICKY
       }
       ACTION_SHOW_OFFER -> {
+        if (!isDriverServiceOnline) {
+          cancelAllDriverNotifications()
+          rideAlertManager.hide()
+          stopSelf()
+          return START_NOT_STICKY
+        }
+        driverId = intent.getStringExtra(EXTRA_DRIVER_ID) ?: intent.getStringExtra("driverId") ?: driverId
         token = intent.getStringExtra(EXTRA_TOKEN) ?: token
         backendUrl = intent.getStringExtra(EXTRA_BACKEND_URL) ?: backendUrl
+        rideAlertManager.updateSession(driverId, token, backendUrl)
         startForeground(NOTIFICATION_ID, buildPersistentNotification())
         presentRideAlert(extrasToOffer(intent))
         return START_STICKY
       }
+      ACTION_ACCEPT_OFFER -> {
+        if (!isDriverServiceOnline) {
+          cancelAllDriverNotifications()
+          rideAlertManager.hide()
+          stopSelf()
+          return START_NOT_STICKY
+        }
+        startForeground(NOTIFICATION_ID, buildPersistentNotification())
+        acceptOfferFromOverlay(extrasToOffer(intent))
+        return START_STICKY
+      }
+      ACTION_DECLINE_OFFER -> {
+        if (!isDriverServiceOnline) {
+          cancelAllDriverNotifications()
+          rideAlertManager.hide()
+          stopSelf()
+          return START_NOT_STICKY
+        }
+        startForeground(NOTIFICATION_ID, buildPersistentNotification())
+        declineOfferFromOverlay(extrasToOffer(intent))
+        return START_STICKY
+      }
       ACTION_STOP_ALERT -> {
-        stopAlertPlayback()
-        DriverOverlayBubbleController.removeCard()
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.cancel(OFFER_NOTIFICATION_ID)
+        if (!isDriverServiceOnline) {
+          cancelAllDriverNotifications()
+          rideAlertManager.hide()
+          stopSelf()
+          return START_NOT_STICKY
+        }
+        rideAlertManager.stopAlert()
         return START_STICKY
       }
       else -> {
         driverId = intent?.getStringExtra(EXTRA_DRIVER_ID) ?: driverId
         token = intent?.getStringExtra(EXTRA_TOKEN) ?: token
         backendUrl = intent?.getStringExtra(EXTRA_BACKEND_URL) ?: backendUrl
-        rideStatus = intent?.getStringExtra(EXTRA_STATUS) ?: "Online"
+        rideAlertManager.updateSession(driverId, token, backendUrl)
+        rideStatus = intent?.getStringExtra(EXTRA_STATUS) ?: "Listening for rides"
+        isDriverServiceOnline = true
         startForeground(NOTIFICATION_ID, buildPersistentNotification())
+        rideAlertManager.goOnline()
         startLocationUpdates()
         scheduleHeartbeat()
-        DriverOverlayBubbleController.show(this, "online", 0)
         return START_STICKY
       }
     }
@@ -100,9 +155,21 @@ class DriverForegroundService : Service(), LocationListener {
   override fun onDestroy() {
     stopLocationUpdates()
     handler.removeCallbacksAndMessages(null)
-    stopAlertPlayback()
-    DriverOverlayBubbleController.hide()
+    rideAlertManager.hide()
+    DriverOverlayBubbleController.clear(rideAlertManager)
+    isDriverServiceOnline = false
     super.onDestroy()
+  }
+
+  override fun onTaskRemoved(rootIntent: Intent?) {
+    // Best-effort server offline before process teardown — avoids ghost Mongo/Redis online.
+    postServerOfflineBestEffort()
+    DriverExperienceEvents.emit(
+      "heartbeat_force_offline",
+      mapOf("status" to 0, "source" to "task_removed")
+    )
+    stopOnlineService()
+    super.onTaskRemoved(rootIntent)
   }
 
   override fun onLocationChanged(location: Location) {
@@ -150,6 +217,28 @@ class DriverForegroundService : Service(), LocationListener {
     }
   }
 
+  private fun postServerOfflineBestEffort() {
+    val base = backendUrl?.trim()?.trimEnd('/') ?: return
+    val bearer = token?.takeIf { it.isNotBlank() } ?: return
+    val id = driverId?.takeIf { it.isNotBlank() } ?: return
+    Thread {
+      runCatching {
+        val url = URL("$base/api/drivers/${URLEncoder.encode(id, "UTF-8")}/online?is_online=false")
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+          requestMethod = "PUT"
+          connectTimeout = 4000
+          readTimeout = 4000
+          setRequestProperty("Authorization", "Bearer $bearer")
+          setRequestProperty("Content-Type", "application/json")
+          doOutput = true
+        }
+        OutputStreamWriter(conn.outputStream).use { it.write("{}") }
+        conn.responseCode
+        conn.disconnect()
+      }
+    }.start()
+  }
+
   private fun sendHeartbeat() {
     val base = backendUrl?.trim()?.trimEnd('/') ?: return
     val bearer = token?.takeIf { it.isNotBlank() } ?: return
@@ -171,67 +260,48 @@ class DriverForegroundService : Service(), LocationListener {
           body.put("lng", loc.longitude)
         }
         OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
-        conn.inputStream.close()
+        val status = conn.responseCode
+        val stream = if (status in 200..299) conn.inputStream else conn.errorStream
+        val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
         conn.disconnect()
+        if (status == 401) {
+          handler.post {
+            DriverExperienceEvents.emit("heartbeat_force_offline", mapOf("status" to 401, "source" to "native_401"))
+            stopOnlineService()
+          }
+          return@runCatching
+        }
+        if (status in 200..299 && raw.isNotBlank()) {
+          val payload = JSONObject(raw)
+          val action = payload.optString("action", "")
+          val serverOnline = payload.optBoolean("server_online", true)
+          if (action == "FORCE_OFFLINE" || !serverOnline) {
+            handler.post {
+              DriverExperienceEvents.emit(
+                "heartbeat_force_offline",
+                mapOf("status" to status, "source" to "native_force_offline", "serverOnline" to serverOnline)
+              )
+              stopOnlineService()
+            }
+          }
+        }
       }
     }.start()
   }
 
   private fun updatePersistentNotification() {
-    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    nm.notify(NOTIFICATION_ID, buildPersistentNotification())
+    driverNotificationManager.updatePersistent(rideStatus)
   }
 
   private fun buildPersistentNotification(): Notification {
-    val openApp = launchIntent("nexryde://action/open_app")
-    val goOffline = launchIntent("nexryde://action/go_offline")
-    val navigate = launchIntent("nexryde://action/open_app")
-    return NotificationCompat.Builder(this, CHANNEL_DRIVER_SERVICE)
-      .setSmallIcon(R.mipmap.ic_launcher)
-      .setContentTitle("NexRyde Driver Online")
-      .setContentText(rideStatus)
-      .setOngoing(true)
-      .setOnlyAlertOnce(true)
-      .setPriority(NotificationCompat.PRIORITY_LOW)
-      .setCategory(NotificationCompat.CATEGORY_SERVICE)
-      .setContentIntent(openApp)
-      .addAction(android.R.drawable.ic_menu_view, "Open App", openApp)
-      .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Go Offline", goOffline)
-      .addAction(android.R.drawable.ic_dialog_map, "Navigate", navigate)
-      .build()
+    return driverNotificationManager.buildPersistentNotification(rideStatus)
   }
 
   private fun presentRideAlert(offer: Map<String, String>) {
     rideStatus = "New ride request"
+    overlayActionInFlight = false
     updatePersistentNotification()
-    startAlertPlayback()
-    DriverOverlayBubbleController.showOfferCard(this, offer)
-
-    val fullScreenIntent = Intent(this, DriverRideAlertActivity::class.java).apply {
-      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-      offer.forEach { (k, v) -> putExtra(k, v) }
-    }
-    val pendingFullScreen = PendingIntent.getActivity(this, OFFER_NOTIFICATION_ID, fullScreenIntent, pendingFlags())
-    val launch = packageManager.getLaunchIntentForPackage(packageName)
-      ?: Intent(Intent.ACTION_VIEW, Uri.parse("nexryde://action/open_app")).setPackage(packageName)
-    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-    val openApp = PendingIntent.getActivity(this, OFFER_NOTIFICATION_ID + 1, launch, pendingFlags())
-    val soundUri = Uri.parse("android.resource://$packageName/${R.raw.nexryde_1}")
-    val notification = NotificationCompat.Builder(this, CHANNEL_DRIVER_OFFERS)
-      .setSmallIcon(R.mipmap.ic_launcher)
-      .setContentTitle("New NexRyde ride request")
-      .setContentText("${offer["pickup"] ?: "Pickup"} · ${offer["fare"] ?: "--"}")
-      .setPriority(NotificationCompat.PRIORITY_MAX)
-      .setCategory(NotificationCompat.CATEGORY_CALL)
-      .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-      .setSound(soundUri)
-      .setVibrate(longArrayOf(0, 700, 250, 700, 250, 900))
-      .setFullScreenIntent(pendingFullScreen, true)
-      .setContentIntent(openApp)
-      .setAutoCancel(false)
-      .build()
-    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    nm.notify(OFFER_NOTIFICATION_ID, notification)
+    rideAlertManager.present(offer)
   }
 
   private fun launchIntent(uri: String): PendingIntent {
@@ -243,27 +313,111 @@ class DriverForegroundService : Service(), LocationListener {
   }
 
   private fun startAlertPlayback() {
-    stopAlertPlayback()
-    mediaPlayer = MediaPlayer.create(this, R.raw.nexryde_1)?.apply {
-      isLooping = true
-      setAudioAttributes(
-        AudioAttributes.Builder()
-          .setUsage(AudioAttributes.USAGE_ALARM)
-          .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-          .build()
-      )
-      start()
-    }
-    vibrateAlert()
+    driverAlertAudioManager.start()
   }
 
   private fun stopAlertPlayback() {
-    runCatching {
-      mediaPlayer?.stop()
-      mediaPlayer?.release()
+    driverAlertAudioManager.stop()
+  }
+
+  override fun onAcceptOffer(offer: Map<String, String>) {
+    acceptOfferFromOverlay(offer)
+  }
+
+  override fun onDeclineOffer(offer: Map<String, String>) {
+    declineOfferFromOverlay(offer)
+  }
+
+  override fun onOfferExpired(offer: Map<String, String>) {
+    stopAlertPlayback()
+    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    nm.cancel(OFFER_NOTIFICATION_ID)
+    DriverExperienceEvents.emit("native_offer_expired", mapOf("tripId" to offer["tripId"], "offerId" to offer["offerId"]))
+  }
+
+  private fun acceptOfferFromOverlay(offer: Map<String, String>) {
+    rideAlertManager.accept(offer)
+  }
+
+  private fun declineOfferFromOverlay(offer: Map<String, String>) {
+    rideAlertManager.decline(offer)
+  }
+
+  private fun putJson(path: String, body: JSONObject, bearer: String): Pair<Int, String> {
+    val base = backendUrl?.trim()?.trimEnd('/') ?: throw IllegalStateException("Missing backend URL")
+    val conn = (URL("$base$path").openConnection() as HttpURLConnection).apply {
+      requestMethod = "PUT"
+      connectTimeout = 10_000
+      readTimeout = 12_000
+      setRequestProperty("Authorization", "Bearer $bearer")
+      setRequestProperty("Content-Type", "application/json")
+      doOutput = true
     }
-    mediaPlayer = null
-    runCatching { vibrator().cancel() }
+    OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+    val status = conn.responseCode
+    val stream = if (status in 200..299) conn.inputStream else conn.errorStream
+    val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+    conn.disconnect()
+    return Pair(status, responseText)
+  }
+
+  private fun requestAlertAudioFocus() {
+    val am = audioManager ?: return
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+        .setAudioAttributes(alertAudioAttributes())
+        .setOnAudioFocusChangeListener { }
+        .build()
+      audioFocusRequest = request
+      am.requestAudioFocus(request)
+    } else {
+      @Suppress("DEPRECATION")
+      am.requestAudioFocus(null, AudioManager.STREAM_ALARM, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+    }
+  }
+
+  private fun abandonAlertAudioFocus() {
+    val am = audioManager ?: return
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      audioFocusRequest?.let { am.abandonAudioFocusRequest(it) }
+      audioFocusRequest = null
+    } else {
+      @Suppress("DEPRECATION")
+      am.abandonAudioFocus(null)
+    }
+  }
+
+  private fun alertAudioAttributes(): AudioAttributes {
+    return AudioAttributes.Builder()
+      .setUsage(AudioAttributes.USAGE_ALARM)
+      .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+      .build()
+  }
+
+  private fun parseFare(raw: String?): Double? {
+    val clean = raw?.replace(Regex("[^0-9.]"), "").orEmpty()
+    return clean.toDoubleOrNull()?.takeIf { it > 0 }
+  }
+
+  private fun urlEncode(value: String): String =
+    URLEncoder.encode(value, "UTF-8")
+
+  private fun cancelOfferNotification() {
+    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    nm.cancel(OFFER_NOTIFICATION_ID)
+  }
+
+  private fun cancelAllDriverNotifications() {
+    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    nm.cancel(OFFER_NOTIFICATION_ID)
+    nm.cancel(NOTIFICATION_ID)
+  }
+
+  private fun openApp(uri: String) {
+    val intent = packageManager.getLaunchIntentForPackage(packageName)
+      ?: Intent(Intent.ACTION_VIEW, Uri.parse(uri)).setPackage(packageName)
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+    startActivity(intent)
   }
 
   private fun vibrateAlert() {
@@ -294,10 +448,12 @@ class DriverForegroundService : Service(), LocationListener {
   }
 
   private fun stopOnlineService() {
+    isDriverServiceOnline = false
     stopAlertPlayback()
-    DriverOverlayBubbleController.hide()
-    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    nm.cancel(OFFER_NOTIFICATION_ID)
+    rideAlertManager.goOffline()
+    cancelAllDriverNotifications()
+    stopLocationUpdates()
+    handler.removeCallbacksAndMessages(null)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
       stopForeground(STOP_FOREGROUND_REMOVE)
     } else {
@@ -324,20 +480,27 @@ class DriverForegroundService : Service(), LocationListener {
     const val ACTION_STOP = "com.nexryde.app.driver.STOP"
     const val ACTION_UPDATE_SESSION = "com.nexryde.app.driver.UPDATE_SESSION"
     const val ACTION_SHOW_OFFER = "com.nexryde.app.driver.SHOW_OFFER"
+    const val ACTION_ACCEPT_OFFER = "com.nexryde.app.driver.ACCEPT_OFFER"
+    const val ACTION_DECLINE_OFFER = "com.nexryde.app.driver.DECLINE_OFFER"
     const val ACTION_STOP_ALERT = "com.nexryde.app.driver.STOP_ALERT"
     const val EXTRA_DRIVER_ID = "driverId"
     const val EXTRA_TOKEN = "token"
     const val EXTRA_BACKEND_URL = "backendUrl"
     const val EXTRA_STATUS = "status"
     private const val CHANNEL_DRIVER_SERVICE = "driver_service"
-    private const val CHANNEL_DRIVER_OFFERS = "driver_offers"
+    private const val CHANNEL_DRIVER_OFFERS = "driver_offers_v2"
     private const val NOTIFICATION_ID = 6101
     private const val OFFER_NOTIFICATION_ID = 6102
     private const val HEARTBEAT_INTERVAL_MS = 60_000L
     private const val LOCATION_INTERVAL_MS = 10_000L
     private const val LOCATION_DISTANCE_M = 10f
+    @Volatile private var isDriverServiceOnline = false
 
     fun start(context: Context, driverId: String?, token: String?, backendUrl: String?) {
+      if (isDriverServiceOnline) {
+        updateSession(context, token, backendUrl)
+        return
+      }
       val intent = Intent(context, DriverForegroundService::class.java).apply {
         action = ACTION_START
         putExtra(EXTRA_DRIVER_ID, driverId)
@@ -349,10 +512,18 @@ class DriverForegroundService : Service(), LocationListener {
     }
 
     fun stop(context: Context) {
+      isDriverServiceOnline = false
+      DriverOverlayBubbleController.hide()
+      if (!isDriverServiceOnline) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.cancel(OFFER_NOTIFICATION_ID)
+        nm.cancel(NOTIFICATION_ID)
+      }
       context.startService(Intent(context, DriverForegroundService::class.java).apply { action = ACTION_STOP })
     }
 
     fun updateSession(context: Context, token: String?, backendUrl: String?) {
+      if (!isDriverServiceOnline) return
       context.startService(Intent(context, DriverForegroundService::class.java).apply {
         action = ACTION_UPDATE_SESSION
         putExtra(EXTRA_TOKEN, token)
@@ -361,6 +532,7 @@ class DriverForegroundService : Service(), LocationListener {
     }
 
     fun showRideAlert(context: Context, offer: Map<String, String>) {
+      if (!isDriverServiceOnline) return
       createChannels(context)
       val intent = Intent(context, DriverForegroundService::class.java).apply {
         action = ACTION_SHOW_OFFER
@@ -371,12 +543,35 @@ class DriverForegroundService : Service(), LocationListener {
     }
 
     fun stopRideAlert(context: Context) {
-      DriverOverlayBubbleController.removeCard()
       val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
       nm.cancel(OFFER_NOTIFICATION_ID)
+      if (!isDriverServiceOnline) {
+        DriverOverlayBubbleController.hide()
+        return
+      }
       runCatching {
         context.startService(Intent(context, DriverForegroundService::class.java).apply { action = ACTION_STOP_ALERT })
       }
+    }
+
+    fun acceptRideAlert(context: Context, offer: Map<String, String>) {
+      if (!isDriverServiceOnline) return
+      val intent = Intent(context, DriverForegroundService::class.java).apply {
+        action = ACTION_ACCEPT_OFFER
+        offer.forEach { (k, v) -> putExtra(k, v) }
+      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+      else context.startService(intent)
+    }
+
+    fun declineRideAlert(context: Context, offer: Map<String, String>) {
+      if (!isDriverServiceOnline) return
+      val intent = Intent(context, DriverForegroundService::class.java).apply {
+        action = ACTION_DECLINE_OFFER
+        offer.forEach { (k, v) -> putExtra(k, v) }
+      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+      else context.startService(intent)
     }
 
     fun createChannels(context: Context) {
@@ -390,7 +585,6 @@ class DriverForegroundService : Service(), LocationListener {
         description = "Keeps NexRyde driver online status active"
         setShowBadge(false)
       }
-      val soundUri = Uri.parse("android.resource://${context.packageName}/${R.raw.nexryde_1}")
       val offerChannel = NotificationChannel(
         CHANNEL_DRIVER_OFFERS,
         "Ride Offers",
@@ -400,13 +594,7 @@ class DriverForegroundService : Service(), LocationListener {
         lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         enableVibration(true)
         vibrationPattern = longArrayOf(0, 700, 250, 700, 250, 900)
-        setSound(
-          soundUri,
-          AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_ALARM)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .build()
-        )
+        setSound(null, null)
       }
       nm.createNotificationChannel(serviceChannel)
       nm.createNotificationChannel(offerChannel)

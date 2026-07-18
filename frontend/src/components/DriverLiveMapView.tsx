@@ -204,6 +204,18 @@ const CAMERA_UNLOCK_FALLBACK_MS = 2500;
 /** `onMapLoaded` can be very late on slow networks; 8s was a false alarm vs real GCP tile failures. */
 const MAP_ONLOADED_TIMEOUT_MS = 40000;
 
+const PROD_TILE_URL_TEMPLATE =
+  process.env.EXPO_PUBLIC_MAP_TILE_URL_TEMPLATE ||
+  (Constants.expoConfig?.extra?.mapTileUrlTemplate as string | undefined) ||
+  '';
+const PROD_TILE_PROVIDER_NAME =
+  process.env.EXPO_PUBLIC_MAP_TILE_PROVIDER_NAME ||
+  (Constants.expoConfig?.extra?.mapTileProviderName as string | undefined) ||
+  'Backup map';
+const HAS_PROD_TILE_FALLBACK =
+  /^https:\/\//i.test(PROD_TILE_URL_TEMPLATE) &&
+  !/openstreetmap\.org|osm\.org/i.test(PROD_TILE_URL_TEMPLATE);
+
 function haversineKmDriver(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 6371;
   const dLat = ((b.lat - a.lat) * Math.PI) / 180;
@@ -300,6 +312,7 @@ export interface ActiveTrip {
   status?: string;
   rider_name?: string | null;
   rider_profile_image?: string | null;
+  rider_photo?: string | null;
   rider_phone?: string | null;
   pickup_code_verified?: boolean;
   security_code_verified?: boolean;
@@ -326,6 +339,8 @@ export interface ActiveTrip {
 interface Props {
   driverCoords: DriverCoords | null;
   isOnline: boolean;
+  /** Socket reconnecting while session stays online — show status, keep Go Offline enabled. */
+  isReconnecting?: boolean;
   driverCanReceiveOffers: boolean;
   todayEarnings: number;
   todayTrips?: number;
@@ -568,6 +583,7 @@ function ZoomButton({
 function DriverLiveMapViewInner({
   driverCoords,
   isOnline,
+  isReconnecting = false,
   driverCanReceiveOffers,
   todayEarnings,
   todayTrips = 0,
@@ -682,7 +698,9 @@ function DriverLiveMapViewInner({
     return () => clearTimeout(t);
   }, [mapLoaded, mapReady]);
 
-  // If Google tiles don't load shortly after map is ready, fail over gracefully.
+  // If Google tiles don't load shortly after map is ready, surface diagnostics.
+  // Never auto-fallback to public OSM tiles in production; only use an explicitly
+  // configured paid tile provider.
   useEffect(() => {
     if (!isOnline || !mapReady || mapLoaded || useTileFallback) return;
     const t = setTimeout(() => {
@@ -691,10 +709,10 @@ function DriverLiveMapViewInner({
         ? ` MapView layout: ${Math.round(mapLayout.width)}×${Math.round(mapLayout.height)}.`
         : '';
       setMapSdkErrorDetail(
-        `[Timer ${MAP_ONLOADED_TIMEOUT_MS / 1000}s] onMapLoaded never ran — native map did not finish its load callback.${sizeNote} Beige + Google watermark usually means GCP: add EAS/Android release SHA‑1 + package com.nexryde.app to this API key, confirm billing, enable Maps SDK for Android. This is not an overlay hiding the map. Tap "Load fallback tiles" to confirm the MapView works.`
+        `[Timer ${MAP_ONLOADED_TIMEOUT_MS / 1000}s] onMapLoaded never ran — native map did not finish its load callback.${sizeNote} Beige + Google watermark usually means GCP: enable Maps SDK for Android, enable billing, register the release SHA-1 with package com.nexryde.app, and make sure EAS injects EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY for the release build. Public OpenStreetMap fallback tiles are disabled because they are not approved for production ride-hailing traffic.`
       );
       setUseDefaultMapStyle(true);
-      setUseTileFallback(true);
+      if (HAS_PROD_TILE_FALLBACK) setUseTileFallback(true);
       console.warn('[NEXRYDE_MAP_SDK] mapLoadTimeoutFallback', { mapReady, mapLoaded, mapLayout });
       logMapEvent('mapLoadTimeoutFallback');
     }, MAP_ONLOADED_TIMEOUT_MS);
@@ -708,13 +726,14 @@ function DriverLiveMapViewInner({
     const fetchUnread = async () => {
       try {
         const res = await fetch(
-          `${BACKEND_URL}/api/users/${driverId}/notifications?unread_only=true&limit=1`,
+          `${BACKEND_URL}/api/users/${driverId}/notifications?unread_only=true&limit=1&exclude_engagement=true`,
           { headers: getAuthHeaders() }
         );
         if (!res.ok) return;
         const data = await res.json();
-        const count = data?.unread_count ?? (Array.isArray(data?.notifications) ? data.notifications.length : 0);
-        if (!cancelled) setMapInboxUnread(Number(count));
+        // Server excludes engagement/daily_slot/reconnect — reconnect loops must not inflate the bell.
+        const count = Number(data?.unread_count ?? 0);
+        if (!cancelled) setMapInboxUnread(Number.isFinite(count) ? count : 0);
       } catch {
         /* silent */
       }
@@ -2123,16 +2142,18 @@ function DriverLiveMapViewInner({
           <TouchableOpacity style={styles.mapRetryAction} onPress={retryGoogleTiles} activeOpacity={0.85}>
             <Text style={styles.mapRetryActionText}>Retry</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.mapErrorAction}
-            onPress={() => {
-              setUseDefaultMapStyle(true);
-              setUseTileFallback(true);
-            }}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.mapErrorActionText}>Load fallback tiles</Text>
-          </TouchableOpacity>
+          {HAS_PROD_TILE_FALLBACK ? (
+            <TouchableOpacity
+              style={styles.mapErrorAction}
+              onPress={() => {
+                setUseDefaultMapStyle(true);
+                setUseTileFallback(true);
+              }}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.mapErrorActionText}>Load backup map</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       )}
       {/* Map canvas: pinned below UI overlays (never paint a full-screen blocker above this). */}
@@ -2205,24 +2226,15 @@ function DriverLiveMapViewInner({
         }}
         mapPadding={mapScreenPadding}
       >
-        {/* Fallback tiles when Google tile service fails */}
+        {/* Optional paid tile-provider fallback. Public OSM tiles are intentionally blocked. */}
         {useTileFallback && (
-          <>
-            <UrlTile
-              urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              maximumZ={19}
-              flipY={false}
-              zIndex={10}
-              tileSize={256}
-            />
-            <UrlTile
-              urlTemplate="https://b.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              maximumZ={19}
-              flipY={false}
-              zIndex={11}
-              tileSize={256}
-            />
-          </>
+          <UrlTile
+            urlTemplate={PROD_TILE_URL_TEMPLATE}
+            maximumZ={19}
+            flipY={false}
+            zIndex={10}
+            tileSize={256}
+          />
         )}
 
         {/* Full trip context (pickup → drop) while driving to A — under nav leg */}
@@ -2668,7 +2680,7 @@ function DriverLiveMapViewInner({
                 color={useTileFallback ? '#FBBF24' : mapLoaded ? '#4ADE80' : '#94A3B8'}
               />
               <Text style={[styles.mapHealthChipText, activeTrip && styles.mapHealthChipTextTrip]} numberOfLines={1}>
-                {useTileFallback ? 'OSM' : mapLoaded ? 'Live' : 'Map…'}
+                {useTileFallback ? PROD_TILE_PROVIDER_NAME : mapLoaded ? 'Live' : 'Map…'}
               </Text>
             </View>
           ) : null}
@@ -2748,8 +2760,10 @@ function DriverLiveMapViewInner({
 
       {isOnline && !activeTrip && !hasEmbeddedOffer && showLegacyTopBar ? (
         <View style={[styles.mapOnlineBadge, { top: insets.top + 52 + 56, left: flow.padH }]} pointerEvents="none">
-          <View style={styles.mapOnlineDot} />
-          <Text style={styles.mapOnlineText}>ONLINE</Text>
+          <View style={[styles.mapOnlineDot, isReconnecting && { backgroundColor: '#FBBF24' }]} />
+          <Text style={styles.mapOnlineText}>
+            {isReconnecting ? 'RECONNECTING' : 'ONLINE'}
+          </Text>
         </View>
       ) : null}
 
@@ -3027,7 +3041,7 @@ function DriverLiveMapViewInner({
           {String(activeTrip.status) === 'accepted' && onTripOpenNavigation ? (
               <DriverNavigatePickupDock
                 riderName={activeTrip.rider_name || 'Rider'}
-                riderPhoto={activeTrip.rider_profile_image ? String(activeTrip.rider_profile_image) : null}
+                riderPhoto={activeTrip.rider_profile_image || activeTrip.rider_photo ? String(activeTrip.rider_profile_image || activeTrip.rider_photo) : null}
                 ratingAvg={activeTrip.rider_reputation_avg ?? null}
                 ratingTrips={activeTrip.rider_trip_count ?? null}
                 isNewRider={!!activeTrip.rider_new_account}
@@ -3092,7 +3106,7 @@ function DriverLiveMapViewInner({
                   : undefined
               }
               riderName={activeTrip.rider_name || 'Rider'}
-              riderPhoto={activeTrip.rider_profile_image ? String(activeTrip.rider_profile_image) : null}
+              riderPhoto={activeTrip.rider_profile_image || activeTrip.rider_photo ? String(activeTrip.rider_profile_image || activeTrip.rider_photo) : null}
               ratingAvg={activeTrip.rider_reputation_avg ?? null}
               ratingTrips={activeTrip.rider_trip_count ?? null}
               isNewRider={!!activeTrip.rider_new_account}
@@ -3153,7 +3167,7 @@ function DriverLiveMapViewInner({
             startTripDockExpanded ? (
               <DriverStartTripDock
                 riderName={activeTrip.rider_name || 'Rider'}
-                riderPhoto={activeTrip.rider_profile_image ? String(activeTrip.rider_profile_image) : null}
+                riderPhoto={activeTrip.rider_profile_image || activeTrip.rider_photo ? String(activeTrip.rider_profile_image || activeTrip.rider_photo) : null}
                 ratingAvg={activeTrip.rider_reputation_avg ?? null}
                 ratingTrips={activeTrip.rider_trip_count ?? null}
                 isNewRider={!!activeTrip.rider_new_account}
@@ -3210,7 +3224,7 @@ function DriverLiveMapViewInner({
                 tripShortId={`Trip ${formatTripShortId(activeTrip.id)}`}
                 paymentMethodLabel={formatPaymentLabel(activeTrip.payment_method)}
                 riderName={activeTrip.rider_name || 'Rider'}
-                riderPhoto={activeTrip.rider_profile_image ? String(activeTrip.rider_profile_image) : null}
+                riderPhoto={activeTrip.rider_profile_image || activeTrip.rider_photo ? String(activeTrip.rider_profile_image || activeTrip.rider_photo) : null}
                 ratingAvg={activeTrip.rider_reputation_avg ?? null}
                 ratingTrips={activeTrip.rider_trip_count ?? null}
                 isNewRider={!!activeTrip.rider_new_account}
@@ -3787,14 +3801,20 @@ function DriverLiveMapViewInner({
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={styles.oiWaitTitle}>
-                      {isFindingRide ? 'Listening for rides' : 'Offers paused'}
+                      {isReconnecting
+                        ? 'Reconnecting…'
+                        : isFindingRide
+                          ? 'Listening for rides'
+                          : 'Offers paused'}
                     </Text>
                     <Text style={styles.oiWaitSub} numberOfLines={1}>
-                      {isFindingRide
-                        ? mapLoaded
-                          ? 'Live on map · tap menu for heatmap'
-                          : 'Connecting to map…'
-                        : 'Complete account steps to receive offers'}
+                      {isReconnecting
+                        ? 'Connection blip · you can still go offline'
+                        : isFindingRide
+                          ? mapLoaded
+                            ? 'Live on map · tap menu for heatmap'
+                            : 'Connecting to map…'
+                          : 'Complete account steps to receive offers'}
                     </Text>
                   </View>
                   {isFindingRide ? <OiListeningPulse /> : null}
@@ -3967,7 +3987,9 @@ function DriverLiveMapViewInner({
             >
               <Ionicons name="options-outline" size={20} color="#94A3B8" />
             </TouchableOpacity>
-            <Text style={styles.offlineStripText}>YOU'RE OFFLINE</Text>
+            <Text style={styles.offlineStripText}>
+              {toggling ? 'CONNECTING…' : "YOU'RE OFFLINE"}
+            </Text>
             <TouchableOpacity
               onPress={onFeatureHub}
               activeOpacity={0.82}
@@ -4023,6 +4045,7 @@ function DriverLiveMapViewInner({
                 <TouchableOpacity
                   style={styles.goOfflineBtn}
                   onPress={onGoOffline}
+                  disabled={toggling}
                   activeOpacity={0.82}
                   hitSlop={{ top: 10, bottom: 10, left: 12, right: 12 }}
                   accessibilityRole="button"

@@ -69,17 +69,30 @@ async def set_driver_offline(driver_id: str) -> None:
     await store.georemove(GEO_AVAILABLE_KEY, driver_id)
 
 
+async def clear_driver_presence_safe(driver_id: str) -> None:
+    """Best-effort Redis/GEO clear used after Mongo force-offline (suspend/enforcement)."""
+    if not driver_id:
+        return
+    try:
+        await set_driver_offline(driver_id)
+    except Exception:
+        logger.exception("clear_driver_presence_safe failed driver=%s", driver_id)
+
+
 async def refresh_driver_presence(
     driver_id: str,
     *,
     lat: Optional[float] = None,
     lng: Optional[float] = None,
 ) -> None:
-    """Extend TTL (~heartbeat). Updates coords when provided."""
+    """Extend TTL (~heartbeat) only when Redis already marks the driver online.
+
+    Never invents presence from a stale key — Mongo-offline drivers must not be
+    re-inflated into GEO/dispatch via heartbeat.
+    """
     existing = await get_driver_presence(driver_id) or {}
+    if not existing.get("online"):
+        return
     use_lat = float(lat if lat is not None else existing.get("lat") or 0)
     use_lng = float(lng if lng is not None else existing.get("lng") or 0)
-    if existing.get("online"):
-        await set_driver_online(driver_id, lat=use_lat, lng=use_lng)
-    else:
-        await store.expire(_presence_key(driver_id), PRESENCE_TTL_SEC)
+    await set_driver_online(driver_id, lat=use_lat, lng=use_lng)

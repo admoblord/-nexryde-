@@ -5,7 +5,7 @@
 import { BACKEND_URL } from '@/src/services/api';
 import { getValidToken } from '@/src/lib/tokenStore';
 import { driverFlowLog } from '@/src/utils/driverOnlineFlowLog';
-import { reportPlatformConnectionSignal } from '@/src/services/platformConnectionManager';
+import { reportPlatformConnectionSignal, reportNetworkOpsSignal } from '@/src/services/platformConnectionManager';
 
 export type DriverOfferPayload = Record<string, unknown>;
 
@@ -46,13 +46,20 @@ class DriverOffersSocketManager {
   }
 
   private emitOffer(offer: DriverOfferPayload) {
+    reportNetworkOpsSignal('ride_offer', true);
     for (const l of this.offerListeners) l(offer);
   }
 
   /** Start / resume offers channel for this driver. Idempotent for same driverId. */
   connect(driverId: string) {
     this.shouldStayConnected = true;
-    if (this.driverId === driverId && this.ws?.readyState === WebSocket.OPEN) return;
+    const rs = this.ws?.readyState;
+    if (
+      this.driverId === driverId &&
+      (rs === WebSocket.OPEN || rs === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
     this.driverId = driverId;
     void this.openSocket();
   }
@@ -79,10 +86,14 @@ class DriverOffersSocketManager {
     driverFlowLog('SOCKET_DISCONNECTED', { reason: 'driver_offline' });
   }
 
-  /** Force reconnect after foreground / network restore. */
+  /**
+   * Force reconnect after foreground / network restore.
+   * Never cancels an in-flight CONNECTING handshake (that caused go-online races).
+   */
   nudgeReconnect(): void {
     if (!this.shouldStayConnected || !this.driverId) return;
-    if (this.ws?.readyState === WebSocket.OPEN) return;
+    const rs = this.ws?.readyState;
+    if (rs === WebSocket.OPEN || rs === WebSocket.CONNECTING) return;
     this.reconnectAttempts = 0;
     void this.openSocket();
   }
@@ -131,7 +142,8 @@ class DriverOffersSocketManager {
       const pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
           try {
-            ws.send(JSON.stringify({ type: 'ping' }));
+            // Server accepts plain "ping" (JSON {type:ping} never got a pong).
+            ws.send('ping');
           } catch {
             /* ignore */
           }
@@ -156,10 +168,10 @@ class DriverOffersSocketManager {
     };
 
     ws.onerror = () => {
-      /* onclose handles reconnect */
+      driverFlowLog('SOCKET_DISCONNECTED', { reason: 'error', driverId: this.driverId });
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       const ext = ws as WebSocket & { _pingInterval?: ReturnType<typeof setInterval> };
       if (ext._pingInterval) {
         clearInterval(ext._pingInterval);
@@ -168,6 +180,12 @@ class DriverOffersSocketManager {
       if (gen !== this.connectGeneration) return;
       this.ws = null;
       this.emitConnection(false);
+      driverFlowLog('SOCKET_DISCONNECTED', {
+        reason: 'close',
+        code: ev.code,
+        wasClean: ev.wasClean,
+        closeReason: typeof ev.reason === 'string' ? ev.reason.slice(0, 80) : '',
+      });
       this.scheduleReconnect();
     };
   }

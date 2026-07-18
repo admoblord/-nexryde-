@@ -195,6 +195,7 @@ export function formatApiDetail(detail: unknown): string {
   if (typeof detail === 'object') {
     const o = detail as Record<string, unknown>;
     if (typeof o.message === 'string') return o.message;
+    if (typeof o.code === 'string' && typeof o.detail === 'string') return o.detail;
   }
   try {
     const s = JSON.stringify(detail);
@@ -202,6 +203,14 @@ export function formatApiDetail(detail: unknown): string {
   } catch {
     return '';
   }
+}
+
+/** Preserve structured `{ code, message }` from FastAPI HTTPException detail. */
+export function extractApiDetailPayload(data: unknown): unknown {
+  if (!data || typeof data !== 'object') return data;
+  const o = data as Record<string, unknown>;
+  if ('detail' in o) return o.detail;
+  return data;
 }
 
 export function messageFromAxiosError(e: unknown, fallback: string): string {
@@ -413,7 +422,7 @@ export const registerPushToken = (
 /** Report tap/open for analytics (`nid` comes from push `data`, set by the backend). */
 export const reportNotificationOpened = (
   userId: string,
-  payload: { nid?: string; notification_id?: string }
+  payload: { nid?: string; notification_id?: string; event?: 'opened' | 'dismissed' | 'action' }
 ) => api.post(`/users/${userId}/notification-opened`, payload);
 
 // Driver APIs
@@ -1111,13 +1120,6 @@ export const respondToSafetyCheck = (checkId: string, response: string) =>
 export const submitDriverStopReason = (tripId: string, reason: string) =>
   api.post(`/trips/${tripId}/stop-reason`, { reason });
 
-export const askSupportVoiceBot = (data: {
-  message: string;
-  user_id?: string;
-  trip_id?: string;
-  language?: 'auto' | 'en' | 'pcm';
-}) => api.post('/support/voice-bot/reply', data);
-
 export const reportTripIssue = (data: {
   trip_id: string;
   user_id: string;
@@ -1186,13 +1188,6 @@ export const getFeatureAnnouncements = () =>
 
 export const triggerRiskAlert = (tripId: string, userId: string, reason?: string) =>
   api.post(`/trips/${tripId}/risk-alert?user_id=${userId}`, { trip_id: tripId, reason });
-
-// AI Assistant
-export const askRiderAssistant = (userId: string, question: string) =>
-  api.get(`/ai/rider-assistant?user_id=${userId}&question=${encodeURIComponent(question)}`);
-
-export const askDriverAssistant = (userId: string, question: string) =>
-  api.get(`/ai/driver-assistant?user_id=${userId}&question=${encodeURIComponent(question)}`);
 
 // Fatigue Monitoring
 export const getFatigueStatus = (userId: string) =>
@@ -1451,17 +1446,6 @@ export const getAvailableDrivers = (params: {
   const qs = q.toString();
   return api.get(`/drivers/available${qs ? `?${qs}` : ''}`);
 };
-
-// Earnings Predictor
-export const predictEarnings = (userId: string, hours: number = 8) =>
-  api.get(`/ai/earnings-predictor/${userId}?hours_to_drive=${hours}`);
-
-// Pidgin English AI
-export const askRiderAssistantPidgin = (userId: string, question: string) =>
-  api.get(`/ai/rider-assistant-pidgin?user_id=${userId}&question=${encodeURIComponent(question)}`);
-
-export const askDriverAssistantPidgin = (userId: string, question: string) =>
-  api.get(`/ai/driver-assistant-pidgin?user_id=${userId}&question=${encodeURIComponent(question)}`);
 
 // Driver Compliance
 export const getDriverCompliance = (driverId: string) =>

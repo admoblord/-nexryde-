@@ -77,6 +77,7 @@ class PushTokenRequest(BaseModel):
 class NotificationOpenedRequest(BaseModel):
     notification_id: Optional[str] = Field(None, description="Legacy row id or same as nid")
     nid: Optional[str] = Field(None, description="Correlation id from push payload data.nid (preferred)")
+    event: Optional[str] = Field("opened", description="opened | dismissed | action")
 
 class ProfilePictureUpload(BaseModel):
     image: str
@@ -181,17 +182,17 @@ async def get_user_trust_summary(user_id: str, request: Request):
 
 @users_router.get("/users/phone/{phone}")
 async def get_user_by_phone(phone: str, request: Request):
-    require_authenticated(request)
-    normalized = phone.strip()
-    if not normalized.startswith('+'):
-        digits = ''.join(filter(str.isdigit, normalized))
-        if normalized.startswith('0'):
-            normalized = '+234' + digits[1:]
-        elif normalized.startswith('234'):
-            normalized = '+' + digits
-        else:
-            normalized = '+234' + digits
-    user = await db.users.find_one({"phone": normalized}, {"_id": 0, "id": 1, "name": 1, "phone": 1, "role": 1, "is_verified": 1})
+    actor_id = require_authenticated(request)
+    normalized = _normalize_phone(phone)
+    actor = await db.users.find_one(
+        {"id": actor_id},
+        {"_id": 0, "id": 1, "name": 1, "phone": 1, "role": 1, "is_verified": 1},
+    )
+    if not actor:
+        raise HTTPException(status_code=404, detail="User not found")
+    if _normalize_phone(actor.get("phone") or "") != normalized:
+        raise HTTPException(status_code=403, detail="You do not have permission to look up this phone number")
+    user = actor
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
@@ -249,7 +250,7 @@ async def notification_opened(user_id: str, request: Request, body: Notification
     from notification_service import record_notification_open
 
     nid = body.nid or body.notification_id
-    await record_notification_open(user_id, nid)
+    await record_notification_open(user_id, nid, event=body.event or "opened")
     return {"ok": True}
 
 
@@ -809,13 +810,27 @@ async def verify_face(user_id: str, payload: FaceVerificationRequest, http_reque
 # ==================== NOTIFICATIONS ====================
 
 @users_router.get("/users/{user_id}/notifications")
-async def get_user_notifications(user_id: str, request: Request, limit: int = 50, unread_only: bool = False):
+async def get_user_notifications(
+    user_id: str,
+    request: Request,
+    limit: int = 50,
+    unread_only: bool = False,
+    exclude_engagement: bool = False,
+):
     verify_owner_strict(request, user_id)
-    query = {"user_id": user_id}
+    query: dict = {"user_id": user_id}
     if unread_only:
         query["read"] = False
+    # Map bell / badge: exclude engagement + daily_slot so reconnect spam never inflates the count.
+    if exclude_engagement:
+        query["category"] = {"$nin": ["driver_engagement", "rider_engagement", "engagement", "daily_slot"]}
+        query["source"] = {"$nin": ["engagement", "daily_slot", "reconnect"]}
     notifications = await db.notifications.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
-    unread_count = await db.notifications.count_documents({"user_id": user_id, "read": False})
+    unread_query = {"user_id": user_id, "read": False}
+    if exclude_engagement:
+        unread_query["category"] = query["category"]
+        unread_query["source"] = query["source"]
+    unread_count = await db.notifications.count_documents(unread_query)
     return {"notifications": notifications, "unread_count": unread_count}
 
 @users_router.post("/users/{user_id}/notifications/{notification_id}/read")

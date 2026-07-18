@@ -1,6 +1,10 @@
 package com.nexryde.app.driver
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -67,6 +71,57 @@ class DriverExperienceModule(private val reactContext: ReactApplicationContext) 
   fun requestOverlayPermission() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !DriverOverlayBubbleController.hasPermission(reactContext)) {
       reactContext.startActivity(DriverOverlayBubbleController.permissionIntent(reactContext))
+    }
+  }
+
+  @ReactMethod
+  fun hasFullScreenIntentPermission(promise: Promise) {
+    promise.resolve(DriverNotificationManager.canUseFullScreenIntent(reactContext))
+  }
+
+  @ReactMethod
+  fun requestFullScreenIntentPermission() {
+    if (!DriverNotificationManager.canUseFullScreenIntent(reactContext)) {
+      reactContext.startActivity(DriverNotificationManager.fullScreenIntentSettingsIntent(reactContext))
+    }
+  }
+
+  @ReactMethod
+  fun hasBatteryOptimizationExempt(promise: Promise) {
+    try {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+        promise.resolve(true)
+        return
+      }
+      val pm = reactContext.getSystemService(PowerManager::class.java)
+      promise.resolve(pm?.isIgnoringBatteryOptimizations(reactContext.packageName) == true)
+    } catch (e: Exception) {
+      promise.resolve(true)
+    }
+  }
+
+  @ReactMethod
+  fun requestBatteryOptimizationExempt() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+    try {
+      val pm = reactContext.getSystemService(PowerManager::class.java)
+      if (pm?.isIgnoringBatteryOptimizations(reactContext.packageName) == true) return
+      // Package-scoped dialog — not the generic battery list.
+      val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+        data = Uri.parse("package:${reactContext.packageName}")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      reactContext.startActivity(intent)
+    } catch (_: Exception) {
+      try {
+        val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+          data = Uri.parse("package:${reactContext.packageName}")
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        reactContext.startActivity(fallback)
+      } catch (_: Exception) {
+        /* no-op */
+      }
     }
   }
 

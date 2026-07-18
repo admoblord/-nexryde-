@@ -29,12 +29,6 @@ from auth_guard import verify_owner_strict
 from admin_guard import require_admin_request
 
 try:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-except ImportError:
-    LlmChat = None
-    UserMessage = None
-
-try:
     from routers.auth import send_driver_verification_notification
 except ImportError:
     async def send_driver_verification_notification(user_id, status, reason=None):
@@ -47,13 +41,6 @@ _DRIVER_GPS_THROTTLE_S = 3.0
 logger = logging.getLogger('server')
 drivers_router = APIRouter(prefix="/api", tags=["Drivers"])
 
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
-AI_AUTO_APPROVE_ENABLED = os.environ.get("AI_AUTO_APPROVE_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
-AI_AUTO_APPROVE_MIN_CONFIDENCE = float(os.environ.get("AI_AUTO_APPROVE_MIN_CONFIDENCE", "0.92"))
-AI_MAX_RISK_SCORE = float(os.environ.get("AI_MAX_RISK_SCORE", "0.2"))
-AI_SECOND_PASS_ENABLED = os.environ.get("AI_SECOND_PASS_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
-AI_SECOND_PASS_MIN_CONFIDENCE = float(os.environ.get("AI_SECOND_PASS_MIN_CONFIDENCE", "0.95"))
-AI_FACE_ID_MIN_SCORE = float(os.environ.get("AI_FACE_ID_MIN_SCORE", "0.9"))
 REQUIRED_DRIVER_DOC_KEYS = {
     "nin",
     "drivers_license",
@@ -193,7 +180,7 @@ TIER_CONFIG = {
 
 def _fare_city_for_surge(lat: Optional[float], lng: Optional[float], fallback_city: Optional[str]) -> str:
     """Maps GPS / saved city → fare_config city slug."""
-    from routers.ai_features import detect_city
+    from city_detection import detect_city
 
     loc = detect_city(lat, lng, fallback_city)
     raw = (loc.get("city") or "lagos").lower().strip().replace(" ", "_")
@@ -661,15 +648,54 @@ async def update_driver_location(user_id: str, request: LocationUpdate, http_req
     return {"message": "Location updated"}
 
 @drivers_router.put("/drivers/{driver_id}/online")
-async def put_driver_online(driver_id: str, is_online: bool, lat: float = 0, lng: float = 0, *, request: Request):
-    """PUT /drivers/{id}/online — zone/cooldown + subscription gates."""
-    return await apply_driver_online_toggle(
+async def put_driver_online(
+    driver_id: str,
+    is_online: bool,
+    lat: float = 0,
+    lng: float = 0,
+    request_id: Optional[str] = None,
+    *,
+    request: Request,
+):
+    """PUT /drivers/{id}/online — zone/cooldown + subscription gates.
+
+    Optional ``request_id`` enables short-TTL idempotency (Uber-style):
+    duplicate clients retries with the same id return the cached result.
+    """
+    if request_id:
+        from redis_store import store as _store
+
+        cache_key = f"driver:online_req:{driver_id}:{request_id}"
+        cached = await _store.get(cache_key)
+        if cached:
+            try:
+                import json as _json
+
+                payload = _json.loads(cached)
+                if isinstance(payload, dict):
+                    return payload
+            except Exception:
+                pass
+
+    result = await apply_driver_online_toggle(
         driver_id=driver_id,
         is_online=is_online,
         lat=lat,
         lng=lng,
         request=request,
     )
+
+    if request_id:
+        try:
+            from redis_store import store as _store
+            import json as _json
+
+            cache_key = f"driver:online_req:{driver_id}:{request_id}"
+            await _store.set(cache_key, _json.dumps(result), ttl=300)
+        except Exception:
+            pass
+
+    return result
 
 
 async def apply_driver_online_toggle(
@@ -763,14 +789,23 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
             max_time_ms=QUERY_MAX_TIME_MS,
         )
         if not profile:
-            raise HTTPException(status_code=403, detail="Complete your driver profile before going online")
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "ERR_APPROVAL",
+                    "message": "Complete your driver profile before going online",
+                },
+            )
 
         vehicles = profile.get("vehicles") or []
         has_vehicle = bool(vehicles) or bool(profile.get("vehicle_model")) or bool(profile.get("vehicle_registered"))
         if not has_vehicle:
             raise HTTPException(
                 status_code=403,
-                detail="Register a vehicle to go online. Add your vehicle in Driver Profile → Vehicle.",
+                detail={
+                    "code": "ERR_NO_VEHICLE",
+                    "message": "Register a vehicle to go online. Add your vehicle in Driver Profile → Vehicle.",
+                },
             )
 
         # ── CRITICAL gates: must be true to go online ─────────────────────────
@@ -782,7 +817,10 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
         if critical_missing:
             raise HTTPException(
                 status_code=403,
-                detail=f"Account not yet approved. Missing: {', '.join(critical_missing)}",
+                detail={
+                    "code": "ERR_APPROVAL",
+                    "message": f"Account not yet approved. Missing: {', '.join(critical_missing)}",
+                },
             )
 
         # ── SOFT gates: warn but allow newer verified drivers a grace period ──
@@ -819,7 +857,10 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
                 if not docs_status.get("compliant", False) and docs_status.get("critically_expired"):
                     raise HTTPException(
                         status_code=403,
-                        detail="One or more required documents have expired. Please renew them before going online."
+                        detail={
+                            "code": "ERR_DOCUMENTS",
+                            "message": "One or more required documents have expired. Please renew them before going online.",
+                        },
                     )
             except HTTPException:
                 raise
@@ -854,18 +895,27 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
             if subscription and subscription.get("status") == "pending_payment":
                 raise HTTPException(
                     status_code=403,
-                    detail="Your free trial has ended. Subscribe to keep receiving trips.",
+                    detail={
+                        "code": "ERR_NO_ACTIVE_PLAN",
+                        "message": "Your free trial has ended. Subscribe to keep receiving trips.",
+                    },
                 )
             raise HTTPException(
                 status_code=403,
-                detail="No active plan. Start your verified-driver trial or subscribe to go online.",
+                detail={
+                    "code": "ERR_NO_ACTIVE_PLAN",
+                    "message": "No active plan. Start your verified-driver trial or subscribe to go online.",
+                },
             )
 
         # Trial gate: live evaluation above; block exhausted trials.
         if subscription.get("status") == "pending_payment":
             raise HTTPException(
                 status_code=403,
-                detail="Your free trial has ended. Subscribe to keep receiving trips.",
+                detail={
+                    "code": "ERR_NO_ACTIVE_PLAN",
+                    "message": "Your free trial has ended. Subscribe to keep receiving trips.",
+                },
             )
 
         now = datetime.utcnow()
@@ -891,7 +941,13 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
                 {"id": user_id},
                 {"$set": {"subscription_active": False, "subscription_expiry": expiry}},
             )
-            raise HTTPException(status_code=403, detail="Subscription expired. Renew to go online.")
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "ERR_NO_ACTIVE_PLAN",
+                    "message": "Subscription expired. Renew to go online.",
+                },
+            )
 
         await db.driver_profiles.update_one(
             {"user_id": user_id},
@@ -934,9 +990,12 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
 
     profile_online_update: dict = {"$set": {"is_online": is_online}}
     if is_online:
-        profile_online_update["$set"]["online_session_started_at"] = datetime.now(
-            timezone.utc
-        ).isoformat()
+        online_at_dt = datetime.now(timezone.utc)
+        online_at = online_at_dt.isoformat()
+        profile_online_update["$set"]["online_session_started_at"] = online_at
+        profile_online_update["$set"]["went_online_at"] = online_at
+        # Seed heartbeat so the idle watchdog does not offlines before first client beat.
+        profile_online_update["$set"]["last_heartbeat"] = online_at_dt
     else:
         profile_online_update["$unset"] = {"online_session_started_at": ""}
     await db.driver_profiles.update_one({"user_id": user_id}, profile_online_update)
@@ -984,7 +1043,7 @@ async def verify_face_at_ride_start(user_id: str, request: FaceVerificationReque
     user = await db.users.find_one({"id": user_id}, {"_id": 0, "id": 1, "name": 1})
     if not user:
         raise HTTPException(status_code=404, detail="Driver not found")
-    await db.face_verifications.insert_one({"driver_id": user_id, "timestamp": datetime.now(timezone.utc), "verification_type": "ride_start", "status": "pending_ai_verification", "verified": True})
+    await db.face_verifications.insert_one({"driver_id": user_id, "timestamp": datetime.now(timezone.utc), "verification_type": "ride_start", "status": "pending_face_verification", "verified": True})
     return {"success": True, "verified": True, "message": "Face verified successfully", "match_confidence": 95.0}
 
 # ==================== VERIFY DOCUMENTS ====================
@@ -1336,7 +1395,7 @@ async def get_driver_onboarding_status(driver_id: str, request: Request):
 
         verification_status = profile.get("verification_status")
         documents_submitted = bool(profile.get("documents_submitted"))
-        if verification_status in {"pending", "pending_review", "under_review", "ai_reviewing"} or (
+        if verification_status in {"pending", "pending_review", "under_review"} or (
             documents_submitted and not profile.get("documents_verified")
         ):
             # If the driver hasn't completed Step 3 yet, send them there first.
@@ -1731,9 +1790,24 @@ async def submit_driver_verification(request: DriverVerificationSubmission, http
     if existing and existing.get("status") == "approved":
         raise HTTPException(status_code=400, detail="Driver is already verified")
     verification_id = existing.get("id") if existing else str(uuid.uuid4())
-    verification_data = {"id": verification_id, "user_id": request.user_id, "personal_info": request.personal_info, "vehicle_info": request.vehicle_info, "documents": request.documents, "status": "ai_reviewing", "submitted_at": datetime.now(timezone.utc), "reviewed_at": None, "reviewed_by": None, "rejection_reason": None, "ai_verification_result": None}
+    missing = [d for d in REQUIRED_DRIVER_DOC_KEYS if not request.documents.get(d, {}).get("uploaded")]
+    status = "rejected" if missing else "pending_review"
+    rejection_reason = f"Missing: {', '.join(missing).replace('_',' ').upper()}" if missing else None
+    verification_data = {
+        "id": verification_id,
+        "user_id": request.user_id,
+        "personal_info": request.personal_info,
+        "vehicle_info": request.vehicle_info,
+        "documents": request.documents,
+        "status": status,
+        "submitted_at": datetime.now(timezone.utc),
+        "reviewed_at": datetime.now(timezone.utc) if missing else None,
+        "reviewed_by": "SYSTEM" if missing else None,
+        "rejection_reason": rejection_reason,
+        "verification_result": None,
+    }
     await db.driver_verifications.update_one({"user_id": request.user_id}, {"$set": verification_data}, upsert=True)
-    await db.users.update_one({"id": request.user_id}, {"$set": {"verification_status": "ai_reviewing"}})
+    await db.users.update_one({"id": request.user_id}, {"$set": {"verification_status": status}})
     await _append_verification_audit_event(
         driver_id=request.user_id,
         verification_id=verification_id,
@@ -1742,213 +1816,17 @@ async def submit_driver_verification(request: DriverVerificationSubmission, http
         actor_id=request.user_id,
         details={"document_keys": sorted(list((request.documents or {}).keys()))},
     )
-    asyncio.create_task(_ai_verify_driver_documents(verification_id, request.user_id, request.personal_info, request.vehicle_info, request.documents))
-    return {"success": True, "message": "Documents submitted! AI Agent is now verifying.", "verification_id": verification_id, "status": "ai_reviewing"}
-
-async def _ai_verify_driver_documents(verification_id, user_id, personal_info, vehicle_info, documents):
-    try:
-        missing = [d for d in REQUIRED_DRIVER_DOC_KEYS if not documents.get(d, {}).get("uploaded")]
-        if missing:
-            await _ai_reject(verification_id, user_id, f"Missing: {', '.join(missing).replace('_',' ').upper()}")
-            return
-        if LlmChat and EMERGENT_LLM_KEY:
-            try:
-                chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"ai-verifier-{user_id}", system_message="You are an AI Document Verification Agent for NEXRYDE.").with_model("openai", "gpt-4o")
-                prompt = f"""
-Review this driver verification submission strictly and return JSON only with this schema:
-{{
-  "approved": true/false,
-  "recommendation": "APPROVE/REJECT/REVIEW",
-  "confidence": 0.0-1.0,
-  "risk_score": 0.0-1.0,
-  "face_id_match_score": 0.0-1.0,
-  "fraud_flags": ["..."],
-  "mismatches": ["..."],
-  "missing_documents": ["..."],
-  "verification_notes": "short reason"
-}}
-Rules:
-- High confidence approval only if all required documents are present and internally consistent.
-- If any identity mismatch, suspicious tampering, or weak evidence, use REJECT or REVIEW.
-- Never be lenient.
-
-Personal: {json.dumps(personal_info)}
-Vehicle: {json.dumps(vehicle_info)}
-Documents payload: {json.dumps(documents)}
-"""
-                response = await chat.send_message(UserMessage(text=prompt))
-                json_match = re.search(r'\{[\s\S]*\}', response, re.DOTALL)
-                ai_result = json.loads(json_match.group()) if json_match else json.loads(response)
-                await db.driver_verifications.update_one({"id": verification_id}, {"$set": {"ai_verification_result": ai_result}})
-                confidence = float(ai_result.get("confidence", 0.0) or 0.0)
-                risk_score = float(ai_result.get("risk_score", 1.0) or 1.0)
-                face_id_score = float(ai_result.get("face_id_match_score", 0.0) or 0.0)
-                recommendation = str(ai_result.get("recommendation", "")).upper()
-                fraud_flags = ai_result.get("fraud_flags") or []
-                mismatches = ai_result.get("mismatches") or []
-                missing_from_ai = ai_result.get("missing_documents") or []
-
-                archived_doc_record = await db.driver_documents.find_one(
-                    {"driver_id": user_id}, {"_id": 0, "documents.data": 0}
-                )
-                missing_archived = _missing_required_archived_docs(archived_doc_record)
-                stored_fraud_flags = (archived_doc_record or {}).get("forgery_flags") or []
-                stored_dup_hashes = (archived_doc_record or {}).get("duplicate_hashes") or []
-
-                auto_approve_ok = (
-                    AI_AUTO_APPROVE_ENABLED
-                    and bool(ai_result.get("approved"))
-                    and recommendation == "APPROVE"
-                    and confidence >= AI_AUTO_APPROVE_MIN_CONFIDENCE
-                    and risk_score <= AI_MAX_RISK_SCORE
-                    and face_id_score >= AI_FACE_ID_MIN_SCORE
-                    and not fraud_flags
-                    and not mismatches
-                    and not missing_from_ai
-                    and not missing_archived
-                    and not stored_fraud_flags
-                    and not stored_dup_hashes
-                )
-
-                if auto_approve_ok:
-                    await _ai_approve(
-                        verification_id,
-                        user_id,
-                        vehicle_info,
-                        ai_result.get("verification_notes", "AI strict auto-approval"),
-                    )
-                else:
-                    second_pass_approved = False
-                    if (
-                        AI_SECOND_PASS_ENABLED
-                        and recommendation in {"APPROVE", "REVIEW"}
-                        and confidence >= (AI_AUTO_APPROVE_MIN_CONFIDENCE - 0.2)
-                        and confidence < AI_AUTO_APPROVE_MIN_CONFIDENCE
-                        and risk_score <= (AI_MAX_RISK_SCORE + 0.2)
-                        and not fraud_flags
-                        and not mismatches
-                        and not missing_from_ai
-                        and not missing_archived
-                        and not stored_fraud_flags
-                        and not stored_dup_hashes
-                    ):
-                        second_chat = LlmChat(
-                            api_key=EMERGENT_LLM_KEY,
-                            session_id=f"ai-verifier-2-{verification_id}",
-                            system_message="You are a secondary anti-fraud verifier. Return strict JSON only.",
-                        ).with_model("openai", "gpt-4o")
-                        second_prompt = (
-                            "Re-evaluate this verification from scratch and return JSON fields: "
-                            '{"approved":true/false,"recommendation":"APPROVE/REJECT/REVIEW","confidence":0.0-1.0,'
-                            '"risk_score":0.0-1.0,"face_id_match_score":0.0-1.0,"fraud_flags":[],"mismatches":[],'
-                            '"missing_documents":[],"verification_notes":"..."} '
-                            f"Input payload: {json.dumps({'personal_info': personal_info, 'vehicle_info': vehicle_info, 'documents': documents})}"
-                        )
-                        second_raw = await second_chat.send_message(UserMessage(text=second_prompt))
-                        second_match = re.search(r'\{[\s\S]*\}', second_raw, re.DOTALL)
-                        second_result = json.loads(second_match.group()) if second_match else json.loads(second_raw)
-                        await db.driver_verifications.update_one(
-                            {"id": verification_id},
-                            {"$set": {"ai_second_pass_result": second_result}},
-                        )
-                        second_pass_approved = (
-                            bool(second_result.get("approved"))
-                            and str(second_result.get("recommendation", "")).upper() == "APPROVE"
-                            and float(second_result.get("confidence", 0.0) or 0.0) >= AI_SECOND_PASS_MIN_CONFIDENCE
-                            and float(second_result.get("risk_score", 1.0) or 1.0) <= AI_MAX_RISK_SCORE
-                            and float(second_result.get("face_id_match_score", 0.0) or 0.0) >= AI_FACE_ID_MIN_SCORE
-                            and not (second_result.get("fraud_flags") or [])
-                            and not (second_result.get("mismatches") or [])
-                            and not (second_result.get("missing_documents") or [])
-                        )
-                    if second_pass_approved:
-                        await _ai_approve(
-                            verification_id,
-                            user_id,
-                            vehicle_info,
-                            "Dual-AI consensus auto-approval",
-                        )
-                        return
-                    reason = (
-                        f"AI review completed; pending human review. "
-                        f"confidence={confidence:.2f}, risk={risk_score:.2f}, "
-                        f"face_id_score={face_id_score:.2f}, fraud_flags={len(fraud_flags) + len(stored_fraud_flags)}, mismatches={len(mismatches)}, "
-                        f"missing_documents={len(missing_from_ai) + len(missing_archived)}."
-                    )
-                    await _mark_pending_manual_review(verification_id, user_id, reason)
-            except Exception as e:
-                logger.error(f"AI verification error: {e}")
-                await _mark_pending_manual_review(
-                    verification_id,
-                    user_id,
-                    f"AI verification unavailable: {str(e)}",
-                )
-        else:
-            await _mark_pending_manual_review(
-                verification_id,
-                user_id,
-                "AI verification key/provider not configured",
-            )
-    except Exception as e:
-        logger.error(f"AI verification failed for {user_id}: {e}")
-        await db.driver_verifications.update_one({"id": verification_id}, {"$set": {"status": "pending", "ai_error": str(e)}})
-        await db.users.update_one({"id": user_id}, {"$set": {"verification_status": "pending"}})
-
-async def _ai_approve(verification_id, user_id, vehicle_info, notes):
-    snapshot = await _snapshot_approved_documents(
-        driver_id=user_id,
-        verification_id=verification_id,
-        approved_by="AI_AGENT",
-        notes=notes,
-    )
-    await db.driver_verifications.update_one({"id": verification_id}, {"$set": {"status": "approved", "reviewed_at": datetime.now(timezone.utc), "reviewed_by": "AI_AGENT", "notes": notes}})
-    await _append_verification_audit_event(
-        driver_id=user_id,
-        verification_id=verification_id,
-        action="approved",
-        actor_type="ai",
-        actor_id="AI_AGENT",
-        details={"notes": notes},
-    )
-    profile = await db.driver_profiles.find_one({"user_id": user_id}) or {}
-    next_onboarding_step = "approved" if profile.get("profile_completed") else "profile"
-    await db.users.update_one({"id": user_id}, {"$set": {"verification_status": "approved", "documents_verified": True}})
-    await db.driver_profiles.update_one(
-        {"user_id": user_id},
-        {"$set": {
-            "documents_verified": True,
-            "verification_status": "approved",
-            "profile_completed": True,
-            "documents_approved_at": datetime.now(timezone.utc).isoformat(),
-            "nin_verified": True,
-            "license_uploaded": True,
-            "vehicle_docs_uploaded": True,
-            "selfie_verified": True,
-            "vehicle_type": vehicle_info.get("vehicleMake"),
-            "vehicle_model": vehicle_info.get("vehicleModel"),
-            "vehicle_plate": vehicle_info.get("plateNumber"),
-            "vehicle_color": vehicle_info.get("vehicleColor"),
-            "onboarding_step": "approved",
-            "approved_documents_snapshot_id": snapshot.get("id"),
-        }},
-        upsert=True
-    )
-    await db.users.update_one({"id": user_id}, {"$set": {"profile_completed": True}})
-    await _ensure_48h_trial_for_verified_driver(user_id)
-    await send_driver_verification_notification(user_id, "approved")
-
-async def _ai_reject(verification_id, user_id, reason):
-    await db.driver_verifications.update_one({"id": verification_id}, {"$set": {"status": "rejected", "reviewed_at": datetime.now(timezone.utc), "reviewed_by": "AI_AGENT", "rejection_reason": reason}})
-    await db.users.update_one({"id": user_id}, {"$set": {"verification_status": "rejected"}})
-    await _append_verification_audit_event(
-        driver_id=user_id,
-        verification_id=verification_id,
-        action="rejected",
-        actor_type="ai",
-        actor_id="AI_AGENT",
-        details={"reason": reason},
-    )
-    await send_driver_verification_notification(user_id, "rejected", reason)
+    if missing:
+        await _append_verification_audit_event(
+            driver_id=request.user_id,
+            verification_id=verification_id,
+            action="rejected",
+            actor_type="system",
+            actor_id="SYSTEM",
+            details={"reason": rejection_reason},
+        )
+        return {"success": False, "message": rejection_reason, "verification_id": verification_id, "status": status}
+    return {"success": True, "message": "Documents submitted for admin review.", "verification_id": verification_id, "status": status}
 
 async def _mark_pending_manual_review(verification_id, user_id, reason):
     await db.driver_verifications.update_one(
@@ -2058,8 +1936,8 @@ async def admin_get_verifications(request: Request, status: str = None, limit: i
     await require_admin_request(request)
     await _ensure_admin_verification_queue_rows()
     status_aliases = {
-        "pending": ["pending", "pending_review", "under_review", "ai_reviewing"],
-        "under_review": ["under_review", "ai_reviewing"],
+        "pending": ["pending", "pending_review", "under_review"],
+        "under_review": ["under_review"],
         "approved": ["approved"],
         "rejected": ["rejected"],
     }
@@ -2076,7 +1954,7 @@ async def admin_get_verifications(request: Request, status: str = None, limit: i
             {"_id": 0, "id": 1, "approved_at": 1, "document_count": 1},
             sort=[("approved_at", -1)],
         )
-        ai_result = v.get("ai_verification_result") or {}
+        review_result = v.get("verification_result") or {}
         doc_summary = v.get("documents_summary") or _driver_document_summary(archived_docs)
         enriched.append({
             **v,
@@ -2097,11 +1975,11 @@ async def admin_get_verifications(request: Request, status: str = None, limit: i
             "vehicle_plate": profile.get("vehicle_plate_number") or profile.get("vehicle_plate") or v.get("vehicle_plate"),
             "vehicle_color": profile.get("vehicle_color") or v.get("vehicle_color"),
             "review_metrics": {
-                "confidence": ai_result.get("confidence"),
-                "risk_score": ai_result.get("risk_score"),
-                "face_id_match_score": ai_result.get("face_id_match_score"),
-                "fraud_flags_count": len(ai_result.get("fraud_flags") or []),
-                "mismatches_count": len(ai_result.get("mismatches") or []),
+                "confidence": review_result.get("confidence"),
+                "risk_score": review_result.get("risk_score"),
+                "face_id_score": review_result.get("face_id_score"),
+                "fraud_flags_count": len(review_result.get("fraud_flags") or []),
+                "mismatches_count": len(review_result.get("mismatches") or []),
             },
         })
     pending_count = await db.driver_verifications.count_documents({"status": {"$in": status_aliases["pending"]}})

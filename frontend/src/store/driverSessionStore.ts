@@ -6,6 +6,7 @@
  */
 import { create } from 'zustand';
 import { driverFlowLog } from '@/src/utils/driverOnlineFlowLog';
+import { reportNetworkOpsSignal } from '@/src/services/platformConnectionManager';
 
 export type DriverOperationalState =
   | 'OFFLINE'
@@ -29,7 +30,7 @@ type DriverSessionState = {
 
   driverOffersWsConnected: boolean;
 
-  /** True when map dashboard should be visible (not OFFLINE). */
+  /** True when live map dashboard should be visible (confirmed/reconnecting/trip — not OFFLINE or CONNECTING). */
   isDashboardVisible: boolean;
 
   beginConnecting: () => void;
@@ -68,9 +69,13 @@ function applyDerived(
   hasIncomingOffer: boolean,
 ): Pick<DriverSessionState, 'operationalState' | 'isDashboardVisible'> {
   const operationalState = deriveState(phase, hasActiveTrip, hasIncomingOffer);
+  // Live map only after confirmed (or reconnecting while already online).
+  // During CONNECTING, stay on offline home so UI never shows map + "YOU'RE OFFLINE".
+  const isDashboardVisible =
+    operationalState !== 'OFFLINE' && operationalState !== 'CONNECTING';
   return {
     operationalState,
-    isDashboardVisible: operationalState !== 'OFFLINE',
+    isDashboardVisible,
   };
 }
 
@@ -92,7 +97,8 @@ export const useDriverSessionStore = create<DriverSessionState>((set, get) => ({
       connectionPhase: 'connecting',
       ...applyDerived('connecting', _tripSignals.hasActiveTrip, _tripSignals.hasIncomingOffer),
     });
-    driverFlowLog('DASHBOARD_VISIBLE', { phase: 'CONNECTING' });
+    // Offline home stays mounted during CONNECTING (isDashboardVisible=false).
+    driverFlowLog('DASHBOARD_VISIBLE', { phase: 'CONNECTING', liveMap: false });
   },
 
   confirmOnline: () => {
@@ -105,8 +111,10 @@ export const useDriverSessionStore = create<DriverSessionState>((set, get) => ({
   },
 
   markReconnecting: () => {
+    // Only after ONLINE (confirmed). Never promote CONNECTING → RECONNECTING —
+    // that left the GO button stuck disabled with no timeout escape.
     const { connectionPhase } = get();
-    if (connectionPhase === 'confirmed' || connectionPhase === 'connecting') {
+    if (connectionPhase === 'confirmed') {
       set({
         connectionPhase: 'reconnecting',
         ...applyDerived('reconnecting', _tripSignals.hasActiveTrip, _tripSignals.hasIncomingOffer),
@@ -167,12 +175,13 @@ export const useDriverSessionStore = create<DriverSessionState>((set, get) => ({
 
   syncTripSignals: (signals) => {
     _tripSignals = signals;
+    reportNetworkOpsSignal('active_trip', signals.hasActiveTrip);
     const { connectionPhase } = get();
     set(applyDerived(connectionPhase, signals.hasActiveTrip, signals.hasIncomingOffer));
   },
 }));
 
-/** Session-visible online — includes CONNECTING (dashboard up, server may still be pending). */
+/** Non-offline session (includes CONNECTING). Live map uses isDashboardVisible, not this. */
 export function isDriverSessionActive(state: DriverOperationalState): boolean {
   return state !== 'OFFLINE';
 }
