@@ -26,6 +26,9 @@ function envString(name: string, fallback = ''): string {
 /** Native Google Navigation SDK for driver trip guidance. */
 export function isGoogleNavigationEnabled(): boolean {
   if (Platform.OS === 'web') return false;
+  // iOS: Nav SDK (GoogleMaps 10.13) conflicts with react-native-maps (GoogleMaps 8.4).
+  // Native module is unlinked via react-native.config.js; use external Maps instead.
+  if (Platform.OS === 'ios') return false;
   return envFlag('EXPO_PUBLIC_GOOGLE_NAVIGATION_ENABLED', true);
 }
 

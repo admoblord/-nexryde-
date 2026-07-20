@@ -62,5 +62,7 @@ target 'NexRyde' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
+    # MapLibre Expo plugin expects this hook; keep it even if prebuild rewrites the file.
+    $MLRN.post_install(installer) if defined?($MLRN) && $MLRN.respond_to?(:post_install)
   end
 end
