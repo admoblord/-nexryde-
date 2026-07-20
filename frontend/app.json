@@ -21,7 +21,7 @@
       "config": {
         "googleMapsApiKey": ""
       },
-      "buildNumber": "64",
+      "buildNumber": "65",
       "associatedDomains": [
         "applinks:nexryde.app",
         "webcredentials:nexryde.app"
@@ -69,7 +69,7 @@
       }
     },
     "android": {
-      "versionCode": 200,
+      "versionCode": 201,
       "config": {
         "googleMaps": {
           "apiKey": "GOOGLE_MAPS_KEY_REDACTED"
