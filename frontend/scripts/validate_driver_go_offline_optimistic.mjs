@@ -25,7 +25,7 @@ async function loadHelpers() {
     // Fallback: duplicate pure contract (kept in sync with the TS module).
     return {
       GO_OFFLINE_FAIL_MESSAGE:
-        'Unable to go offline. Please check your connection and try again.',
+        "You're offline. We'll sync with the server when your connection improves.",
       GO_OFFLINE_UI_BUDGET_MS: 100,
       applyOptimisticGoOffline(effects) {
         const t0 = Date.now();
@@ -140,34 +140,21 @@ async function main() {
     ),
   );
 
-  // Failure path
-  restoreOnlineAfterOfflineFailure({
-    confirmOnline: () => {
-      phase = 'confirmed';
-      isDashboardVisible = true;
-      listenersEnabled = true;
-      calls.push('confirmOnline');
-    },
-    connectOffersSocket: () => {
-      offersConnected = true;
-      calls.push('connectOffersSocket');
-    },
-    fetchIncomingRide: record('fetchIncomingRide'),
-    startBackgroundLocation: record('startBackgroundLocation'),
-    persistLocalOnline: record('persistLocalOnline'),
-  });
+  // Failure path — must KEEP offline (safety). Soft message only; no online restore.
+  const failMsgOk =
+    typeof GO_OFFLINE_FAIL_MESSAGE === 'string' &&
+    GO_OFFLINE_FAIL_MESSAGE.toLowerCase().includes('offline');
   results.push(
     printRow(
       'R5',
-      'Backend failure restores Online + re-enables listeners after restore',
-      phase === 'confirmed' &&
-        isDashboardVisible &&
-        offersConnected &&
-        listenersEnabled &&
-        calls.indexOf('confirmOnline') < calls.indexOf('connectOffersSocket') &&
-        GO_OFFLINE_FAIL_MESSAGE ===
-          'Unable to go offline. Please check your connection and try again.',
-      `message="${GO_OFFLINE_FAIL_MESSAGE}"`,
+      'Backend failure keeps Offline (no restore-online deadlock)',
+      phase === 'offline' &&
+        !isDashboardVisible &&
+        !offersConnected &&
+        !listenersEnabled &&
+        failMsgOk &&
+        !calls.includes('confirmOnline'),
+      `phase=${phase}, message="${GO_OFFLINE_FAIL_MESSAGE}"`,
     ),
   );
 

@@ -6,6 +6,30 @@ import { ensureDriverOfferPushChannel } from '@/src/services/driverOfferBackgrou
 
 /** Android 8+: remote pushes reference channelId — register before first marketing/ride notification. */
 export async function ensureAndroidPushChannels(): Promise<void> {
+  await Notifications.setNotificationCategoryAsync('engagement_driver', [
+    {
+      identifier: 'go_online',
+      buttonTitle: 'Go Online',
+      options: { opensAppToForeground: true },
+    },
+    {
+      identifier: 'view_heatmap',
+      buttonTitle: 'View Heatmap',
+      options: { opensAppToForeground: true },
+    },
+  ]);
+  await Notifications.setNotificationCategoryAsync('engagement_rider', [
+    {
+      identifier: 'book_ride',
+      buttonTitle: 'Book Ride',
+      options: { opensAppToForeground: true },
+    },
+    {
+      identifier: 'open_app',
+      buttonTitle: 'Open NexRyde',
+      options: { opensAppToForeground: true },
+    },
+  ]);
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync('default', {
     name: 'NexRyde Notifications',
@@ -29,7 +53,40 @@ export async function ensureAndroidPushChannels(): Promise<void> {
     lightColor: '#FFD700',
     showBadge: true,
   });
-  // 'offers' channel: used by all scheduled daily engagement notifications.
+  await Notifications.setNotificationChannelAsync('engagement_critical', {
+    name: 'Critical NexRyde Alerts',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 400, 200, 400],
+    lightColor: '#FF3B30',
+    enableLights: true,
+    enableVibrate: true,
+    showBadge: true,
+  });
+  await Notifications.setNotificationChannelAsync('engagement_high', {
+    name: 'High Priority NexRyde Updates',
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 260, 120, 260],
+    lightColor: '#FFD700',
+    enableLights: true,
+    enableVibrate: true,
+    showBadge: true,
+  });
+  await Notifications.setNotificationChannelAsync('engagement_low', {
+    name: 'NexRyde Suggestions',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    lightColor: '#00D47E',
+    showBadge: false,
+  });
+  await Notifications.setNotificationChannelAsync('marketing', {
+    name: 'NexRyde Tips and Offers',
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 220, 120, 220],
+    lightColor: '#00D47E',
+    enableLights: true,
+    enableVibrate: true,
+    showBadge: true,
+  });
+  // Legacy 'offers' channel: kept for older scheduled engagement payloads.
   // Must be importance HIGH or above — otherwise Android may drop it silently.
   await Notifications.setNotificationChannelAsync('offers', {
     name: 'NexRyde Offers and Tips',
@@ -54,6 +111,21 @@ export interface PushNotificationData {
     | 'earnings_update'
     | 'challenge_complete'
     | 'subscription_expiring'
+    | 'driver_morning_rush'
+    | 'driver_midday_reminder'
+    | 'driver_evening_rush'
+    | 'driver_weekend_demand'
+    | 'driver_offline_reminder'
+    | 'driver_nearby_ride_opportunity'
+    | 'driver_online_high_demand'
+    | 'driver_online_move_to_demand'
+    | 'rider_morning_commute'
+    | 'rider_evening_ride'
+    | 'rider_weekend_travel'
+    | 'rider_weather_ready'
+    | 'rider_promo'
+    | 'rider_driver_availability'
+    | 'rider_book_before_demand_rises'
     | 'geo_fence_deviation'
     | 'geo_fence_explained'
     | 'speed_spike_alert'

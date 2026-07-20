@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "318026702830",
+    "project_id": "nexryde-10965",
+    "storage_bucket": "nexryde-10965.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:318026702830:android:79f7a98a01780f4ab3b8ff",
+        "android_client_info": {
+          "package_name": "com.nexryde.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCgt8XDkp5kC9lHIBj5ACZucyCyDXS8shI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

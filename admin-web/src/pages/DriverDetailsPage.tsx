@@ -43,7 +43,41 @@ export function DriverDetailsPage() {
   const [tab, setTab] = useState<Tab>('Profile');
   const [data, setData] = useState<DriverProfile | null>(null);
   const [err, setErr] = useState('');
-  const [docModal, setDocModal] = useState<{ type: string; label: string; url: string } | null>(null);
+  const [docModal, setDocModal] = useState<{
+    type: string;
+    label: string;
+    url: string;
+    mime: string;
+    error?: string;
+  } | null>(null);
+
+  const revokeDocUrl = (url?: string | null) => {
+    if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
+  };
+
+  const closeDocModal = () => {
+    setDocModal((prev) => {
+      revokeDocUrl(prev?.url);
+      return null;
+    });
+  };
+
+  const buildDocObjectUrl = (base64: string, contentType?: string | null): { url: string; mime: string } => {
+    const mimeRaw = (contentType || 'image/jpeg').split(';')[0].trim().toLowerCase();
+    const mime = mimeRaw === 'image/jpg' ? 'image/jpeg' : mimeRaw || 'image/jpeg';
+    const cleaned = base64.replace(/\s+/g, '');
+    const binary = atob(cleaned);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    // Sniff if declared MIME is wrong/missing — broken data: URLs show only alt text.
+    let resolved = mime;
+    if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) resolved = 'image/jpeg';
+    else if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50) resolved = 'image/png';
+    else if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[8] === 0x57) resolved = 'image/webp';
+    else if (bytes.length >= 4 && bytes[0] === 0x25 && bytes[1] === 0x50) resolved = 'application/pdf';
+    const blob = new Blob([bytes], { type: resolved });
+    return { url: URL.createObjectURL(blob), mime: resolved };
+  };
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [revealedNin, setRevealedNin] = useState<string | null>(null);
@@ -79,9 +113,15 @@ export function DriverDetailsPage() {
     if (!driverId) return;
     try {
       const res = await api<{ data?: string; content_type?: string }>(`/admin/drivers/${driverId}/document/${docType}`);
-      if (!res.data) { alert('No document data'); return; }
-      const mime = res.content_type || 'image/jpeg';
-      setDocModal({ type: docType, label, url: `data:${mime};base64,${res.data}` });
+      if (!res.data) {
+        alert('No document image on file. If this is NIN, use Reveal NIN instead.');
+        return;
+      }
+      const { url, mime } = buildDocObjectUrl(res.data, res.content_type);
+      setDocModal((prev) => {
+        revokeDocUrl(prev?.url);
+        return { type: docType, label, url, mime };
+      });
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to load document');
     }
@@ -89,12 +129,22 @@ export function DriverDetailsPage() {
 
   const downloadDoc = async (docType: string, label: string) => {
     if (!driverId) return;
-    const res = await api<{ data?: string; content_type?: string; filename?: string }>(`/admin/drivers/${driverId}/document/${docType}`);
-    if (!res.data) return;
-    const a = document.createElement('a');
-    a.href = `data:${res.content_type || 'image/jpeg'};base64,${res.data}`;
-    a.download = res.filename || `${label}.jpg`;
-    a.click();
+    try {
+      const res = await api<{ data?: string; content_type?: string; filename?: string }>(`/admin/drivers/${driverId}/document/${docType}`);
+      if (!res.data) {
+        alert('No document binary available to download.');
+        return;
+      }
+      const { url, mime } = buildDocObjectUrl(res.data, res.content_type);
+      const a = document.createElement('a');
+      a.href = url;
+      const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('pdf') ? 'pdf' : 'jpg';
+      a.download = res.filename || `${label}.${ext}`;
+      a.click();
+      setTimeout(() => revokeDocUrl(url), 2_000);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to download document');
+    }
   };
 
   const reviewDoc = async (docType: string, action: 'approve' | 'reject' | 'request_reupload') => {
@@ -271,7 +321,7 @@ export function DriverDetailsPage() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="License" value={(verification.license as Record<string, unknown>)?.license_masked || ((verification.license as Record<string, unknown>)?.has_license_number ? 'On file' : '—')} />
             <Field label="Face Verification" value={(verification.face_verification as Record<string, unknown>)?.status} />
-            <Field label="AI Score" value={verification.ai_score} />
+            <Field label="Review Score" value={verification.review_score} />
             <Field label="Background Check" value={verification.background_check} />
           </div>
           <div>
@@ -481,13 +531,41 @@ export function DriverDetailsPage() {
       )}
 
       {docModal ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={() => setDocModal(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={closeDocModal}>
           <div className="card max-h-[90vh] max-w-4xl overflow-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-4 flex items-center justify-between">
+            <div className="mb-4 flex items-center justify-between gap-3">
               <h3 className="font-bold">{docModal.label}</h3>
-              <button type="button" className="btn-ghost text-xs" onClick={() => setDocModal(null)}>Close</button>
+              <div className="flex gap-2">
+                <a className="btn-ghost text-xs" href={docModal.url} download={`${docModal.label}.bin`}>
+                  Download
+                </a>
+                <button type="button" className="btn-ghost text-xs" onClick={closeDocModal}>Close</button>
+              </div>
             </div>
-            <img src={docModal.url} alt={docModal.label} className="max-h-[70vh] w-full object-contain" />
+            {docModal.error ? (
+              <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-6 text-sm text-red-300">
+                {docModal.error}
+              </p>
+            ) : docModal.mime === 'application/pdf' ? (
+              <iframe title={docModal.label} src={docModal.url} className="h-[70vh] w-full rounded-xl bg-white" />
+            ) : (
+              <img
+                src={docModal.url}
+                alt=""
+                className="max-h-[70vh] w-full bg-black object-contain"
+                onError={() => {
+                  setDocModal((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          error:
+                            'Could not render this document in the browser. Use Download, or ask the driver to re-upload a JPG/PNG photo.',
+                        }
+                      : prev,
+                  );
+                }}
+              />
+            )}
           </div>
         </div>
       ) : null}

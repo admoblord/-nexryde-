@@ -691,7 +691,7 @@ async def seed_community_content(db_ref):
             {"group_id": "vehicle-maintenance", "user_id": "driver_011", "user_name": "Segun D.", "user_role": "driver",
              "text": "Good mechanic in Surulere - Baba Ade at 23 Bode Thomas Street.", "likes": 134, "replies": 42, "created_at": datetime.now(timezone.utc).isoformat()},
             {"group_id": "new-drivers", "user_id": "driver_012", "user_name": "NEXRYDE Support", "user_role": "admin",
-             "text": "Welcome new drivers! 3 golden rules: 1) Verify rider identity. 2) Keep documents updated. 3) Use AI Coach!", "likes": 156, "replies": 38, "is_pinned": True, "pinned_at": datetime.now(timezone.utc).isoformat(), "created_at": datetime.now(timezone.utc).isoformat()},
+             "text": "Welcome new drivers! 3 golden rules: 1) Verify rider identity. 2) Keep documents updated. 3) Use support when anything feels unclear.", "likes": 156, "replies": 38, "is_pinned": True, "pinned_at": datetime.now(timezone.utc).isoformat(), "created_at": datetime.now(timezone.utc).isoformat()},
         ]
         await db_ref.community_messages.insert_many(seed_messages)
         logger.info(f"Seeded {len(seed_messages)} community messages")

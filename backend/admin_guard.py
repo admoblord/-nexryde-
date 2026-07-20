@@ -26,7 +26,7 @@ async def require_admin_request(request: Request) -> str:
             "revoked": {"$ne": True},
             "expires_at": {"$gt": now},
         },
-        {"_id": 0, "email": 1},
+        {"_id": 0, "email": 1, "role": 1},
     )
     if not session:
         raise HTTPException(status_code=401, detail="Invalid or expired admin session")
@@ -35,4 +35,6 @@ async def require_admin_request(request: Request) -> str:
         {"token_hash": token_hash},
         {"$set": {"last_seen_at": now}},
     )
+    request.state.admin_email = session.get("email")
+    request.state.admin_role = session.get("role") or "super_admin"
     return str(session.get("email") or "")

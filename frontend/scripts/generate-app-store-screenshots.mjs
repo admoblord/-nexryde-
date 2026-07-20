@@ -21,8 +21,11 @@ const ZIP_NAME = 'nexryde-app-store-screenshots.zip';
 
 const MAPS_KEY =
   process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
-  process.env.GOOGLE_MAPS_API_KEY ||
-  'AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY';
+  process.env.GOOGLE_MAPS_API_KEY;
+
+if (!MAPS_KEY) {
+  throw new Error('Set EXPO_PUBLIC_GOOGLE_MAPS_API_KEY or GOOGLE_MAPS_API_KEY before generating screenshots.');
+}
 
 const W = 430;
 const H = 932;

@@ -20,6 +20,23 @@ concurrency:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
+  # 0. Repository hygiene — no commit-visible backups, debug dumps, or secrets
+  # ─────────────────────────────────────────────────────────────────────────────
+  repo-hygiene:
+    name: Repository — Hygiene Guard
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Block commit-visible secret and backup artifacts
+        run: python scripts/check_repo_hygiene.py
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # 1a. Backend — pure unit tests (no external services needed)
   # ─────────────────────────────────────────────────────────────────────────────
   backend-unit:
@@ -60,6 +77,10 @@ jobs:
             tests/test_fare_surge_unit.py \
             tests/test_nexryde_pricing.py \
             tests/test_lagride_lagos_pricing.py \
+            tests/test_nexryde_api_paths.py \
+            tests/test_auth_revocation_contract.py \
+            tests/test_production_redis_contract.py \
+            tests/test_non_ai_authz_contract.py \
             -v --tb=short \
             --cov=. --cov-report=term-missing \
             2>&1 | tail -80
@@ -160,7 +181,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   deploy-staging:
     name: Deploy → Staging
-    needs: [backend-unit, backend-test, frontend-lint]
+    needs: [repo-hygiene, backend-unit, backend-test, frontend-lint]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
     environment: staging
@@ -229,7 +250,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   deploy-production:
     name: Deploy → Production
-    needs: [backend-unit, backend-test, frontend-lint]
+    needs: [repo-hygiene, backend-unit, backend-test, frontend-lint]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production

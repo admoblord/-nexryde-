@@ -19,24 +19,44 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useAppStore } from '@/src/store/appStore';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { useThemeColors } from '@/src/constants/theme';
+import { SURFACE } from '@/src/constants/designSystem';
 
 const { width } = Dimensions.get('window');
 
-const COLORS = {
-  background: '#F8FAFC',
-  card: '#FFFFFF',
-  primary: '#0F172A',
-  green: '#22C55E',
-  greenLight: '#4ADE80',
-  blue: '#3B82F6',
-  purple: '#8B5CF6',
-  orange: '#F59E0B',
-  red: '#EF4444',
-  textPrimary: '#0F172A',
-  textSecondary: '#475569',
-  textMuted: '#94A3B8',
-  border: '#E2E8F0',
+type SchedulePalette = {
+  background: string;
+  card: string;
+  primary: string;
+  green: string;
+  greenLight: string;
+  blue: string;
+  purple: string;
+  orange: string;
+  red: string;
+  textPrimary: string;
+  textSecondary: string;
+  textMuted: string;
+  border: string;
 };
+
+function buildSchedulePalette(isDark: boolean, colors: ReturnType<typeof useThemeColors>['colors']): SchedulePalette {
+  return {
+    background: colors.background,
+    card: isDark ? SURFACE.cardDark : colors.card,
+    primary: colors.text,
+    green: '#22C55E',
+    greenLight: '#4ADE80',
+    blue: '#3B82F6',
+    purple: '#8B5CF6',
+    orange: '#F59E0B',
+    red: '#EF4444',
+    textPrimary: colors.text,
+    textSecondary: colors.textSecondary,
+    textMuted: colors.textMuted,
+    border: isDark ? SURFACE.hairline : colors.border,
+  };
+}
 
 interface ScheduledRide {
   id: string;
@@ -55,6 +75,9 @@ interface ScheduledRide {
 export default function ScheduleScreen() {
   const router = useRouter();
   const { user, userId: riderId, canCallAuthedApi } = useAuthedUserId();
+  const { colors, isDark } = useThemeColors();
+  const COLORS = React.useMemo(() => buildSchedulePalette(isDark, colors), [isDark, colors]);
+  const styles = React.useMemo(() => createScheduleStyles(COLORS), [COLORS]);
   const params = useLocalSearchParams<{
     pickup?: string;
     dropoff?: string;
@@ -424,7 +447,7 @@ export default function ScheduleScreen() {
               <FlatList
                 data={scheduledRides}
                 renderItem={renderScheduledRide}
-                keyExtractor={(item) => item.id}
+                keyExtractor={(item, index) => String(item.id ?? `scheduled-${index}`)}
                 scrollEnabled={false}
               />
             </View>
@@ -489,7 +512,8 @@ export default function ScheduleScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createScheduleStyles(COLORS: SchedulePalette) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
@@ -894,3 +918,4 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
+}

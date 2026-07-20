@@ -16,18 +16,24 @@ import {
   Platform,
   Linking,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import { useThemeColors } from '@/src/constants/theme';
 import * as Location from 'expo-location';
 import * as Haptics from 'expo-haptics';
-import MapView, { Circle, Marker, PROVIDER_GOOGLE, MapStyleElement } from 'react-native-maps';
+import MapView, { Circle, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
+import { NEXRYDE_MAP_STYLE } from '@/src/constants/nexrydeMapBehavior';
+import { MapLibreDemandHeatmap } from '@/src/components/map/MapLibreDemandHeatmap';
+import { isMapLibreEnabled } from '@/src/constants/mapEngines';
+import { ensureLagosOfflinePack } from '@/src/services/mapLibreOffline';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,40 +51,9 @@ interface HeatmapData {
   zones: HeatZone[];
   updated_at: string;
   recommendation: string;
-  /** True when zones are generated on-device (API failed or returned no coordinates). */
-  isEstimate?: boolean;
 }
 
-/** Lagos macro areas — kept in sync with backend NIGERIAN_CITIES.lagos.zones for consistent naming. */
-const LAGOS_ZONE_NAMES = ['Victoria Island', 'Lekki', 'Ikeja', 'Surulere', 'Oshodi', 'Apapa'];
-
-function mulberry32(seed: number) {
-  return function () {
-    let t = (seed += 0x6d2b79f5);
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** Deterministic “hot spots” around a center when the API is unreachable or returns bad coords. */
-function buildFallbackZones(baseLat: number, baseLng: number, hourSeed: number): HeatZone[] {
-  const rand = mulberry32((hourSeed * 31 + Math.round(baseLat * 1000 + baseLng * 1000)) >>> 0);
-  return LAGOS_ZONE_NAMES.map((name, i) => {
-    const intensity = Math.min(0.95, Math.max(0.52, 0.58 + rand() * 0.37 - i * 0.02));
-    const surge = Math.min(1.5, 1 + rand() * 0.48);
-    const dlat = (rand() - 0.5) * 0.088;
-    const dlng = (rand() - 0.5) * 0.11;
-    return {
-      lat: Math.round((baseLat + dlat) * 10000) / 10000,
-      lng: Math.round((baseLng + dlng) * 10000) / 10000,
-      intensity,
-      name,
-      surge: Math.round(surge * 10) / 10,
-      demand_level: intensity > 0.8 ? 'very_high' : intensity > 0.65 ? 'high' : 'medium',
-    };
-  });
-}
+type HeatmapStatus = 'loading' | 'success' | 'empty' | 'error';
 
 async function fetchWithTimeout(url: string, init: RequestInit & { timeoutMs?: number }) {
   const { timeoutMs = 12000, ...rest } = init;
@@ -91,6 +66,56 @@ async function fetchWithTimeout(url: string, init: RequestInit & { timeoutMs?: n
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, reason: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(reason)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function logHeatmapFailure(reason: string, meta?: Record<string, unknown>) {
+  const payload = { reason, ...(meta || {}) };
+  console.warn('[NEXRYDE_HEATMAP]', payload);
+  try {
+    const { sentryWarn } = require('@/src/utils/sentryBreadcrumbs');
+    sentryWarn('Driver heatmap failure', payload);
+  } catch {
+    /* diagnostics only */
+  }
+}
+
+function normalizeHeatmapZones(rawZones: unknown): HeatZone[] {
+  if (!Array.isArray(rawZones)) return [];
+  return rawZones
+    .map((z: Record<string, unknown>) => ({
+      lat: Number(z.lat ?? z.latitude),
+      lng: Number(z.lng ?? z.longitude),
+      intensity: Math.min(1, Math.max(0, Number(z.intensity ?? 0.5))),
+      name: String(z.zone_name ?? z.name ?? 'Hot zone'),
+      surge: Number(z.surge_multiplier ?? z.surge ?? 1),
+      demand_level: typeof z.demand_level === 'string' ? z.demand_level : undefined,
+    }))
+    .filter((z) =>
+      Number.isFinite(z.lat) &&
+      Number.isFinite(z.lng) &&
+      Math.abs(z.lat) <= 90 &&
+      Math.abs(z.lng) <= 180 &&
+      !(Math.abs(z.lat) < 0.00001 && Math.abs(z.lng) < 0.00001)
+    )
+    .sort((a, b) => b.intensity - a.intensity);
+}
+
 // ── Demand config ────────────────────────────────────────────────────────────
 
 function getDemandConfig(intensity: number) {
@@ -99,21 +124,6 @@ function getDemandConfig(intensity: number) {
   if (intensity >= 0.45) return { label: 'Medium',    color: '#FBBF24', mapColor: 'rgba(251,191,36,0.18)', ring: 'rgba(251,191,36,0.4)', radius: 550 };
   return                          { label: 'Low',       color: '#22C55E', mapColor: 'rgba(34,197,94,0.14)', ring: 'rgba(34,197,94,0.35)', radius: 400 };
 }
-
-// ── Dark map style ───────────────────────────────────────────────────────────
-
-const DARK_MAP: MapStyleElement[] = [
-  { elementType: 'geometry', stylers: [{ color: '#0f172a' }] },
-  { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#64748b' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#0f172a' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1e3a5f' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#1d4ed8' }] },
-  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0ea5e9', lightness: -60 }] },
-  { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#0f1f35' }] },
-];
 
 // ── Hourly forecast data (time-of-day demand pattern) ────────────────────────
 
@@ -228,6 +238,9 @@ function HourlyForecast({ city }: { city: string }) {
 // ── Main screen ───────────────────────────────────────────────────────────────
 
 export default function DriverHeatmapScreen() {
+  const { colors, isDark } = useThemeColors();
+  const screenBg = isDark ? '#0D1420' : colors.background;
+  const cardBg = isDark ? '#111827' : colors.card;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
@@ -237,12 +250,17 @@ export default function DriverHeatmapScreen() {
   const mapRef = useRef<MapView>(null);
 
   const [data, setData] = useState<HeatmapData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<HeatmapStatus>('loading');
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState('');
   const [fetchHint, setFetchHint] = useState<string | null>(null);
+  const [errorReason, setErrorReason] = useState<string | null>(null);
   const [driverCoords, setDriverCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const driverCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [mapLoaded, setMapLoaded] = useState(false);
   const [selectedZone, setSelectedZone] = useState<number | null>(null);
+  const requestSeq = useRef(0);
   const spinAnim = useRef(new Animated.Value(0)).current;
 
   const spinLoop = useRef<Animated.CompositeAnimation | null>(null);
@@ -260,113 +278,112 @@ export default function DriverHeatmapScreen() {
     spinAnim.setValue(0);
   }, [spinAnim]);
 
+  const updateDriverCoords = useCallback((coords: { lat: number; lng: number } | null) => {
+    driverCoordsRef.current = coords;
+    setDriverCoords(coords);
+  }, []);
+
   const getFreshCoords = useCallback(async (): Promise<{ lat: number; lng: number } | null> => {
     try {
-      const { status } = await Location.getForegroundPermissionsAsync();
-      if (status !== 'granted') return null;
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const perm = await withTimeout(
+        Location.getForegroundPermissionsAsync(),
+        2500,
+        'LOCATION_PERMISSION_TIMEOUT',
+      );
+      if (perm.status !== 'granted') {
+        logHeatmapFailure('location_permission_not_granted', { status: perm.status });
+        return null;
+      }
+      const pos = await withTimeout(
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        5000,
+        'LOCATION_FIX_TIMEOUT',
+      );
       return { lat: pos.coords.latitude, lng: pos.coords.longitude };
-    } catch {
+    } catch (err) {
+      logHeatmapFailure('location_unavailable', {
+        message: err instanceof Error ? err.message : String(err),
+      });
       return null;
     }
   }, []);
 
-  const loadHeatmap = useCallback(async (coords?: { lat: number; lng: number }) => {
+  const fetchHeatmapOnce = useCallback(async (loc: { lat: number; lng: number } | null) => {
+    const params = loc ? `?lat=${encodeURIComponent(loc.lat)}&lng=${encodeURIComponent(loc.lng)}` : '';
+    const res = await fetchWithTimeout(`${BACKEND_URL}/api/driver/heatmap${params}`, {
+      headers: getAuthHeaders(),
+      timeoutMs: 12000,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      const reason = res.status === 401
+        ? 'Authentication expired. Sign in again to refresh hot zones.'
+        : `Heatmap server error (${res.status}).`;
+      throw new Error(reason);
+    }
+    let json: Record<string, unknown> = {};
+    try {
+      json = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new Error('Heatmap server returned invalid JSON.');
+    }
+    return json;
+  }, []);
+
+  const fetchHeatmapWithRetry = useCallback(async (loc: { lat: number; lng: number } | null) => {
+    const delays = [0, 800, 1800, 3600];
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < delays.length; attempt += 1) {
+      if (delays[attempt] > 0) await sleep(delays[attempt]);
+      try {
+        return await fetchHeatmapOnce(loc);
+      } catch (err) {
+        lastErr = err;
+        logHeatmapFailure('heatmap_request_failed', {
+          attempt: attempt + 1,
+          message: err instanceof Error ? err.message : String(err),
+          hasCoords: Boolean(loc),
+        });
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error('Heatmap request failed.');
+  }, [fetchHeatmapOnce]);
+
+  const loadHeatmap = useCallback(async (coords?: { lat: number; lng: number } | null, opts?: { background?: boolean }) => {
+    const seq = requestSeq.current + 1;
+    requestSeq.current = seq;
     if (!canCallAuthedApi) {
-      setLoading(false);
+      setStatus('error');
+      setErrorReason('Authentication is not ready yet. Try again in a moment.');
       return;
     }
-    startSpin();
+    if (!opts?.background) setStatus('loading');
     setFetchHint(null);
+    setErrorReason(null);
+    startSpin();
     try {
-      const fresh = coords ?? await getFreshCoords();
-      const loc = fresh || driverCoords;
-      const center = loc ?? { lat: 6.5244, lng: 3.3792 };
-      if (fresh) setDriverCoords(fresh);
+      const fresh = coords === undefined ? await getFreshCoords() : coords;
+      const loc = fresh || driverCoordsRef.current;
+      if (fresh) updateDriverCoords(fresh);
 
-      const params = loc ? `?lat=${encodeURIComponent(loc.lat)}&lng=${encodeURIComponent(loc.lng)}` : '';
-      let raw: HeatZone[] = [];
-      let cityName = '';
-      let rec = '';
-      let updatedIso = '';
-      let fromApi = false;
-      let backendErrHint: string | null = null;
+      const json = await fetchHeatmapWithRetry(loc);
+      if (seq !== requestSeq.current) return;
+      const sorted = normalizeHeatmapZones(json.zones);
+      const cityName = typeof json.city === 'string' ? json.city : '';
+      const rec = typeof json.recommendation === 'string' ? json.recommendation : '';
+      const updatedIso = typeof json.updated_at === 'string' ? json.updated_at : '';
 
-      try {
-        const res = await fetchWithTimeout(`${BACKEND_URL}/api/driver/heatmap${params}`, {
-          headers: getAuthHeaders(),
-          timeoutMs: 12000,
-        });
-        const text = await res.text();
-        if (!res.ok) {
-          backendErrHint =
-            res.status === 401
-              ? 'Sign in required to refresh live data.'
-              : `Server error (${res.status}). Showing offline estimate.`;
-          throw new Error('HTTP ' + res.status);
-        }
-        let json: Record<string, unknown> = {};
-        try {
-          json = JSON.parse(text) as Record<string, unknown>;
-        } catch {
-          backendErrHint = 'Invalid response from server. Showing offline estimate.';
-          throw new Error('INVALID_JSON');
-        }
-        raw = (Array.isArray(json.zones) ? json.zones : [])
-          .map((z: Record<string, unknown>) => ({
-            lat:          Number(z.lat ?? z.latitude ?? 0),
-            lng:          Number(z.lng ?? z.longitude ?? 0),
-            intensity:    Math.min(1, Math.max(0, Number(z.intensity ?? 0.5))),
-            name:         String(z.zone_name ?? z.name ?? 'Hot zone'),
-            surge:        Number(z.surge_multiplier ?? z.surge ?? 1),
-            demand_level: typeof z.demand_level === 'string' ? z.demand_level : undefined,
-          }))
-          .filter((z) =>
-            Number.isFinite(z.lat) &&
-            Number.isFinite(z.lng) &&
-            Math.abs(z.lat) <= 90 &&
-            Math.abs(z.lng) <= 180 &&
-            !(Math.abs(z.lat) < 0.00001 && Math.abs(z.lng) < 0.00001)
-          );
-        cityName = typeof json.city === 'string' ? json.city : '';
-        rec = typeof json.recommendation === 'string' ? json.recommendation : '';
-        updatedIso = typeof json.updated_at === 'string' ? json.updated_at : '';
-        fromApi = true;
-      } catch {
-        raw = [];
-        if (!backendErrHint)
-          backendErrHint = 'Network error or timeout. Showing offline estimate.';
-      }
-
-      let isEstimate = false;
-      if (raw.length === 0) {
-        const hourSeed = new Date().getHours();
-        raw = buildFallbackZones(center.lat, center.lng, hourSeed);
-        isEstimate = true;
-        if (!cityName) cityName = loc ? 'Metro area' : 'Lagos';
-        if (!rec) {
-          const top = raw[0]?.name ?? 'central hotspots';
-          rec = `Estimated demand — head toward ${top} for the best shot at requests nearby. Pull to refresh for live data.`;
-        }
-        setFetchHint(
-          backendErrHint ??
-            (fromApi
-              ? 'Live zones unavailable. Showing offline estimate.'
-              : 'Could not load live heatmap. Showing offline estimate.')
-        );
-      } else {
-        setFetchHint(null);
-      }
-
-      const sorted = [...raw].sort((a, b) => b.intensity - a.intensity);
       setData({
-        city:           cityName || 'Lagos',
-        zones:          sorted,
-        updated_at:     updatedIso || new Date().toISOString(),
-        recommendation: rec || `Focus on ${sorted[0]?.name ?? 'top zones'} for stronger demand.`,
-        isEstimate,
+        city: cityName || (loc ? 'Near you' : 'Lagos'),
+        zones: sorted,
+        updated_at: updatedIso || new Date().toISOString(),
+        recommendation: rec || (sorted[0] ? `Focus on ${sorted[0].name} for stronger demand.` : ''),
       });
       setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      setStatus(sorted.length > 0 ? 'success' : 'empty');
+      if (sorted.length === 0) {
+        setFetchHint('No active hot zones nearby right now. Pull to refresh or check again during peak windows.');
+      }
 
       if (sorted.length > 0 && mapRef.current) {
         setTimeout(() => {
@@ -377,50 +394,77 @@ export default function DriverHeatmapScreen() {
         }, 400);
       }
     } catch (e) {
-      if (__DEV__) console.warn('[heatmap]', e);
-      const center = driverCoords ?? { lat: 6.5244, lng: 3.3792 };
-      const raw = buildFallbackZones(center.lat, center.lng, new Date().getHours());
-      setData({
-        city: 'Lagos',
-        zones: raw.sort((a, b) => b.intensity - a.intensity),
-        updated_at: new Date().toISOString(),
-        recommendation: 'Estimated demand — pick a hotspot below and tap Go to open navigation.',
-        isEstimate: true,
+      if (seq !== requestSeq.current) return;
+      const reason = e instanceof Error ? e.message : 'Heatmap request failed.';
+      logHeatmapFailure('heatmap_load_failed', {
+        message: reason,
+        coords: driverCoordsRef.current,
       });
-      setFetchHint('Could not refresh heatmap. Showing offline estimate.');
-      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      setStatus('error');
+      setErrorReason(reason);
+      setFetchHint(null);
     } finally {
-      setLoading(false);
       stopSpin();
     }
-  }, [canCallAuthedApi, driverCoords, getFreshCoords, startSpin, stopSpin]);
+  }, [
+    canCallAuthedApi,
+    fetchHeatmapWithRetry,
+    getFreshCoords,
+    startSpin,
+    stopSpin,
+    updateDriverCoords,
+  ]);
 
-  // Get GPS on mount, then fetch
+  // Get GPS on mount, but never let GPS block the hot-zone request forever.
   useEffect(() => {
-    if (!canCallAuthedApi) return;
+    if (!canCallAuthedApi) {
+      setStatus('error');
+      setErrorReason('Authentication is not ready yet. Try again in a moment.');
+      return;
+    }
+    let cancelled = false;
     (async () => {
+      let coords: { lat: number; lng: number } | null = null;
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          setDriverCoords(coords);
-          await loadHeatmap(coords);
-          return;
+        const perm = await withTimeout(
+          Location.requestForegroundPermissionsAsync(),
+          3500,
+          'LOCATION_PERMISSION_REQUEST_TIMEOUT',
+        );
+        if (perm.status === 'granted') {
+          const pos = await withTimeout(
+            Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+            5000,
+            'LOCATION_INITIAL_FIX_TIMEOUT',
+          );
+          coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          if (!cancelled) updateDriverCoords(coords);
+        } else {
+          logHeatmapFailure('location_permission_denied_on_mount', { status: perm.status });
         }
-      } catch { /* fall through */ }
-      await loadHeatmap();
+      } catch (err) {
+        logHeatmapFailure('initial_location_failed', {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+      if (!cancelled) await loadHeatmap(coords);
     })();
 
-    const interval = setInterval(() => { void loadHeatmap(); }, 45000);
-    return () => clearInterval(interval);
-  }, [canCallAuthedApi, loadHeatmap]);
+    const interval = setInterval(() => { void loadHeatmap(undefined, { background: true }); }, 45000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [canCallAuthedApi, loadHeatmap, updateDriverCoords]);
 
   const onRefresh = useCallback(async () => {
     if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setRefreshing(true);
-    await loadHeatmap();
-    setRefreshing(false);
+    try {
+      await loadHeatmap();
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadHeatmap]);
 
   const navigateTo = (zone: HeatZone) => {
@@ -447,7 +491,8 @@ export default function DriverHeatmapScreen() {
   const spinInterp = spinAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 
   const topZones = data?.zones ?? [];
-  const city = data?.city ?? (loading ? 'Loading…' : 'Near you');
+  const isLoading = status === 'loading';
+  const city = data?.city ?? (isLoading ? 'Loading…' : 'Near you');
   const forecastCity = data?.city && data.city !== 'Loading…' ? data.city : 'Lagos metro';
 
   // Default region (Lagos)
@@ -459,8 +504,8 @@ export default function DriverHeatmapScreen() {
   };
 
   return (
-    <View style={s.root}>
-      <StatusBar style="light" />
+    <View style={[s.root, { backgroundColor: screenBg }]}>
+      <StatusBar style={isDark ? "light" : "dark"} />
 
       {/* Header */}
       <View style={[s.header, { paddingTop: insets.top + 6, paddingHorizontal: flow.padH }]}>
@@ -478,16 +523,14 @@ export default function DriverHeatmapScreen() {
         </TouchableOpacity>
       </View>
 
-      {(fetchHint || data?.isEstimate) && (
-        <View style={[s.hintBanner, !fetchHint && s.hintBannerMuted, { marginHorizontal: flow.padH }]}>
+      {fetchHint && (
+        <View style={[s.hintBanner, status === 'empty' && s.hintBannerMuted, { marginHorizontal: flow.padH }]}>
           <Ionicons
-            name={fetchHint ? 'warning-outline' : 'radio-outline'}
+            name={status === 'empty' ? 'radio-outline' : 'warning-outline'}
             size={16}
-            color={fetchHint ? '#F59E0B' : '#818cf8'}
+            color={status === 'empty' ? '#818cf8' : '#F59E0B'}
           />
-          <Text style={s.hintText}>
-            {fetchHint ?? 'Illustrative demand hotspots — refreshed every time you pull down.'}
-          </Text>
+          <Text style={s.hintText}>{fetchHint}</Text>
         </View>
       )}
 
@@ -506,14 +549,30 @@ export default function DriverHeatmapScreen() {
         ]}
       >
 
-        {/* ── LIVE MAP ──────────────────────────────────────────────────── */}
+        {/* ── LIVE MAP (MapLibre GPU heatmap preferred) ─────────────────── */}
         <View style={s.mapWrap}>
-          {Platform.OS !== 'web' ? (
+          {Platform.OS !== 'web' && isMapLibreEnabled() ? (
+            <MapLibreDemandHeatmap
+              zones={topZones}
+              height={mapHeight}
+              center={
+                driverCoords
+                  ? { lat: driverCoords.lat, lng: driverCoords.lng }
+                  : topZones[0]
+                    ? { lat: topZones[0].lat, lng: topZones[0].lng }
+                    : null
+              }
+              onZonePress={(i) => {
+                const z = topZones[i];
+                if (z) focusZone(z, i);
+              }}
+            />
+          ) : Platform.OS !== 'web' ? (
             <MapView
               ref={mapRef}
               style={[s.map, { height: mapHeight }]}
               provider={PROVIDER_GOOGLE}
-              customMapStyle={DARK_MAP}
+              customMapStyle={NEXRYDE_MAP_STYLE}
               initialRegion={defaultRegion}
               scrollEnabled
               zoomEnabled
@@ -522,21 +581,39 @@ export default function DriverHeatmapScreen() {
               showsUserLocation
               showsMyLocationButton={false}
               showsCompass={false}
+              showsPointsOfInterest={false}
+              showsTraffic
               toolbarEnabled={false}
+              onMapReady={() => {
+                setMapReady(true);
+                if (__DEV__) console.log('[NEXRYDE_HEATMAP] map_ready');
+              }}
+              onMapLoaded={() => {
+                setMapLoaded(true);
+                if (__DEV__) console.log('[NEXRYDE_HEATMAP] map_loaded');
+              }}
+              // @ts-expect-error react-native-maps types omit native onMapLoadingError
+              onMapLoadingError={(error: { nativeEvent?: unknown }) => {
+                logHeatmapFailure('map_error', {
+                  error: typeof error?.nativeEvent === 'string'
+                    ? error.nativeEvent
+                    : JSON.stringify(error?.nativeEvent ?? {}),
+                  mapReady,
+                  mapLoaded,
+                });
+              }}
             >
               {topZones.map((zone, i) => {
                 const cfg = getDemandConfig(zone.intensity);
                 const isSelected = selectedZone === i;
                 return (
                   <React.Fragment key={`zone-${i}`}>
-                    {/* Outer glow ring */}
                     <Circle
                       center={{ latitude: zone.lat, longitude: zone.lng }}
                       radius={cfg.radius * 1.6}
                       fillColor={cfg.mapColor.replace('0.2', '0.06').replace('0.18', '0.05').replace('0.14', '0.04').replace('0.22', '0.07')}
                       strokeColor="transparent"
                     />
-                    {/* Main heat circle */}
                     <Circle
                       center={{ latitude: zone.lat, longitude: zone.lng }}
                       radius={isSelected ? cfg.radius * 1.2 : cfg.radius}
@@ -544,7 +621,6 @@ export default function DriverHeatmapScreen() {
                       strokeColor={cfg.ring}
                       strokeWidth={isSelected ? 2.5 : 1.5}
                     />
-                    {/* Zone name marker */}
                     <Marker
                       coordinate={{ latitude: zone.lat, longitude: zone.lng }}
                       anchor={{ x: 0.5, y: 0.5 }}
@@ -571,13 +647,13 @@ export default function DriverHeatmapScreen() {
             </View>
           )}
 
-          {/* Live indicator */}
-          <View style={[s.liveChip, { left: mapEdge }]}>
-            <View style={s.liveDot} />
-            <Text style={s.liveText}>LIVE</Text>
-          </View>
+          {!isMapLibreEnabled() ? (
+            <View style={[s.liveChip, { left: mapEdge }]}>
+              <View style={s.liveDot} />
+              <Text style={s.liveText}>LIVE</Text>
+            </View>
+          ) : null}
 
-          {/* Zone count chip */}
           {topZones.length > 0 && (
             <View style={[s.zoneChip, { right: mapEdge }]}>
               <Ionicons name="location" size={12} color="#6366F1" />
@@ -586,18 +662,33 @@ export default function DriverHeatmapScreen() {
           )}
         </View>
 
-        {/* ── AI RECOMMENDATION ─────────────────────────────────────────── */}
+        {Platform.OS !== 'web' && isMapLibreEnabled() ? (
+          <TouchableOpacity
+            style={s.offlinePackBtn}
+            onPress={() => {
+              void ensureLagosOfflinePack().then((r) => {
+                Alert.alert(r.ok ? 'Offline maps' : 'Offline maps', r.message);
+              });
+            }}
+            activeOpacity={0.88}
+          >
+            <Ionicons name="cloud-download-outline" size={16} color="#A5B4FC" />
+            <Text style={s.offlinePackTxt}>Download Lagos offline pack (MapLibre)</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {/* ── RECOMMENDATION ────────────────────────────────────────────── */}
         {data?.recommendation ? (
           <LinearGradient colors={['rgba(99,102,241,0.15)', 'rgba(139,92,246,0.08)']} style={s.recCard}>
             <View style={s.recIcon}>
               <Ionicons name="bulb" size={22} color="#FBBF24" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={s.recLabel}>AI Recommendation</Text>
+              <Text style={s.recLabel}>Demand Recommendation</Text>
               <Text style={s.recText}>{data.recommendation}</Text>
             </View>
           </LinearGradient>
-        ) : loading ? (
+        ) : isLoading ? (
           <View style={s.recCard}>
             <View style={[s.recIcon, { backgroundColor: '#1e293b' }]}>
               <Ionicons name="bulb-outline" size={22} color="#475569" />
@@ -616,16 +707,25 @@ export default function DriverHeatmapScreen() {
             <Text style={s.sectionSub}>Tap a zone to focus map</Text>
           </View>
 
-          {loading && topZones.length === 0 ? (
+          {isLoading && topZones.length === 0 ? (
             <View style={s.emptyCard}>
               <Ionicons name="hourglass-outline" size={28} color="#475569" />
               <Text style={s.emptyText}>Loading zones…</Text>
             </View>
+          ) : status === 'error' && topZones.length === 0 ? (
+            <View style={s.emptyCard}>
+              <Ionicons name="warning-outline" size={28} color="#F59E0B" />
+              <Text style={s.emptyText}>Could not load hot zones</Text>
+              <Text style={s.emptySub}>{errorReason || 'Network request failed.'}</Text>
+              <TouchableOpacity style={s.retryBtn} onPress={() => void onRefresh()}>
+                <Text style={s.retryText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
           ) : topZones.length === 0 ? (
             <View style={s.emptyCard}>
               <Ionicons name="map-outline" size={28} color="#475569" />
-              <Text style={s.emptyText}>No zones to show</Text>
-              <Text style={s.emptySub}>Check connection and try again.</Text>
+              <Text style={s.emptyText}>No active hot zones nearby</Text>
+              <Text style={s.emptySub}>Demand can be quiet outside peak windows. Pull down to refresh.</Text>
               <TouchableOpacity style={s.retryBtn} onPress={() => void onRefresh()}>
                 <Text style={s.retryText}>Retry</Text>
               </TouchableOpacity>
@@ -790,6 +890,19 @@ const s = StyleSheet.create({
   liveText: { fontSize: 10, fontWeight: '900', color: '#22c55e', letterSpacing: 1 },
   zoneChip: { position: 'absolute', top: 10, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(13,20,32,0.85)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: 'rgba(99,102,241,0.3)' },
   zoneChipText: { fontSize: 10, fontWeight: '800', color: '#818cf8' },
+  offlinePackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    borderRadius: 12,
+    backgroundColor: 'rgba(99,102,241,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(99,102,241,0.28)',
+  },
+  offlinePackTxt: { color: '#C7D2FE', fontSize: 12, fontWeight: '700' },
 
   // Recommendation
   recCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginHorizontal: 0, marginBottom: 12, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: 'rgba(99,102,241,0.25)' },

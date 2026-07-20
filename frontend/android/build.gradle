@@ -9,6 +9,7 @@ buildscript {
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
     classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
+    classpath('com.google.gms:google-services:4.4.2')
   }
 }
 
@@ -17,6 +18,26 @@ allprojects {
     google()
     mavenCentral()
     maven { url 'https://www.jitpack.io' }
+  }
+  // Navigation SDK bundles Maps SDK — exclude standalone play-services-maps
+  // from react-native-maps / other transitive deps to avoid duplicate classes.
+  configurations {
+    implementation {
+      exclude group: 'com.google.android.gms', module: 'play-services-maps'
+    }
+  }
+}
+
+// react-native-maps still needs Maps compile APIs; supply them via Navigation SDK
+// (same artifact version as @googlemaps/react-native-navigation-sdk).
+subprojects { sub ->
+  if (sub.name == 'react-native-maps') {
+    sub.afterEvaluate {
+      sub.dependencies.add(
+        'implementation',
+        'com.google.android.libraries.navigation:navigation:7.6.1'
+      )
+    }
   }
 }
 

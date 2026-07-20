@@ -1568,20 +1568,33 @@ async def register(request: RegisterRequest, http_request: Request):
     }
 
 class LogoutBody(BaseModel):
-    refresh_token: str | None = None
+    refresh_token: Optional[str] = None
 
 @auth_router.post("/auth/logout")
 async def logout(request: Request, response: Response, body: LogoutBody = LogoutBody()):
     """Logout user: revoke refresh token and clear session."""
     import hashlib as _hashlib
     try:
+        jwt_payload = getattr(request.state, "jwt_payload", None) or {}
+        jti = jwt_payload.get("jti")
+        if jti:
+            ttl = JWT_ACCESS_EXPIRY_MINUTES * 60
+            exp = jwt_payload.get("exp")
+            if isinstance(exp, (int, float)):
+                ttl = max(1, int(exp - _time.time()))
+            try:
+                from redis_store import store
+                await store.set(f"auth:revoked_jti:{jti}", "1", ttl=ttl)
+            except Exception as exc:
+                logger.warning("access token revocation cache unavailable: %s", exc)
+
         # Revoke refresh token from DB so it cannot be used again
         raw_refresh = (body.refresh_token or "").strip()
         if raw_refresh:
             token_hash = _hashlib.sha256(raw_refresh.encode()).hexdigest()
             await db.refresh_tokens.update_one(
                 {"token_hash": token_hash},
-                {"$set": {"revoked": True}},
+                {"$set": {"revoked": True, "revoked_at": datetime.now(timezone.utc).isoformat()}},
             )
 
         # Also clear any legacy session-cookie session
@@ -1682,9 +1695,11 @@ async def brevo_unified_otp_verify_endpoint(
     }
 
 
-@auth_router.get("/auth/otp/status")
+@auth_router.get("/auth/otp/status", include_in_schema=False)
 async def brevo_unified_otp_status_endpoint(email: EmailStr = Query(..., description="Email to inspect")):
     """Debug: pending OTP metadata for this email (per-server process memory only)."""
+    if os.environ.get("NEXRYDE_ENV", "production").lower() == "production":
+        raise HTTPException(status_code=404, detail="Not found")
     return await brevo_unified_otp_status(email_raw=str(email))
 
 

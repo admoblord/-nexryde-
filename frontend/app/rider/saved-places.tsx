@@ -19,7 +19,9 @@ import LocationAutocomplete from '@/src/components/LocationAutocomplete';
 import { RiderSavedSlotPremiumIcon } from '@/src/components/RiderSavedSlotPremiumIcon';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL } from '@/src/services/api';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { useThemeColors } from '@/src/constants/theme';
+import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
+import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import {
   loadRiderSavedPlaces,
@@ -35,6 +37,8 @@ export default function RiderSavedPlacesScreen() {
   const router = useRouter();
   const { userId: riderId, canCallAuthedApi } = useAuthedUserId();
   const tabPad = useTabBottomPad(16);
+  const flow = useFlowLayout();
+  const { colors, isDark } = useThemeColors();
   const [places, setPlaces] = useState<Awaited<ReturnType<typeof loadRiderSavedPlaces>>>([]);
   const [loading, setLoading] = useState(true);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -161,47 +165,64 @@ export default function RiderSavedPlacesScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: isDark ? BRAND.bgDeep : colors.background }]} edges={['top']}>
+      <View style={[styles.header, { paddingHorizontal: flow.padH, borderBottomColor: isDark ? SURFACE.hairline : colors.border }]}>
         <TouchableOpacity style={styles.back} onPress={() => router.back()} hitSlop={12}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.gray800} />
+          <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Saved places</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Saved places</Text>
         <View style={{ width: 44 }} />
       </View>
 
-      <Text style={styles.subtitle}>
+      <Text style={[styles.subtitle, { color: colors.textMuted, paddingHorizontal: flow.padH }]}>
         Home, work, and more — book in one tap from the home screen. Stored on this device.
       </Text>
 
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator color={COLORS.primary} />
+          <ActivityIndicator color={BRAND.primary} />
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={[styles.list, { paddingBottom: tabPad }]}
+          contentContainerStyle={[styles.list, { paddingBottom: tabPad, paddingHorizontal: flow.padH }]}
           showsVerticalScrollIndicator={false}
         >
           {RIDER_SAVED_SLOTS_ORDER.map((slot) => {
             const meta = RIDER_SAVED_SLOT_META[slot];
             const p = placeFor(slot);
             return (
-              <View key={slot} style={styles.card}>
+              <View
+                key={slot}
+                style={[
+                  styles.card,
+                  {
+                    backgroundColor: isDark ? SURFACE.cardDark : colors.card,
+                    borderColor: isDark ? SURFACE.hairline : colors.border,
+                  },
+                ]}
+              >
                 <RiderSavedSlotPremiumIcon slot={slot} filled={!!p} size="lg" />
                 <View style={styles.cardMid}>
-                  <Text style={styles.cardLabel}>{meta.label}</Text>
-                  <Text style={styles.cardAddr} numberOfLines={2}>
+                  <Text style={[styles.cardLabel, { color: colors.text }]}>{meta.label}</Text>
+                  <Text style={[styles.cardAddr, { color: colors.textMuted }]} numberOfLines={2}>
                     {p?.address || 'Tap to set'}
                   </Text>
                 </View>
                 <View style={styles.cardActions}>
-                  <TouchableOpacity style={styles.miniBtn} onPress={() => openEditor(slot)} activeOpacity={0.85}>
-                    <Ionicons name={p ? 'pencil' : 'add'} size={18} color={COLORS.primary} />
+                  <TouchableOpacity
+                    style={[styles.miniBtn, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
+                    onPress={() => openEditor(slot)}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name={p ? 'pencil' : 'add'} size={18} color={BRAND.primary} />
                   </TouchableOpacity>
                   {p ? (
-                    <TouchableOpacity style={styles.miniBtn} onPress={() => handleRemove(slot)} activeOpacity={0.85}>
-                      <Ionicons name="trash-outline" size={18} color={COLORS.error} />
+                    <TouchableOpacity
+                      style={[styles.miniBtn, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
+                      onPress={() => handleRemove(slot)}
+                      activeOpacity={0.85}
+                    >
+                      <Ionicons name="trash-outline" size={18} color={BRAND.danger} />
                     </TouchableOpacity>
                   ) : null}
                 </View>
@@ -214,7 +235,7 @@ export default function RiderSavedPlacesScreen() {
             onPress={() => router.push('/rider/book' as any)}
             activeOpacity={0.88}
           >
-            <LinearGradient colors={[COLORS.accentGreen, '#16A34A']} style={styles.doneGrad}>
+            <LinearGradient colors={[BRAND.primaryDark, BRAND.primary]} style={styles.doneGrad}>
               <Ionicons name="car-sport" size={20} color="#FFF" />
               <Text style={styles.doneText}>Book a ride</Text>
             </LinearGradient>
@@ -223,8 +244,8 @@ export default function RiderSavedPlacesScreen() {
       )}
 
       <Modal visible={editorOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setEditorOpen(false)}>
-        <SafeAreaView style={styles.modalSafe}>
-          <View style={styles.modalHead}>
+        <SafeAreaView style={[styles.modalSafe, { backgroundColor: colors.background }]}>
+          <View style={[styles.modalHead, { borderBottomColor: colors.border }]}>
             <TouchableOpacity
               onPress={() => {
                 setEditorOpen(false);
@@ -234,7 +255,7 @@ export default function RiderSavedPlacesScreen() {
             >
               <Text style={styles.modalCancel}>Cancel</Text>
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
               Set {editingSlot ? RIDER_SAVED_SLOT_META[editingSlot].label : ''}
             </Text>
             <View style={{ width: 56 }} />
@@ -249,7 +270,7 @@ export default function RiderSavedPlacesScreen() {
               />
               {savingPlace ? (
                 <View style={{ padding: 16, alignItems: 'center' }}>
-                  <ActivityIndicator color={COLORS.primary} />
+                  <ActivityIndicator color={BRAND.primary} />
                 </View>
               ) : null}
             </>
@@ -261,55 +282,46 @@ export default function RiderSavedPlacesScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: COLORS.gray50 },
+  safe: { flex: 1, backgroundColor: BRAND.bgDeep },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
+    paddingVertical: SPACING.sm + 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: FONT_SIZE.lg, fontWeight: '800', color: COLORS.gray800 },
+  headerTitle: { fontSize: 17, fontWeight: '900', letterSpacing: -0.2 },
   subtitle: {
-    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.md,
     paddingBottom: SPACING.md,
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.gray500,
-    lineHeight: 20,
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 19,
   },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  list: { paddingHorizontal: SPACING.lg, gap: SPACING.sm },
+  list: { gap: SPACING.stack },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
+    borderRadius: RADIUS.xl,
     padding: SPACING.md,
-    borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.2)',
+    borderWidth: StyleSheet.hairlineWidth,
     gap: SPACING.md,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 2,
   },
   cardMid: { flex: 1, minWidth: 0 },
-  cardLabel: { fontSize: FONT_SIZE.md, fontWeight: '800', color: COLORS.gray800 },
-  cardAddr: { fontSize: FONT_SIZE.sm, color: COLORS.gray500, marginTop: 4, lineHeight: 18 },
+  cardLabel: { fontSize: 15, fontWeight: '800', letterSpacing: -0.1 },
+  cardAddr: { fontSize: 13, marginTop: 4, lineHeight: 18, fontWeight: '500' },
   cardActions: { flexDirection: 'row', gap: 6 },
   miniBtn: {
     width: 40,
     height: 40,
-    borderRadius: 12,
-    backgroundColor: COLORS.gray50,
+    borderRadius: RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.gray100,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  doneRow: { marginTop: SPACING.lg, borderRadius: BORDER_RADIUS.xl, overflow: 'hidden' },
+  doneRow: { marginTop: SPACING.lg, borderRadius: RADIUS.xl, overflow: 'hidden' },
   doneGrad: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -317,17 +329,16 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: SPACING.md,
   },
-  doneText: { fontSize: FONT_SIZE.md, fontWeight: '800', color: '#FFF' },
-  modalSafe: { flex: 1, backgroundColor: COLORS.white },
+  doneText: { fontSize: 15, fontWeight: '800', color: BRAND.textInverse },
+  modalSafe: { flex: 1 },
   modalHead: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.gray100,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  modalCancel: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.primary },
-  modalTitle: { fontSize: FONT_SIZE.md, fontWeight: '800', color: COLORS.gray800 },
+  modalCancel: { fontSize: 15, fontWeight: '700', color: BRAND.primary },
+  modalTitle: { fontSize: 15, fontWeight: '800' },
 });

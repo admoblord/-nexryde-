@@ -1,10 +1,18 @@
 import React, { ReactNode } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, StyleProp, ViewStyle } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  StyleProp,
+  ViewStyle,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { BRAND } from '@/src/constants/designSystem';
+import { BRAND, RADIUS, SCREEN, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
+import { ScreenBackdrop } from '@/src/components/ui/ScreenStructure';
 
 type ScreenShellProps = {
   title: string;
@@ -13,6 +21,8 @@ type ScreenShellProps = {
   headerRight?: ReactNode;
   scroll?: boolean;
   contentContainerStyle?: StyleProp<ViewStyle>;
+  /** Optional eyebrow above the title (e.g. "DRIVER"). */
+  eyebrow?: string;
 };
 
 /** Header + layout chrome that renders immediately — content area is children. */
@@ -23,63 +33,98 @@ export function ScreenShell({
   headerRight,
   scroll = true,
   contentContainerStyle,
+  eyebrow,
 }: ScreenShellProps) {
   const router = useRouter();
   const handleBack = onBack ?? (() => router.back());
 
   const body = scroll ? (
-    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={contentContainerStyle}>
+    <ScrollView
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={[styles.scrollContent, contentContainerStyle]}
+    >
       {children}
     </ScrollView>
   ) : (
-    <View style={[{ flex: 1 }, contentContainerStyle]}>{children}</View>
+    <View style={[styles.bodyFill, contentContainerStyle]}>{children}</View>
   );
+  // Note: horizontal page pad is owned by each screen (flow.padH) so we don't double-pad.
 
   return (
-    <View style={styles.container}>
-      <LinearGradient colors={[BRAND.bgDeep, BRAND.bgCard, BRAND.bgDeep]} style={StyleSheet.absoluteFill} />
-      <SafeAreaView style={styles.safeArea}>
+    <ScreenBackdrop>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={handleBack}
+            activeOpacity={0.82}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
             <Ionicons name="arrow-back" size={22} color={BRAND.textPrimary} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>{title}</Text>
+          <View style={styles.headerCenter}>
+            {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {title}
+            </Text>
+          </View>
           <View style={styles.headerRight}>{headerRight ?? <View style={styles.headerSpacer} />}</View>
         </View>
         {body}
       </SafeAreaView>
-    </View>
+    </ScreenBackdrop>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BRAND.bgDeep },
   safeArea: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: SCREEN.headerPadH,
+    paddingVertical: SCREEN.headerPadV,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: SURFACE.hairline,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    width: SCREEN.iconBtn,
+    height: SCREEN.iconBtn,
+    borderRadius: RADIUS.md,
+    backgroundColor: SURFACE.tile,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACE.hairline,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: SPACING.sm,
+    gap: 2,
+  },
+  eyebrow: {
+    ...TYPOGRAPHY.label,
+    color: BRAND.primary,
+    textTransform: 'uppercase',
+  },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '900',
+    ...TYPOGRAPHY.title,
     color: BRAND.textPrimary,
-    letterSpacing: -0.5,
+    letterSpacing: -0.35,
   },
   headerRight: {
-    minWidth: 40,
+    minWidth: SCREEN.iconBtn,
     alignItems: 'flex-end',
     justifyContent: 'center',
   },
-  headerSpacer: { width: 40, height: 40 },
+  headerSpacer: { width: SCREEN.iconBtn, height: SCREEN.iconBtn },
+  scrollContent: {
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.bottomGutter,
+  },
+  bodyFill: {
+    flex: 1,
+  },
 });

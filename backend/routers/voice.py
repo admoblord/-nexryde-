@@ -1,11 +1,12 @@
 """Voice Router - Nigerian-accent booking parsing with learning."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
 import re
 
 from database import db
+from auth_guard import verify_owner_strict
 from nigerian_vocabulary import (
     extract_destination_from_pidgin,
     normalize_city_name,
@@ -133,7 +134,9 @@ def _extract_route(text: str) -> dict:
 
 
 @voice_router.post("/parse-booking-command")
-async def parse_booking_command(request: VoiceParseRequest):
+async def parse_booking_command(request: VoiceParseRequest, http_request: Request):
+    if request.user_id:
+        verify_owner_strict(http_request, request.user_id)
     profile = await _get_learning_profile(request.user_id)
     correction_map = profile.get("correction_map", {}) if profile else {}
 
@@ -236,8 +239,10 @@ async def get_voice_vocabulary():
 
 
 @voice_router.get("/personalized-context")
-async def get_personalized_context(user_id: Optional[str] = None):
+async def get_personalized_context(http_request: Request, user_id: Optional[str] = None):
     """Return personalized contextual strings that improve STT over time."""
+    if user_id:
+        verify_owner_strict(http_request, user_id)
     profile = await _get_learning_profile(user_id)
     top_places = []
     top_phrases = []
@@ -278,9 +283,10 @@ async def get_personalized_context(user_id: Optional[str] = None):
 
 
 @voice_router.post("/learning-event")
-async def save_learning_event(request: VoiceLearningEventRequest):
+async def save_learning_event(request: VoiceLearningEventRequest, http_request: Request):
     """Persist voice outcomes so recognition improves for each user."""
     user_id = request.user_id
+    verify_owner_strict(http_request, user_id)
     transcript = _clean_text(request.transcript)
     if not transcript:
         return {"success": False, "message": "Empty transcript"}

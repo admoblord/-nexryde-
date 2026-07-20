@@ -373,7 +373,7 @@ export default function RideBidScreen() {
                   <FlatList
                     data={driverOffers}
                     renderItem={renderOffer}
-                    keyExtractor={(item) => item.offer_id}
+                    keyExtractor={(item, index) => String(item.offer_id ?? item.driver_id ?? `offer-${index}`)}
                     scrollEnabled={false}
                   />
                 </View>

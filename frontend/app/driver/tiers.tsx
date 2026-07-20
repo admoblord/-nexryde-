@@ -38,14 +38,6 @@ export default function SubscriptionTiersScreen() {
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          {/* Hero Section */}
-          <View style={styles.heroCard}>
-            <Text style={styles.heroTitle}>Drive & Earn</Text>
-            <Text style={styles.heroSubtitle}>
-              Choose your plan and keep 100% of your earnings
-            </Text>
-          </View>
-
           {/* Intra-City Plan (Dynamic Intro Pricing) */}
           <View style={styles.planCard}>
             <View style={styles.planHeader}>
@@ -101,7 +93,7 @@ export default function SubscriptionTiersScreen() {
               
               <View style={styles.benefit}>
                 <Ionicons name="checkmark-circle" size={20} color={COLORS.accentGreen} />
-                <Text style={styles.benefitText}>AI-powered features</Text>
+                <Text style={styles.benefitText}>Premium driver tools</Text>
               </View>
               
               <View style={styles.benefit}>
@@ -252,24 +244,6 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: SPACING.lg,
     paddingBottom: SPACING.xl * 2,
-  },
-  heroCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.xl,
-    alignItems: 'center',
-    marginBottom: SPACING.lg,
-  },
-  heroTitle: {
-    fontSize: 28,
-    fontWeight: '900',
-    color: COLORS.lightTextPrimary,
-    marginBottom: SPACING.xs,
-  },
-  heroSubtitle: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
-    textAlign: 'center',
   },
   planCard: {
     backgroundColor: COLORS.white,

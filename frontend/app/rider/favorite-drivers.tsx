@@ -15,7 +15,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { FONT_SIZE, SPACING, BORDER_RADIUS } from '@/src/constants/theme';
+import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
+import { useThemeColors } from '@/src/constants/theme';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { getFavoriteDrivers, removeFavoriteDriver, getTripsWithDriver } from '@/src/services/api';
 import {
@@ -29,6 +30,13 @@ import { RiderFavoriteDriverCard } from '@/src/components/rider/RiderFavoriteDri
 export default function FavoriteDriversScreen() {
   const router = useRouter();
   const { userId: riderId, canCallAuthedApi } = useAuthedUserId();
+  const { colors, isDark } = useThemeColors();
+  const screenBg = isDark ? BRAND.bgDeep : colors.background;
+  const titleColor = isDark ? '#F8FAFC' : colors.text;
+  const mutedColor = isDark ? '#94A3B8' : colors.textMuted;
+  const headerGrad = isDark
+    ? ([BRAND.bgDeep, BRAND.bgElevated, BRAND.bgDeep] as const)
+    : ([colors.card, colors.surfaceAlt, colors.card] as const);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [favoriteDrivers, setFavoriteDrivers] = useState<RiderFavoriteDriverRow[]>([]);
@@ -137,25 +145,29 @@ export default function FavoriteDriversScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={s.container}>
+      <SafeAreaView style={[s.container, { backgroundColor: screenBg }]}>
         <View style={s.loadingWrap}>
           <RiderFavoriteIcon size={56} filled />
           <ActivityIndicator size="large" color="#EC4899" style={{ marginTop: 16 }} />
-          <Text style={s.loadingText}>Loading favourites…</Text>
+          <Text style={[s.loadingText, { color: mutedColor }]}>Loading favourites…</Text>
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={s.container}>
-      <LinearGradient colors={['#3B0764', '#0F172A', '#020617']} style={s.header}>
-        <TouchableOpacity style={s.backBtn} onPress={() => router.back()} accessibilityRole="button">
-          <Ionicons name="arrow-back" size={22} color="#F8FAFC" />
+    <SafeAreaView style={[s.container, { backgroundColor: screenBg }]}>
+      <LinearGradient colors={[...headerGrad]} style={s.header}>
+        <TouchableOpacity
+          style={[s.backBtn, !isDark && { backgroundColor: colors.surfaceAlt }]}
+          onPress={() => router.back()}
+          accessibilityRole="button"
+        >
+          <Ionicons name="arrow-back" size={22} color={titleColor} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={s.headerTitle}>Favourite drivers</Text>
-          <Text style={s.headerSub}>
+          <Text style={[s.headerTitle, { color: titleColor }]}>Favourite drivers</Text>
+          <Text style={[s.headerSub, { color: isDark ? '#F9A8D4' : '#DB2777' }]}>
             {favoriteDrivers.length > 0
               ? `${onlineCount} online · ${favoriteDrivers.length} saved`
               : 'Your trusted drivers in one place'}
@@ -164,9 +176,9 @@ export default function FavoriteDriversScreen() {
         <RiderFavoriteIcon size={40} filled />
       </LinearGradient>
 
-      <View style={s.perkStrip}>
+      <View style={[s.perkStrip, !isDark && { backgroundColor: 'rgba(236,72,153,0.06)' }]}>
         <Ionicons name="sparkles" size={16} color="#F472B6" />
-        <Text style={s.perkTxt}>{RIDER_FAV_PERK_DETAIL}</Text>
+        <Text style={[s.perkTxt, { color: isDark ? '#FBCFE8' : '#BE185D' }]}>{RIDER_FAV_PERK_DETAIL}</Text>
       </View>
 
       <ScrollView
@@ -212,8 +224,8 @@ export default function FavoriteDriversScreen() {
         ) : (
           <View style={s.emptyWrap}>
             <RiderFavoriteIcon size={72} filled />
-            <Text style={s.emptyTitle}>No favourites yet</Text>
-            <Text style={s.emptyText}>
+            <Text style={[s.emptyTitle, { color: titleColor }]}>No favourites yet</Text>
+            <Text style={[s.emptyText, { color: mutedColor }]}>
               After a great ride, tap the heart on your trip receipt or driver profile. They’ll appear on your home screen for one-tap booking.
             </Text>
             <TouchableOpacity style={s.emptyBtnWrap} onPress={() => router.push('/rider/book' as any)} activeOpacity={0.9}>
@@ -230,18 +242,27 @@ export default function FavoriteDriversScreen() {
 }
 
 function SectionLabel({ title, online }: { title: string; online?: boolean }) {
+  const { colors, isDark } = useThemeColors();
   return (
     <View style={s.sectionHeader}>
       <View style={[s.sectionDot, online && s.sectionDotOn]} />
-      <Text style={[s.sectionLabel, online && s.sectionLabelOn]}>{title}</Text>
+      <Text
+        style={[
+          s.sectionLabel,
+          { color: isDark ? '#64748B' : colors.textMuted },
+          online && s.sectionLabelOn,
+        ]}
+      >
+        {title}
+      </Text>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
+  container: { flex: 1, backgroundColor: BRAND.bgDeep },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  loadingText: { color: '#94A3B8', fontWeight: '600', fontSize: FONT_SIZE.sm, marginTop: 8 },
+  loadingText: { color: '#94A3B8', fontWeight: '600', fontSize: 13, marginTop: 8 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -257,8 +278,8 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: { fontSize: FONT_SIZE.lg, fontWeight: '900', color: '#F8FAFC' },
-  headerSub: { fontSize: FONT_SIZE.xs, fontWeight: '600', color: '#F9A8D4', marginTop: 2 },
+  headerTitle: { fontSize: 17, fontWeight: '900', color: '#F8FAFC' },
+  headerSub: { fontSize: 11, fontWeight: '600', color: '#F9A8D4', marginTop: 2 },
   perkStrip: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -266,23 +287,23 @@ const s = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: 12,
     backgroundColor: 'rgba(236,72,153,0.08)',
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(236,72,153,0.15)',
   },
-  perkTxt: { flex: 1, fontSize: FONT_SIZE.xs, fontWeight: '600', color: '#FBCFE8', lineHeight: 18 },
+  perkTxt: { flex: 1, fontSize: 11, fontWeight: '600', color: '#BE185D', lineHeight: 18 },
   content: { padding: SPACING.md },
   contentEmpty: { flexGrow: 1 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10, marginTop: 4 },
   sectionDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#475569' },
-  sectionDotOn: { backgroundColor: '#22C55E' },
+  sectionDotOn: { backgroundColor: BRAND.primary },
   sectionLabel: {
-    fontSize: FONT_SIZE.xs,
+    fontSize: 11,
     fontWeight: '800',
     color: '#64748B',
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
-  sectionLabelOn: { color: '#4ADE80' },
+  sectionLabelOn: { color: BRAND.primaryLight },
   emptyWrap: {
     flex: 1,
     alignItems: 'center',
@@ -291,15 +312,15 @@ const s = StyleSheet.create({
     paddingHorizontal: 28,
     gap: 14,
   },
-  emptyTitle: { fontSize: FONT_SIZE.xl, fontWeight: '900', color: '#F8FAFC', textAlign: 'center' },
+  emptyTitle: { fontSize: 20, fontWeight: '900', color: '#F8FAFC', textAlign: 'center' },
   emptyText: {
-    fontSize: FONT_SIZE.sm,
+    fontSize: 13,
     fontWeight: '600',
     color: '#94A3B8',
     textAlign: 'center',
     lineHeight: 22,
   },
-  emptyBtnWrap: { borderRadius: BORDER_RADIUS.xl, overflow: 'hidden', marginTop: 8 },
+  emptyBtnWrap: { borderRadius: RADIUS.xl, overflow: 'hidden', marginTop: 8 },
   emptyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -307,5 +328,5 @@ const s = StyleSheet.create({
     paddingHorizontal: 28,
     paddingVertical: 14,
   },
-  emptyBtnTxt: { fontSize: FONT_SIZE.md, fontWeight: '900', color: '#FFF' },
+  emptyBtnTxt: { fontSize: 15, fontWeight: '900', color: '#FFF' },
 });

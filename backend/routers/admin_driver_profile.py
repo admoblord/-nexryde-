@@ -46,14 +46,17 @@ def _driver_nin_public(docs_row: dict, user: dict, profile: dict) -> dict[str, A
 
 
 def _doc_has_data(doc_key: str, meta: dict, docs_row: dict) -> bool:
-    if meta.get("size_bytes") or meta.get("file_key") or meta.get("gcs_key"):
+    if meta.get("size_bytes") or meta.get("file_key") or meta.get("gcs_key") or meta.get("data"):
+        return True
+    if meta.get("storage") in ("inline", "gcs"):
         return True
     if doc_key == "nin":
         if meta.get("nin_cipher") or meta.get("capture_mode") == "number_only":
             return True
-        if docs_row.get("nin_hash") or docs_row.get("nin_last4"):
+        if docs_row.get("nin_hash") or docs_row.get("nin_last4") or docs_row.get("nin_cipher"):
             return True
-    return False
+    # Uploaded metadata present (binary may still be fetchable).
+    return bool(meta.get("uploaded_at") and meta.get("filename"))
 
 
 def _account_status(user: dict, profile: dict) -> str:
@@ -224,7 +227,7 @@ async def driver_operations_profile(driver_id: str):
             "rejection_reason": nin_meta.get("rejection_reason"),
         })
     license_public = public_license_fields(docs_row)
-    ai = verification.get("ai_verification_result") or {}
+    verification_result = verification.get("verification_result") or verification.get("ai_verification_result") or {}
 
     founding = any(
         "founding" in str(s.get("plan_type", "")).lower() or "founding" in str(s.get("plan", "")).lower()
@@ -302,6 +305,7 @@ async def driver_operations_profile(driver_id: str):
             "current_location": profile.get("current_location"),
             "active_trip_id": (active_trip or {}).get("id"),
             "work_zone_area_ids": profile.get("work_zone_area_ids") or [],
+            "work_zone_zones": profile.get("work_zone_zones") or [],
         },
         "ratings": {
             "average": user.get("rating"),
@@ -311,6 +315,7 @@ async def driver_operations_profile(driver_id: str):
         "work_zone": {
             "active": profile.get("work_zone_active", False),
             "area_ids": profile.get("work_zone_area_ids") or [],
+            "zones": profile.get("work_zone_zones") or [],
             "expires_at": profile.get("work_zone_expires_at"),
             "label": profile.get("work_zone_label"),
         },
@@ -321,13 +326,13 @@ async def driver_operations_profile(driver_id: str):
             "nin": nin_public,
             "license": license_public,
             "face_verification": {
-                "score": ai.get("face_match_score") or ai.get("confidence"),
-                "status": ai.get("face_verification_status", "unknown"),
+                "score": verification_result.get("face_match_score") or verification_result.get("confidence"),
+                "status": verification_result.get("face_verification_status", "unknown"),
             },
             "background_check": verification.get("background_check_status", "not_available"),
             "documents": doc_items,
             "audit_history": audit_history,
-            "ai_score": ai.get("verification_score"),
+            "review_score": verification_result.get("verification_score"),
         },
         "vehicle": {
             "make": profile.get("vehicle_make") or profile.get("vehicle_type"),
@@ -355,6 +360,7 @@ async def driver_operations_profile(driver_id: str):
             "work_zone": {
                 "active": profile.get("work_zone_active", False),
                 "area_ids": profile.get("work_zone_area_ids") or [],
+                "zones": profile.get("work_zone_zones") or [],
                 "expires_at": profile.get("work_zone_expires_at"),
             },
         },
@@ -386,6 +392,7 @@ async def driver_operations_profile(driver_id: str):
             "last_location_at": profile.get("last_location_at"),
             "active_trip": active_trip,
             "work_zone_area_ids": profile.get("work_zone_area_ids") or [],
+            "work_zone_zones": profile.get("work_zone_zones") or [],
             "battery_level": profile.get("battery_level"),
             "network_status": profile.get("network_status", "unknown"),
         },
@@ -443,6 +450,8 @@ async def suspend_driver(driver_id: str, body: SuspendBody, request: Request):
         {"user_id": driver_id},
         {"$set": {"is_online": False, "suspended_until": until.isoformat(), "suspension_reason": body.reason}},
     )
+    from driver_presence import clear_driver_presence_safe
+    await clear_driver_presence_safe(driver_id)
     await _log_audit(request, "driver_suspended", "driver", driver_id, body.model_dump())
     return {"success": True, "suspended_until": until.isoformat()}
 
@@ -553,9 +562,11 @@ async def admin_grant_document_grace(driver_id: str, body: DocumentGraceBody, re
 async def notify_driver(driver_id: str, body: NotifyDriverBody, request: Request):
     import uuid
     from notification_service import send_push_notification
-    user = await db.users.find_one({"id": driver_id}, {"_id": 1})
+    user = await db.users.find_one({"id": driver_id}, {"_id": 1, "role": 1})
     if not user:
         raise HTTPException(status_code=404, detail="Driver not found")
+    if user.get("role") != "driver":
+        raise HTTPException(status_code=400, detail="Target user is not a driver")
     now_iso = datetime.now(timezone.utc).isoformat()
     await db.notifications.insert_one({
         "id": str(uuid.uuid4()),

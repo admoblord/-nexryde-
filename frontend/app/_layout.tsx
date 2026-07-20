@@ -4,11 +4,11 @@ import 'react-native-get-random-values';
 import * as SplashScreen from 'expo-splash-screen';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, View, Text, Platform, useColorScheme } from 'react-native';
+import { StyleSheet, View, Text, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { DARK_COLORS, LIGHT_COLORS } from '@/src/constants/theme';
-import { bootstrapThemeFromStorage } from '@/src/theme/appearanceTheme';
+import { useThemeColors } from '@/src/constants/theme';
+import { bootstrapThemeFromStorage, persistThemePreference } from '@/src/theme/appearanceTheme';
 import { ErrorBoundary } from '@/src/components/ErrorBoundary';
 import { OfflineBanner } from '@/src/components/OfflineBanner';
 import { LanguageProvider } from '@/src/i18n/LanguageContext';
@@ -29,6 +29,7 @@ import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
 import { warmBackendConnection } from '@/src/utils/warmBackend';
 import { initSentry, wrapWithSentry, installGlobalErrorHandler } from '@/src/utils/sentry';
 import { initializeOfflineMode } from '@/src/services/offlineMode';
+import { getUserPreferences } from '@/src/services/api';
 
 // Initialize crash reporting as early as possible — before the root component
 // mounts — so startup crashes (rider + driver) are captured. No-op without a DSN.
@@ -133,9 +134,8 @@ function RootLayout() {
   const { user, isAuthenticated } = useAppStore();
   const hasHydrated = usePersistStoreReady();
   const wasAuthenticated = useRef<boolean | null>(null);
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
-  const stackBackground = isDark ? DARK_COLORS.background : LIGHT_COLORS.background;
+  const { colors, isDark } = useThemeColors();
+  const stackBackground = colors.background;
 
   useEffect(() => {
     if (Platform.OS !== 'web') {
@@ -159,10 +159,29 @@ function RootLayout() {
     }
   }, [hasHydrated]);
 
-  // Restore last Light / Dark / Auto choice so hooks + StatusBar match immediately after splash
+  // Restore last Light / Dark / Auto choice (JS-only; never touches Appearance TurboModule)
   useEffect(() => {
-    void bootstrapThemeFromStorage();
+    void bootstrapThemeFromStorage().catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!hasHydrated || !isAuthenticated || !user?.id) return;
+    let cancelled = false;
+    void getUserPreferences(user.id)
+      .then(async (res) => {
+        if (cancelled) return;
+        const pref = res.data?.theme;
+        if (pref === 'light' || pref === 'dark' || pref === 'auto') {
+          await persistThemePreference(pref);
+        }
+      })
+      .catch(() => {
+        /* keep local preference */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasHydrated, isAuthenticated, user?.id]);
 
   // ── Register global login navigator (used by authedFetch outside React tree) ─
   useEffect(() => {
@@ -272,7 +291,6 @@ function RootLayout() {
                   <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                   <Stack.Screen name="driver" options={{ headerShown: false }} />
                   <Stack.Screen name="rider" options={{ headerShown: false }} />
-                  <Stack.Screen name="assistant" options={{ headerShown: false }} />
                   {/* Modal-style screens — iOS bottom sheet */}
                   <Stack.Screen
                     name="support"

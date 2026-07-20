@@ -3,7 +3,7 @@
  *
  * React Native's Metro bundler produces a single bundle by default. Using
  * React.lazy() + Suspense defers parsing and execution of expensive modules
- * (AI buddy, analytics, admin dashboard, map components) until the user
+ * (analytics, admin dashboard, map components) until the user
  * actually navigates to them — improving cold-start and TTI.
  *
  * Usage:

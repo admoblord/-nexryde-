@@ -9,12 +9,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
+import { useThemeColors } from '@/src/constants/theme';
+import { BRAND, RADIUS, SPACING, SURFACE } from '@/src/constants/designSystem';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { getDriverStats } from '@/src/services/api';
 
 export default function PerformanceScreen() {
+  const { colors, isDark } = useThemeColors();
   const router = useRouter();
   const { userId: driverId } = useAuthedUserId();
   const [loading, setLoading] = useState(true);
@@ -58,11 +60,11 @@ export default function PerformanceScreen() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'excellent': return COLORS.success;
-      case 'good': return COLORS.info;
-      case 'needs_improvement': return COLORS.warning;
-      case 'poor': return COLORS.error;
-      default: return COLORS.gray500;
+      case 'excellent': return BRAND.primary;
+      case 'good': return BRAND.info;
+      case 'needs_improvement': return BRAND.warning;
+      case 'poor': return BRAND.danger;
+      default: return BRAND.textMuted;
     }
   };
 
@@ -70,10 +72,10 @@ export default function PerformanceScreen() {
   const overallTitle = Number(stats?.rating || 0) >= 4.8 ? 'Excellent Performance' : 'Strong Performance';
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: isDark ? BRAND.bgDeep : colors.background }]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.gray800} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Performance</Text>
         <View style={{ width: 40 }} />
@@ -82,12 +84,12 @@ export default function PerformanceScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         {loading ? (
           <View style={styles.loadingWrap}>
-            <ActivityIndicator size="large" color={COLORS.primary} />
+            <ActivityIndicator size="large" color={BRAND.primary} />
             <Text style={styles.loadingText}>Loading performance...</Text>
           </View>
         ) : loadError ? (
           <View style={styles.loadingWrap}>
-            <Ionicons name="cloud-offline-outline" size={48} color={COLORS.gray400} />
+            <Ionicons name="cloud-offline-outline" size={48} color={BRAND.textMuted} />
             <Text style={[styles.loadingText, { marginTop: 12 }]}>Could not load stats</Text>
             <TouchableOpacity onPress={loadStats} style={styles.retryButton}>
               <Text style={styles.retryText}>Try again</Text>
@@ -95,9 +97,9 @@ export default function PerformanceScreen() {
           </View>
         ) : !stats ? (
           <View style={styles.loadingWrap}>
-            <Ionicons name="bar-chart-outline" size={48} color={COLORS.gray300} />
+            <Ionicons name="bar-chart-outline" size={48} color={BRAND.textMuted} />
             <Text style={[styles.loadingText, { marginTop: 12 }]}>No performance data yet</Text>
-            <Text style={[styles.loadingText, { fontSize: FONT_SIZE.sm, color: COLORS.gray400, marginTop: 4 }]}>
+            <Text style={[styles.loadingText, { fontSize: 13, color: BRAND.textMuted, marginTop: 4 }]}>
               Complete trips to see your metrics here.
             </Text>
           </View>
@@ -133,7 +135,7 @@ export default function PerformanceScreen() {
         ))}
 
         <View style={styles.tipsCard}>
-          <Ionicons name="bulb" size={24} color={COLORS.accent} />
+          <Ionicons name="bulb" size={24} color={BRAND.primary} />
           <View style={styles.tipsContent}>
             <Text style={styles.tipsTitle}>Pro Tip</Text>
             <Text style={styles.tipsText}>
@@ -151,7 +153,7 @@ export default function PerformanceScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.gray50,
+    backgroundColor: BRAND.bgDeep,
   },
   header: {
     flexDirection: 'row',
@@ -159,17 +161,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
-    backgroundColor: COLORS.white,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.gray100,
+    backgroundColor: SURFACE.cardDark,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: SURFACE.hairline,
   },
   backButton: {
     padding: SPACING.sm,
   },
   headerTitle: {
-    fontSize: FONT_SIZE.lg,
+    fontSize: 17,
     fontWeight: '800',
-    color: COLORS.gray800,
+    color: BRAND.textPrimary,
   },
   content: {
     padding: SPACING.lg,
@@ -181,62 +183,60 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: SPACING.sm,
-    color: COLORS.gray500,
+    color: BRAND.textMuted,
     fontWeight: '600',
   },
   overallCard: {
-    backgroundColor: COLORS.white,
+    backgroundColor: SURFACE.cardDark,
     padding: SPACING.xl,
-    borderRadius: BORDER_RADIUS.xl,
+    borderRadius: RADIUS.xl,
     alignItems: 'center',
     marginBottom: SPACING.lg,
-    ...SHADOWS.md,
   },
   scoreCircle: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: COLORS.successSoft,
+    backgroundColor: BRAND.primaryMuted,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 4,
-    borderColor: COLORS.success,
+    borderColor: BRAND.primary,
   },
   scoreValue: {
-    fontSize: FONT_SIZE.xxl,
+    fontSize: 22,
     fontWeight: '900',
-    color: COLORS.success,
+    color: BRAND.primary,
   },
   overallTitle: {
-    fontSize: FONT_SIZE.lg,
+    fontSize: 17,
     fontWeight: '800',
-    color: COLORS.gray800,
+    color: BRAND.textPrimary,
     marginTop: SPACING.md,
   },
   overallSubtext: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.gray500,
+    fontSize: 13,
+    color: BRAND.textMuted,
     marginTop: SPACING.xs,
   },
   sectionTitle: {
-    fontSize: FONT_SIZE.md,
+    fontSize: 15,
     fontWeight: '800',
-    color: COLORS.gray800,
+    color: BRAND.textPrimary,
     marginBottom: SPACING.md,
   },
   metricCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
+    backgroundColor: SURFACE.cardDark,
     padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
+    borderRadius: RADIUS.lg,
     marginBottom: SPACING.sm,
-    ...SHADOWS.sm,
   },
   metricIcon: {
     width: 48,
     height: 48,
-    borderRadius: BORDER_RADIUS.md,
+    borderRadius: RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -245,26 +245,26 @@ const styles = StyleSheet.create({
     marginLeft: SPACING.md,
   },
   metricLabel: {
-    fontSize: FONT_SIZE.md,
+    fontSize: 15,
     fontWeight: '700',
-    color: COLORS.gray800,
+    color: BRAND.textPrimary,
   },
   metricTarget: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.gray500,
+    fontSize: 13,
+    color: BRAND.textMuted,
   },
   metricValueWrap: {
     paddingHorizontal: SPACING.md,
   },
   metricValue: {
-    fontSize: FONT_SIZE.xl,
+    fontSize: 20,
     fontWeight: '900',
   },
   tipsCard: {
     flexDirection: 'row',
-    backgroundColor: COLORS.accentSoft,
+    backgroundColor: BRAND.primaryMuted,
     padding: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl,
+    borderRadius: RADIUS.xl,
     marginTop: SPACING.md,
     gap: SPACING.md,
   },
@@ -272,26 +272,26 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   tipsTitle: {
-    fontSize: FONT_SIZE.md,
+    fontSize: 15,
     fontWeight: '800',
-    color: COLORS.gray800,
+    color: BRAND.textPrimary,
   },
   tipsText: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.gray600,
+    fontSize: 13,
+    color: BRAND.textSecondary,
     marginTop: 4,
     lineHeight: 20,
   },
   retryButton: {
     marginTop: SPACING.lg,
-    backgroundColor: COLORS.primary,
+    backgroundColor: BRAND.primary,
     paddingHorizontal: SPACING.xl,
     paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.full,
+    borderRadius: RADIUS.full,
   },
   retryText: {
-    color: COLORS.white,
+    color: SURFACE.cardDark,
     fontWeight: '700',
-    fontSize: FONT_SIZE.md,
+    fontSize: 15,
   },
 });

@@ -58,6 +58,8 @@ export type DriverArrivedPickupDockProps = {
   onStartTrip?: () => void;
   onNavigateToPickup?: () => void;
   onNavigateToDestination?: () => void;
+  /** Shown after free wait — cancel as rider no-show. */
+  onRiderNoShow?: () => void;
   onCall: () => void;
   onMessage: () => void;
   onSafetyPress: () => void;
@@ -217,6 +219,7 @@ export default function DriverArrivedPickupDock({
   onStartTrip,
   onNavigateToPickup,
   onNavigateToDestination,
+  onRiderNoShow,
   onCall,
   onMessage,
   onSafetyPress,
@@ -445,6 +448,33 @@ export default function DriverArrivedPickupDock({
             </Text>
             <Ionicons name="chevron-forward" size={16} color={MUTED} />
           </TouchableOpacity>
+
+          {onRiderNoShow ? (
+            <TouchableOpacity
+              style={s.noShowBtn}
+              onPress={() => {
+                Alert.alert(
+                  'Rider no-show?',
+                  'Free wait has ended. Cancel this trip as a no-show only if the rider never arrived.',
+                  [
+                    { text: 'Keep waiting', style: 'cancel' },
+                    { text: 'Rider no-show', style: 'destructive', onPress: onRiderNoShow },
+                  ],
+                );
+              }}
+              disabled={!!tripActionBusy}
+              activeOpacity={0.88}
+              accessibilityRole="button"
+              accessibilityLabel="Rider no-show"
+            >
+              <Ionicons name="person-remove-outline" size={18} color="#FBBF24" />
+              <View style={{ flex: 1 }}>
+                <Text style={s.noShowTitle}>Rider no-show</Text>
+                <Text style={s.noShowSub}>Free wait ended · cancel with reason</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={MUTED} />
+            </TouchableOpacity>
+          ) : null}
 
           {onCancelTrip ? (
             <TouchableOpacity
@@ -876,6 +906,20 @@ const s = StyleSheet.create({
     fontWeight: '800',
     color: '#86EFAC',
   },
+  noShowBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(251,191,36,0.1)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(251,191,36,0.35)',
+    marginBottom: 8,
+  },
+  noShowTitle: { fontSize: 14, fontWeight: '800', color: '#FDE68A' },
+  noShowSub: { fontSize: 11, fontWeight: '600', color: '#94A3B8', marginTop: 2 },
   cancelBtn: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -22,19 +22,23 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { DOCK_BLUR_INTENSITY, DOCK_TOP_RADIUS } from '@/src/components/driver/driverDockTheme';
+import { useThemeColors } from '@/src/constants/theme';
 import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 import { DriverOfferBidActions } from '@/src/components/driver/DriverOfferBidActions';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
-const G   = '#00D47E';   // NexRyde green
-const G2  = '#34F5B8';   // lighter mint
-const BG  = '#080E1A';   // darkest bg
-const SRF = '#111827';   // surface
-const SRF2= '#1A2438';   // elevated surface
-const TXT = '#F1F5F9';   // primary text
-const MUT = '#64748B';   // muted text
-const RED = '#EF4444';   // decline
-const AMB = '#F59E0B';   // countdown amber warning
+const G   = '#00D47E';
+const G2  = '#34F5B8';
+const RED = '#EF4444';
+const AMB = '#F59E0B';
+
+type OfferTok = { BG: string; SRF: string; SRF2: string; TXT: string; MUT: string };
+function offerTokens(isDark: boolean, colors: { background: string; card: string; surfaceAlt: string; text: string; textMuted: string }): OfferTok {
+  if (isDark) {
+    return { BG: '#080E1A', SRF: '#111827', SRF2: '#1A2438', TXT: '#F1F5F9', MUT: '#64748B' };
+  }
+  return { BG: colors.background, SRF: colors.card, SRF2: colors.surfaceAlt, TXT: colors.text, MUT: colors.textMuted };
+}
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 type TripOffer = Record<string, any>;
@@ -111,7 +115,7 @@ function CountdownRing({
       >
         {Math.max(0, Math.ceil(seconds))}
       </Text>
-      <Text style={{ fontSize: 9, fontWeight: '700', color: MUT, letterSpacing: 0.4 }}>sec</Text>
+      <Text style={{ fontSize: 9, fontWeight: '700', color: '#64748B', letterSpacing: 0.4 }}>sec</Text>
     </View>
   );
 }
@@ -141,6 +145,10 @@ function DriverMapOfferDock({
   onAcceptCounterPrice,
   onDecline,
 }: Props) {
+  const { colors, isDark } = useThemeColors();
+  const { BG, SRF, SRF2, TXT, MUT } = offerTokens(isDark, colors);
+  const s = React.useMemo(() => createOfferStyles({ BG, SRF, SRF2, TXT, MUT }), [BG, SRF, SRF2, TXT, MUT]);
+  const blurTint = isDark ? 'dark' : 'light';
   const riderName  = trip?.rider_name || trip?.rider?.name || 'Rider';
   const riderPhoto = trip?.rider_photo || trip?.rider?.profile_image || null;
   const rating     = trip?.shield?.rider_reputation_avg != null
@@ -189,9 +197,9 @@ function DriverMapOfferDock({
   return (
     <View style={s.shell}>
       {Platform.OS !== 'web' ? (
-        <BlurView intensity={DOCK_BLUR_INTENSITY} tint="dark" style={StyleSheet.absoluteFillObject} />
+        <BlurView intensity={DOCK_BLUR_INTENSITY} tint={blurTint} style={StyleSheet.absoluteFillObject} />
       ) : (
-        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(8,14,26,0.98)' }]} />
+        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: isDark ? 'rgba(8,14,26,0.98)' : 'rgba(255,255,255,0.97)' }]} />
       )}
       <LinearGradient
         colors={['rgba(0,212,126,0.09)', BG, BG]}
@@ -363,7 +371,9 @@ export function offerTripPickupDropCoords(trip: TripOffer | null) {
 }
 
 // ─── Styles ────────────────────────────────────────────────────────────────────
-const s = StyleSheet.create({
+function createOfferStyles(t: OfferTok) {
+  const { BG, SRF, SRF2, TXT, MUT } = t;
+  return StyleSheet.create({
   shell: {
     borderTopLeftRadius: DOCK_TOP_RADIUS,
     borderTopRightRadius: DOCK_TOP_RADIUS,
@@ -513,3 +523,4 @@ const s = StyleSheet.create({
   declineTxt: { fontSize: 14, fontWeight: '800', color: '#FCA5A5' },
   btnDisabled: { opacity: 0.45 },
 });
+}

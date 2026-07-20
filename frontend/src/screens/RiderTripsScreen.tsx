@@ -24,7 +24,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
+import { CURRENCY, useThemeColors } from '@/src/constants/theme';
+import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { getUserTrips } from '@/src/services/api';
 import { isActiveTripStatus, normalizeTripStatus } from '@/src/utils/tripStatus';
@@ -40,24 +41,29 @@ function getTripStatusMeta(status: string, paymentStatus?: string): {
   const s = String(status || '');
   const ps = String(paymentStatus || '');
   if (s === 'completed' && (ps === 'pending' || ps === 'pending_confirmation')) {
-    return { label: 'Awaiting Payment', color: '#7C3AED', bg: '#EDE9FE', icon: 'time-outline' };
+    return { label: 'Awaiting payment', color: BRAND.accentPurple, bg: 'rgba(139,92,246,0.15)', icon: 'time-outline' };
   }
   if (s === 'completed') {
-    return { label: 'Completed', color: '#16A34A', bg: '#DCFCE7', icon: 'checkmark-circle' };
+    return { label: 'Completed', color: BRAND.primaryDark, bg: BRAND.primaryMuted, icon: 'checkmark-circle' };
   }
   if (s === 'cancelled') {
-    return { label: 'Cancelled', color: '#DC2626', bg: '#FEE2E2', icon: 'close-circle' };
+    return { label: 'Cancelled', color: BRAND.danger, bg: 'rgba(239,68,68,0.12)', icon: 'close-circle' };
   }
   if (['ongoing'].includes(s)) {
-    return { label: 'On Trip', color: '#2563EB', bg: '#DBEAFE', icon: 'navigate' };
+    return { label: 'On trip', color: BRAND.accentBlue, bg: 'rgba(0,102,255,0.12)', icon: 'navigate' };
   }
   if (['accepted', 'arrived'].includes(s)) {
-    return { label: s === 'arrived' ? 'Driver Arrived' : 'Driver Assigned', color: '#0EA5E9', bg: '#E0F2FE', icon: 'car-sport' };
+    return {
+      label: s === 'arrived' ? 'Driver arrived' : 'Driver assigned',
+      color: BRAND.info,
+      bg: 'rgba(56,189,248,0.14)',
+      icon: 'car-sport',
+    };
   }
   if (s === 'pending_payment') {
-    return { label: 'Awaiting Payment', color: '#7C3AED', bg: '#EDE9FE', icon: 'wallet-outline' };
+    return { label: 'Awaiting payment', color: BRAND.accentPurple, bg: 'rgba(139,92,246,0.15)', icon: 'wallet-outline' };
   }
-  return { label: 'Searching', color: '#F59E0B', bg: '#FEF3C7', icon: 'search' };
+  return { label: 'Searching', color: BRAND.warning, bg: 'rgba(245,158,11,0.14)', icon: 'search' };
 }
 
 function formatDate(raw?: string): string {
@@ -108,6 +114,12 @@ function TripCard({
   onReport: () => void;
   onSameDriver: () => void;
 }) {
+  const { colors, isDark } = useThemeColors();
+  const cardBg = isDark ? SURFACE.cardDark : colors.card;
+  const border = isDark ? SURFACE.hairline : colors.border;
+  const muted = colors.textMuted;
+  const secondary = colors.textSecondary;
+  const primaryText = colors.text;
   const pickup   = getAddress(trip.pickup_location);
   const dropoff  = getAddress(trip.dropoff_location);
   const fare     = Number(trip.fare || 0);
@@ -125,7 +137,7 @@ function TripCard({
 
   return (
     <TouchableOpacity
-      style={styles.tripCard}
+      style={[styles.tripCard, { backgroundColor: cardBg, borderColor: border }]}
       onPress={onPress}
       activeOpacity={0.88}
       accessibilityRole="button"
@@ -133,8 +145,8 @@ function TripCard({
     >
       {/* Header row: date + fare */}
       <View style={styles.cardHeader}>
-        <Text style={styles.cardDate}>{dateStr}</Text>
-        <Text style={styles.cardFare}>{fmtFare(fare)}</Text>
+        <Text style={[styles.cardDate, { color: muted }]}>{dateStr}</Text>
+        <Text style={[styles.cardFare, { color: primaryText }]}>{fmtFare(fare)}</Text>
       </View>
 
       {/* Status badge */}
@@ -146,40 +158,40 @@ function TripCard({
       {/* Route */}
       <View style={styles.routeBlock}>
         <View style={styles.routePoint}>
-          <View style={[styles.routeDot, { backgroundColor: COLORS.success }]} />
-          <Text style={styles.routeAddr} numberOfLines={1}>{pickup}</Text>
+          <View style={[styles.routeDot, { backgroundColor: BRAND.primary }]} />
+          <Text style={[styles.routeAddr, { color: primaryText }]} numberOfLines={1}>{pickup}</Text>
         </View>
         <View style={styles.routeLine} />
         <View style={styles.routePoint}>
-          <View style={[styles.routeDot, { backgroundColor: COLORS.error }]} />
-          <Text style={styles.routeAddr} numberOfLines={1}>{dropoff}</Text>
+          <View style={[styles.routeDot, { backgroundColor: BRAND.danger }]} />
+          <Text style={[styles.routeAddr, { color: primaryText }]} numberOfLines={1}>{dropoff}</Text>
         </View>
       </View>
 
       {/* Meta row */}
       <View style={styles.metaRow}>
-        <Text style={styles.driverLabel} numberOfLines={1}>{driverLabel}</Text>
+        <Text style={[styles.driverLabel, { color: secondary }]} numberOfLines={1}>{driverLabel}</Text>
         <View style={styles.metaRight}>
           {distKm > 0 && (
-            <View style={styles.metaChip}>
-              <Ionicons name="navigate-outline" size={11} color={COLORS.gray500} />
-              <Text style={styles.metaChipTxt}>{distKm.toFixed(1)} km</Text>
+            <View style={[styles.metaChip, { backgroundColor: isDark ? SURFACE.tile : colors.surface, borderColor: border }]}>
+              <Ionicons name="navigate-outline" size={11} color={BRAND.textMuted} />
+              <Text style={[styles.metaChipTxt, { color: muted }]}>{distKm.toFixed(1)} km</Text>
             </View>
           )}
           {durMins > 0 && (
-            <View style={styles.metaChip}>
-              <Ionicons name="time-outline" size={11} color={COLORS.gray500} />
-              <Text style={styles.metaChipTxt}>{durMins} min</Text>
+            <View style={[styles.metaChip, { backgroundColor: isDark ? SURFACE.tile : colors.surface, borderColor: border }]}>
+              <Ionicons name="time-outline" size={11} color={BRAND.textMuted} />
+              <Text style={[styles.metaChipTxt, { color: muted }]}>{durMins} min</Text>
             </View>
           )}
           {payMethod && (
-            <View style={styles.metaChip}>
+            <View style={[styles.metaChip, { backgroundColor: isDark ? SURFACE.tile : colors.surface, borderColor: border }]}>
               <Ionicons
                 name={payMethod.toLowerCase().includes('cash') ? 'cash-outline' : 'wallet-outline'}
                 size={11}
-                color={COLORS.gray500}
+                color={BRAND.textMuted}
               />
-              <Text style={styles.metaChipTxt}>{payMethod}</Text>
+              <Text style={[styles.metaChipTxt, { color: muted }]}>{payMethod}</Text>
             </View>
           )}
           {isCompleted && rating > 0 && (
@@ -194,8 +206,8 @@ function TripCard({
       {/* Vehicle identification for completed trips */}
       {isCompleted && (vehicle || plate) ? (
         <View style={styles.vehicleRow}>
-          <Ionicons name="car-sport-outline" size={13} color={COLORS.gray500} />
-          <Text style={styles.vehicleTxt} numberOfLines={1}>
+          <Ionicons name="car-sport-outline" size={13} color={BRAND.textMuted} />
+          <Text style={[styles.vehicleTxt, { color: muted }]} numberOfLines={1}>
             {[vehicle, plate ? plate.toUpperCase() : null].filter(Boolean).join(' · ')}
           </Text>
         </View>
@@ -209,11 +221,11 @@ function TripCard({
             <Text style={styles.btnBookAgainTxt}>Book Again</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.btnReceipt} onPress={onReceipt} accessibilityRole="button">
-            <Ionicons name="receipt-outline" size={15} color={COLORS.accentBlue} />
+            <Ionicons name="receipt-outline" size={15} color={BRAND.info} />
             <Text style={styles.btnReceiptTxt}>Receipt</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.btnReport} onPress={onReport} accessibilityRole="button">
-            <Ionicons name="shield-outline" size={15} color={COLORS.error} />
+            <Ionicons name="shield-outline" size={15} color={BRAND.danger} />
             <Text style={styles.btnReportTxt}>Issue</Text>
           </TouchableOpacity>
         </View>
@@ -222,7 +234,7 @@ function TripCard({
       {/* Same driver row (completed only) */}
       {isCompleted && trip.driver_id ? (
         <TouchableOpacity style={styles.sameDriverBtn} onPress={onSameDriver} accessibilityRole="button">
-          <Ionicons name="heart-outline" size={15} color={COLORS.primary} />
+          <Ionicons name="heart-outline" size={15} color={BRAND.primary} />
           <Text style={styles.sameDriverTxt}>Request same driver</Text>
         </TouchableOpacity>
       ) : null}
@@ -240,6 +252,9 @@ function TripCard({
 
 // ─── Insights card ───────────────────────────────────────────────────────────
 function InsightsCard({ completed }: { completed: any[] }) {
+  const { colors, isDark } = useThemeColors();
+  const cardBg = isDark ? SURFACE.cardDark : colors.card;
+  const border = isDark ? SURFACE.hairline : colors.border;
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
 
@@ -268,8 +283,8 @@ function InsightsCard({ completed }: { completed: any[] }) {
   }
 
   return (
-    <View style={styles.insightsCard}>
-      <Text style={styles.insightsTitle}>Your activity</Text>
+    <View style={[styles.insightsCard, { backgroundColor: cardBg, borderColor: border }]}>
+      <Text style={[styles.insightsTitle, { color: colors.text }]}>Your activity</Text>
       <View style={styles.insightsRow}>
         <View style={styles.insightCell}>
           <Text style={styles.insightValue}>{ridesMonth}</Text>
@@ -283,11 +298,11 @@ function InsightsCard({ completed }: { completed: any[] }) {
       </View>
       {topDest ? (
         <View style={styles.topDestRow}>
-          <Ionicons name="location" size={14} color={COLORS.primary} />
-          <Text style={styles.topDestTxt} numberOfLines={1}>Top stop: {topDest}</Text>
+          <Ionicons name="location" size={14} color={BRAND.primary} />
+          <Text style={[styles.topDestTxt, { color: colors.textSecondary }]} numberOfLines={1}>Top stop: {topDest}</Text>
         </View>
       ) : null}
-      <Text style={styles.insightsFoot}>
+      <Text style={[styles.insightsFoot, { color: colors.textMuted }]}>
         {allTimeRides} completed · {fmtFare(allSpend)} lifetime
       </Text>
     </View>
@@ -297,6 +312,7 @@ function InsightsCard({ completed }: { completed: any[] }) {
 // ─── Main screen ─────────────────────────────────────────────────────────────
 export default function RiderTripsScreen() {
   const router = useRouter();
+  const { colors, isDark } = useThemeColors();
   const { userId: riderId, canCallAuthedApi } = useAuthedUserId();
   const [activeTab, setActiveTab] = useState<TripTab>('upcoming');
   const [loading, setLoading] = useState(true);
@@ -382,8 +398,8 @@ export default function RiderTripsScreen() {
     );
   }, [activeTab, router]);
 
-  const keyExtractor = useCallback((item: any) =>
-    String(item.id || item._id || Math.random()), []);
+  const keyExtractor = useCallback((item: any, index: number) =>
+    String(item.id ?? item._id ?? `trip-${index}`), []);
 
   const ListHeader = useMemo(() => (
     <View style={styles.listHeaderWrap}>
@@ -395,9 +411,9 @@ export default function RiderTripsScreen() {
 
   const ListEmpty = (
     <View style={styles.emptyState}>
-      <Ionicons name="car-outline" size={64} color={COLORS.gray300} />
-      <Text style={styles.emptyTitle}>No {activeTab} trips</Text>
-      <Text style={styles.emptySub}>
+      <Ionicons name="car-outline" size={64} color={colors.textMuted} />
+      <Text style={[styles.emptyTitle, { color: colors.text }]}>No {activeTab} trips</Text>
+      <Text style={[styles.emptySub, { color: colors.textMuted }]}>
         {activeTab === 'upcoming'
           ? 'No active trips right now'
           : activeTab === 'completed'
@@ -406,7 +422,7 @@ export default function RiderTripsScreen() {
       </Text>
       {activeTab === 'upcoming' ? (
         <TouchableOpacity style={styles.bookBtn} onPress={() => router.push('/rider/book' as any)}>
-          <Text style={styles.bookBtnTxt}>Book a Ride</Text>
+          <Text style={styles.bookBtnTxt}>Book a ride</Text>
         </TouchableOpacity>
       ) : null}
     </View>
@@ -414,9 +430,9 @@ export default function RiderTripsScreen() {
 
   const ErrorState = (
     <View style={styles.errorState}>
-      <Ionicons name="cloud-offline-outline" size={48} color={COLORS.error} />
-      <Text style={styles.errorTitle}>Could not load trips</Text>
-      <Text style={styles.errorSub}>Check your connection and try again</Text>
+      <Ionicons name="cloud-offline-outline" size={48} color={BRAND.danger} />
+      <Text style={[styles.errorTitle, { color: colors.text }]}>Could not load trips</Text>
+      <Text style={[styles.errorSub, { color: colors.textMuted }]}>Check your connection and try again</Text>
       <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoading(true); void loadTrips(); }}>
         <Ionicons name="refresh" size={16} color="#FFF" />
         <Text style={styles.retryBtnTxt}>Retry</Text>
@@ -425,27 +441,45 @@ export default function RiderTripsScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.root} edges={['top']}>
+    <SafeAreaView style={[styles.root, { backgroundColor: isDark ? BRAND.bgDeep : colors.background }]} edges={['top']}>
       <TabBrandStrip role="rider" />
 
       {/* Header */}
-      <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
+      <View
+        style={[
+          styles.header,
+          {
+            paddingHorizontal: flow.padH,
+            backgroundColor: isDark ? BRAND.bgDeep : colors.background,
+            borderBottomColor: isDark ? SURFACE.hairline : colors.border,
+          },
+        ]}
+      >
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} accessibilityRole="button">
-          <Ionicons name="arrow-back" size={24} color={COLORS.gray800} />
+          <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>My Trips</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>My trips</Text>
         <TouchableOpacity
           style={styles.shieldBtn}
           onPress={() => router.push('/shield-disputes' as any)}
           accessibilityRole="button"
-          accessibilityLabel="Nexryde Shield"
+          accessibilityLabel="NexRyde Shield"
         >
-          <Ionicons name="shield-checkmark-outline" size={22} color={COLORS.primary} />
+          <Ionicons name="shield-checkmark-outline" size={22} color={BRAND.primary} />
         </TouchableOpacity>
       </View>
 
       {/* Tab bar */}
-      <View style={[styles.tabBar, { paddingHorizontal: flow.padH }]}>
+      <View
+        style={[
+          styles.tabBar,
+          {
+            paddingHorizontal: flow.padH,
+            backgroundColor: isDark ? BRAND.bgDeep : colors.background,
+            borderBottomColor: isDark ? SURFACE.hairline : colors.border,
+          },
+        ]}
+      >
         {(['upcoming', 'completed', 'cancelled'] as TripTab[]).map((tab) => (
           <TouchableOpacity
             key={tab}
@@ -453,12 +487,18 @@ export default function RiderTripsScreen() {
             onPress={() => setActiveTab(tab)}
             accessibilityRole="tab"
           >
-            <Text style={[styles.tabTxt, activeTab === tab && styles.tabTxtActive]}>
+            <Text
+              style={[
+                styles.tabTxt,
+                { color: colors.textMuted },
+                activeTab === tab && styles.tabTxtActive,
+              ]}
+            >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
             </Text>
             {segmented[tab].length > 0 ? (
               <View style={[styles.tabBadge, activeTab === tab && styles.tabBadgeActive]}>
-                <Text style={[styles.tabBadgeTxt, activeTab === tab && styles.tabBadgeTxtActive]}>
+                <Text style={[styles.tabBadgeTxt, { color: colors.textSecondary }, activeTab === tab && styles.tabBadgeTxtActive]}>
                   {segmented[tab].length}
                 </Text>
               </View>
@@ -491,6 +531,8 @@ export default function RiderTripsScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={() => { setRefreshing(true); void loadTrips(true); }}
+              tintColor={BRAND.primary}
+              colors={[BRAND.primary]}
             />
           }
           showsVerticalScrollIndicator={false}
@@ -504,129 +546,217 @@ export default function RiderTripsScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: COLORS.gray50 },
+  root: { flex: 1, backgroundColor: BRAND.bgDeep },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: SPACING.md, backgroundColor: COLORS.white,
-    borderBottomWidth: 1, borderBottomColor: COLORS.gray100,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: SPACING.stack,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  backBtn: { padding: SPACING.sm },
-  headerTitle: { fontSize: FONT_SIZE.lg, fontWeight: '800', color: COLORS.gray800 },
-  shieldBtn: { padding: SPACING.xs },
+  backBtn: { padding: SPACING.sm, width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { fontSize: 17, fontWeight: '900', letterSpacing: -0.2 },
+  shieldBtn: { padding: SPACING.xs, width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
 
   tabBar: {
-    flexDirection: 'row', backgroundColor: COLORS.white,
-    borderBottomWidth: 1, borderBottomColor: COLORS.gray100,
+    flexDirection: 'row',
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   tab: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 5, paddingVertical: 13, borderBottomWidth: 2, borderBottomColor: 'transparent',
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 12,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
-  tabActive: { borderBottomColor: COLORS.primary },
-  tabTxt: { fontSize: FONT_SIZE.xs + 1, fontWeight: '600', color: COLORS.gray500 },
-  tabTxtActive: { color: COLORS.primary, fontWeight: '800' },
+  tabActive: { borderBottomColor: BRAND.primary },
+  tabTxt: { fontSize: 12, fontWeight: '600' },
+  tabTxtActive: { color: BRAND.primary, fontWeight: '800' },
   tabBadge: {
-    minWidth: 18, height: 18, borderRadius: 9, backgroundColor: COLORS.gray100,
-    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: RADIUS.full,
+    backgroundColor: SURFACE.tile,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
   },
-  tabBadgeActive: { backgroundColor: COLORS.primary },
-  tabBadgeTxt: { fontSize: 10, fontWeight: '800', color: COLORS.gray600 },
-  tabBadgeTxtActive: { color: '#FFF' },
+  tabBadgeActive: { backgroundColor: BRAND.primary },
+  tabBadgeTxt: { fontSize: 10, fontWeight: '800' },
+  tabBadgeTxtActive: { color: BRAND.textInverse },
 
-  listContent: { paddingTop: SPACING.md, gap: SPACING.sm, flexGrow: 1 },
-  listHeaderWrap: { marginBottom: SPACING.sm },
+  listContent: { paddingTop: SPACING.md, gap: SPACING.stack, flexGrow: 1 },
+  listHeaderWrap: { marginBottom: SPACING.xs },
 
-  // Insights card
   insightsCard: {
-    backgroundColor: COLORS.white, borderRadius: BORDER_RADIUS.lg,
-    borderWidth: 1, borderColor: COLORS.gray100, padding: SPACING.md, ...SHADOWS.sm,
+    borderRadius: RADIUS.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: SPACING.md,
   },
-  insightsTitle: { fontSize: FONT_SIZE.sm, fontWeight: '800', color: COLORS.gray800, marginBottom: SPACING.sm },
+  insightsTitle: { fontSize: 14, fontWeight: '800', marginBottom: SPACING.sm, letterSpacing: -0.1 },
   insightsRow: { flexDirection: 'row', alignItems: 'center' },
   insightCell: { flex: 1, alignItems: 'center', paddingVertical: SPACING.xs },
-  insightDivider: { width: 1, height: 36, backgroundColor: COLORS.gray100 },
-  insightValue: { fontSize: FONT_SIZE.xl, fontWeight: '900', color: COLORS.primary },
-  insightLabel: { fontSize: FONT_SIZE.xs, fontWeight: '600', color: COLORS.gray500, marginTop: 3, textAlign: 'center' },
-  topDestRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: SPACING.sm, paddingTop: SPACING.sm, borderTopWidth: 1, borderTopColor: COLORS.gray100 },
-  topDestTxt: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.gray700 },
-  insightsFoot: { marginTop: SPACING.sm, fontSize: FONT_SIZE.xs, fontWeight: '600', color: COLORS.gray400, textAlign: 'center' },
+  insightDivider: { width: StyleSheet.hairlineWidth, height: 36, backgroundColor: SURFACE.hairline },
+  insightValue: { fontSize: 22, fontWeight: '900', color: BRAND.primary, letterSpacing: -0.3 },
+  insightLabel: { ...TYPOGRAPHY.caption, color: BRAND.textMuted, marginTop: 3, textAlign: 'center' },
+  topDestRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginTop: SPACING.sm,
+    paddingTop: SPACING.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: SURFACE.hairline,
+  },
+  topDestTxt: { flex: 1, fontSize: 13, fontWeight: '700' },
+  insightsFoot: { marginTop: SPACING.sm, fontSize: 11, fontWeight: '600', textAlign: 'center' },
 
-  // Trip card
   tripCard: {
-    backgroundColor: COLORS.white, borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md, borderWidth: 1, borderColor: COLORS.gray100, ...SHADOWS.sm,
-    gap: SPACING.sm,
+    borderRadius: RADIUS.xl,
+    padding: SPACING.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: SPACING.stack,
   },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  cardDate: { fontSize: FONT_SIZE.xs + 1, fontWeight: '600', color: COLORS.gray500 },
-  cardFare: { fontSize: FONT_SIZE.md + 1, fontWeight: '900', color: COLORS.gray800 },
+  cardDate: { fontSize: 12, fontWeight: '600' },
+  cardFare: { fontSize: 16, fontWeight: '900', letterSpacing: -0.2 },
 
   statusBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start',
-    paddingHorizontal: 9, paddingVertical: 4, borderRadius: BORDER_RADIUS.full,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: RADIUS.full,
   },
-  statusBadgeTxt: { fontSize: FONT_SIZE.xs, fontWeight: '800' },
+  statusBadgeTxt: { fontSize: 11, fontWeight: '800' },
 
   routeBlock: { gap: 4 },
-  routePoint: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
+  routePoint: { flexDirection: 'row', alignItems: 'center', gap: SPACING.stack },
   routeDot: { width: 9, height: 9, borderRadius: 5 },
-  routeAddr: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '600', color: COLORS.gray700 },
-  routeLine: { width: 1.5, height: 14, backgroundColor: COLORS.gray200, marginLeft: 4 },
+  routeAddr: { flex: 1, fontSize: 13, fontWeight: '600' },
+  routeLine: { width: StyleSheet.hairlineWidth + 0.5, height: 14, backgroundColor: SURFACE.hairline, marginLeft: 4 },
 
-  metaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SPACING.xs, paddingTop: SPACING.xs, borderTopWidth: 1, borderTopColor: COLORS.gray100 },
-  driverLabel: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '600', color: COLORS.gray600 },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: SPACING.xs,
+    paddingTop: SPACING.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  driverLabel: { flex: 1, fontSize: 13, fontWeight: '600' },
   metaRight: { flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' },
   metaChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 3,
-    backgroundColor: COLORS.gray50, borderRadius: BORDER_RADIUS.full,
-    paddingHorizontal: 7, paddingVertical: 3, borderWidth: 1, borderColor: COLORS.gray100,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    borderRadius: RADIUS.full,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  metaChipTxt: { fontSize: 10, fontWeight: '700', color: COLORS.gray500 },
-  ratingBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#FEF9C3', borderRadius: BORDER_RADIUS.full, paddingHorizontal: 7, paddingVertical: 3 },
-  ratingTxt: { fontSize: 10, fontWeight: '800', color: '#92400E' },
+  metaChipTxt: { fontSize: 10, fontWeight: '700' },
+  ratingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(245,158,11,0.14)',
+    borderRadius: RADIUS.full,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  ratingTxt: { fontSize: 10, fontWeight: '800', color: BRAND.warning },
 
   vehicleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  vehicleTxt: { fontSize: FONT_SIZE.xs + 1, fontWeight: '600', color: COLORS.gray500, flex: 1 },
+  vehicleTxt: { fontSize: 12, fontWeight: '600', flex: 1 },
 
   actionsRow: { flexDirection: 'row', gap: SPACING.xs },
   btnBookAgain: {
-    flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
-    borderRadius: BORDER_RADIUS.lg, paddingVertical: 10, backgroundColor: COLORS.success,
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    borderRadius: RADIUS.lg,
+    paddingVertical: 10,
+    backgroundColor: BRAND.primary,
   },
-  btnBookAgainTxt: { color: '#FFF', fontWeight: '800', fontSize: FONT_SIZE.sm },
+  btnBookAgainTxt: { color: BRAND.textInverse, fontWeight: '800', fontSize: 13 },
   btnReceipt: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
-    borderRadius: BORDER_RADIUS.lg, paddingVertical: 10,
-    backgroundColor: COLORS.accentBlueSoft,
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderRadius: RADIUS.lg,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(56,189,248,0.12)',
   },
-  btnReceiptTxt: { color: COLORS.accentBlue, fontWeight: '700', fontSize: FONT_SIZE.sm },
+  btnReceiptTxt: { color: BRAND.info, fontWeight: '700', fontSize: 13 },
   btnReport: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
-    borderRadius: BORDER_RADIUS.lg, paddingVertical: 10,
-    backgroundColor: 'rgba(239,68,68,0.08)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.2)',
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderRadius: RADIUS.lg,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(239,68,68,0.22)',
   },
-  btnReportTxt: { color: COLORS.error, fontWeight: '700', fontSize: FONT_SIZE.sm },
+  btnReportTxt: { color: BRAND.danger, fontWeight: '700', fontSize: 13 },
   sameDriverBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
-    paddingVertical: 9, borderRadius: BORDER_RADIUS.lg,
-    borderWidth: 1.5, borderColor: 'rgba(0,158,247,0.3)', backgroundColor: COLORS.white,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingVertical: 9,
+    borderRadius: RADIUS.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: `${BRAND.primary}44`,
+    backgroundColor: BRAND.primaryMuted,
   },
-  sameDriverTxt: { fontSize: FONT_SIZE.sm, fontWeight: '800', color: COLORS.primary },
+  sameDriverTxt: { fontSize: 13, fontWeight: '800', color: BRAND.primary },
   btnActive: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    borderRadius: BORDER_RADIUS.lg, paddingVertical: 10, backgroundColor: '#2563EB',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: RADIUS.lg,
+    paddingVertical: 10,
+    backgroundColor: BRAND.accentBlue,
   },
-  btnActiveTxt: { color: '#FFF', fontWeight: '800', fontSize: FONT_SIZE.sm },
+  btnActiveTxt: { color: '#FFF', fontWeight: '800', fontSize: 13 },
 
-  // Empty / error
-  emptyState: { alignItems: 'center', paddingVertical: 60, gap: SPACING.sm },
-  emptyTitle: { fontSize: FONT_SIZE.lg, fontWeight: '800', color: COLORS.gray600 },
-  emptySub: { fontSize: FONT_SIZE.sm, color: COLORS.gray400, textAlign: 'center' },
-  bookBtn: { backgroundColor: COLORS.primary, paddingHorizontal: SPACING.xl, paddingVertical: SPACING.md, borderRadius: BORDER_RADIUS.xl, marginTop: SPACING.md },
-  bookBtnTxt: { fontSize: FONT_SIZE.md, fontWeight: '700', color: '#FFF' },
-  errorState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 60, gap: SPACING.sm },
-  errorTitle: { fontSize: FONT_SIZE.lg, fontWeight: '800', color: COLORS.gray700 },
-  errorSub: { fontSize: FONT_SIZE.sm, color: COLORS.gray400 },
-  retryBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.error, paddingHorizontal: SPACING.xl, paddingVertical: SPACING.md, borderRadius: BORDER_RADIUS.xl, marginTop: SPACING.sm },
-  retryBtnTxt: { color: '#FFF', fontWeight: '800', fontSize: FONT_SIZE.sm },
+  emptyState: { alignItems: 'center', paddingVertical: 60, gap: SPACING.stack },
+  emptyTitle: { fontSize: 17, fontWeight: '800' },
+  emptySub: { fontSize: 13, textAlign: 'center' },
+  bookBtn: {
+    backgroundColor: BRAND.primary,
+    paddingHorizontal: SPACING.xl,
+    paddingVertical: SPACING.md,
+    borderRadius: RADIUS.xl,
+    marginTop: SPACING.md,
+  },
+  bookBtnTxt: { fontSize: 15, fontWeight: '800', color: BRAND.textInverse },
+  errorState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 60, gap: SPACING.stack },
+  errorTitle: { fontSize: 17, fontWeight: '800' },
+  errorSub: { fontSize: 13 },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: BRAND.danger,
+    paddingHorizontal: SPACING.xl,
+    paddingVertical: SPACING.md,
+    borderRadius: RADIUS.xl,
+    marginTop: SPACING.sm,
+  },
+  retryBtnTxt: { color: '#FFF', fontWeight: '800', fontSize: 13 },
 });

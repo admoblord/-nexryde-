@@ -71,6 +71,15 @@ import {
   HANDLE_GRADIENT_DEFAULT,
 } from '@/src/components/driver/driverDockTheme';
 import { BRAND, SURFACE } from '@/src/constants/designSystem';
+import {
+  NEXRYDE_MAP_STYLE as SHARED_NEXRYDE_MAP_STYLE,
+  MAP,
+} from '@/src/constants/nexrydeMapBehavior';
+import { MAP_3D, getNexrydeMapStyleAuto, isLocalMapNight } from '@/src/constants/nexrydeMap3d';
+import { DriverCarMarker } from '@/src/components/tracking/map/DriverCarMarker';
+import { DriverDemandHeatmapOverlay } from '@/src/components/map/DriverDemandHeatmapOverlay';
+import { EtaRoutePuck } from '@/src/components/map/EtaRoutePuck';
+import { useDriverHeatmapSnapshot } from '@/src/hooks/useDriverHeatmapSnapshot';
 import { formatPickupWaitLabel } from '@/src/components/driver/driverDockUtils';
 import { driverTripProgressPercent } from '@/src/utils/driverOngoingDisplay';
 import {
@@ -81,7 +90,13 @@ import {
   haversineM,
   type NavStep,
 } from '@/src/navigation/navUtils';
-import { COLORS as THEME_COLORS } from '@/src/constants/theme';
+import { useNavVoiceFromSteps } from '@/src/navigation/useNavVoiceFromSteps';
+import {
+  appendTripBreadcrumb,
+  clearTripBreadcrumb,
+  type MapCoord,
+} from '@/src/utils/tripBreadcrumbTrail';
+import { COLORS as THEME_COLORS, useThemeColors } from '@/src/constants/theme';
 
 /** Advance to next Directions step when the driver is this close to the step end (metres). */
 const NAV_STEP_END_PROXIMITY_M = 40;
@@ -241,60 +256,8 @@ function serializeMapsNativePayload(error: { nativeEvent?: unknown } | null | un
 }
 
 /* ─────────────────────── Dark "Nexryde Night" map style ───────────────────────── */
-/**
- * NEXRYDE night map — city + road labels stay readable while driving.
- * Exported so other components (e.g. offline home) can reuse it.
- */
-export const NEXRYDE_MAP_STYLE: MapStyleElement[] = [
-  /* ── Base geometry ── */
-  { elementType: 'geometry',                         stylers: [{ color: '#0c1220' }] },
-  { elementType: 'labels.text.stroke',               stylers: [{ color: '#0c1220' }] },
-  { elementType: 'labels.text.fill',                 stylers: [{ color: '#8eaad4' }] },
-  { elementType: 'labels.icon',                      stylers: [{ visibility: 'off' }] },
-
-  /* ── Land & landscape ── */
-  { featureType: 'landscape',          elementType: 'geometry',            stylers: [{ color: '#0e1628' }] },
-  { featureType: 'landscape.man_made', elementType: 'geometry',            stylers: [{ color: '#111d33' }] },
-  { featureType: 'landscape.natural',  elementType: 'geometry',            stylers: [{ color: '#0b1421' }] },
-
-  /* ── Water ── */
-  { featureType: 'water',              elementType: 'geometry',            stylers: [{ color: '#071524' }] },
-  { featureType: 'water',              elementType: 'labels.text.fill',    stylers: [{ color: '#2c5282' }] },
-
-  /* ── Roads (thicker, higher-contrast “tick” lines for driving) ── */
-  { featureType: 'road',               elementType: 'geometry',            stylers: [{ color: '#243a5c' }] },
-  { featureType: 'road',               elementType: 'geometry.stroke',     stylers: [{ color: '#4a6a9a', weight: 1.2 }] },
-  { featureType: 'road',               elementType: 'labels.text.fill',    stylers: [{ color: '#9ec5ef' }] },
-  { featureType: 'road',               elementType: 'labels.text.stroke',  stylers: [{ color: '#0c1220', weight: 2 }] },
-  { featureType: 'road.highway',       elementType: 'geometry',            stylers: [{ color: '#2a4f82' }] },
-  { featureType: 'road.highway',       elementType: 'geometry.stroke',     stylers: [{ color: '#6b9ee8', weight: 1.8 }] },
-  { featureType: 'road.highway',       elementType: 'labels.text.fill',    stylers: [{ color: '#b8d4f5' }] },
-  { featureType: 'road.arterial',      elementType: 'geometry',            stylers: [{ color: '#1f3558' }] },
-  { featureType: 'road.arterial',      elementType: 'geometry.stroke',     stylers: [{ color: '#5a82b8', weight: 1.4 }] },
-  { featureType: 'road.arterial',      elementType: 'labels.text.fill',    stylers: [{ color: '#8eb4dc' }] },
-  { featureType: 'road.local',         elementType: 'geometry',            stylers: [{ color: '#1a2d48' }] },
-  { featureType: 'road.local',         elementType: 'geometry.stroke',     stylers: [{ color: '#3d5f88', weight: 1 }] },
-  { featureType: 'road.local',         elementType: 'labels.text.fill',    stylers: [{ color: '#6a90b8' }] },
-
-  /* ── Cities & admin labels (readable while moving) ── */
-  { featureType: 'administrative',                    elementType: 'geometry',            stylers: [{ color: '#1a2a42' }] },
-  { featureType: 'administrative',                    elementType: 'geometry.stroke',     stylers: [{ color: '#1e3660' }] },
-  { featureType: 'administrative.country',            elementType: 'labels.text.fill',    stylers: [{ color: '#94a3b8' }] },
-  { featureType: 'administrative.country',            elementType: 'labels.text.stroke',  stylers: [{ color: '#0c1220' }] },
-  { featureType: 'administrative.province',           elementType: 'labels.text.fill',    stylers: [{ color: '#7ea0c4' }] },
-  { featureType: 'administrative.locality',           elementType: 'labels.text.fill',    stylers: [{ color: '#c0d4ef' }] },
-  { featureType: 'administrative.locality',           elementType: 'labels.text.stroke',  stylers: [{ color: '#0c1220' }] },
-  { featureType: 'administrative.neighborhood',       elementType: 'labels.text.fill',    stylers: [{ color: '#6a8db0' }] },
-  { featureType: 'administrative.land_parcel',        elementType: 'labels',              stylers: [{ visibility: 'off' }] },
-
-  /* ── POI — keep off for clean look, except parks ── */
-  { featureType: 'poi',                               stylers: [{ visibility: 'off' }] },
-  { featureType: 'poi.park',          elementType: 'geometry',            stylers: [{ color: '#0a1e14', visibility: 'on' }] },
-  { featureType: 'poi.park',          elementType: 'labels.text.fill',    stylers: [{ color: '#2e6b47', visibility: 'on' }] },
-
-  /* ── Transit off ── */
-  { featureType: 'transit',                           stylers: [{ visibility: 'off' }] },
-];
+/** Canonical night map — shared with rider booking/tracking (2026 edition). */
+export const NEXRYDE_MAP_STYLE: MapStyleElement[] = SHARED_NEXRYDE_MAP_STYLE as MapStyleElement[];
 
 /* ─────────────────────── Types ───────────────────────── */
 export type DriverCoords = { lat: number; lng: number; heading?: number };
@@ -343,16 +306,8 @@ interface Props {
   isReconnecting?: boolean;
   driverCanReceiveOffers: boolean;
   todayEarnings: number;
-  todayTrips?: number;
-  /** Sum of completed trip duration today (hours), from earnings `summary.total_time_mins`. */
-  todayTripHours?: number;
-  /** Driver lifetime/average rating for idle stats (from profile). */
-  driverRating?: number | null;
-  weekEarnings?: number;
   activeTrip?: ActiveTrip | null;
   driverOffersWsConnected?: boolean;
-  surgeActive?: boolean;
-  surgeMultiplier?: number;
   workZoneActive?: boolean;
   workZoneLabel?: string;
   /** Called when driver taps GO (offline → online) */
@@ -371,20 +326,26 @@ interface Props {
   driverApproved?: boolean;
   trialReady?: boolean;
 
-  /** Open Google Maps to current leg (pickup vs dropoff based on trip status). */
+  /** Open Google Maps / in-app nav to current leg (pickup vs dropoff by status). */
   onTripOpenNavigation?: () => void;
+  /** Explicit nav to drop-off (arrived dock preview / start dock). */
+  onTripNavigateToDestination?: () => void;
   onTripMarkArrived?: () => void | Promise<void>;
   onTripStart?: () => void | Promise<void>;
   /** After pickup code is verified — begins metered trip (PUT /start). */
   onTripConfirmStart?: () => void | Promise<void>;
   /** Driver cancels from pre-start sheet (arrived + verified). */
   onTripCancel?: () => void | Promise<void>;
+  /** Rider no-show after free wait (arrived phase). */
+  onTripRiderNoShow?: () => void | Promise<void>;
   /** Drop-off complete — ends active trip on the map */
   onTripComplete?: () => void | Promise<void>;
   /** Optional — e.g. hold / report issue while metered (UI may show “coming soon”). */
   onTripPause?: () => void | Promise<void>;
   onTripCallRider?: () => void | Promise<void>;
   onTripMessageRider?: () => void | Promise<void>;
+  /** Real SOS — not just open Safety tab. */
+  onTripEmergency?: () => void | Promise<void>;
   /** When set with no active trip, show offer dock on this map (driver is online). */
   embeddedOfferTrip?: Record<string, unknown> | null;
   embeddedOfferCountdown?: number;
@@ -398,66 +359,6 @@ interface Props {
   tripActionBusy?: string | null;
   /** When true, hide the active-trip bottom dock (e.g. trip-completion sheet is covering it). */
   suppressTripDock?: boolean;
-}
-
-/* ─────────────────────── Animated car marker on map ───────────────────────── */
-function CarMarker({
-  bounceAnim,
-  pulseAnim,
-  tone = 'green',
-  caption,
-}: {
-  bounceAnim: Animated.Value;
-  pulseAnim: Animated.Value;
-  /** Blue glow + gradient when online and idle (reference UI). */
-  tone?: 'green' | 'blue';
-  /** Small label above the car (e.g. "You" on pickup navigation). */
-  caption?: string;
-}) {
-  const translateY = bounceAnim.interpolate({
-    inputRange: [-1, 0, 1],
-    outputRange: [4, 0, -4],
-  });
-  const scaleX = bounceAnim.interpolate({
-    inputRange: [-1, 0, 1],
-    outputRange: [1.08, 1, 0.93],
-  });
-  const ringScale = pulseAnim.interpolate({
-    inputRange: [1, 1.6],
-    outputRange: [1, 1.5],
-  });
-  const ringOpacity = pulseAnim.interpolate({
-    inputRange: [1, 1.6],
-    outputRange: [0.6, 0],
-  });
-  const blue = tone === 'blue';
-
-  return (
-    <View style={{ alignItems: 'center' }}>
-      {caption ? (
-        <View style={markerStyles.youPill}>
-          <Text style={markerStyles.youPillTxt}>{caption}</Text>
-        </View>
-      ) : null}
-      <Animated.View style={[markerStyles.container, { transform: [{ translateY }, { scaleX }] }]}>
-        {blue ? <View style={markerStyles.accuracyRing} /> : null}
-        <Animated.View
-          style={[
-            blue ? markerStyles.glowRingBlue : markerStyles.glowRing,
-            { transform: [{ scale: ringScale }], opacity: ringOpacity },
-          ]}
-        />
-        <LinearGradient
-          colors={blue ? ['#3B82F6', '#1D4ED8'] : ['#22e5a0', '#00c473']}
-          style={[markerStyles.carCircle, blue && markerStyles.carCircleBlue]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        >
-          <Ionicons name="car-sport" size={20} color="#FFF" />
-        </LinearGradient>
-      </Animated.View>
-    </View>
-  );
 }
 
 /* ─────────────────────── Pickup/Dropoff markers ───────────────────────── */
@@ -584,16 +485,10 @@ function DriverLiveMapViewInner({
   driverCoords,
   isOnline,
   isReconnecting = false,
-  driverCanReceiveOffers,
+  driverCanReceiveOffers: _driverCanReceiveOffers,
   todayEarnings,
-  todayTrips = 0,
-  todayTripHours = 0,
-  driverRating = null,
-  weekEarnings = 0,
   activeTrip,
   driverOffersWsConnected = false,
-  surgeActive = false,
-  surgeMultiplier = 1,
   workZoneActive = false,
   workZoneLabel = '',
   onGoOnline,
@@ -615,14 +510,17 @@ function DriverLiveMapViewInner({
   onEmbeddedOfferDecline,
   embeddedOfferAccepting = false,
   onTripOpenNavigation,
+  onTripNavigateToDestination,
   onTripMarkArrived,
   onTripStart,
   onTripConfirmStart,
   onTripCancel,
+  onTripRiderNoShow,
   onTripComplete,
   onTripPause,
   onTripCallRider,
   onTripMessageRider,
+  onTripEmergency,
   tripActionBusy = null,
   suppressTripDock = false,
 }: Props) {
@@ -630,10 +528,18 @@ function DriverLiveMapViewInner({
   const { height: winHeight } = useWindowDimensions();
   const flow = useFlowLayout();
   const router = useRouter();
+  const { isDark } = useThemeColors();
   const { user } = useAppStore();
   const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const [mapInboxUnread, setMapInboxUnread] = useState(0);
   const mapRef = useRef<MapView>(null);
+  const showDemandHeat = Boolean(isOnline && !activeTrip);
+  const { zones: demandZones } = useDriverHeatmapSnapshot(
+    driverCoords ? { lat: driverCoords.lat, lng: driverCoords.lng } : null,
+    showDemandHeat,
+    !isOnline,
+  );
+
   const cameraZoomRef = useRef(15);
   const lastAnimCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
 
@@ -646,8 +552,6 @@ function DriverLiveMapViewInner({
   const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
   /* ── Stats card slide ── */
-  const statsSlide = useRef(new Animated.Value(0)).current;
-  const [statsOpen, setStatsOpen] = useState(false);
   /** Premium pickup dock: chevron in heading bar can collapse the sheet for more map. */
   const [pickupNavDockExpanded, setPickupNavDockExpanded] = useState(true);
   /** “You’ve arrived” dock — same collapse pattern. */
@@ -661,10 +565,23 @@ function DriverLiveMapViewInner({
   const [mapError, setMapError] = useState(false);
   const [mapSdkErrorDetail, setMapSdkErrorDetail] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
-  const [useDefaultMapStyle, setUseDefaultMapStyle] = useState(true);
+  const [useDefaultMapStyle, setUseDefaultMapStyle] = useState(false);
   const [useTileFallback, setUseTileFallback] = useState(false);
   const [cameraUnlocked, setCameraUnlocked] = useState(false);
   const [mapLayout, setMapLayout] = useState<{ width: number; height: number } | null>(null);
+  const [breadcrumbTrail, setBreadcrumbTrail] = useState<MapCoord[]>([]);
+  const [mapIsNight, setMapIsNight] = useState(() => isLocalMapNight());
+  const liveMapStyle = useMemo(
+    () => (useDefaultMapStyle ? undefined : getNexrydeMapStyleAuto(mapIsNight)),
+    [useDefaultMapStyle, mapIsNight],
+  );
+
+  useEffect(() => {
+    const tick = () => setMapIsNight(isLocalMapNight());
+    tick();
+    const id = setInterval(tick, 5 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     startupLog('MAP_INIT', { component: 'DriverLiveMapView' });
@@ -859,63 +776,68 @@ function DriverLiveMapViewInner({
     }
     lastAnimCoordsRef.current = { lat: driverCoords.lat, lng: driverCoords.lng };
 
+    const onTrip = Boolean(activeTrip);
     const cam: Camera = {
       center: {
         latitude: driverCoords.lat,
         longitude: driverCoords.lng,
       },
       heading: driverCoords.heading ?? 0,
-      pitch: activeTrip ? 15 : 0,
-      zoom: cameraZoomRef.current,
-      altitude: 5000,
+      pitch: onTrip ? MAP_3D.tripPitch : isOnline ? MAP_3D.idlePitch : 0,
+      zoom: cameraZoomRef.current || (onTrip ? MAP_3D.tripZoom : MAP_3D.idleZoom),
+      altitude: onTrip ? MAP_3D.tripAltitude : MAP_3D.idleAltitude,
     };
-    mapRef.current.animateCamera(cam, { duration: 800 });
-  }, [driverCoords, mapReady, cameraUnlocked, !!activeTrip]); // eslint-disable-line react-hooks/exhaustive-deps
+    try {
+      mapRef.current.animateCamera(cam, { duration: 800 });
+    } catch {
+      /* native map may already be torn down */
+    }
+  }, [driverCoords, mapReady, cameraUnlocked, !!activeTrip, isOnline]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Stats card toggle ── */
-  const toggleStats = useCallback(() => {
-    const opening = !statsOpen;
-    setStatsOpen(opening);
-    Animated.spring(statsSlide, {
-      toValue: opening ? 1 : 0,
-      tension: 60,
-      friction: 10,
-      useNativeDriver: true,
-    }).start();
-  }, [statsOpen, statsSlide]);
+  const openEarnings = useCallback(() => {
+    router.push('/(driver-tabs)/driver-earnings' as any);
+  }, [router]);
 
   /* ── Zoom controls ── */
   const handleZoomIn = useCallback(() => {
     cameraZoomRef.current = Math.min(cameraZoomRef.current + 1.5, 20);
     if (driverCoords && mapRef.current) {
-      mapRef.current.animateCamera(
-        {
-          center: { latitude: driverCoords.lat, longitude: driverCoords.lng },
-          zoom: cameraZoomRef.current,
-          heading: driverCoords.heading ?? 0,
-          pitch: activeTrip ? 15 : 0,
-          altitude: 2000,
-        },
-        { duration: 400 }
-      );
+      try {
+        mapRef.current.animateCamera(
+          {
+            center: { latitude: driverCoords.lat, longitude: driverCoords.lng },
+            zoom: cameraZoomRef.current,
+            heading: driverCoords.heading ?? 0,
+            pitch: activeTrip ? MAP_3D.tripPitch : isOnline ? MAP_3D.idlePitch : 12,
+            altitude: activeTrip ? MAP_3D.tripAltitude : 2000,
+          },
+          { duration: 400 }
+        );
+      } catch {
+        /* noop */
+      }
     }
-  }, [driverCoords, activeTrip]);
+  }, [driverCoords, activeTrip, isOnline]);
 
   const handleZoomOut = useCallback(() => {
     cameraZoomRef.current = Math.max(cameraZoomRef.current - 1.5, 6);
     if (driverCoords && mapRef.current) {
-      mapRef.current.animateCamera(
-        {
-          center: { latitude: driverCoords.lat, longitude: driverCoords.lng },
-          zoom: cameraZoomRef.current,
-          heading: driverCoords.heading ?? 0,
-          pitch: 0,
-          altitude: 50000,
-        },
-        { duration: 400 }
-      );
+      try {
+        mapRef.current.animateCamera(
+          {
+            center: { latitude: driverCoords.lat, longitude: driverCoords.lng },
+            zoom: cameraZoomRef.current,
+            heading: driverCoords.heading ?? 0,
+            pitch: activeTrip ? 28 : 0,
+            altitude: activeTrip ? 1800 : 50000,
+          },
+          { duration: 400 }
+        );
+      } catch {
+        /* noop */
+      }
     }
-  }, [driverCoords]);
+  }, [driverCoords, activeTrip]);
 
   /* ── Extract pickup/dropoff coords (early — used by recenter + map) ── */
   const getCoord = (loc: any): { lat: number; lng: number } | null => {
@@ -965,17 +887,21 @@ function DriverLiveMapViewInner({
       return;
     }
     if (!driverCoords) return;
-    cameraZoomRef.current = 15;
-    mapRef.current.animateCamera(
-      {
-        center: { latitude: driverCoords.lat, longitude: driverCoords.lng },
-        zoom: 15,
-        heading: driverCoords.heading ?? 0,
-        pitch: activeTrip ? 15 : 0,
-        altitude: 5000,
-      },
-      { duration: 600 },
-    );
+    cameraZoomRef.current = activeTrip ? MAP_3D.tripZoom : MAP_3D.idleZoom;
+    try {
+      mapRef.current.animateCamera(
+        {
+          center: { latitude: driverCoords.lat, longitude: driverCoords.lng },
+          zoom: cameraZoomRef.current,
+          heading: driverCoords.heading ?? 0,
+          pitch: activeTrip ? MAP_3D.tripPitch : MAP_3D.idlePitch,
+          altitude: activeTrip ? MAP_3D.tripAltitude : MAP_3D.idleAltitude,
+        },
+        { duration: 600 },
+      );
+    } catch {
+      /* noop */
+    }
   }, [
     driverCoords,
     activeTrip,
@@ -1071,12 +997,11 @@ function DriverLiveMapViewInner({
     return { first, second, mid: midCoord };
   }, [offerRouteLatLng]);
 
-  const isFindingRide = isOnline && driverCanReceiveOffers && !activeTrip && !hasEmbeddedOffer;
   const showOnlineIdleChrome = isOnline && !activeTrip && !hasEmbeddedOffer;
   const onlineIdleMapPadBottom = useMemo(() => {
     if (!showOnlineIdleChrome) return 0;
-    // Compact Uber-style idle dock (~186px content + safe area).
-    return Math.round(insets.bottom + 186);
+    // Bare map+GO dock: ONLINE + TODAY + Go Offline (~132px content + safe area).
+    return Math.round(insets.bottom + 132);
   }, [showOnlineIdleChrome, insets.bottom]);
   const showLegacyTopBar = !showOnlineIdleChrome && !hasEmbeddedOffer && !activeTrip;
   const tripPhaseChromeTop = insets.top + 52;
@@ -1863,6 +1788,54 @@ function DriverLiveMapViewInner({
     [currentNavStep],
   );
 
+  const tripStatusStr = String(activeTrip?.status || '');
+  const navVoiceActive = Boolean(
+    activeTrip && (tripStatusStr === 'accepted' || tripStatusStr === 'ongoing'),
+  );
+  const { muted: navMuted, toggleMute: toggleNavMute } = useNavVoiceFromSteps({
+    active: navVoiceActive,
+    currentStep: currentNavStep,
+    nextStep: followingNavStep,
+    distToStepM: navRemainingToStepEndM,
+    stepIndex: navStepIndex,
+    tripStatus: tripStatusStr,
+  });
+
+  /* Traveled path breadcrumb (Uber/Bolt-style trail behind the car). */
+  useEffect(() => {
+    const tripId = activeTrip?.id;
+    if (!tripId || !driverCoords) return;
+    setBreadcrumbTrail(appendTripBreadcrumb(tripId, driverCoords.lat, driverCoords.lng));
+  }, [activeTrip?.id, driverCoords?.lat, driverCoords?.lng]);
+
+  useEffect(() => {
+    const tripId = activeTrip?.id;
+    const st = String(activeTrip?.status || '');
+    if (tripId && (st === 'completed' || st === 'cancelled')) {
+      clearTripBreadcrumb(tripId);
+      setBreadcrumbTrail([]);
+    }
+  }, [activeTrip?.id, activeTrip?.status]);
+
+  const etaPuckTarget = useMemo(() => {
+    if (!activeTrip) return null;
+    const st = String(activeTrip.status || '');
+    if (st === 'accepted' || st === 'arrived') {
+      return pickupCoord ? { ...pickupCoord, tone: 'green' as const, label: 'Pickup' } : null;
+    }
+    if (st === 'ongoing') {
+      return dropCoord ? { ...dropCoord, tone: 'red' as const, label: 'Drop-off' } : null;
+    }
+    return null;
+  }, [activeTrip, pickupCoord, dropCoord]);
+
+  const etaPuckMinutes = useMemo(() => {
+    if (displayTripEtaMin != null && Number.isFinite(displayTripEtaMin)) return displayTripEtaMin;
+    if (snapEtaMin != null && Number.isFinite(snapEtaMin)) return snapEtaMin;
+    if (tripEtaMin != null && Number.isFinite(tripEtaMin)) return tripEtaMin;
+    return null;
+  }, [displayTripEtaMin, snapEtaMin, tripEtaMin]);
+
   const mapScreenPadding = useMemo(
     () => ({
       top:
@@ -2081,23 +2054,6 @@ function DriverLiveMapViewInner({
     [logMapEvent]
   );
 
-  /* ── Sonar pulse for finding chip ── */
-  const sonarAnim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    if (!showOnlineIdleChrome) {
-      sonarAnim.setValue(0);
-      return;
-    }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(sonarAnim, { toValue: 1, duration: 1600, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-        Animated.timing(sonarAnim, { toValue: 0, duration: 0, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [showOnlineIdleChrome]); // eslint-disable-line react-hooks/exhaustive-deps
-
   /* ── Outer ring for offline GO button ── */
   const goRingAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -2163,15 +2119,15 @@ function DriverLiveMapViewInner({
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
         provider={PROVIDER_GOOGLE}
-        customMapStyle={useDefaultMapStyle ? undefined : NEXRYDE_MAP_STYLE}
+        customMapStyle={liveMapStyle}
         mapType={useTileFallback ? 'none' : 'standard'}
         initialRegion={initialRegion}
         showsUserLocation={false}
         showsMyLocationButton={false}
-        showsCompass={false}
+        showsCompass={Boolean(activeTrip)}
         showsPointsOfInterest={false}
-        showsBuildings={false}
-        showsTraffic={false}
+        showsBuildings={Boolean(activeTrip) || Boolean(isOnline)}
+        showsTraffic={Boolean(activeTrip)}
         showsScale={false}
         rotateEnabled={true}
         pitchEnabled={true}
@@ -2182,12 +2138,10 @@ function DriverLiveMapViewInner({
         onMapReady={() => {
           startupLog('MAP_READY', { platform: Platform.OS });
           driverFlowLog('MAP_READY', { platform: Platform.OS });
-          console.log('✅ MAP READY - Google Maps initialized successfully');
           setMapReady(true);
-          console.log('[NEXRYDE_MAP_SDK] onMapReady', {
-            platform: Platform.OS,
-            initialRegion,
-          });
+          if (__DEV__) {
+            console.log('[NEXRYDE_MAP_SDK] onMapReady', { platform: Platform.OS, initialRegion });
+          }
           logMapEvent('onMapReady', { initialRegion });
         }}
         onMapLoaded={() => {
@@ -2196,33 +2150,28 @@ function DriverLiveMapViewInner({
             setMapError(false);
             setMapSdkErrorDetail(null);
           }
-          console.log('[NEXRYDE_MAP_SDK] onMapLoaded', { platform: Platform.OS });
+          if (__DEV__) console.log('[NEXRYDE_MAP_SDK] onMapLoaded', { platform: Platform.OS });
           logMapEvent('onMapLoaded');
         }}
         // @ts-expect-error react-native-maps types omit native onMapLoadingError
         onMapLoadingError={(error: NativeSyntheticEvent<Record<string, unknown>>) => {
-          try {
-            console.error('🔴 MAP LOADING ERROR:', JSON.stringify(error, null, 2));
-          } catch {
-            console.error('🔴 MAP LOADING ERROR (event not JSON-serializable):', error);
+          if (__DEV__) {
+            try {
+              console.error('[NEXRYDE_MAP_SDK] onMapLoadingError', JSON.stringify(error, null, 2));
+            } catch {
+              console.error('[NEXRYDE_MAP_SDK] onMapLoadingError', error);
+            }
           }
-          console.error('🔴 Error details:', error.nativeEvent);
-          const ne = error.nativeEvent as Record<string, unknown> | undefined;
-          console.error('🔴 Error message:', ne?.message);
-          console.error('🔴 Error code:', ne?.code);
-
           const detail = serializeMapsNativePayload(error) || '(no nativeEvent — check adb logcat for Google/AndroidRuntime)';
           setMapError(true);
           setMapSdkErrorDetail(detail);
           setUseDefaultMapStyle(true);
           setUseTileFallback(true);
-          console.warn('[NEXRYDE_MAP_SDK] onMapLoadingError', detail, error.nativeEvent);
-          console.warn('[NEXRYDE_MAP_SDK] onMapError', { detail, nativeEvent: error.nativeEvent ?? null });
+          console.warn('[NEXRYDE_MAP_SDK] onMapLoadingError', detail);
           logMapEvent('onMapLoadingError', { error: error.nativeEvent ?? null });
         }}
-        // Native MapView may ignore onError if unsupported — kept for logging experiments
         onError={(error: unknown) => {
-          console.error('🔴 MAPVIEW ERROR:', error);
+          if (__DEV__) console.error('[NEXRYDE_MAP_SDK] onError', error);
         }}
         mapPadding={mapScreenPadding}
       >
@@ -2457,32 +2406,41 @@ function DriverLiveMapViewInner({
           </Marker>
         )}
 
-        {/* Driver car marker */}
+        {/* Demand heatmap — idle online */}
+        {showDemandHeat ? <DriverDemandHeatmapOverlay zones={demandZones} maxZones={8} /> : null}
+
+        {/* Traveled breadcrumb trail */}
+        {breadcrumbTrail.length >= 2 ? (
+          <Polyline
+            coordinates={breadcrumbTrail}
+            strokeColor={MAP.breadcrumb}
+            strokeWidth={MAP.breadcrumbWidth}
+            lineCap="round"
+            lineJoin="round"
+            zIndex={3}
+          />
+        ) : null}
+
+        {/* ETA puck on pickup / drop-off */}
+        {etaPuckTarget ? (
+          <EtaRoutePuck
+            lat={etaPuckTarget.lat}
+            lng={etaPuckTarget.lng}
+            etaMin={etaPuckMinutes}
+            label={etaPuckTarget.label}
+            tone={etaPuckTarget.tone}
+          />
+        ) : null}
+
+        {/* Driver car — smooth glide + heading (Bolt-class) */}
         {driverCoords && (
-          <Marker
-            coordinate={{ latitude: driverCoords.lat, longitude: driverCoords.lng }}
-            anchor={{ x: 0.5, y: 0.5 }}
-            flat={false}
-            tracksViewChanges={false}
-            rotation={driverCoords.heading ?? 0}
-          >
-            <CarMarker
-              bounceAnim={bounceAnim}
-              pulseAnim={pulseAnim}
-              tone={
-                isOnline && !activeTrip
-                  ? 'blue'
-                  : isReadyToStartTrip
-                    ? 'blue'
-                    : 'green'
-              }
-              caption={
-                isHeadingToPickup || isWaitingAtPickupNoCode || isReadyToStartTrip || (isOnline && !activeTrip)
-                  ? 'You'
-                  : undefined
-              }
-            />
-          </Marker>
+          <DriverCarMarker
+            lat={driverCoords.lat}
+            lng={driverCoords.lng}
+            heading={driverCoords.heading}
+            moving={Boolean(activeTrip) || Boolean(isOnline)}
+            moveDurationMs={activeTrip ? 1800 : 2500}
+          />
         )}
       </MapView>
       </View>
@@ -2690,11 +2648,11 @@ function DriverLiveMapViewInner({
           <TouchableOpacity
             style={[styles.earningsPillOuter, activeTrip && styles.earningsPillOuterTrip]}
             activeOpacity={0.88}
-            onPress={toggleStats}
+            onPress={openEarnings}
             hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
             accessibilityRole="button"
             accessibilityLabel={`Today's earnings, ${todayEarnings > 0 ? earningsDisplay : '₦0.00'}`}
-            accessibilityHint="Opens earnings summary"
+            accessibilityHint="Opens earnings"
           >
             <LinearGradient
               colors={['rgba(15,23,42,0.98)', 'rgba(6,11,24,0.99)', 'rgba(6,20,14,0.97)']}
@@ -2821,6 +2779,19 @@ function DriverLiveMapViewInner({
           <View style={[styles.navCardIcon, { borderColor: `${navAccentColor}55` }]}>
             <Ionicons name="navigate-circle" size={40} color={navAccentColor} />
           </View>
+          <TouchableOpacity
+            style={styles.navMuteBtn}
+            onPress={toggleNavMute}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel={navMuted ? 'Unmute navigation voice' : 'Mute navigation voice'}
+          >
+            <Ionicons
+              name={navMuted ? 'volume-mute' : 'volume-high'}
+              size={16}
+              color={navMuted ? '#64748B' : '#E2E8F0'}
+            />
+          </TouchableOpacity>
           <View style={{ flex: 1, minWidth: 0 }}>
             {tripNavSteps.length > 1 ? (
               <Text style={styles.navStepMeta}>
@@ -2877,59 +2848,6 @@ function DriverLiveMapViewInner({
         </View>
       )}
 
-      {/* ── Stats card (tap earnings pill to show/hide) ── */}
-      {statsOpen && (
-        <Animated.View
-          style={[
-            styles.statsCard,
-            {
-              top: showLegacyTopBar
-                ? insets.top + 52 + (activeTrip ? 168 : 72)
-                : showOnlineIdleChrome
-                  ? insets.top + 72
-                  : insets.top + 96,
-              opacity: statsSlide,
-              transform: [
-                {
-                  translateY: statsSlide.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [-20, 0],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <Ionicons name="wallet" size={18} color="#22E5A0" />
-              <Text style={styles.statValue}>
-                {todayEarnings >= 1000 ? `₦${(todayEarnings / 1000).toFixed(1)}k` : `₦${todayEarnings.toLocaleString()}`}
-              </Text>
-              <Text style={styles.statLabel}>Today</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Ionicons name="calendar" size={18} color="#3B82F6" />
-              <Text style={styles.statValue}>
-                {weekEarnings >= 1000 ? `₦${(weekEarnings / 1000).toFixed(1)}k` : `₦${weekEarnings.toLocaleString()}`}
-              </Text>
-              <Text style={styles.statLabel}>This Week</Text>
-            </View>
-          </View>
-          <Text style={styles.statsEarningsHint}>Trips, hours & rating are in Earnings</Text>
-          {surgeActive && (
-            <View style={styles.surgeChip}>
-              <Ionicons name="flash" size={13} color="#F59E0B" />
-              <Text style={styles.surgeChipText}>⚡ Surge {surgeMultiplier}x — Earn more now</Text>
-            </View>
-          )}
-          <TouchableOpacity style={styles.statsCloseBtn} onPress={toggleStats}>
-            <Text style={styles.statsCloseText}>Close</Text>
-          </TouchableOpacity>
-        </Animated.View>
-      )}
-
       {/* ── Map controls: left column when idle online; right stack otherwise ── */}
       {showOnlineIdleChrome ? (
         <View
@@ -2938,14 +2856,12 @@ function DriverLiveMapViewInner({
         >
           {onWorkZone ? (
             <TouchableOpacity
-              style={[styles.oiDestMapFab, workZoneActive && styles.oiDestMapFabOn]}
+              style={styles.oiDestMapFab}
               onPress={onWorkZone}
               activeOpacity={0.88}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
-              accessibilityLabel={
-                workZoneActive ? 'Work Zone active — tap to manage' : 'Set Work Zone'
-              }
+              accessibilityLabel={workZoneActive && workZoneLabel ? `Work Zone: ${workZoneLabel}` : 'Set Work Zone'}
             >
               <Ionicons
                 name={workZoneActive ? 'map' : 'map-outline'}
@@ -3009,22 +2925,6 @@ function DriverLiveMapViewInner({
           ) : null}
         </>
       )}
-
-      {/* Work Zone strip — legacy bar (hidden when unified idle dock is shown) */}
-      {workZoneActive && workZoneLabel && !showOnlineIdleChrome ? (
-        <TouchableOpacity
-          style={[styles.destinationStrip, { bottom: activeTrip ? insets.bottom + 228 : insets.bottom + 80 }]}
-          onPress={onWorkZone}
-          activeOpacity={0.88}
-        >
-          <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#22E5A0' }} />
-          <Text style={styles.destinationStripText} numberOfLines={1}>
-            Zone: {workZoneLabel}
-          </Text>
-          <Text style={styles.destinationStripCount}>ON</Text>
-          <Ionicons name="chevron-forward" size={14} color="#64748B" />
-        </TouchableOpacity>
-      ) : null}
 
       {/* ── Active trip dock — stage-first CTAs (I've arrived / Start / Complete) then navigation ── */}
       {isOnline &&
@@ -3133,7 +3033,24 @@ function DriverLiveMapViewInner({
                     }
                   : undefined
               }
-              onNavigateToDestination={onTripOpenNavigation}
+              onNavigateToDestination={
+                onTripNavigateToDestination
+                  ? () => {
+                      if (Platform.OS !== 'web') void Haptics.selectionAsync();
+                      onTripNavigateToDestination();
+                    }
+                  : undefined
+              }
+              onRiderNoShow={
+                onTripRiderNoShow && pickupWaitSec >= 3 * 60
+                  ? () => {
+                      if (Platform.OS !== 'web') {
+                        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                      }
+                      void onTripRiderNoShow();
+                    }
+                  : undefined
+              }
               onCall={() => {
                 if (!onTripCallRider) return;
                 if (!activeTrip.rider_phone) {
@@ -3183,6 +3100,19 @@ function DriverLiveMapViewInner({
                   if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                   void onTripConfirmStart();
                 }}
+                onNavigate={
+                  onTripNavigateToDestination
+                    ? () => {
+                        if (Platform.OS !== 'web') void Haptics.selectionAsync();
+                        onTripNavigateToDestination();
+                      }
+                    : onTripOpenNavigation
+                      ? () => {
+                          if (Platform.OS !== 'web') void Haptics.selectionAsync();
+                          onTripOpenNavigation();
+                        }
+                      : undefined
+                }
                 onCall={() => {
                   if (!onTripCallRider) return;
                   if (!activeTrip.rider_phone) {
@@ -3286,6 +3216,10 @@ function DriverLiveMapViewInner({
                 }}
                 onEmergencyPress={() => {
                   if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                  if (onTripEmergency) {
+                    void onTripEmergency();
+                    return;
+                  }
                   if (onShieldPress) void onShieldPress();
                 }}
                 onPauseTrip={onTripPause}
@@ -3703,7 +3637,11 @@ function DriverLiveMapViewInner({
           >
             <View style={styles.oiDockShell}>
               <View style={styles.oiDockBg} />
-              <BlurView intensity={DOCK_BLUR_INTENSITY} tint="dark" style={StyleSheet.absoluteFillObject} />
+              <BlurView
+                intensity={DOCK_BLUR_INTENSITY}
+                tint={isDark ? 'dark' : 'light'}
+                style={StyleSheet.absoluteFillObject}
+              />
               <LinearGradient
                 colors={['rgba(34,225,128,0.07)', 'transparent']}
                 start={{ x: 0.5, y: 0 }}
@@ -3728,15 +3666,16 @@ function DriverLiveMapViewInner({
                 </View>
                 <TouchableOpacity
                   style={styles.oiEarnCenter}
-                  onPress={toggleStats}
+                  onPress={openEarnings}
                   activeOpacity={0.85}
                   accessibilityRole="button"
                   accessibilityLabel={`Today's earnings, ${todayEarnings > 0 ? earningsDisplay : '₦0.00'}`}
+                  accessibilityHint="Opens earnings"
                 >
                   <View style={styles.oiTodayLabelRow}>
                     <Ionicons name="wallet-outline" size={12} color={BRAND.primary} />
                     <Text style={styles.oiTodayLabel}>TODAY</Text>
-                    <Ionicons name="chevron-down" size={11} color={BRAND.textMuted} />
+                    <Ionicons name="chevron-forward" size={11} color={BRAND.textMuted} />
                   </View>
                   <View style={styles.oiEarnAmountRow}>
                     <Text style={styles.oiEarnCurrency}>₦</Text>
@@ -3750,75 +3689,6 @@ function DriverLiveMapViewInner({
                     </Text>
                   </View>
                 </TouchableOpacity>
-              </View>
-
-              {workZoneActive && workZoneLabel ? (
-                <TouchableOpacity style={styles.oiDestBanner} onPress={onWorkZone} activeOpacity={0.9}>
-                  <View style={styles.oiDestBannerIcon}>
-                    <Ionicons name="map" size={20} color={BRAND.primary} />
-                  </View>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={styles.oiDestBannerEyebrow}>WORK ZONE</Text>
-                    <Text style={styles.oiDestBannerTxt} numberOfLines={2}>
-                      {workZoneLabel}
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={BRAND.textMuted} />
-                </TouchableOpacity>
-              ) : null}
-
-              <View style={styles.oiListenCard}>
-                <View style={styles.oiListenRow}>
-                  <View style={styles.oiWaitIconCol}>
-                    {isFindingRide ? (
-                      <Animated.View
-                        style={[
-                          styles.oiWaitSonar,
-                          {
-                            opacity: sonarAnim.interpolate({
-                              inputRange: [0, 0.5, 1],
-                              outputRange: [0.12, 0.45, 0.12],
-                            }),
-                            transform: [
-                              {
-                                scale: sonarAnim.interpolate({
-                                  inputRange: [0, 1],
-                                  outputRange: [1, 1.22],
-                                }),
-                              },
-                            ],
-                          },
-                        ]}
-                      />
-                    ) : null}
-                    <View style={styles.oiWaitCarRing}>
-                      <Ionicons
-                        name={isFindingRide ? 'radio' : 'pause-circle'}
-                        size={18}
-                        color={isFindingRide ? BRAND.primary : BRAND.textMuted}
-                      />
-                    </View>
-                  </View>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={styles.oiWaitTitle}>
-                      {isReconnecting
-                        ? 'Reconnecting…'
-                        : isFindingRide
-                          ? 'Listening for rides'
-                          : 'Offers paused'}
-                    </Text>
-                    <Text style={styles.oiWaitSub} numberOfLines={1}>
-                      {isReconnecting
-                        ? 'Connection blip · you can still go offline'
-                        : isFindingRide
-                          ? mapLoaded
-                            ? 'Live on map · tap menu for heatmap'
-                            : 'Connecting to map…'
-                          : 'Complete account steps to receive offers'}
-                    </Text>
-                  </View>
-                  {isFindingRide ? <OiListeningPulse /> : null}
-                </View>
               </View>
 
               <View style={styles.oiActionRow}>
@@ -3888,14 +3758,6 @@ function DriverLiveMapViewInner({
           ══════════════════════════════════════════════════════════════ */}
       {!isOnline && (
         <>
-          {/* "Ready to go?" hint above GO button */}
-          {driverApproved && trialReady && (
-            <View style={[styles.readyHint, { bottom: insets.bottom + 100 }]}>
-              <Ionicons name="arrow-down" size={12} color="#1DFFA0" style={{ opacity: 0.85 }} />
-              <Text style={styles.readyHintText}>Tap GO to go online</Text>
-            </View>
-          )}
-
           {/* Offline bottom bar */}
           <View style={[styles.offlineBottomBar, { paddingBottom: insets.bottom + 12 }]}>
             {/* Left: Shield */}
@@ -4075,13 +3937,8 @@ function DriverLiveMapViewInner({
       {!showOnlineIdleChrome && !activeTrip ? (
       <DriverMapInboxBar
         anchor="dock"
-        bottom={
-          insets.bottom +
-          (hasEmbeddedOffer ? 340 : isFindingRide && !workZoneActive ? 220 : 78)
-        }
-        compact={Boolean(
-          (isFindingRide && !workZoneActive) || hasEmbeddedOffer,
-        )}
+        bottom={insets.bottom + (hasEmbeddedOffer ? 340 : 78)}
+        compact={Boolean(hasEmbeddedOffer)}
         unread={mapInboxUnread}
         onPress={handleMapInboxPress}
       />
@@ -4260,151 +4117,8 @@ function DriverMapInboxBar({
   );
 }
 
-/* ─────────────────────── Listening pulse (single green dot) ───────────────────────── */
-function OiListeningPulse() {
-  const pulse = useRef(new Animated.Value(0.4)).current;
-  useEffect(() => {
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0.4, duration: 700, useNativeDriver: true }),
-      ]),
-    );
-    anim.start();
-    return () => anim.stop();
-  }, [pulse]);
-  return (
-    <Animated.View
-      style={[
-        styles.oiListenPulse,
-        {
-          opacity: pulse,
-          transform: [
-            {
-              scale: pulse.interpolate({ inputRange: [0.4, 1], outputRange: [0.9, 1.15] }),
-            },
-          ],
-        },
-      ]}
-    />
-  );
-}
-
-/* ─────────────────────── Seeking animation (four dots, legacy) ───────────────────────── */
-function SeekingDotsFour() {
-  const d0 = useRef(new Animated.Value(0.35)).current;
-  const d1 = useRef(new Animated.Value(0.35)).current;
-  const d2 = useRef(new Animated.Value(0.35)).current;
-  const d3 = useRef(new Animated.Value(0.35)).current;
-
-  useEffect(() => {
-    const seq = (d: Animated.Value, delay: number) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(d, { toValue: 1, duration: 280, useNativeDriver: true }),
-          Animated.timing(d, { toValue: 0.35, duration: 280, useNativeDriver: true }),
-          Animated.delay(520),
-        ])
-      );
-    const a0 = seq(d0, 0);
-    const a1 = seq(d1, 160);
-    const a2 = seq(d2, 320);
-    const a3 = seq(d3, 480);
-    a0.start();
-    a1.start();
-    a2.start();
-    a3.start();
-    return () => {
-      a0.stop();
-      a1.stop();
-      a2.stop();
-      a3.stop();
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const dot = (anim: Animated.Value) => (
-    <Animated.View
-      style={[
-        styles.seekingDot,
-        {
-          opacity: anim,
-          transform: [
-            {
-              scale: anim.interpolate({ inputRange: [0.35, 1], outputRange: [0.85, 1.15] }),
-            },
-          ],
-        },
-      ]}
-    />
-  );
-  return (
-    <View style={styles.seekingDotsRow}>
-      {dot(d0)}
-      {dot(d1)}
-      {dot(d2)}
-      {dot(d3)}
-    </View>
-  );
-}
-
 /* ─────────────────────── Marker styles ───────────────────────── */
 const markerStyles = StyleSheet.create({
-  container: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 52,
-    height: 52,
-  },
-  glowRing: {
-    position: 'absolute',
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(34,229,160,0.18)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(34,229,160,0.5)',
-  },
-  accuracyRing: {
-    position: 'absolute',
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    borderWidth: 2,
-    borderColor: 'rgba(52,245,184,0.35)',
-    backgroundColor: 'rgba(59,130,246,0.08)',
-  },
-  glowRingBlue: {
-    position: 'absolute',
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: 'rgba(59,130,246,0.22)',
-    borderWidth: 2,
-    borderColor: 'rgba(96,165,250,0.55)',
-  },
-  carCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#FFF',
-    shadowColor: '#22E5A0',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  carCircleBlue: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    shadowColor: '#3B82F6',
-    shadowOpacity: 0.95,
-    shadowRadius: 14,
-  },
   destWrap: { alignItems: 'center' },
   destCircle: {
     width: 28,
@@ -4458,21 +4172,6 @@ const markerStyles = StyleSheet.create({
     color: '#0F172A',
     textAlign: 'center',
   },
-  youPill: {
-    marginBottom: 6,
-    paddingHorizontal: 11,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: 'rgba(30,64,175,0.95)',
-    borderWidth: 1,
-    borderColor: 'rgba(191,219,254,0.45)',
-    shadowColor: '#3B82F6',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.45,
-    shadowRadius: 6,
-    elevation: 6,
-  },
-  youPillTxt: { fontSize: 10, fontWeight: '900', color: '#F8FAFC', letterSpacing: 0.4 },
 });
 
 /* ─────────────────────── Zoom button styles ───────────────────────── */
@@ -4719,38 +4418,6 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     flexShrink: 1,
   },
-  oiDestBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 14,
-    backgroundColor: BRAND.primaryMuted,
-    borderWidth: 1,
-    borderColor: SURFACE.glassBorder,
-  },
-  oiDestBannerIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(34,225,128,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  oiDestBannerEyebrow: {
-    fontSize: 9,
-    fontWeight: '900',
-    color: BRAND.primary,
-    letterSpacing: 1,
-    marginBottom: 2,
-  },
-  oiDestBannerTxt: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: BRAND.textPrimary,
-    lineHeight: 18,
-  },
   oiDestMapFab: {
     width: 52,
     height: 52,
@@ -4874,64 +4541,6 @@ const styles = StyleSheet.create({
     color: '#64748B',
     letterSpacing: 0.3,
   },
-  oiListenCard: {
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: SURFACE.tile,
-    borderWidth: 1,
-    borderColor: SURFACE.hairline,
-  },
-  oiListenRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  oiWaitIconCol: {
-    width: 48,
-    height: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  oiWaitSonar: {
-    position: 'absolute',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: 'rgba(34,225,128,0.35)',
-    backgroundColor: BRAND.primaryMuted,
-  },
-  oiWaitCarRing: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: SURFACE.glassBorder,
-    backgroundColor: BRAND.primaryMuted,
-  },
-  oiWaitTitle: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: BRAND.textPrimary,
-    letterSpacing: -0.2,
-    lineHeight: 18,
-  },
-  oiWaitSub: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: BRAND.textMuted,
-    marginTop: 2,
-    lineHeight: 15,
-  },
-  oiListenPulse: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: BRAND.primary,
-  },
   oiActionRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -4987,19 +4596,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  seekingDotsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingLeft: 4,
-  },
-  seekingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: BRAND.primary,
-  },
-
   offerRouteKmChip: {
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -5813,6 +5409,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: 'rgba(29,255,160,0.38)',
+  },
+  navMuteBtn: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.25)',
+    zIndex: 2,
   },
   navDistanceTop: {
     fontSize: 13,
@@ -6984,90 +6594,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#1DFFA0',
   },
-  /* Stats card */
-  statsCard: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    backgroundColor: 'rgba(8,13,24,0.99)',
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(52,211,153,0.22)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.55,
-    shadowRadius: 22,
-    elevation: 16,
-    zIndex: 20,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    marginBottom: 12,
-  },
-  statItem: {
-    alignItems: 'center',
-    gap: 4,
-    flex: 1,
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#E2E8F0',
-  },
-  statLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#64748B',
-    letterSpacing: 0.5,
-  },
-  statDivider: {
-    width: 1,
-    height: 44,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  surgeChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(245,158,11,0.12)',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(245,158,11,0.3)',
-  },
-  surgeChipText: {
-    color: '#F59E0B',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  statsEarningsHint: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#64748B',
-    textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  statsCloseBtn: {
-    alignSelf: 'center',
-    paddingHorizontal: 28,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  statsCloseText: {
-    color: '#E2E8F0',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-
   /* ── Offline bottom bar ──────────────────────────────────────── */
   offlineBottomBar: {
     position: 'absolute',
@@ -7194,27 +6720,6 @@ const styles = StyleSheet.create({
   offlineStripRight: { padding: 8 },
 
   /* "Ready to go?" hint */
-  readyHint: {
-    position: 'absolute',
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(29,255,160,0.12)',
-    borderRadius: 22,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(29,255,160,0.35)',
-    zIndex: 10,
-  },
-  readyHintText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#86EFAC',
-    letterSpacing: 0.2,
-  },
-
   /* Web fallback */
   webFallback: {
     flex: 1,

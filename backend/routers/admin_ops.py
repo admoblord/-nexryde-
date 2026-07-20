@@ -331,8 +331,8 @@ async def driver_approval_queue(
 ):
     """Driver approval queue with verification risk score."""
     status_aliases = {
-        "pending": ["pending", "pending_review", "under_review", "ai_reviewing"],
-        "under_review": ["under_review", "ai_reviewing"],
+        "pending": ["pending", "pending_review", "under_review"],
+        "under_review": ["under_review"],
         "approved": ["approved"],
         "rejected": ["rejected"],
     }
@@ -350,8 +350,8 @@ async def driver_approval_queue(
             {"driver_id": driver_id},
             {"_id": 0, "nin_hash": 1, "nin_last4": 1, "nin_capture_mode": 1, "nin_number": 1, "documents.nin": 1},
         ) or {}
-        ai = v.get("ai_verification_result") or {}
-        raw_score = ai.get("verification_score") or ai.get("confidence")
+        verification_result = v.get("verification_result") or v.get("ai_verification_result") or {}
+        raw_score = verification_result.get("verification_score") or verification_result.get("confidence")
         if raw_score is None:
             docs = v.get("documents_summary") or {}
             complete = sum(1 for val in docs.values() if val in ("uploaded", "verified", True))

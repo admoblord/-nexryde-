@@ -24,7 +24,11 @@ from typing import Any, Optional
 import httpx
 
 SQUAD_SECRET_KEY = os.environ.get("SQUAD_SECRET_KEY", "")
-SQUAD_BASE_URL = os.environ.get("SQUAD_BASE_URL", "https://api-d.squadco.com").rstrip("/")
+_raw_squad_base = (os.environ.get("SQUAD_BASE_URL") or "https://api-d.squadco.com").rstrip("/")
+# api.squadco.com is not the payment API (403); force the live API host.
+if _raw_squad_base.lower() in ("https://api.squadco.com", "http://api.squadco.com"):
+    _raw_squad_base = "https://api-d.squadco.com"
+SQUAD_BASE_URL = _raw_squad_base
 SQUAD_MERCHANT_ID = (os.environ.get("SQUAD_MERCHANT_ID") or "").strip()
 
 # Squad transfer success statuses (string form). 424 = timeout/failed -> requery.

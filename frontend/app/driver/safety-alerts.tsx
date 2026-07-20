@@ -15,11 +15,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, useThemeColors } from '@/src/constants/theme';
+import { SURFACE } from '@/src/constants/designSystem';
 import { AreaBoySafety, DangerZone, SafetyAlert, DangerReport, useAreaBoySafety } from '@/src/services/areaBoySafety';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 
 export default function DriverSafetyAlertsScreen() {
+  const { colors, isDark } = useThemeColors();
+  const screenBg = isDark ? colors.background : COLORS.lightBackground;
+  const cardBg = isDark ? SURFACE.cardDark : COLORS.white;
+  const textPrimary = colors.text;
+  const textMuted = colors.textMuted;
   const router = useRouter();
   const { user, userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const { dangerZones, safetyAlerts, loading, fetchDangerZones, fetchSafetyAlerts, reportDanger } = useAreaBoySafety();
@@ -106,7 +112,7 @@ export default function DriverSafetyAlertsScreen() {
   const getActiveDangerZones = () => dangerZones.filter(z => AreaBoySafety.isZoneDangerousNow(z));
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: screenBg }]}>
       {/* Header */}
       <LinearGradient
         colors={['#FF0000', '#DC143C']}
@@ -294,7 +300,7 @@ export default function DriverSafetyAlertsScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>📢 Report Danger</Text>
               <TouchableOpacity onPress={() => setShowReportModal(false)}>
-                <Ionicons name="close" size={28} color={COLORS.lightTextPrimary} />
+                <Ionicons name="close" size={28} color={textPrimary} />
               </TouchableOpacity>
             </View>
 
@@ -404,7 +410,7 @@ const DangerZoneCard = ({ zone }: { zone: DangerZone }) => {
       <View style={styles.dangerStats}>
         <StatItem icon="time" text={AreaBoySafety.formatActiveTime(zone.activeTime)} />
         <StatItem icon="people" text={`${zone.verifiedReports} reports`} />
-        <StatItem icon="sparkles" text={`${zone.aiConfidence}% AI`} />
+        <StatItem icon="shield-checkmark" text={`${zone.aiConfidence}% confidence`} />
         <StatItem icon="star" text={`${Number(zone.communityRating || 0).toFixed(1)}★`} />
       </View>
 

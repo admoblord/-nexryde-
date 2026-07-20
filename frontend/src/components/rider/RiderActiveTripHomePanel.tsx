@@ -1,5 +1,5 @@
-import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import React, { useCallback, useRef, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -7,12 +7,18 @@ import { useAppStore } from '@/src/store/appStore';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { RiderActiveTripHomeCard } from '@/src/components/rider/RiderActiveTripHomeCard';
+import { RiderActiveTripMapPeek } from '@/src/components/map/RiderActiveTripMapPeek';
 import { useRiderActiveTripPhase } from '@/src/hooks/useRiderHasActiveTrip';
+import { useThemeColors } from '@/src/constants/theme';
 import {
+  riderCancelFeePreviewNgn,
   riderTripCanCancel,
   riderTripHasDriver,
 } from '@/src/constants/riderActiveTripDisplay';
 import { openShareTrip } from '@/src/utils/openShareTrip';
+import CancellationReasonModal from '@/src/components/shared/CancellationReasonModal';
+import { useErrorToast } from '@/src/components/shared/ErrorToast';
+import { clearTripDriverCache } from '@/src/utils/tripDriverCache';
 
 type QuickAction = {
   id: string;
@@ -30,6 +36,11 @@ export function RiderActiveTripHomePanel() {
   const setCurrentTrip = useAppStore((s) => s.setCurrentTrip);
   const { userId, canCallAuthedApi } = useAuthedUserId();
   const [cancelling, setCancelling] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const cancelInFlightRef = useRef(false);
+  const toast = useErrorToast();
+  const { isDark } = useThemeColors();
 
   const openTracking = useCallback(() => {
     if (!currentTrip?.id) return;
@@ -37,43 +48,55 @@ export function RiderActiveTripHomePanel() {
     router.push({ pathname: '/rider/tracking', params: { tripId: currentTrip.id } } as any);
   }, [currentTrip?.id, router]);
 
+  const confirmCancel = useCallback(
+    async (reason?: string) => {
+      if (!currentTrip?.id || !userId || !canCallAuthedApi) return;
+      if (cancelInFlightRef.current) return;
+      cancelInFlightRef.current = true;
+      setCancelError(null);
+      setCancelling(true);
+      try {
+        const payload: Record<string, string> = { cancelled_by: userId };
+        const trimmed = String(reason || '').trim();
+        if (trimmed) {
+          payload.reason = trimmed;
+          payload.cancellation_reason = trimmed;
+        }
+        const res = await fetch(`${BACKEND_URL}/api/trips/${currentTrip.id}/cancel`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(payload),
+        });
+        let data: { detail?: string } = {};
+        try {
+          data = await res.json();
+        } catch {
+          /* ignore */
+        }
+        if (!res.ok) {
+          setCancelError(String(data?.detail || 'Unable to cancel this request. Tap Cancel Ride to retry.'));
+          return;
+        }
+        clearTripDriverCache();
+        setCurrentTrip(null);
+        setCancelOpen(false);
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        toast.show('Trip cancelled successfully.', 'success');
+      } catch {
+        setCancelError('Could not cancel this request. Check your connection and retry.');
+      } finally {
+        cancelInFlightRef.current = false;
+        setCancelling(false);
+      }
+    },
+    [currentTrip?.id, userId, canCallAuthedApi, setCurrentTrip, toast],
+  );
+
   const handleCancel = useCallback(() => {
     if (!currentTrip?.id || !userId || !canCallAuthedApi) return;
-    Alert.alert(
-      'Cancel this ride?',
-      phase === 'accepted'
-        ? 'Your driver has already accepted. Cancelling may affect your account standing.'
-        : 'Drivers will stop seeing your request.',
-      [
-        { text: 'Keep ride', style: 'cancel' },
-        {
-          text: 'Cancel ride',
-          style: 'destructive',
-          onPress: async () => {
-            setCancelling(true);
-            try {
-              const res = await fetch(`${BACKEND_URL}/api/trips/${currentTrip.id}/cancel`, {
-                method: 'PUT',
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ cancelled_by: userId }),
-              });
-              const data = await res.json();
-              if (res.ok) {
-                setCurrentTrip(null);
-                void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                return;
-              }
-              Alert.alert('Cannot cancel', data?.detail || 'Unable to cancel this request.');
-            } catch {
-              Alert.alert('Error', 'Could not cancel this request.');
-            } finally {
-              setCancelling(false);
-            }
-          },
-        },
-      ],
-    );
-  }, [currentTrip?.id, userId, canCallAuthedApi, setCurrentTrip, phase]);
+    setCancelError(null);
+    setCancelOpen(true);
+  }, [currentTrip?.id, userId, canCallAuthedApi]);
 
   if (!currentTrip?.id || !phase) return null;
 
@@ -130,6 +153,7 @@ export function RiderActiveTripHomePanel() {
   return (
     <View style={styles.wrap}>
       <RiderActiveTripHomeCard />
+      <RiderActiveTripMapPeek trip={currentTrip} isDark={isDark} onPress={openTracking} />
 
       <Text style={styles.sectionLabel}>Quick actions</Text>
       <View style={styles.actionGrid}>
@@ -184,6 +208,31 @@ export function RiderActiveTripHomePanel() {
           other tabs.
         </Text>
       </View>
+
+      <CancellationReasonModal
+        visible={cancelOpen}
+        role="rider"
+        cancelling={cancelling}
+        errorMessage={cancelError}
+        feePreviewNote={
+          (() => {
+            const fee = riderCancelFeePreviewNgn(
+              phase,
+              (currentTrip as { cancellation_fee?: number } | null)?.cancellation_fee,
+            );
+            if (fee == null) return null;
+            if (fee <= 0) return 'No cancellation fee while searching for a driver.';
+            return `A cancellation fee of about ₦${fee.toLocaleString()} may apply.`;
+          })()
+        }
+        onKeepTrip={() => {
+          if (!cancelling) {
+            setCancelError(null);
+            setCancelOpen(false);
+          }
+        }}
+        onConfirm={(reason) => void confirmCancel(reason)}
+      />
     </View>
   );
 }

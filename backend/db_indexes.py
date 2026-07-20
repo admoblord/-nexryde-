@@ -20,6 +20,8 @@ async def ensure_indexes(db):
         await db.driver_profiles.create_index([("current_location", "2dsphere")])
         await db.driver_profiles.create_index([("is_online", 1), ("current_location", "2dsphere")])
         await db.driver_profiles.create_index([("is_online", 1), ("online_session_started_at", 1)])
+        await db.driver_profiles.create_index([("work_zone_active", 1), ("is_online", 1)])
+        await db.driver_profiles.create_index("work_zone_zones.place_id", sparse=True)
         
         # Trips
         await db.trips.create_index("rider_id")
@@ -155,6 +157,21 @@ async def ensure_indexes(db):
         await db.ab_assignments.create_index([("user_id", 1), ("experiment_key", 1)], unique=True)
         await db.ab_experiments.create_index("key", unique=True)
         await db.admin_broadcasts.create_index([("created_at", -1)])
+        await db.engagement_notification_log.create_index(
+            [("user_id", 1), ("day", 1), ("slot_id", 1)],
+            unique=True,
+            name="engagement_user_day_slot_unique",
+        )
+        await db.engagement_notification_log.create_index([("day", 1), ("role", 1)])
+        await db.engagement_notification_log.create_index([("user_id", 1), ("delivery_status", 1), ("sent_at", -1)])
+        await db.engagement_notification_log.create_index([("user_id", 1), ("slot_id", 1), ("delivery_status", 1), ("sent_at", -1)])
+        await db.engagement_notification_log.create_index([("notification_type", 1), ("variant_id", 1), ("delivery_status", 1)])
+        await db.engagement_notification_log.create_index([("opened_at", -1)], sparse=True)
+        await db.engagement_notification_log.create_index([("dismissed_at", -1)], sparse=True)
+        await db.engagement_notification_log.create_index([("learning_attributed_at", 1), ("delivery_status", 1), ("sent_at", -1)])
+        await db.engagement_area_metric_snapshots.create_index([("area_key", 1), ("created_at", -1)])
+        await db.engagement_area_metric_snapshots.create_index("expires_at", expireAfterSeconds=0, sparse=True)
+        await db.engagement_notification_config.create_index("id", unique=True)
 
         # Encrypted PII access audit (NIN / license reveal trail)
         await db.admin_pii_access_log.create_index([("accessed_at", -1)])
@@ -163,6 +180,19 @@ async def ensure_indexes(db):
         await db.admin_pii_access_log.create_index("pii_type")
 
         await db.daily_notification_slot_log.create_index([("day", 1), ("slot_id", 1)], unique=True)
+
+        # Central notification delivery ledger (atomic dedupe before send)
+        await db.notification_delivery_ledger.create_index("delivery_key", unique=True)
+        await db.notification_delivery_ledger.create_index(
+            [("user_id", 1), ("notification_type", 1), ("role", 1), ("delivery_window", 1), ("created_at", -1)]
+        )
+        await db.notification_delivery_ledger.create_index([("user_id", 1), ("local_date", 1), ("source", 1), ("status", 1)])
+        await db.notification_delivery_ledger.create_index([("trip_id", 1), ("notification_type", 1)], sparse=True)
+        try:
+            await db.notification_delivery_ledger.create_index("expires_at", expireAfterSeconds=0)
+        except Exception:
+            pass
+        await db.notification_scheduler_locks.create_index("expires_at")
 
         # NEXRYDE Shield — disputes & encrypted trip audio (48h TTL)
         await db.shield_disputes.create_index("id", unique=True)

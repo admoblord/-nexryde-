@@ -2,7 +2,7 @@
 // Sharper, Brighter, Clearer, More Visible
 // Updated for maximum visual impact and clarity
 
-import { useColorScheme } from 'react-native';
+import { useResolvedAppearanceTheme } from '@/src/theme/appearanceTheme';
 
 export const COLORS = {
   // Primary - Deep Navy (Professional, Trust)
@@ -282,31 +282,55 @@ export default {
 export const DARK_COLORS = {
   background: '#020617',
   surface: '#0F172A',
+  surfaceAlt: '#111827',
   card: '#1E293B',
+  cardElevated: '#1A2332',
+  input: '#111827',
   text: '#F8FAFC',
+  textInverse: '#061A0F',
   textSecondary: '#CBD5E1',
   textMuted: '#94A3B8',
+  textDisabled: '#64748B',
   border: '#334155',
+  borderStrong: '#475569',
   icon: '#CBD5E1',
+  overlay: 'rgba(2,6,23,0.72)',
+  scrim: 'rgba(0,0,0,0.62)',
+  shadow: '#000000',
+  mapStyle: 'dark' as const,
+  statusBar: 'light-content' as const,
 };
 
 export const LIGHT_COLORS = {
   background: '#FFFFFF',
   surface: '#F8FAFC',
+  surfaceAlt: '#F1F5F9',
   card: '#FFFFFF',
+  cardElevated: '#FFFFFF',
+  input: '#FFFFFF',
   text: '#0F172A',
+  textInverse: '#FFFFFF',
   textSecondary: '#334155',
   textMuted: '#64748B',
+  textDisabled: '#94A3B8',
   border: '#E2E8F0',
+  borderStrong: '#CBD5E1',
   icon: '#64748B',
+  overlay: 'rgba(15,23,42,0.08)',
+  scrim: 'rgba(15,23,42,0.42)',
+  shadow: '#0F172A',
+  mapStyle: 'light' as const,
+  statusBar: 'dark-content' as const,
 };
 
 export function useThemeColors() {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { isDark, preference, resolvedTheme, systemTheme } = useResolvedAppearanceTheme();
   return {
     colors: isDark ? DARK_COLORS : LIGHT_COLORS,
     isDark,
+    preference,
+    resolvedTheme,
+    systemTheme,
   };
 }
 

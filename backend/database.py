@@ -43,7 +43,6 @@ db_analytics = client.get_database(
 logger = logging.getLogger('server')
 
 # Shared config keys
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
 
 # Shared business config

@@ -15,7 +15,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Slider from '@react-native-community/slider';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, useThemeColors } from '@/src/constants/theme';
+import { SURFACE } from '@/src/constants/designSystem';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders, getDriverSalaryMode, updateDriverSalaryMode } from '@/src/services/api';
 
@@ -50,6 +51,11 @@ interface SalaryModePlan {
 }
 
 export default function SmartModeScreen() {
+  const { colors, isDark } = useThemeColors();
+  const screenBg = isDark ? colors.background : COLORS.lightBackground;
+  const cardBg = isDark ? SURFACE.cardDark : COLORS.white;
+  const textPrimary = colors.text;
+  const textMuted = colors.textMuted;
   const router = useRouter();
   const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
 
@@ -186,7 +192,7 @@ export default function SmartModeScreen() {
   };
 
   const calculateAcceptanceRate = () => {
-    // AI logic preview
+    // Rule preview
     const distanceScore = ((settings.maxDistance - settings.minDistance) / 20) * 100;
     const ratingScore = (settings.minRating / 5) * 100;
     const surgeBonus = settings.acceptSurge ? 20 : 0;
@@ -211,7 +217,7 @@ export default function SmartModeScreen() {
     : 'Turn on salary mode for predictable monthly income';
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: screenBg }]}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity 
@@ -530,19 +536,19 @@ export default function SmartModeScreen() {
           </View>
         </View>
 
-        {/* AI Logic Explanation */}
-        <View style={styles.aiCard}>
-          <View style={styles.aiHeader}>
+        {/* Rule Explanation */}
+        <View style={styles.rulesCard}>
+          <View style={styles.rulesHeader}>
             <Ionicons name="hardware-chip" size={24} color={COLORS.accentBlue} />
-            <Text style={styles.aiTitle}>How Smart Mode Works</Text>
+            <Text style={styles.rulesTitle}>How Smart Mode Works</Text>
           </View>
-          <View style={styles.aiList}>
-            <AIFeature icon="analytics" text="Filters rides by distance, rider rating, and surge multiplier" />
-            <AIFeature icon="calculator" text="Previews estimated acceptance rate based on your rules" />
-            <AIFeature icon="flag" text="Highlights matching rides so you can accept faster" />
-            <AIFeature icon="close-circle" text="Dims rides below your minimum standards" />
-            <AIFeature icon="wallet" text="Salary Mode raises your dispatch priority when behind monthly target" />
-            <AIFeature icon="settings" text="All filters are local preferences — you still accept each ride" />
+          <View style={styles.rulesList}>
+            <SmartModeRule icon="analytics" text="Filters rides by distance, rider rating, and surge multiplier" />
+            <SmartModeRule icon="calculator" text="Previews estimated acceptance rate based on your rules" />
+            <SmartModeRule icon="flag" text="Highlights matching rides so you can accept faster" />
+            <SmartModeRule icon="close-circle" text="Dims rides below your minimum standards" />
+            <SmartModeRule icon="wallet" text="Salary Mode raises your dispatch priority when behind monthly target" />
+            <SmartModeRule icon="settings" text="All filters are local preferences - you still accept each ride" />
           </View>
         </View>
 
@@ -578,7 +584,7 @@ export default function SmartModeScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>🤖 Smart Mode Benefits</Text>
+              <Text style={styles.modalTitle}>Smart Mode Benefits</Text>
               <TouchableOpacity onPress={() => setShowPreview(false)}>
                 <Ionicons name="close" size={28} color={COLORS.gray500} />
               </TouchableOpacity>
@@ -593,7 +599,7 @@ export default function SmartModeScreen() {
               <BenefitItem 
                 icon="trending-up" 
                 title="Maximize Earnings"
-                desc="AI picks the most profitable rides for you."
+                desc="Your rules highlight the most profitable rides for you."
               />
               <BenefitItem 
                 icon="shield-checkmark" 
@@ -603,7 +609,7 @@ export default function SmartModeScreen() {
               <BenefitItem 
                 icon="analytics" 
                 title="Data-Driven"
-                desc="AI learns from thousands of rides to optimize."
+                desc="Ride data helps preview distance, rating, and surge tradeoffs."
               />
               <BenefitItem 
                 icon="settings" 
@@ -630,7 +636,7 @@ export default function SmartModeScreen() {
   );
 }
 
-const AIFeature = ({ icon, text }: { icon: string; text: string }) => (
+const SmartModeRule = ({ icon, text }: { icon: string; text: string }) => (
   <View style={styles.aiFeature}>
     <Ionicons name={icon as any} size={18} color={COLORS.accentBlue} />
     <Text style={styles.aiFeatureText}>{text}</Text>
@@ -926,8 +932,8 @@ const styles = StyleSheet.create({
     color: COLORS.accentPurpleDark,
   },
   
-  // AI Card
-  aiCard: {
+  // Rules Card
+  rulesCard: {
     backgroundColor: COLORS.accentBlueSoft,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.lg,
@@ -935,18 +941,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.accentBlue + '30',
   },
-  aiHeader: {
+  rulesHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
     marginBottom: SPACING.md,
   },
-  aiTitle: {
+  rulesTitle: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '900',
     color: COLORS.accentBlue,
   },
-  aiList: {
+  rulesList: {
     gap: SPACING.sm,
   },
   aiFeature: {

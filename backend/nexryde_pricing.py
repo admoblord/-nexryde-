@@ -27,21 +27,21 @@ def nexryde_service_multiplier(service_key: str) -> float:
     Tier uplift on (base + distance + time) before surge.
 
     Nationwide (non-Lagos path): Economy 1.0×, Comfort 1.15×, Premium 1.3×, XL / Executive 1.5×.
-    Legacy budget/omni kept for compatibility.
+    Omni/budget are not NEXRYDE vehicles — map to economy.
     """
     k = (service_key or "economy").strip().lower()
     if k == "standard":
         k = "economy"
     if k == "pro":
         k = "premium"
+    if k in ("omni", "budget"):
+        k = "economy"
     return {
         "economy": 1.0,
         "comfort": 1.15,
         "premium": 1.3,
         "xl": 1.5,
         "executive": 1.5,
-        "budget": 0.45,
-        "omni": 0.45,
     }.get(k, 1.0)
 
 

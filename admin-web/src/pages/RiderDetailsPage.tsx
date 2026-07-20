@@ -36,8 +36,8 @@ export function RiderDetailsPage() {
     if (!riderId) return;
     setLoading(true);
     setErr('');
-    api(`/admin/riders/${riderId}/operations-profile`)
-      .then((d) => { setData(d); setLoading(false); })
+    api<Record<string, unknown>>(`/admin/riders/${riderId}/operations-profile`)
+      .then((d) => { setData(d as Record<string, unknown>); setLoading(false); })
       .catch((e) => { setData(null); setErr(e instanceof Error ? e.message : 'Failed to load rider'); setLoading(false); });
   }, [riderId]);
 

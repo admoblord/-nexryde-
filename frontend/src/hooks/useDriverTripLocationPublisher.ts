@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 import { postTripLocation } from '@/src/services/tripTrackingApi';
 import { flushTripLocationQueue, queueTripLocation } from '@/src/utils/tripLocationQueue';
 import { coordsChangedEnough } from '@/src/utils/riderTripLiveSync';
+import { reportNetworkOpsSignal } from '@/src/services/platformConnectionManager';
 
 const ACTIVE_STATUSES = new Set(['accepted', 'arrived', 'ongoing']);
 const PING_MS = 2500;
@@ -48,7 +49,9 @@ export function useDriverTripLocationPublisher(
       const res = await postTripLocation(tripId, payload);
       if (res) {
         lastSentRef.current = { lat: c.lat, lng: c.lng };
+        reportNetworkOpsSignal('location_upload', true);
       } else {
+        reportNetworkOpsSignal('location_upload', false);
         await queueTripLocation({ tripId, ...payload, speed: c.speedKmh });
       }
     };

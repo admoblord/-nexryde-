@@ -66,14 +66,27 @@ export type DriverBootState = {
   continueOffline: () => void;
 };
 
+/** Conservative defaults — never invent "approved" (that caused Activate CTA vs profile Pending). */
 const DEFAULT_SNAPSHOT: Omit<DriverBootSnapshot, 'driverId' | 'savedAt'> = {
-  verificationStatus: 'approved',
+  verificationStatus: 'pending_review',
   subscriptionStatus: 'none',
   trialTripsCompleted: 0,
   trialTripsTarget: 15,
   trialExtended: false,
   onboardingCompleted: true,
 };
+
+/** Canonical verification: driver_profiles.verification_status (via onboarding-status). */
+function resolveVerificationStatus(
+  raw: unknown,
+  opts: { completed: boolean; locked: boolean },
+): string {
+  const v = typeof raw === 'string' ? raw.trim() : '';
+  if (v) return v;
+  // Missing field: pending until server confirms — do not assume approved.
+  if (opts.locked || !opts.completed) return 'pending_review';
+  return 'pending_review';
+}
 
 function applySnapshot(
   snap: Pick<
@@ -187,8 +200,8 @@ export function useDriverBoot({
           const prev = await readDriverBootCache(driverId);
           await writeDriverBootCache({
             driverId,
-            verificationStatus:
-              prev?.verificationStatus || (locked ? 'pending_review' : 'approved'),
+            // Never invent approved from subscription fetch — onboarding owns verification.
+            verificationStatus: prev?.verificationStatus || 'pending_review',
             subscriptionStatus: status,
             trialTripsCompleted: tripsCompleted,
             trialTripsTarget: tripsTarget,
@@ -244,9 +257,10 @@ export function useDriverBoot({
       const locked = completed && status.can_go_online === false;
       setLockedPendingApproval(locked);
 
-      const vStatus =
-        (status.verification_status as string) ||
-        (completed && !locked ? 'approved' : 'pending_review');
+      const vStatus = resolveVerificationStatus(status.verification_status, {
+        completed,
+        locked,
+      });
 
       if (!completed) {
         setVerificationStatus(vStatus);
@@ -261,16 +275,14 @@ export function useDriverBoot({
         return;
       }
 
-      setVerificationStatus(
-        (status.verification_status as string) || (locked ? 'pending_review' : 'approved'),
-      );
+      setVerificationStatus(vStatus);
       if (locked) setSubscriptionStatus('locked_until_approval');
 
       void loadSubscriptionBackground(locked, runId);
 
       await writeDriverBootCache({
         driverId,
-        verificationStatus: (status.verification_status as string) || vStatus,
+        verificationStatus: vStatus,
         subscriptionStatus: locked ? 'locked_until_approval' : subscriptionStatus || 'none',
         trialTripsCompleted,
         trialTripsTarget,
@@ -316,10 +328,11 @@ export function useDriverBoot({
       setIsRefreshing(false);
       setRetrying(false);
 
+      // Onboarding owns verification + locked gate; subscription loads from there
+      // (or Activate). Avoid racing unlocked subscription before verification resolves.
       void fetchOnboardingBackground(runId);
-      void loadSubscriptionBackground(false, runId);
     },
-    [driverId, enabled, fetchOnboardingBackground, loadSubscriptionBackground, openGate, openGateWithDefaults],
+    [driverId, enabled, fetchOnboardingBackground, openGate, openGateWithDefaults],
   );
 
   useEffect(() => {

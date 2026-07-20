@@ -200,7 +200,7 @@ export default function RegisterScreen() {
                 <View style={styles.roleFeatures}>
                   <Text style={[styles.roleFeature, selectedRole === 'rider' && styles.roleFeatureActive]}>Book rides instantly</Text>
                   <Text style={[styles.roleFeature, selectedRole === 'rider' && styles.roleFeatureActive]}>Live trip tracking</Text>
-                  <Text style={[styles.roleFeature, selectedRole === 'rider' && styles.roleFeatureActive]}>AI-powered assistance</Text>
+                  <Text style={[styles.roleFeature, selectedRole === 'rider' && styles.roleFeatureActive]}>24/7 support access</Text>
                 </View>
               </TouchableOpacity>
 

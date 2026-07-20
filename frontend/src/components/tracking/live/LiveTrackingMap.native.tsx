@@ -15,8 +15,7 @@ import { DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
 import { fetchDirectionsResilient } from '@/src/navigation/fetchDirectionsResilient';
 import type { TrackingMapModel } from '@/src/components/tracking/types';
 import {
-  PERFECT_TRACKING,
-  PERFECT_TRACKING_MAP_STYLE,
+  getPerfectTrackingMapStyle,
 } from '@/src/components/tracking/trackingMapTokens';
 import {
   bearingDeg,
@@ -29,6 +28,13 @@ import {
   splitRouteAtDriver,
 } from '@/src/components/tracking/map/driverMapAnimation';
 import { DriverCarMarker } from '@/src/components/tracking/map/DriverCarMarker';
+import { EtaRoutePuck } from '@/src/components/map/EtaRoutePuck';
+import { MAP_3D } from '@/src/constants/nexrydeMap3d';
+import { MAP } from '@/src/constants/nexrydeMapBehavior';
+import {
+  appendTripBreadcrumb,
+  type MapCoord,
+} from '@/src/utils/tripBreadcrumbTrail';
 import { RIDER_TRACKING_LOCATION_THROTTLE_MS } from '@/src/constants/tripRealtimeRhythm';
 import {
   trackVerifyCamera,
@@ -38,10 +44,12 @@ import { useMapMarkerTracksChanges } from '@/src/components/tracking/map/useMapM
 import {
   PickupMarker,
   DestinationMarker,
+  StopMarker,
   UserLocationMarker,
 } from '@/src/components/tracking/map/MapMarkers';
 import { LIVE } from '@/src/components/tracking/live/liveTrackingTheme';
 import { DriverConnectingOverlay } from '@/src/components/tracking/map/DriverConnectingOverlay';
+import { useThemeColors } from '@/src/constants/theme';
 
 export type LiveTrackingMapHandle = {
   recenter: () => void;
@@ -54,7 +62,7 @@ export type LiveTrackingMapProps = {
   connectingToDriver?: boolean;
 };
 
-function regionFromCoords(coords: Array<{ latitude: number; longitude: number }>, pad = 0.012) {
+function regionFromCoords(coords: { latitude: number; longitude: number }[], pad = 0.012) {
   if (!coords.length) {
     return { latitude: 6.5244, longitude: 3.3792, latitudeDelta: 0.08, longitudeDelta: 0.08 };
   }
@@ -83,14 +91,17 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
     const [mapReady, setMapReady] = useState(false);
     const markerTracks = useMapMarkerTracksChanges(model.tripId);
     const [trafficOn, setTrafficOn] = useState(true);
+    const { colors } = useThemeColors();
     const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(model.userLocation ?? null);
-    const [approachRoute, setApproachRoute] = useState<Array<{ latitude: number; longitude: number }>>([]);
-    const [tripRoute, setTripRoute] = useState<Array<{ latitude: number; longitude: number }>>([]);
+    const [approachRoute, setApproachRoute] = useState<{ latitude: number; longitude: number }[]>([]);
+    const [tripRoute, setTripRoute] = useState<{ latitude: number; longitude: number }[]>([]);
+    const [breadcrumbTrail, setBreadcrumbTrail] = useState<MapCoord[]>([]);
     const lastDriverRef = useRef<{ lat: number; lng: number } | null>(null);
     const lastApproachFetchRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
 
     const pickup = model.pickup;
     const dropoff = model.dropoff;
+    const stops = (model.stops || []).filter((s) => isValidMapCoord(s.lat, s.lng));
     const driver = model.driver;
     const isEnRoute = model.tripStatus === 'accepted' || model.tripStatus === 'arrived';
     const isOngoing = model.tripStatus === 'ongoing';
@@ -304,6 +315,9 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
       if (pickup && isValidMapCoord(pickup.lat, pickup.lng)) {
         pts.push({ latitude: pickup.lat, longitude: pickup.lng });
       }
+      for (const s of stops) {
+        pts.push({ latitude: s.lat, longitude: s.lng });
+      }
       if (dropoff && isValidMapCoord(dropoff.lat, dropoff.lng)) {
         pts.push({ latitude: dropoff.lat, longitude: dropoff.lng });
       }
@@ -314,7 +328,7 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
         pts.push({ latitude: userLoc.lat, longitude: userLoc.lng });
       }
       return sanitizeMapCoords(pts);
-    }, [tripCoords, approachCoords, pickup, dropoff, driver, userLoc]);
+    }, [tripCoords, approachCoords, pickup, stops, dropoff, driver, userLoc]);
 
     const initialRegion = useMemo(() => regionFromCoords(fitCoords), [fitCoords]);
     const followRef = useRef(true);
@@ -346,6 +360,11 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
     }, [fitCoords]);
 
     useEffect(() => {
+      if (!model.tripId || !driver || !isValidMapCoord(driver.lat, driver.lng)) return;
+      setBreadcrumbTrail(appendTripBreadcrumb(`rider:${model.tripId}`, driver.lat, driver.lng));
+    }, [model.tripId, driver?.lat, driver?.lng]);
+
+    useEffect(() => {
       if (!mapReady || !followRef.current || !mapRef.current) return;
       if (!driver || !isValidMapCoord(driver.lat, driver.lng)) return;
       const target = isOngoing ? dropoff : isEnRoute ? pickup : null;
@@ -362,22 +381,26 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
       try {
         mapRef.current.animateCamera(
           {
-            center: { latitude: frame.latitude, longitude: frame.longitude },
-            zoom: frame.zoom,
-            heading: 0,
-            pitch: 0,
+            center: {
+              latitude: driver.lat * 0.72 + frame.latitude * 0.28,
+              longitude: driver.lng * 0.72 + frame.longitude * 0.28,
+            },
+            zoom: Math.max(frame.zoom, MAP_3D.riderZoom - 1),
+            heading: driverHeading || 0,
+            pitch: MAP_3D.riderPitch,
+            altitude: MAP_3D.tripAltitude + 120,
           },
           { duration: 520 },
         );
         const targetLabel = isOngoing ? 'dropoff' : 'pickup';
         trackVerifyCamera(
           'follow',
-          `framing driver+${targetLabel} center=${frame.latitude.toFixed(5)},${frame.longitude.toFixed(5)} zoom=${frame.zoom}`,
+          `3d driver+${targetLabel} heading=${Math.round(driverHeading || 0)} pitch=${MAP_3D.riderPitch}`,
         );
       } catch {
         /* native map not ready */
       }
-    }, [driver?.lat, driver?.lng, mapReady, isOngoing, isEnRoute, pickup, dropoff]);
+    }, [driver?.lat, driver?.lng, mapReady, isOngoing, isEnRoute, pickup, dropoff, driverHeading]);
 
     useEffect(
       () => () => {
@@ -412,16 +435,17 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
       <>
       <MapView
         ref={mapRef}
-        style={styles.map}
+        style={[styles.map, { backgroundColor: LIVE.mapBg || colors.surface }]}
         provider={PROVIDER_GOOGLE}
-        customMapStyle={PERFECT_TRACKING_MAP_STYLE}
+        customMapStyle={getPerfectTrackingMapStyle()}
         initialRegion={initialRegion}
         showsUserLocation={false}
         showsMyLocationButton={false}
-        showsCompass={false}
+        showsCompass
+        showsBuildings
         showsTraffic={trafficOn}
         rotateEnabled
-        pitchEnabled={false}
+        pitchEnabled
         onPanDrag={pauseAutoFollow}
         onMapReady={() => {
           mapReadyRef.current = true;
@@ -450,15 +474,71 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
           />
         ) : null}
 
+        {breadcrumbTrail.length >= 2 ? (
+          <Polyline
+            coordinates={breadcrumbTrail}
+            strokeColor={MAP.breadcrumb}
+            strokeWidth={MAP.breadcrumbWidth}
+            lineCap="round"
+            lineJoin="round"
+            zIndex={3}
+          />
+        ) : null}
+
         {pickup ? (
           <PickupMarker lat={pickup.lat} lng={pickup.lng} tracksViewChanges={markerTracks} />
         ) : null}
+        {stops.map((s, i) => (
+          <StopMarker
+            key={`stop-${i}-${s.lat}-${s.lng}`}
+            lat={s.lat}
+            lng={s.lng}
+            index={i + 1}
+            tracksViewChanges={markerTracks}
+          />
+        ))}
         {dropoff ? (
           <DestinationMarker
             lat={dropoff.lat}
             lng={dropoff.lng}
             address={model.destinationAddress ?? undefined}
             tracksViewChanges={markerTracks}
+          />
+        ) : null}
+        {isEnRoute && pickup ? (
+          <EtaRoutePuck
+            lat={pickup.lat}
+            lng={pickup.lng}
+            etaMin={model.etaMinutes ?? null}
+            label="Pickup"
+            tone="green"
+          />
+        ) : null}
+        {isOngoing && stops[0] ? (
+          <EtaRoutePuck
+            lat={stops[0].lat}
+            lng={stops[0].lng}
+            etaMin={model.etaMinutes ?? null}
+            label="Stop"
+            tone="amber"
+          />
+        ) : null}
+        {isOngoing && dropoff && !stops.length ? (
+          <EtaRoutePuck
+            lat={dropoff.lat}
+            lng={dropoff.lng}
+            etaMin={model.etaMinutes ?? null}
+            label="Drop-off"
+            tone="red"
+          />
+        ) : null}
+        {isOngoing && dropoff && stops.length ? (
+          <EtaRoutePuck
+            lat={dropoff.lat}
+            lng={dropoff.lng}
+            etaMin={null}
+            label="Drop-off"
+            tone="red"
           />
         ) : null}
         {(() => {
@@ -497,5 +577,5 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
 export const LiveTrackingMap = memo(LiveTrackingMapInner);
 
 const styles = StyleSheet.create({
-  map: { flex: 1, backgroundColor: LIVE.mapBg },
+  map: { flex: 1 },
 });

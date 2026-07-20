@@ -14,30 +14,41 @@ import {
 } from '@/src/constants/pushNotificationRouting';
 import { normalizeExpoPushData } from '@/src/utils/expoPushData';
 
+const DISMISS_ACTION_IDENTIFIER = 'expo.modules.notifications.actions.DISMISS';
+
 /**
  * Global foreground notification handler.
  * ALL notifications show as banners in the notification bar.
  * Sound plays for urgent ride events and engagement offers; silent for others.
  */
-Notifications.setNotificationHandler({
-  handleNotification: async (notification) => {
-    const data = normalizeExpoPushData(
-      notification.request.content.data as Record<string, unknown> | undefined
-    );
-    const t = typeof data?.type === 'string' ? data.type : '';
-    const isPrayerAlert = typeof data?.prayerName === 'string';
-    // Engagement/offer notifications also play sound so they get attention
-    const isEngagement = t === 'earnings_update' || t === 'feature_update' || t === 'engagement';
-    const urgent = URGENT_PUSH_TYPES.has(t) || isPrayerAlert;
-    return {
-      shouldShowAlert: true,
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: urgent || isEngagement,
-      shouldSetBadge: true,
-    };
-  },
-});
+try {
+  Notifications.setNotificationHandler({
+    handleNotification: async (notification) => {
+      const data = normalizeExpoPushData(
+        notification.request.content.data as Record<string, unknown> | undefined
+      );
+      const t = typeof data?.type === 'string' ? data.type : '';
+      const isPrayerAlert = typeof data?.prayerName === 'string';
+      // Engagement/offer notifications also play sound so they get attention.
+      const isEngagement =
+        t === 'earnings_update' ||
+        t === 'feature_update' ||
+        t === 'engagement' ||
+        t.startsWith('driver_') ||
+        t.startsWith('rider_');
+      const urgent = URGENT_PUSH_TYPES.has(t) || isPrayerAlert;
+      return {
+        shouldShowAlert: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: urgent || isEngagement,
+        shouldSetBadge: true,
+      };
+    },
+  });
+} catch (err) {
+  console.warn('[startup] Notification handler install failed:', err);
+}
 
 export function useNotifications() {
   const router = useRouter();
@@ -71,6 +82,15 @@ export function useNotifications() {
       try {
         await registerPushToken(userId, tokenData.data, { platform: Platform.OS });
       } catch {}
+      if (Platform.OS === 'android') {
+        try {
+          const nativeToken = await Notifications.getDevicePushTokenAsync();
+          const token = typeof nativeToken.data === 'string' ? nativeToken.data : '';
+          if (token) {
+            await registerPushToken(userId, token, { platform: Platform.OS, provider: 'fcm' });
+          }
+        } catch {}
+      }
       try {
         await syncAndNotifyNewFeatures(user?.role ?? 'rider');
       } catch {}
@@ -83,7 +103,12 @@ export function useNotifications() {
         lastResponse.notification.request.content.data as Record<string, unknown> | undefined
       );
       const u = userRef.current;
-      const target = raw ? resolvePushNotificationRoute(raw, { role: u?.role }) : null;
+      const actionId = lastResponse.actionIdentifier;
+      const routeRaw =
+        raw && actionId && actionId !== Notifications.DEFAULT_ACTION_IDENTIFIER && actionId !== DISMISS_ACTION_IDENTIFIER
+          ? { ...raw, action: actionId }
+          : raw;
+      const target = routeRaw ? resolvePushNotificationRoute(routeRaw, { role: u?.role }) : null;
       if (target) router.push(target as any);
     });
 
@@ -94,7 +119,14 @@ export function useNotifications() {
       const u = userRef.current;
       const nid = typeof raw?.nid === 'string' ? raw.nid : undefined;
       if (nid && u?.id) {
-        void reportNotificationOpened(u.id, { nid }).catch(() => {});
+        const actionId = response.actionIdentifier;
+        const event =
+          actionId === DISMISS_ACTION_IDENTIFIER
+            ? 'dismissed'
+            : actionId && actionId !== Notifications.DEFAULT_ACTION_IDENTIFIER
+              ? 'action'
+              : 'opened';
+        void reportNotificationOpened(u.id, { nid, event }).catch(() => {});
       }
 
       if (raw?.type === 'feature_update') {

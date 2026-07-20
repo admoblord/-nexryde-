@@ -113,7 +113,25 @@ export function riderTripStatusIcon(phase: NormalizedTripStatus, opts?: RiderTri
 }
 
 export function riderTripCanCancel(phase: NormalizedTripStatus): boolean {
-  return phase === 'pending' || phase === 'pending_driver_offers' || phase === 'accepted';
+  // Uber-style: cancel allowed until the trip actually starts.
+  return (
+    phase === 'pending' ||
+    phase === 'pending_driver_offers' ||
+    phase === 'accepted' ||
+    phase === 'arrived'
+  );
+}
+
+/** Fee preview copy for cancel sheet (₦). Prefer trip.cancellation_fee when present. */
+export function riderCancelFeePreviewNgn(phase: NormalizedTripStatus, tripFee?: number | null): number | null {
+  if (!riderTripCanCancel(phase)) return null;
+  if (tripFee != null && Number.isFinite(Number(tripFee)) && Number(tripFee) > 0) {
+    return Math.round(Number(tripFee));
+  }
+  if (phase === 'pending' || phase === 'pending_driver_offers') return 0;
+  if (phase === 'accepted') return 300;
+  if (phase === 'arrived') return 450;
+  return null;
 }
 
 export function riderTripHasDriver(phase: NormalizedTripStatus): boolean {

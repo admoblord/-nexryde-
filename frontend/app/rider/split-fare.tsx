@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
-  Platform,
   Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,7 +14,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Contacts from 'expo-contacts';
 import * as SMS from 'expo-sms';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY, useThemeColors } from '@/src/constants/theme';
 import { splitFare } from '@/src/services/api';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { useAppStore } from '@/src/store/appStore';
@@ -35,6 +34,7 @@ export default function SplitFareScreen() {
   const tripId = String(params.tripId || currentTrip?.id || '');
   const mountedRef = useRef(true);
   const sendInFlightRef = useRef(false);
+  const { colors, isDark } = useThemeColors();
 
   useEffect(() => {
     mountedRef.current = true;
@@ -165,12 +165,12 @@ export default function SplitFareScreen() {
     : contacts;
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.gray800} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Split Fare</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Split Fare</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -196,38 +196,44 @@ export default function SplitFareScreen() {
         </View>
 
         {/* Search */}
-        <View style={styles.searchBox}>
-          <Ionicons name="search" size={20} color={COLORS.gray400} />
+        <View style={[styles.searchBox, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}>
+          <Ionicons name="search" size={20} color={colors.textMuted} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: colors.text }]}
             placeholder="Search contacts..."
-            placeholderTextColor={COLORS.gray400}
+            placeholderTextColor={colors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
         </View>
 
         {/* Contacts */}
-        <Text style={styles.sectionTitle}>Select Friends ({selectedFriends.length}/4)</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Select Friends ({selectedFriends.length}/4)</Text>
         
         {filteredContacts.map((contact) => (
           <TouchableOpacity
             key={contact.id}
             style={[
               styles.contactCard,
-              selectedFriends.find(f => f.id === contact.id) && styles.contactCardSelected
+              {
+                backgroundColor: selectedFriends.find(f => f.id === contact.id)
+                  ? (isDark ? 'rgba(34,197,94,0.12)' : '#F0FDF4')
+                  : colors.card,
+                borderColor: selectedFriends.find(f => f.id === contact.id) ? COLORS.accentGreen : colors.border,
+              },
             ]}
             onPress={() => toggleFriend(contact)}
           >
-            <View style={styles.contactAvatar}>
+            <View style={[styles.contactAvatar, { backgroundColor: colors.surfaceAlt }]}>
               <Text style={styles.avatarText}>{contact.avatar}</Text>
             </View>
             <View style={styles.contactInfo}>
-              <Text style={styles.contactName}>{contact.name}</Text>
-              <Text style={styles.contactPhone}>{contact.phone}</Text>
+              <Text style={[styles.contactName, { color: colors.text }]}>{contact.name}</Text>
+              <Text style={[styles.contactPhone, { color: colors.textMuted }]}>{contact.phone}</Text>
             </View>
             <View style={[
               styles.checkbox,
+              { borderColor: colors.borderStrong },
               selectedFriends.some(f => f.id === contact.id) && styles.checkboxSelected
             ]}>
               {selectedFriends.some(f => f.id === contact.id) && (
@@ -251,19 +257,19 @@ export default function SplitFareScreen() {
       </ScrollView>
       <Modal visible={showAddModal} transparent animationType="slide" onRequestClose={() => setShowAddModal(false)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Add Phone Number</Text>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Add Phone Number</Text>
             <TextInput
-              style={styles.modalInput}
+              style={[styles.modalInput, { backgroundColor: colors.surfaceAlt, borderColor: colors.border, color: colors.text }]}
               placeholder="080..., +234..."
               value={manualPhone}
               onChangeText={setManualPhone}
               keyboardType="phone-pad"
-              placeholderTextColor={COLORS.gray400}
+              placeholderTextColor={colors.textMuted}
             />
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.modalCancel} onPress={() => setShowAddModal(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
+                <Text style={[styles.modalCancelText, { color: colors.textMuted }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.modalAdd} onPress={addManualPhone}>
                 <Text style={styles.modalAddText}>Add</Text>

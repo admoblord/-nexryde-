@@ -15,6 +15,7 @@ import {
 } from '@/src/constants/riderActiveTripDisplay';
 import type { RiderTripDisplayOpts } from '@/src/utils/tripPaymentMethod';
 import { RIDER_MAP_PRIMARY_CTA_GRADIENT } from '@/src/constants/riderRideChrome';
+import { COLORS, useThemeColors } from '@/src/constants/theme';
 
 function LivePulse() {
   const pulse = useRef(new Animated.Value(1)).current;
@@ -77,31 +78,40 @@ function RouteBlock({
   dropoff?: string;
   fare?: number;
 }) {
+  const { colors, isDark } = useThemeColors();
   return (
-    <View style={styles.routeCard}>
+    <View style={[styles.routeCard, { backgroundColor: colors.card }]}>
       <View style={styles.routeRow}>
         <View style={styles.routeRail}>
-          <View style={[styles.routeDot, { backgroundColor: '#22C55E' }]} />
-          <View style={styles.routeLine} />
-          <View style={[styles.routeDot, { backgroundColor: '#EF4444' }]} />
+          <View style={[styles.routeDot, { backgroundColor: COLORS.success }]} />
+          <View style={[styles.routeLine, { backgroundColor: colors.borderStrong }]} />
+          <View style={[styles.routeDot, { backgroundColor: COLORS.error }]} />
         </View>
         <View style={styles.routeBody}>
           <View style={styles.routeStop}>
-            <Text style={styles.routeLabel}>PICK UP</Text>
-            <Text style={styles.routeAddr} numberOfLines={2}>
+            <Text style={[styles.routeLabel, { color: COLORS.success }]}>PICK UP</Text>
+            <Text style={[styles.routeAddr, { color: colors.text }]} numberOfLines={2}>
               {pickup || 'Pickup location'}
             </Text>
           </View>
           <View style={[styles.routeStop, { marginTop: 12 }]}>
-            <Text style={[styles.routeLabel, { color: '#EF4444' }]}>DROP OFF</Text>
-            <Text style={styles.routeAddr} numberOfLines={2}>
+            <Text style={[styles.routeLabel, { color: COLORS.error }]}>DROP OFF</Text>
+            <Text style={[styles.routeAddr, { color: colors.text }]} numberOfLines={2}>
               {dropoff || 'Destination'}
             </Text>
           </View>
         </View>
       </View>
       {fare != null && fare > 0 ? (
-        <View style={styles.fareChip}>
+        <View
+          style={[
+            styles.fareChip,
+            {
+              backgroundColor: isDark ? 'rgba(34,197,94,0.12)' : '#F0FDF4',
+              borderColor: isDark ? 'rgba(34,197,94,0.28)' : '#BBF7D0',
+            },
+          ]}
+        >
           <Text style={styles.fareLbl}>Estimated fare</Text>
           <Text style={styles.fareVal}>₦{Math.round(fare).toLocaleString()}</Text>
         </View>
@@ -114,6 +124,7 @@ export function RiderActiveTripHomeCard() {
   const router = useRouter();
   const phase = useRiderActiveTripPhase();
   const currentTrip = useAppStore((s) => s.currentTrip);
+  const { colors, isDark } = useThemeColors();
 
   if (!currentTrip?.id || !phase) return null;
 
@@ -137,7 +148,14 @@ export function RiderActiveTripHomeCard() {
 
   return (
     <TouchableOpacity
-      style={styles.wrap}
+      style={[
+        styles.wrap,
+        {
+          backgroundColor: colors.card,
+          borderColor: colors.border,
+          shadowColor: colors.shadow,
+        },
+      ]}
       activeOpacity={0.92}
       onPress={openTracking}
       accessibilityRole="button"
@@ -171,10 +189,18 @@ export function RiderActiveTripHomeCard() {
 
       <RouteBlock pickup={pickup} dropoff={dropoff} fare={currentTrip.fare} />
 
-      <View style={styles.mapCta}>
-        <Ionicons name="map" size={18} color="#057A48" />
+      <View
+        style={[
+          styles.mapCta,
+          {
+            backgroundColor: isDark ? colors.surfaceAlt : '#F8FAFC',
+            borderTopColor: colors.border,
+          },
+        ]}
+      >
+        <Ionicons name="map" size={18} color={COLORS.accentGreenDark} />
         <Text style={styles.mapCtaTxt}>Open live map & tracking</Text>
-        <Ionicons name="arrow-forward" size={16} color="#057A48" />
+        <Ionicons name="arrow-forward" size={16} color={COLORS.accentGreenDark} />
       </View>
     </TouchableOpacity>
   );

@@ -19,7 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, useThemeColors } from '@/src/constants/theme';
 import { BRAND, SURFACE } from '@/src/constants/designSystem';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useFlowLayout } from '@/src/constants/flowLayout';
@@ -75,6 +75,12 @@ export default function BankDetailsScreen() {
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
   const { userId: driverId } = useAuthedUserId();
+  const { colors, isDark } = useThemeColors();
+  const screenBg = isDark ? colors.background : '#F8FAFC';
+  const cardBg = isDark ? SURFACE.cardDark : '#FFF';
+  const textPrimary = colors.text;
+  const textMuted = colors.textMuted;
+  const border = isDark ? SURFACE.hairline : '#E2E8F0';
 
   // Bank form state
   const [bankName, setBankName] = useState('');
@@ -341,16 +347,16 @@ export default function BankDetailsScreen() {
   const formComplete = Boolean(bankName && accountNumber.length === 10 && accountName);
 
   return (
-    <View style={styles.root}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: BRAND.bgDeep }} edges={['top']}>
+    <View style={[styles.root, { backgroundColor: screenBg }]}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: screenBg }} edges={['top']}>
         <TabBrandStrip role="driver" />
         {/* ── Header ── */}
-        <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
+        <View style={[styles.header, { backgroundColor: cardBg, borderBottomColor: border, paddingHorizontal: flow.padH }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={24} color="#0F172A" />
+            <Ionicons name="arrow-back" size={24} color={textPrimary} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
-            <Text style={styles.headerTitle}>Bank Details</Text>
+            <Text style={[styles.headerTitle, { color: textPrimary }]}>Bank Details</Text>
           </View>
           {payoutReady && (
             <View style={styles.payoutReadyPill}>
@@ -406,7 +412,7 @@ export default function BankDetailsScreen() {
         )}
 
         {/* ── Status banner ── */}
-        <View style={[styles.statusBanner, payoutReady ? styles.statusBannerReady : styles.statusBannerPending]}>
+        <View style={[[styles.statusBanner, { backgroundColor: cardBg, borderColor: border }], payoutReady ? styles.statusBannerReady : styles.statusBannerPending]}>
               <View style={[styles.statusIcon, { backgroundColor: payoutReady ? '#D1FAE5' : '#FEF3C7' }]}>
                 <Ionicons
                   name={payoutReady ? 'shield-checkmark' : 'alert-circle'}
@@ -720,7 +726,7 @@ export default function BankDetailsScreen() {
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Select Your Bank</Text>
             <TouchableOpacity onPress={() => { setShowBankModal(false); setSearchQuery(''); }}>
-              <Ionicons name="close" size={28} color="#0F172A" />
+              <Ionicons name="close" size={28} color={textPrimary} />
             </TouchableOpacity>
           </View>
           <View style={styles.searchBar}>
@@ -803,7 +809,7 @@ export default function BankDetailsScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F8FAFC' },
+  root: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

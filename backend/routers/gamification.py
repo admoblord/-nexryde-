@@ -1,12 +1,14 @@
 """Gamification Router - Challenges, Leaderboard, Loyalty Program, Streaks & Badges for NEXRYDE."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from datetime import datetime, timezone, timedelta
 import logging
 import uuid
 
 from database import db
+from auth_guard import require_authenticated, verify_owner_strict
+from admin_guard import require_admin_request
 
 logger = logging.getLogger('server')
 gamification_router = APIRouter(prefix="/api", tags=["Gamification"])
@@ -136,7 +138,8 @@ async def get_active_challenges():
     return {"challenges": challenges}
 
 @gamification_router.get("/drivers/{user_id}/challenges")
-async def get_driver_challenge_progress(user_id: str):
+async def get_driver_challenge_progress(user_id: str, request: Request):
+    verify_owner_strict(request, user_id)
     challenges = await db.challenges.find({"is_active": True}).to_list(20)
     profile = await db.driver_profiles.find_one({"user_id": user_id})
     progress = []
@@ -213,11 +216,9 @@ async def get_driver_of_the_month_current():
 
 
 @gamification_router.post("/driver-of-the-month/vote")
-async def vote_for_driver_of_the_month(request: dict):
-    voter_id = str(request.get("user_id") or "").strip()
-    driver_id = str(request.get("driver_id") or "").strip()
-    if not voter_id:
-        raise HTTPException(status_code=400, detail="User id is required")
+async def vote_for_driver_of_the_month(payload: dict, request: Request):
+    voter_id = require_authenticated(request)
+    driver_id = str(payload.get("driver_id") or "").strip()
     if not driver_id:
         raise HTTPException(status_code=400, detail="Driver id is required")
 
@@ -246,7 +247,8 @@ async def vote_for_driver_of_the_month(request: dict):
 # ==================== DRIVER CERTIFICATION ====================
 
 @gamification_router.get("/drivers/{user_id}/certification")
-async def get_driver_certification(user_id: str):
+async def get_driver_certification(user_id: str, request: Request):
+    verify_owner_strict(request, user_id)
     user = await db.users.find_one({"id": user_id})
     if not user or user.get("role") != "driver":
         raise HTTPException(status_code=404, detail="Driver not found")
@@ -276,7 +278,8 @@ async def get_driver_certification(user_id: str):
 # ==================== STREAKS & BADGES ====================
 
 @gamification_router.get("/drivers/{user_id}/streaks")
-async def get_driver_streaks(user_id: str):
+async def get_driver_streaks(user_id: str, request: Request):
+    verify_owner_strict(request, user_id)
     user = await db.users.find_one({"id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -294,7 +297,8 @@ async def get_driver_streaks(user_id: str):
     return {"current_streak": streaks.get("current", 0), "best_streak": streaks.get("best", 0), "last_active": streaks.get("last_date"), "earned_badges": badges, "available_badges": [b for b in available_badges if b["id"] not in badges]}
 
 @gamification_router.post("/drivers/{user_id}/check-streak")
-async def check_and_update_streak(user_id: str):
+async def check_and_update_streak(user_id: str, request: Request):
+    verify_owner_strict(request, user_id)
     user = await db.users.find_one({"id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -324,7 +328,8 @@ async def check_and_update_streak(user_id: str):
 # ==================== LOYALTY PROGRAM ====================
 
 @gamification_router.get("/loyalty/{user_id}")
-async def get_loyalty_status(user_id: str):
+async def get_loyalty_status(user_id: str, request: Request):
+    verify_owner_strict(request, user_id)
     loyalty = await db.loyalty_programs.find_one({"user_id": user_id})
     if not loyalty:
         loyalty = {"id": str(uuid.uuid4()), "user_id": user_id, "tier": "bronze", "points": 0, "total_trips": 0, "total_spent": 0.0, "perks_earned": [], "created_at": datetime.utcnow()}
@@ -341,7 +346,8 @@ async def get_loyalty_status(user_id: str):
     return {"user_id": user_id, "current_tier": current_tier, "points": loyalty.get("points", 0), "total_trips": loyalty.get("total_trips", 0), "total_spent": loyalty.get("total_spent", 0), "current_perks": tier_config["perks"], "points_multiplier": tier_config["points_multiplier"], "next_tier": next_tier, "next_tier_requirements": next_tier_requirements, "progress_to_next": {"trips_needed": (next_tier_requirements["min_trips"] - loyalty.get("total_trips", 0)) if next_tier_requirements else 0, "spent_needed": (next_tier_requirements["min_spent"] - loyalty.get("total_spent", 0)) if next_tier_requirements else 0} if next_tier else None}
 
 @gamification_router.post("/loyalty/{user_id}/add-points")
-async def add_loyalty_points(user_id: str, trip_fare: float):
+async def add_loyalty_points(user_id: str, trip_fare: float, request: Request):
+    await require_admin_request(request)
     loyalty = await db.loyalty_programs.find_one({"user_id": user_id})
     if not loyalty:
         loyalty = {"id": str(uuid.uuid4()), "user_id": user_id, "tier": "bronze", "points": 0, "total_trips": 0, "total_spent": 0.0, "perks_earned": [], "created_at": datetime.utcnow()}

@@ -26,8 +26,8 @@ async function fetchWorkZoneScreenData(
   workZoneScreenLog('WORKZONE_FETCH_START', { driverId, silent: opts.silent });
 
   try {
-    const [areasRes, stateRes] = await Promise.all([
-      fetchWithTimeout(`${BACKEND_URL}/api/work-zone/areas?city=lagos`, {
+    const [configRes, stateRes] = await Promise.all([
+      fetchWithTimeout(`${BACKEND_URL}/api/work-zone/config`, {
         headers: getAuthHeaders(),
         timeoutMs: 8000,
       }),
@@ -40,9 +40,9 @@ async function fetchWorkZoneScreenData(
     let areas: WorkZoneArea[] = store.areas;
     let driverState: WorkZoneDriverState | null = store.driverState;
 
-    if (areasRes.ok) {
-      const d = await areasRes.json();
-      areas = d.areas || [];
+    if (configRes.ok) {
+      await configRes.json().catch(() => ({}));
+      areas = [];
     }
     if (stateRes.ok) {
       driverState = (await stateRes.json()) as WorkZoneDriverState;

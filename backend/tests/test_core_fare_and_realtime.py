@@ -87,6 +87,19 @@ def test_squad_initiate_response_ok_false():
     assert not squad_initiate_response_ok(None)
 
 
+def test_normalize_squad_live_base_rewrites_wrong_host():
+    # Keep contract at source level — importing routers.payments needs py3.10+ typing.
+    from pathlib import Path
+    src = Path(__file__).resolve().parents[1] / "routers" / "payments.py"
+    text = src.read_text(encoding="utf-8")
+    assert "def _normalize_squad_live_base" in text
+    assert '"https://api.squadco.com"' in text
+    assert "https://api-d.squadco.com" in text
+    yaml = (Path(__file__).resolve().parents[1] / "cloudrun.service.yaml").read_text(encoding="utf-8")
+    assert 'value: "https://api-d.squadco.com"' in yaml
+    assert 'value: "https://api.squadco.com"' not in yaml
+
+
 def test_generate_nexryde_squad_transaction_ref_shape():
     r = generate_nexryde_squad_transaction_ref()
     assert 6 <= len(r) <= 50

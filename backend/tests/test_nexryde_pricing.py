@@ -77,7 +77,9 @@ def test_route_location_combines_pickup_and_dropoff():
 
 
 def test_budget_tier_multiplier():
-    assert nexryde_service_multiplier("budget") == 0.45
+    """Omni/budget are not NEXRYDE vehicles — same as economy."""
+    assert nexryde_service_multiplier("budget") == 1.0
+    assert nexryde_service_multiplier("omni") == 1.0
 
 
 def test_nationwide_service_tier_multipliers():

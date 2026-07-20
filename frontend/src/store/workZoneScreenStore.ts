@@ -13,9 +13,26 @@ export type WorkZoneArea = {
   adjacent_ids?: string[];
 };
 
+export type WorkZonePlace = {
+  id: string;
+  place_id?: string;
+  label: string;
+  address?: string;
+  lat: number;
+  lng: number;
+  radius_m: number;
+  country?: string;
+  state?: string;
+  source?: string;
+  trips_per_week?: number;
+  demand_label?: string;
+  online_driver_count?: number;
+};
+
 export type WorkZoneDriverState = {
   active: boolean;
   area_ids: string[];
+  zones?: WorkZonePlace[];
   label: string;
   expires_at?: string;
   entitled: boolean;
@@ -35,6 +52,7 @@ type WorkZoneScreenStore = {
   driverState: WorkZoneDriverState | null;
   hydratedDriverId: string | null;
   selected: string[];
+  selectedZones: WorkZonePlace[];
   initialLoadDone: boolean;
   fetchInFlight: boolean;
   saving: boolean;
@@ -42,6 +60,10 @@ type WorkZoneScreenStore = {
 
   setSaving: (saving: boolean) => void;
   setSelected: (ids: string[]) => void;
+  setSelectedZones: (zones: WorkZonePlace[]) => void;
+  addSelectedZone: (zone: WorkZonePlace) => void;
+  removeSelectedZone: (zoneId: string) => void;
+  updateSelectedZoneRadius: (zoneId: string, radiusM: number) => void;
   toggleSelected: (areaId: string) => void;
   hydrate: (areas: WorkZoneArea[], driverState: WorkZoneDriverState | null, driverId: string) => void;
   patchDriverState: (patch: Partial<WorkZoneDriverState>) => void;
@@ -57,6 +79,7 @@ export const useWorkZoneScreenStore = create<WorkZoneScreenStore>()(
       driverState: null,
       hydratedDriverId: null,
       selected: [],
+      selectedZones: [],
       initialLoadDone: false,
       fetchInFlight: false,
       saving: false,
@@ -65,6 +88,29 @@ export const useWorkZoneScreenStore = create<WorkZoneScreenStore>()(
       setSaving: (saving) => set({ saving }),
 
       setSelected: (ids) => set({ selected: ids }),
+      setSelectedZones: (zones) => set({ selectedZones: zones }),
+
+      addSelectedZone: (zone) => {
+        const { selectedZones } = get();
+        if (selectedZones.some((z) => z.id === zone.id || (zone.place_id && z.place_id === zone.place_id))) {
+          return;
+        }
+        if (selectedZones.length >= 4) return;
+        set({ selectedZones: [...selectedZones, zone] });
+      },
+
+      removeSelectedZone: (zoneId) => {
+        set({ selectedZones: get().selectedZones.filter((z) => z.id !== zoneId) });
+      },
+
+      updateSelectedZoneRadius: (zoneId, radiusM) => {
+        const clamped = Math.max(1000, Math.min(25000, Math.round(radiusM)));
+        set({
+          selectedZones: get().selectedZones.map((z) =>
+            z.id === zoneId ? { ...z, radius_m: clamped } : z,
+          ),
+        });
+      },
 
       toggleSelected: (areaId) => {
         const { selected, areas } = get();
@@ -87,11 +133,14 @@ export const useWorkZoneScreenStore = create<WorkZoneScreenStore>()(
       hydrate: (areas, driverState, driverId) => {
         const selected =
           driverState?.area_ids?.length ? [...driverState.area_ids] : get().selected;
+        const selectedZones =
+          driverState?.zones?.length ? [...driverState.zones] : get().selectedZones;
         set({
           areas,
           driverState,
           hydratedDriverId: driverId,
           selected,
+          selectedZones,
           initialLoadDone: true,
         });
       },
@@ -109,17 +158,19 @@ export const useWorkZoneScreenStore = create<WorkZoneScreenStore>()(
     {
       name: 'nexryde-work-zone-screen',
       storage: createJSONStorage(() => AsyncStorage),
-      version: 2,
+      version: 3,
       migrate: (persisted) => {
         const state = (persisted || {}) as Partial<WorkZoneScreenStore>;
         return {
           areas: Array.isArray(state.areas) ? state.areas : [],
           selected: Array.isArray(state.selected) ? state.selected : [],
+          selectedZones: Array.isArray(state.selectedZones) ? state.selectedZones : [],
         };
       },
       partialize: (state) => ({
         areas: state.areas,
         selected: state.selected,
+        selectedZones: state.selectedZones,
       }),
     },
   ),

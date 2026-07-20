@@ -1,58 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Linking, Alert, ActivityIndicator, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Linking, Alert, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, useThemeColors } from '@/src/constants/theme';
+import { SURFACE } from '@/src/constants/designSystem';
 import * as Location from 'expo-location';
-import {
-  ExpoSpeechRecognitionModule,
-  useSpeechRecognitionEvent,
-} from 'expo-speech-recognition';
 import policeContacts from '@/src/data/policeContacts';
-import { askSupportVoiceBot, getSupportContacts, reportTripIssue } from '@/src/services/api';
+import { getSupportContacts, reportTripIssue } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
 import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
-
-function SupportVoiceHandler({
-  onListeningStart,
-  onListeningEnd,
-  onError,
-  onResult,
-}: {
-  onListeningStart: () => void;
-  onListeningEnd: () => void;
-  onError: (msg: string) => void;
-  onResult: (transcript: string) => void;
-}) {
-  useSpeechRecognitionEvent('start', () => onListeningStart());
-  useSpeechRecognitionEvent('end', () => onListeningEnd());
-  useSpeechRecognitionEvent('error', (event: any) => {
-    onError(event?.message || 'Unable to capture voice right now.');
-  });
-  useSpeechRecognitionEvent('result', (event: any) => {
-    if (!event?.isFinal) return;
-    const transcript = event?.results?.[0]?.transcript?.trim();
-    if (transcript) onResult(transcript);
-  });
-  return null;
-}
-
-class SupportVoiceErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  { hasError: boolean }
-> {
-  state = { hasError: false };
-  static getDerivedStateFromError() { return { hasError: true }; }
-  render() { return this.state.hasError ? null : this.props.children; }
-}
-
-type BotMessage = {
-  id: string;
-  role: 'user' | 'bot';
-  text: string;
-};
 
 type PoliceContact = {
   state: string;
@@ -71,19 +29,16 @@ export default function SupportScreen() {
   const storeReady = usePersistStoreReady();
   const { user, currentTrip } = useAppStore();
   const { userId, canCallAuthedApi } = useAuthedUserId();
-  const [message, setMessage] = useState('');
+  const { colors, isDark } = useThemeColors();
+  const screenBg = isDark ? colors.background : COLORS.background;
+  const cardBg = isDark ? SURFACE.cardDark : COLORS.white;
+  const border = isDark ? SURFACE.hairline : COLORS.gray200;
+  const textPrimary = colors.text;
+  const textMuted = colors.textMuted;
+  const softGreen = isDark ? 'rgba(34,197,94,0.16)' : COLORS.accentGreenSoft;
   const [issueCategory, setIssueCategory] = useState<'safety' | 'fare' | 'behavior' | 'route' | 'payment' | 'general'>('general');
   const [issueText, setIssueText] = useState('');
   const [reportingIssue, setReportingIssue] = useState(false);
-  const [messages, setMessages] = useState<BotMessage[]>([
-    {
-      id: 'welcome',
-      role: 'bot',
-      text: 'Support Assistant is live. Ask in English or Pidgin (voice/text) for fast help.',
-    },
-  ]);
-  const [sending, setSending] = useState(false);
-  const [listening, setListening] = useState(false);
   const [supportPhone, setSupportPhone] = useState('+2348089297811');
   const [supportEmail, setSupportEmail] = useState('admin@admoblordgroup.com');
   const [stateQuery, setStateQuery] = useState('');
@@ -141,102 +96,7 @@ export default function SupportScreen() {
     { icon: 'mail', label: 'Email Us', value: supportEmail, action: () => Linking.openURL(`mailto:${supportEmail}`) },
   ];
 
-  const voiceReplyEnglish = useMemo(
-    () => ['I need help with my trip', 'Payment or fare looks wrong'],
-    []
-  );
-  const voiceReplyPidgin = useMemo(
-    () => ['Abeg help me, my trip get wahala', 'Dem charge me too much for this ride'],
-    []
-  );
   const prefilledTripId = (params.tripId as string) || currentTrip?.id || '';
-
-  const sendToBot = async (text: string) => {
-    const cleaned = text.trim();
-    if (!cleaned || sending) return;
-
-    const userMsg: BotMessage = {
-      id: `u-${Date.now()}`,
-      role: 'user',
-      text: cleaned,
-    };
-    setMessages((prev) => [...prev, userMsg]);
-    setMessage('');
-    setSending(true);
-
-    try {
-      const res = await askSupportVoiceBot({
-        message: cleaned,
-        user_id: canCallAuthedApi ? userId : undefined,
-        trip_id: currentTrip?.id,
-        language: 'auto',
-      });
-      const data = res.data || {};
-      const botText =
-        data.response ||
-        'I could not complete that request right now. Please try again or call support.';
-      const botMsg: BotMessage = {
-        id: `b-${Date.now()}`,
-        role: 'bot',
-        text: botText,
-      };
-      setMessages((prev) => [...prev, botMsg]);
-      if (data.escalate) {
-        Alert.alert(
-          'Emergency Guidance',
-          'Please trigger SOS from the Safety screen now or call support immediately.'
-        );
-      }
-    } catch (error: any) {
-      const errorMsg: BotMessage = {
-        id: `b-err-${Date.now()}`,
-        role: 'bot',
-        text: error?.response?.data?.detail || 'Support service is temporarily unavailable.',
-      };
-      setMessages((prev) => [...prev, errorMsg]);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const [voiceActive, setVoiceActive] = useState(false);
-
-  const startVoiceSupport = async () => {
-    try {
-      if (
-        !ExpoSpeechRecognitionModule ||
-        typeof ExpoSpeechRecognitionModule.requestPermissionsAsync !== 'function' ||
-        typeof ExpoSpeechRecognitionModule.start !== 'function'
-      ) {
-        Alert.alert('Not Available', 'Voice recognition is not available on this device.');
-        return;
-      }
-      setVoiceActive(true);
-      const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission Required', 'Microphone permission is needed for voice support.');
-        return;
-      }
-      ExpoSpeechRecognitionModule.start({
-        lang: 'en-NG',
-        interimResults: true,
-        maxAlternatives: 2,
-        continuous: false,
-        contextualStrings: [
-          'abeg help me',
-          'driver stop',
-          'otp no come',
-          'payment issue',
-          'refund',
-          'emergency',
-          'safety',
-          'trip',
-        ],
-      });
-    } catch (e: any) {
-      Alert.alert('Voice Error', e?.message || 'Could not start voice support.');
-    }
-  };
 
   const submitIssueReport = async () => {
     if (!userId || !canCallAuthedApi || !user) {
@@ -279,63 +139,59 @@ export default function SupportScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0D1420" />
-      {voiceActive && (
-        <SupportVoiceErrorBoundary>
-          <SupportVoiceHandler
-            onListeningStart={() => setListening(true)}
-            onListeningEnd={() => setListening(false)}
-            onError={(msg) => { setListening(false); Alert.alert('Voice Error', msg); }}
-            onResult={(transcript) => sendToBot(transcript)}
-          />
-        </SupportVoiceErrorBoundary>
-      )}
+    <View style={[styles.container, { backgroundColor: screenBg }]}>
+      <StatusBar barStyle={colors.statusBar} backgroundColor={screenBg} />
       <SafeAreaView style={styles.safeArea}>
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: cardBg, borderBottomColor: border }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.gray900} />
+            <Ionicons name="arrow-back" size={24} color={textPrimary} />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
-            <Text style={styles.headerTitle}>Help & Support</Text>
-            <Text style={styles.headerSubtitle}>Fast support for trips, payments, safety and disputes.</Text>
+            <Text style={[styles.headerTitle, { color: textPrimary }]}>Help & Support</Text>
+            <Text style={[styles.headerSubtitle, { color: textMuted }]}>
+              Fast support for trips, payments, safety and disputes.
+            </Text>
           </View>
           <View style={styles.placeholder} />
         </View>
 
         <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-          <View style={styles.heroCard}>
-            <View style={styles.heroIcon}>
+          <View style={[styles.heroCard, { backgroundColor: cardBg, borderColor: border }]}>
+            <View style={[styles.heroIcon, { backgroundColor: softGreen }]}>
               <Ionicons name="headset" size={24} color={COLORS.accentGreen} />
             </View>
             <View style={styles.heroTextWrap}>
-              <Text style={styles.heroTitle}>Support Center</Text>
-              <Text style={styles.heroText}>
-                Start with the assistant for quick help, then escalate to direct support or Shield when you need a human review.
+              <Text style={[styles.heroTitle, { color: textPrimary }]}>Support Center</Text>
+              <Text style={[styles.heroText, { color: textMuted }]}>
+                Reach support directly, find emergency contacts, or submit a trip issue for human review.
               </Text>
             </View>
           </View>
 
-          <Text style={styles.sectionTitle}>Direct contact</Text>
+          <Text style={[styles.sectionTitle, { color: textPrimary }]}>Direct contact</Text>
           {contactOptions.map((option, index) => (
-            <TouchableOpacity key={index} style={styles.contactCard} onPress={option.action}>
-              <View style={styles.contactIcon}>
+            <TouchableOpacity
+              key={index}
+              style={[styles.contactCard, { backgroundColor: cardBg, borderColor: border, borderWidth: 1 }]}
+              onPress={option.action}
+            >
+              <View style={[styles.contactIcon, { backgroundColor: softGreen }]}>
                 <Ionicons name={option.icon as any} size={24} color={COLORS.accentGreen} />
               </View>
               <View style={styles.contactInfo}>
-                <Text style={styles.contactLabel}>{option.label}</Text>
-                <Text style={styles.contactValue}>{option.value}</Text>
+                <Text style={[styles.contactLabel, { color: textPrimary }]}>{option.label}</Text>
+                <Text style={[styles.contactValue, { color: textMuted }]}>{option.value}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+              <Ionicons name="chevron-forward" size={20} color={textMuted} />
             </TouchableOpacity>
           ))}
 
-          <Text style={styles.sectionTitle}>Nigerian Police Finder</Text>
-          <View style={styles.messageCard}>
+          <Text style={[styles.sectionTitle, { color: textPrimary }]}>Nigerian Police Finder</Text>
+          <View style={[styles.messageCard, { backgroundColor: cardBg, borderColor: border, borderWidth: 1 }]}>
             <TextInput
-              style={[styles.messageInput, styles.finderInput]}
+              style={[styles.messageInput, styles.finderInput, { color: textPrimary, borderColor: border }]}
               placeholder="Search state (e.g. Lagos, Abuja, Port Harcourt)"
-              placeholderTextColor={COLORS.gray400}
+              placeholderTextColor={textMuted}
               value={stateQuery}
               onChangeText={(value) => {
                 setStateQuery(value);
@@ -343,17 +199,17 @@ export default function SupportScreen() {
               }}
             />
             {!stateQuery.trim() && detectedState ? (
-              <Text style={styles.issueMeta}>Auto-detected: {detectedState}</Text>
+              <Text style={[styles.issueMeta, { color: textMuted }]}>Auto-detected: {detectedState}</Text>
             ) : null}
             {activeQuery && matchedPoliceContact ? (
-              <View style={[styles.contactCard, styles.finderResultCard]}>
-                <View style={styles.contactIcon}>
+              <View style={[styles.contactCard, styles.finderResultCard, { backgroundColor: softGreen }]}>
+                <View style={[styles.contactIcon, { backgroundColor: softGreen }]}>
                   <Ionicons name="shield-checkmark" size={24} color={COLORS.accentGreen} />
                 </View>
                 <View style={styles.contactInfo}>
-                  <Text style={styles.contactLabel}>{matchedPoliceContact.state}</Text>
-                  <Text style={styles.contactValue}>Police Command</Text>
-                  <Text style={[styles.contactValue, { color: COLORS.gray900, fontWeight: '700', marginTop: 3 }]}>
+                  <Text style={[styles.contactLabel, { color: textPrimary }]}>{matchedPoliceContact.state}</Text>
+                  <Text style={[styles.contactValue, { color: textMuted }]}>Police Command</Text>
+                  <Text style={[styles.contactValue, { color: textPrimary, fontWeight: '700', marginTop: 3 }]}>
                     {matchedPoliceContact.phone}
                   </Text>
                 </View>
@@ -366,12 +222,12 @@ export default function SupportScreen() {
               </View>
             ) : null}
             {(searchTouched || !!detectedState) && activeQuery && !matchedPoliceContact ? (
-              <Text style={styles.emptyStateText}>No state found. Try another name.</Text>
+              <Text style={[styles.emptyStateText, { color: textMuted }]}>No state found. Try another name.</Text>
             ) : null}
           </View>
 
           <TouchableOpacity
-            style={styles.contactCard}
+            style={[styles.contactCard, { backgroundColor: cardBg, borderColor: border, borderWidth: 1 }]}
             onPress={() =>
               router.push({
                 pathname: '/shield-disputes',
@@ -379,86 +235,32 @@ export default function SupportScreen() {
               })
             }
           >
-            <View style={styles.contactIcon}>
+            <View style={[styles.contactIcon, { backgroundColor: softGreen }]}>
               <Ionicons name="shield-checkmark" size={24} color={COLORS.accentGreen} />
             </View>
             <View style={styles.contactInfo}>
-              <Text style={styles.contactLabel}>NEXRYDE Shield — Disputes</Text>
-              <Text style={styles.contactValue}>Fair process: both sides heard before any action</Text>
+              <Text style={[styles.contactLabel, { color: textPrimary }]}>NEXRYDE Shield — Disputes</Text>
+              <Text style={[styles.contactValue, { color: textMuted }]}>
+                Fair process: both sides heard before any action
+              </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+            <Ionicons name="chevron-forward" size={20} color={textMuted} />
           </TouchableOpacity>
 
-          <Text style={styles.sectionTitle}>Instant assistant</Text>
-          <View style={styles.messageCard}>
-            <Text style={styles.chipLangLabel}>English</Text>
-            <View style={styles.quickPromptWrap}>
-              {voiceReplyEnglish.map((prompt) => (
-                <TouchableOpacity key={prompt} style={styles.quickPrompt} onPress={() => sendToBot(prompt)}>
-                  <Text style={styles.quickPromptText}>{prompt}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <Text style={[styles.chipLangLabel, { marginTop: SPACING.sm }]}>Pidgin</Text>
-            <View style={styles.quickPromptWrap}>
-              {voiceReplyPidgin.map((prompt) => (
-                <TouchableOpacity key={prompt} style={styles.quickPrompt} onPress={() => sendToBot(prompt)}>
-                  <Text style={styles.quickPromptText}>{prompt}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <View style={styles.chatBox}>
-              {messages.map((m) => (
-                <View
-                  key={m.id}
-                  style={[styles.bubble, m.role === 'user' ? styles.userBubble : styles.botBubble]}
-                >
-                  <Text style={[styles.bubbleText, m.role === 'user' && styles.userBubbleText]}>{m.text}</Text>
-                </View>
-              ))}
-              {sending && (
-                <View style={[styles.bubble, styles.botBubble]}>
-                  <ActivityIndicator size="small" color={COLORS.accentGreen} />
-                </View>
-              )}
-            </View>
-          </View>
-
-          <Text style={styles.sectionTitle}>Send message or voice</Text>
-          <View style={styles.messageCard}>
-            <TextInput
-              style={styles.messageInput}
-              placeholder="Talk or type your issue..."
-              placeholderTextColor={COLORS.gray400}
-              multiline
-              numberOfLines={4}
-              value={message}
-              onChangeText={setMessage}
-            />
-            <View style={styles.actionRow}>
-              <TouchableOpacity
-                style={[styles.voiceButton, listening && styles.voiceButtonActive]}
-                onPress={listening ? () => ExpoSpeechRecognitionModule.stop() : startVoiceSupport}
-              >
-                <Ionicons name={listening ? 'mic' : 'mic-outline'} size={18} color={COLORS.white} />
-                <Text style={styles.voiceButtonText}>{listening ? 'Listening...' : 'Voice'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.sendButton} onPress={() => sendToBot(message)} disabled={sending}>
-                <Text style={styles.sendButtonText}>Send to Bot</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <Text style={styles.sectionTitle}>Report trip issue</Text>
-          <View style={styles.messageCard}>
-            <Text style={styles.issueMeta}>
+          <Text style={[styles.sectionTitle, { color: textPrimary }]}>Report trip issue</Text>
+          <View style={[styles.messageCard, { backgroundColor: cardBg, borderColor: border, borderWidth: 1 }]}>
+            <Text style={[styles.issueMeta, { color: textMuted }]}>
               Trip: {prefilledTripId || 'No trip selected'}
             </Text>
             <View style={styles.quickPromptWrap}>
               {(['safety', 'fare', 'behavior', 'route', 'payment', 'general'] as const).map((cat) => (
                 <TouchableOpacity
                   key={cat}
-                  style={[styles.quickPrompt, issueCategory === cat && styles.selectedCategory]}
+                  style={[
+                    styles.quickPrompt,
+                    { backgroundColor: softGreen },
+                    issueCategory === cat && styles.selectedCategory,
+                  ]}
                   onPress={() => setIssueCategory(cat)}
                 >
                   <Text style={[styles.quickPromptText, issueCategory === cat && styles.selectedCategoryText]}>
@@ -468,9 +270,9 @@ export default function SupportScreen() {
               ))}
             </View>
             <TextInput
-              style={styles.messageInput}
+              style={[styles.messageInput, { color: textPrimary, borderColor: border }]}
               placeholder="Describe issue with this trip..."
-              placeholderTextColor={COLORS.gray400}
+              placeholderTextColor={textMuted}
               multiline
               numberOfLines={4}
               value={issueText}
@@ -662,23 +464,6 @@ const styles = StyleSheet.create({
   finderResultCard: {
     marginBottom: 0,
   },
-  actionRow: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-  },
-  voiceButton: {
-    backgroundColor: COLORS.gray700,
-    paddingHorizontal: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 6,
-  },
-  voiceButtonActive: {
-    backgroundColor: COLORS.accentGreen,
-  },
-  voiceButtonText: { color: COLORS.white, fontSize: FONT_SIZE.sm, fontWeight: '700' },
   sendButton: {
     backgroundColor: COLORS.accentGreen,
     padding: SPACING.md,

@@ -7,7 +7,7 @@ import re
 import logging
 import math
 
-from database import db, EMERGENT_LLM_KEY
+from database import db
 
 logger = logging.getLogger('server')
 safety_router = APIRouter(prefix="/api/safety", tags=["Safety"])

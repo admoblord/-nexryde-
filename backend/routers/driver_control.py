@@ -110,7 +110,7 @@ async def driver_go_offline(request: Request):
 async def driver_heartbeat(request: Request):
     """Called regularly by the app to signal the driver is still active."""
     driver_id = require_authenticated(request)
-    from driver_presence import refresh_driver_presence, set_driver_online
+    from driver_presence import set_driver_offline, set_driver_online
 
     try:
         body = await request.json()
@@ -139,7 +139,8 @@ async def driver_heartbeat(request: Request):
     if profile and profile.get("is_online"):
         await set_driver_online(driver_id, lat=lat_f or 0.0, lng=lng_f or 0.0)
     else:
-        await refresh_driver_presence(driver_id, lat=lat_f, lng=lng_f)
+        # Mongo offline → clear Redis/GEO so heartbeat cannot re-inflate ghost presence.
+        await set_driver_offline(driver_id)
 
     access_ttl_sec = None
     auth_header = request.headers.get("authorization", "")
@@ -160,6 +161,8 @@ async def driver_heartbeat(request: Request):
         "heartbeat_interval_sec": 60,
         "access_token_ttl_sec": access_ttl_sec,
         "session_refresh_recommended": access_ttl_sec is not None and access_ttl_sec < 300,
+        # Client must force local OFFLINE when server says not online (session/TTL loss).
+        "action": None if (profile and profile.get("is_online")) else "FORCE_OFFLINE",
     }
 
 
@@ -169,18 +172,33 @@ async def run_auto_offline_sweep():
     """Set drivers offline if their last heartbeat is older than IDLE_TIMEOUT_MINUTES.
 
     Designed to be called from a background scheduler (e.g. APScheduler) every minute.
+    Clears Redis presence/GEO for every driver offlined (Mongo alone leaves ghosts).
     """
+    from driver_presence import set_driver_offline
+
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=IDLE_TIMEOUT_MINUTES)
+    query = {
+        "is_online": True,
+        "$or": [
+            {"last_heartbeat": {"$lt": cutoff}},
+            {"last_heartbeat": {"$lt": cutoff.isoformat()}},
+            {"last_heartbeat": {"$exists": False}},
+        ],
+    }
+    stale = await db.driver_profiles.find(query, {"_id": 0, "user_id": 1}).to_list(500)
+    if not stale:
+        return 0
+    now = datetime.now(timezone.utc)
+    ids = [d["user_id"] for d in stale if d.get("user_id")]
     result = await db.driver_profiles.update_many(
-        {
-            "is_online": True,
-            "$or": [
-                {"last_heartbeat": {"$lt": cutoff}},
-                {"last_heartbeat": {"$exists": False}},
-            ],
-        },
-        {"$set": {"is_online": False, "went_offline_at": datetime.now(timezone.utc), "offline_reason": "idle_timeout"}},
+        {"user_id": {"$in": ids}, "is_online": True},
+        {"$set": {"is_online": False, "went_offline_at": now, "offline_reason": "idle_timeout"}},
     )
+    for did in ids:
+        try:
+            await set_driver_offline(did)
+        except Exception:
+            logger.exception("auto_offline_sweep_presence_clear driver=%s", did)
     if result.modified_count:
         logger.info(f"Auto-offline sweep: set {result.modified_count} idle drivers offline")
     return result.modified_count

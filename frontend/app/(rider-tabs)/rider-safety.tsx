@@ -19,8 +19,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
-import { BRAND, LAYOUT } from '@/src/constants/designSystem';
+import { useThemeColors } from '@/src/constants/theme';
+import { BRAND, LAYOUT, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useAppStore } from '@/src/store/appStore';
@@ -149,40 +149,41 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
 function toneIconBg(tone: Row['tone']) {
   switch (tone) {
     case 'danger':
-      return COLORS.errorSoft;
+      return 'rgba(239,68,68,0.14)';
     case 'safe':
-      return COLORS.successSoft;
+      return BRAND.primaryMuted;
     default:
-      return COLORS.infoSoft;
+      return 'rgba(56,189,248,0.14)';
   }
 }
 
 function toneIconColor(tone: Row['tone']) {
   switch (tone) {
     case 'danger':
-      return COLORS.error;
+      return BRAND.danger;
     case 'safe':
-      return COLORS.success;
+      return BRAND.primary;
     default:
-      return COLORS.info;
+      return BRAND.info;
   }
 }
 
 function quickBg(v: (typeof QUICK)[number]['variant']) {
   switch (v) {
     case 'danger':
-      return COLORS.error;
+      return BRAND.danger;
     case 'police':
-      return BRAND.navyDeep;
+      return BRAND.bgDeep;
     case 'witness':
-      return COLORS.warning;
+      return BRAND.warning;
     default:
-      return COLORS.gray700;
+      return BRAND.textMuted;
   }
 }
 
 export default function RiderSafetyScreen() {
   const router = useRouter();
+  const { colors, isDark } = useThemeColors();
   const { user, currentTrip } = useAppStore();
   const { canCallAuthedApi } = useAuthedApiReady();
   const { userId: riderId } = useAuthedUserId();
@@ -289,7 +290,7 @@ export default function RiderSafetyScreen() {
 
   const handleConfirmSOS = async () => {
     if (!effectiveTripId) {
-      Alert.alert('No Active Trip', 'SOS works only during an active trip.');
+      Alert.alert('No active trip', 'SOS works only during an active trip.');
       return;
     }
 
@@ -319,7 +320,7 @@ export default function RiderSafetyScreen() {
       setSosModalVisible(false);
       Alert.alert(
         'SOS Sent',
-        'Emergency alert has been sent to your contacts and NEXRYDE support.',
+        'Emergency alert has been sent to your contacts and NexRyde support.',
       );
     } catch (error: any) {
       Alert.alert('SOS Failed', error?.response?.data?.detail || 'Could not send SOS right now.');
@@ -329,11 +330,11 @@ export default function RiderSafetyScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: isDark ? BRAND.bgDeep : colors.background }]} edges={['top']}>
       <TabBrandStrip role="rider" />
       <View style={[styles.hero, { paddingHorizontal: flow.padH }]}>
-        <Text style={styles.heroTitle}>Safety Center</Text>
-        <Text style={styles.heroSub}>Verification, emergencies, and trip protection — organized in one screen.</Text>
+        <Text style={styles.heroTitle}>Safety center</Text>
+        <Text style={styles.heroSub}>Verification, emergencies, and trip protection — in one place.</Text>
       </View>
 
       <ScrollView
@@ -345,7 +346,7 @@ export default function RiderSafetyScreen() {
             maxWidth: flow.maxContentWidth,
             alignSelf: 'center',
             width: '100%',
-            gap: Math.round(flow.sectionGap * 0.35),
+            gap: SPACING.stack,
           },
         ]}
         showsVerticalScrollIndicator={false}
@@ -358,7 +359,7 @@ export default function RiderSafetyScreen() {
           />
         ) : null}
 
-        <Text style={styles.quickLabel}>Quick access</Text>
+        <Text style={[styles.quickLabel, { color: colors.textMuted }]}>Quick access</Text>
         <View style={styles.quickRow}>
           {QUICK.map(q => (
             <TouchableOpacity
@@ -380,9 +381,9 @@ export default function RiderSafetyScreen() {
               accessibilityLabel={q.label}
             >
               <View style={[styles.quickIconWrap, { backgroundColor: quickBg(q.variant) }]}>
-                <Ionicons name={q.icon} size={22} color={COLORS.white} />
+                <Ionicons name={q.icon} size={22} color="#FFF" />
               </View>
-              <Text style={styles.quickText} numberOfLines={2}>
+              <Text style={[styles.quickText, { color: colors.text }]} numberOfLines={2}>
                 {q.label}
               </Text>
             </TouchableOpacity>
@@ -397,31 +398,31 @@ export default function RiderSafetyScreen() {
           ]}
         >
           <View style={styles.sosIconWrap}>
-            <Ionicons name="alert-circle" size={44} color={COLORS.white} />
+            <Ionicons name="alert-circle" size={44} color="#FFF" />
           </View>
           <Text style={styles.sosText}>{sendingSos ? 'Sending SOS...' : 'Emergency SOS'}</Text>
           <Text style={styles.sosSubtext}>
             {effectiveTripId ? 'Trigger a protected emergency alert now' : 'SOS available only in active trip'}
           </Text>
           <EmergencyButton
-            label={effectiveTripId ? 'Send SOS Alert' : 'No Active Trip'}
+            label={effectiveTripId ? 'Send SOS alert' : 'No active trip'}
             style={styles.sosCta}
             onPress={() => setSosModalVisible(true)}
             compact={false}
           />
         </Animated.View>
-        {loadingTrip ? <ActivityIndicator size="small" color={COLORS.accentGreen} style={{ marginBottom: SPACING.md }} /> : null}
+        {loadingTrip ? <ActivityIndicator size="small" color={BRAND.primary} style={{ marginBottom: SPACING.md }} /> : null}
 
-        {/* Nigerian Police Finder */}
+        {/* Nigerian police finder */}
         <View style={styles.policeCard}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-            <Ionicons name="shield" size={20} color="#1d4ed8" />
-            <Text style={styles.policeCardTitle}>Nigerian Police Finder</Text>
-            {detectingPolice && <ActivityIndicator size="small" color="#1d4ed8" style={{ marginLeft: 8 }} />}
+            <Ionicons name="shield" size={20} color={BRAND.info} />
+            <Text style={styles.policeCardTitle}>Nigerian police finder</Text>
+            {detectingPolice && <ActivityIndicator size="small" color={BRAND.info} style={{ marginLeft: 8 }} />}
           </View>
           {detectedPolice ? (
             <View style={styles.policeDetected}>
-              <Ionicons name="location" size={14} color="#16a34a" />
+              <Ionicons name="location" size={14} color={BRAND.primary} />
               <Text style={styles.policeDetectedText}>Detected: {detectedPolice.state} Police</Text>
             </View>
           ) : null}
@@ -438,21 +439,27 @@ export default function RiderSafetyScreen() {
           >
             <Ionicons name="call" size={18} color="#fff" />
             <Text style={styles.policeCallBtnText}>
-              {detectedPolice ? `Call ${detectedPolice.state} Police` : 'Find & Call State Police'}
+              {detectedPolice ? `Call ${detectedPolice.state} Police` : 'Find & call state police'}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => { setPoliceQuery(''); setShowPolicePicker(true); }} style={{ marginTop: 6 }}>
-            <Text style={{ color: '#1d4ed8', fontSize: 12, textAlign: 'center' }}>Search a different state</Text>
+            <Text style={{ color: BRAND.info, fontSize: 12, textAlign: 'center' }}>Search a different state</Text>
           </TouchableOpacity>
         </View>
 
         {SECTIONS.map(section => (
           <View key={section.title} style={styles.section}>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
+            <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{section.title}</Text>
             {section.rows.map(row => (
               <TouchableOpacity
                 key={row.route + row.label}
-                style={styles.row}
+                style={[
+                  styles.row,
+                  {
+                    backgroundColor: isDark ? SURFACE.cardDark : colors.card,
+                    borderColor: isDark ? SURFACE.hairline : colors.border,
+                  },
+                ]}
                 onPress={() => {
                   if (row.route === '/rider/share-trip') {
                     openShareTrip(router, effectiveTripId);
@@ -468,10 +475,10 @@ export default function RiderSafetyScreen() {
                   <Ionicons name={row.icon} size={22} color={toneIconColor(row.tone)} />
                 </View>
                 <View style={styles.rowBody}>
-                  <Text style={styles.rowTitle}>{row.label}</Text>
-                  <Text style={styles.rowDesc}>{row.desc}</Text>
+                  <Text style={[styles.rowTitle, { color: colors.text }]}>{row.label}</Text>
+                  <Text style={[styles.rowDesc, { color: colors.textSecondary }]}>{row.desc}</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={COLORS.lightTextMuted} />
+                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
               </TouchableOpacity>
             ))}
           </View>
@@ -481,7 +488,7 @@ export default function RiderSafetyScreen() {
       <ConfirmationModal
         visible={sosModalVisible}
         title="Confirm Emergency SOS"
-        message="This sends your live location and trip details to emergency contacts and NEXRYDE support."
+        message="This sends your live location and trip details to emergency contacts and NexRyde support."
         confirmText={sendingSos ? 'Sending...' : 'Send SOS'}
         cancelText="Cancel"
         destructive
@@ -494,7 +501,7 @@ export default function RiderSafetyScreen() {
         <View style={styles.policeModal}>
           <View style={styles.policeModalSheet}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <Text style={{ fontSize: 17, fontWeight: '700', color: '#0f172a' }}>Select Your State</Text>
+              <Text style={{ fontSize: 17, fontWeight: '700', color: BRAND.textPrimary }}>Select your state</Text>
               <TouchableOpacity onPress={() => setShowPolicePicker(false)}>
                 <Ionicons name="close-circle" size={26} color="#94a3b8" />
               </TouchableOpacity>
@@ -502,7 +509,7 @@ export default function RiderSafetyScreen() {
             <TextInput
               style={styles.policeSearchInput}
               placeholder="Search state (e.g. Lagos, Abuja...)"
-              placeholderTextColor="#94a3b8"
+              placeholderTextColor={BRAND.textMuted}
               value={policeQuery}
               onChangeText={setPoliceQuery}
               autoFocus
@@ -517,13 +524,13 @@ export default function RiderSafetyScreen() {
                   onPress={() => { setShowPolicePicker(false); callPolice(item); }}
                 >
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 15, fontWeight: '600', color: '#0f172a' }}>{item.state} Police</Text>
-                    <Text style={{ fontSize: 13, color: '#1d4ed8', marginTop: 2 }}>{item.phone}</Text>
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: BRAND.textPrimary }}>{item.state} Police</Text>
+                    <Text style={{ fontSize: 13, color: BRAND.info, marginTop: 2 }}>{item.phone}</Text>
                   </View>
-                  <Ionicons name="call" size={20} color="#16a34a" />
+                  <Ionicons name="call" size={20} color={BRAND.primary} />
                 </TouchableOpacity>
               )}
-              ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: '#f1f5f9' }} />}
+              ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: SURFACE.hairline }} />}
             />
           </View>
         </View>
@@ -535,42 +542,40 @@ export default function RiderSafetyScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.gray50,
+    backgroundColor: BRAND.bgDeep,
   },
   hero: {
     paddingTop: SPACING.md,
     paddingBottom: SPACING.lg,
-    backgroundColor: BRAND.navyDeep,
-    borderBottomLeftRadius: BORDER_RADIUS.xxl,
-    borderBottomRightRadius: BORDER_RADIUS.xxl,
+    backgroundColor: BRAND.bgDeep,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: SURFACE.glassBorder,
   },
   heroTitle: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '800',
-    color: COLORS.white,
+    fontSize: 24,
+    fontWeight: '900',
+    color: BRAND.textPrimary,
+    letterSpacing: -0.4,
   },
   heroSub: {
     marginTop: SPACING.xs,
-    fontSize: FONT_SIZE.sm,
+    fontSize: 13,
     fontWeight: '600',
-    color: 'rgba(255,255,255,0.85)',
-    lineHeight: 20,
+    color: BRAND.textSecondary,
+    lineHeight: 19,
   },
   scroll: {
     paddingTop: SPACING.md,
   },
   quickLabel: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '800',
-    color: COLORS.lightTextMuted,
+    ...TYPOGRAPHY.label,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
     marginBottom: SPACING.sm,
   },
   quickRow: {
     flexDirection: 'row',
-    gap: SPACING.sm,
-    marginBottom: SPACING.lg,
+    gap: SPACING.stack,
+    marginBottom: SPACING.md,
   },
   quickBtn: {
     flex: 1,
@@ -580,7 +585,7 @@ const styles = StyleSheet.create({
   quickIconWrap: {
     width: 48,
     height: 48,
-    borderRadius: 14,
+    borderRadius: RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 6,
@@ -588,19 +593,16 @@ const styles = StyleSheet.create({
   quickText: {
     fontSize: 11,
     fontWeight: '800',
-    color: COLORS.lightTextPrimary,
     textAlign: 'center',
   },
   sosButton: {
-    backgroundColor: COLORS.error,
-    borderRadius: BORDER_RADIUS.xxl,
+    backgroundColor: BRAND.danger,
+    borderRadius: RADIUS.xl,
     padding: SPACING.xl,
     alignItems: 'center',
-    marginBottom: SPACING.xl,
-    ...SHADOWS.lg,
-    shadowColor: '#EF4444',
-    shadowOpacity: 0.35,
-    shadowRadius: 14,
+    marginBottom: SPACING.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(239,68,68,0.35)',
   },
   sosIconWrap: {
     width: 120,
@@ -614,17 +616,17 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.35)',
   },
   sosDisabled: {
-    backgroundColor: COLORS.gray400,
+    backgroundColor: BRAND.textMuted,
   },
   sosText: {
-    fontSize: FONT_SIZE.xl,
+    fontSize: 22,
     fontWeight: '900',
-    color: COLORS.white,
+    color: '#FFF',
     marginTop: SPACING.sm,
     letterSpacing: -0.5,
   },
   sosSubtext: {
-    fontSize: FONT_SIZE.sm,
+    fontSize: 13,
     fontWeight: '700',
     color: '#FEE2E2',
     marginTop: SPACING.xs,
@@ -634,17 +636,17 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
   },
   policeCard: {
-    backgroundColor: '#eff6ff',
-    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: 'rgba(56,189,248,0.08)',
+    borderRadius: RADIUS.xl,
     padding: SPACING.md,
-    marginBottom: SPACING.lg,
-    borderWidth: 1,
-    borderColor: '#bfdbfe',
+    marginBottom: SPACING.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(56,189,248,0.28)',
   },
   policeCardTitle: {
     fontSize: 15,
-    fontWeight: '700',
-    color: '#1d4ed8',
+    fontWeight: '800',
+    color: BRAND.info,
     marginLeft: 8,
     flex: 1,
   },
@@ -656,13 +658,13 @@ const styles = StyleSheet.create({
   },
   policeDetectedText: {
     fontSize: 12,
-    color: '#16a34a',
+    color: BRAND.primary,
     fontWeight: '600',
     marginLeft: 4,
   },
   policeCallBtn: {
-    backgroundColor: '#1d4ed8',
-    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: BRAND.accentBlue,
+    borderRadius: RADIUS.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -677,25 +679,28 @@ const styles = StyleSheet.create({
   },
   policeModal: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: BRAND.bgOverlay,
     justifyContent: 'flex-end',
   },
   policeModalSheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
+    backgroundColor: BRAND.bgElevated,
+    borderTopLeftRadius: RADIUS.xl + 4,
+    borderTopRightRadius: RADIUS.xl + 4,
+    padding: SPACING.lg,
     paddingBottom: 36,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: 0,
+    borderColor: SURFACE.hairline,
   },
   policeSearchInput: {
-    backgroundColor: '#f8fafc',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: SURFACE.tile,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACE.hairline,
+    borderRadius: RADIUS.md,
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 14,
-    color: '#0f172a',
+    color: BRAND.textPrimary,
     marginBottom: 12,
   },
   policeListItem: {
@@ -705,35 +710,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   section: {
-    marginBottom: SPACING.lg,
+    marginBottom: SPACING.md,
   },
   sectionTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    ...TYPOGRAPHY.label,
+    textTransform: 'uppercase',
     marginBottom: SPACING.sm,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
+    borderRadius: RADIUS.xl,
     padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    marginBottom: SPACING.stack,
+    borderWidth: StyleSheet.hairlineWidth,
     minHeight: LAYOUT.touchMin + 6,
-    ...SHADOWS.sm,
   },
   rowIcon: {
     width: 44,
     height: 44,
-    borderRadius: BORDER_RADIUS.lg,
+    borderRadius: RADIUS.lg,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: SPACING.md,
   },
   rowBody: { flex: 1 },
-  rowTitle: { fontSize: FONT_SIZE.md, fontWeight: '800', color: COLORS.lightTextPrimary },
-  rowDesc: { fontSize: FONT_SIZE.xs, fontWeight: '600', color: COLORS.lightTextSecondary, marginTop: 2 },
+  rowTitle: { fontSize: 14, fontWeight: '800' },
+  rowDesc: { fontSize: 12, fontWeight: '600', marginTop: 2 },
 });
+

@@ -12,7 +12,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
+import { useThemeColors } from '@/src/constants/theme';
+import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
 import { BACKEND_URL, getAuthHeaders, getDriverProfile } from '@/src/services/api';
 import { driverDocumentsRouteParams } from '@/src/utils/driverOnboardingNav';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
@@ -61,7 +62,7 @@ const skDoc = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
     marginBottom: 8,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#F1F5F9',
   },
   icon: { width: 44, height: 44, borderRadius: 10, backgroundColor: '#E2E8F0' },
@@ -80,6 +81,7 @@ export default function DocumentsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
+  const { colors, isDark } = useThemeColors();
   const { user, userId: driverId } = useAuthedUserId();
 
   const [loading, setLoading] = useState(true);
@@ -153,8 +155,8 @@ export default function DocumentsScreen() {
     switch (status) {
       case 'verified': return '#16A34A';
       case 'pending': return '#D97706';
-      case 'expired': return COLORS.error;
-      default: return COLORS.gray400;
+      case 'expired': return BRAND.danger;
+      default: return BRAND.textMuted;
     }
   };
 
@@ -163,7 +165,7 @@ export default function DocumentsScreen() {
       case 'verified': return '#D1FAE5';
       case 'pending': return '#FEF3C7';
       case 'expired': return '#FEE2E2';
-      default: return COLORS.gray100;
+      default: return SURFACE.tile;
     }
   };
 
@@ -189,10 +191,10 @@ export default function DocumentsScreen() {
   const allVerified = verifiedCount === documents.length;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: isDark ? BRAND.bgDeep : colors.background }]}>
       <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.gray800} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>My Documents</Text>
         <View style={{ width: 40 }} />
@@ -223,7 +225,7 @@ export default function DocumentsScreen() {
           <Ionicons
             name={isApproved ? 'shield-checkmark' : 'time'}
             size={32}
-            color={COLORS.white}
+            color="#FFF"
           />
           <View style={{ flex: 1 }}>
             <Text style={styles.bannerTitle}>
@@ -309,7 +311,7 @@ export default function DocumentsScreen() {
             }}
             activeOpacity={0.88}
           >
-            <Ionicons name="cloud-upload-outline" size={20} color={COLORS.white} />
+            <Ionicons name="cloud-upload-outline" size={20} color="#FFF" />
             <Text style={styles.updateButtonText}>
               {verificationStatus ? 'Update / Resubmit Documents' : 'Upload Documents'}
             </Text>
@@ -330,30 +332,29 @@ export default function DocumentsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.gray50 },
+  container: { flex: 1, backgroundColor: BRAND.bgDeep },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: SPACING.md,
-    backgroundColor: COLORS.white,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.gray100,
+    backgroundColor: '#FFF',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: SURFACE.hairline,
   },
   backButton: { padding: SPACING.sm },
-  headerTitle: { fontSize: FONT_SIZE.lg, fontWeight: '800', color: COLORS.gray800 },
+  headerTitle: { fontSize: 17, fontWeight: '800', color: BRAND.textPrimary },
   content: { paddingTop: SPACING.lg, paddingBottom: SPACING.md },
   statusBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.md,
     padding: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl,
+    borderRadius: RADIUS.xl,
     marginBottom: SPACING.lg,
-    ...SHADOWS.md,
   },
-  bannerTitle: { fontSize: FONT_SIZE.md, fontWeight: '800', color: COLORS.white },
-  bannerSubtitle: { fontSize: FONT_SIZE.sm, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+  bannerTitle: { fontSize: 15, fontWeight: '800', color: '#FFF' },
+  bannerSubtitle: { fontSize: 13, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
   ninVerifiedCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -362,30 +363,30 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#86EFAC',
     padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.xl,
+    borderRadius: RADIUS.xl,
     marginBottom: SPACING.lg,
   },
   ninVerifiedLeft: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
   ninIcon: {
     width: 44,
     height: 44,
-    borderRadius: BORDER_RADIUS.md,
+    borderRadius: RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  ninVerifiedTitle: { fontSize: FONT_SIZE.md, fontWeight: '800', color: '#065F46' },
-  ninVerifiedSub: { fontSize: FONT_SIZE.sm, color: '#059669', fontWeight: '600', marginTop: 2 },
+  ninVerifiedTitle: { fontSize: 15, fontWeight: '800', color: '#065F46' },
+  ninVerifiedSub: { fontSize: 13, color: '#059669', fontWeight: '600', marginTop: 2 },
   verifiedBadge: {
     backgroundColor: '#16A34A',
     paddingHorizontal: SPACING.sm,
     paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.full,
+    borderRadius: RADIUS.full,
   },
-  verifiedBadgeText: { fontSize: 10, fontWeight: '800', color: COLORS.white, letterSpacing: 0.5 },
+  verifiedBadgeText: { fontSize: 10, fontWeight: '800', color: '#FFF', letterSpacing: 0.5 },
   sectionTitle: {
-    fontSize: FONT_SIZE.sm,
+    fontSize: 13,
     fontWeight: '800',
-    color: COLORS.gray500,
+    color: BRAND.bgDeep,
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: SPACING.md,
@@ -397,17 +398,16 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.xl,
     justifyContent: 'center',
   },
-  loadingText: { fontSize: FONT_SIZE.sm, color: COLORS.gray400 },
+  loadingText: { fontSize: 13, color: BRAND.textMuted },
   documentCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
+    backgroundColor: '#FFF',
     padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
+    borderRadius: RADIUS.lg,
     marginBottom: SPACING.sm,
-    ...SHADOWS.sm,
     gap: SPACING.sm,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'transparent',
   },
   documentCardVerified: {
@@ -417,35 +417,34 @@ const styles = StyleSheet.create({
   docIconWrap: {
     width: 44,
     height: 44,
-    borderRadius: BORDER_RADIUS.md,
+    borderRadius: RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
   docInfo: { flex: 1 },
-  docName: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.gray800 },
-  docDetail: { fontSize: FONT_SIZE.xs, fontWeight: '600', marginTop: 2 },
-  docDesc: { fontSize: 11, color: COLORS.gray400, marginTop: 2, lineHeight: 15 },
+  docName: { fontSize: 13, fontWeight: '700', color: BRAND.textPrimary },
+  docDetail: { fontSize: 11, fontWeight: '600', marginTop: 2 },
+  docDesc: { fontSize: 11, color: BRAND.textMuted, marginTop: 2, lineHeight: 15 },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     paddingHorizontal: SPACING.sm,
     paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.full,
+    borderRadius: RADIUS.full,
   },
   statusBadgeText: { fontSize: 11, fontWeight: '700' },
   updateButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.primary,
+    backgroundColor: BRAND.primary,
     padding: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl,
+    borderRadius: RADIUS.xl,
     marginTop: SPACING.xl,
     gap: SPACING.sm,
-    ...SHADOWS.md,
   },
-  updateButtonText: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.white },
+  updateButtonText: { fontSize: 15, fontWeight: '700', color: '#FFF' },
   approvedNote: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -454,7 +453,7 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xl,
     padding: SPACING.md,
     backgroundColor: '#F0FDF4',
-    borderRadius: BORDER_RADIUS.lg,
+    borderRadius: RADIUS.lg,
   },
-  approvedNoteText: { fontSize: FONT_SIZE.sm, color: '#059669', fontWeight: '600' },
+  approvedNoteText: { fontSize: 13, color: '#059669', fontWeight: '600' },
 });

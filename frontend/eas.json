@@ -9,17 +9,15 @@
       "node": "20.19.4",
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-backend-993913300770.us-central1.run.app",
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY",
-        "EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY": "AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY",
         "EAS_SKIP_AUTO_FINGERPRINT": "1"
       },
       "autoIncrement": true,
       "android": {
-        "prebuildCommand": "npx expo prebuild --platform android --no-install",
+        "prebuildCommand": "npx expo prebuild --platform android --no-install && node ./scripts/verify_driver_experience_package.cjs --require-success",
         "buildType": "apk"
       },
       "ios": {
-        "prebuildCommand": "npx expo prebuild --platform ios --no-install",
+        "prebuildCommand": "node ./scripts/apply_appearance_native_patch.cjs --require-success && npx expo prebuild --platform ios --no-install && node ./scripts/apply_appearance_native_patch.cjs --verify-only --require-success && node ./scripts/verify_rn_from_source.cjs --require-success",
         "simulator": false,
         "buildConfiguration": "Release"
       }
@@ -29,19 +27,20 @@
       "node": "20.19.4",
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-backend-993913300770.us-central1.run.app",
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY",
-        "EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY": "AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY",
-        "EAS_SKIP_AUTO_FINGERPRINT": "1"
+        "EAS_SKIP_AUTO_FINGERPRINT": "1",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true",
+        "SENTRY_ALLOW_FAILURE": "true",
+        "RCT_USE_PREBUILT_RNCORE": "0"
       },
       "autoIncrement": true,
       "android": {
-        "prebuildCommand": "npx expo prebuild --platform android --no-install",
+        "prebuildCommand": "npx expo prebuild --platform android --no-install && node ./scripts/verify_driver_experience_package.cjs --require-success",
         "buildType": "app-bundle",
         "gradleCommand": ":app:bundleRelease",
         "resourceClass": "medium"
       },
       "ios": {
-        "prebuildCommand": "npx expo prebuild --platform ios --no-install",
+        "prebuildCommand": "node ./scripts/apply_appearance_native_patch.cjs --require-success && npx expo prebuild --platform ios --no-install && node ./scripts/apply_appearance_native_patch.cjs --verify-only --require-success && node ./scripts/verify_rn_from_source.cjs --require-success",
         "buildConfiguration": "Release",
         "autoIncrement": "buildNumber",
         "resourceClass": "m-medium"

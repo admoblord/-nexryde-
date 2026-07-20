@@ -40,6 +40,8 @@ import FindingDriverScreenV2 from '@/src/components/finding/FindingDriverScreenV
 import { TrackingPaymentView } from '@/src/components/tracking/TrackingPaymentView';
 import { TripMapErrorBoundary } from '@/src/components/TripMapErrorBoundary';
 import CancellationReasonModal from '@/src/components/shared/CancellationReasonModal';
+import { PickupWaitTimerCard } from '@/src/components/shared/PickupWaitTimerCard';
+import { ChangeTripRouteModal } from '@/src/components/tracking/live/ChangeTripRouteModal';
 import { useThrottledValue } from '@/src/hooks/useThrottledValue';
 import { RIDER_TRACKING_DISPLAY_THROTTLE_MS } from '@/src/constants/tripRealtimeRhythm';
 import { useDevDriverMovementSim } from '@/src/components/tracking/hooks/useDevDriverMovementSim';
@@ -47,6 +49,12 @@ import { DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
 import { getAvailableDrivers } from '@/src/services/api';
 import { trackVerifyPing } from '@/src/components/tracking/map/trackVerifyLog';
 import { TrackingLiveDebugPanel } from '@/src/components/tracking/v2/TrackingLiveDebugPanel';
+import {
+  riderCancelFeePreviewNgn,
+  riderTripCanCancel,
+} from '@/src/constants/riderActiveTripDisplay';
+import type { NormalizedTripStatus } from '@/src/utils/tripStatus';
+import { CURRENCY } from '@/src/constants/theme';
 
 // After this many seconds searching with no driver matched, the finding screen
 // shows a clear "no drivers available" message instead of spinning forever.
@@ -390,6 +398,7 @@ export default function LiveTrackingScreen() {
     startedAtIso,
     distanceRemainingKm,
     liveEta,
+    pickupWait,
     tripStatus,
     tripPaymentMethod,
     paymentStatus,
@@ -400,6 +409,7 @@ export default function LiveTrackingScreen() {
     currentTrip,
     cancelModalOpen,
     cancellingRide,
+    cancelError,
     wsConnected,
     syncError,
     liveDebug,
@@ -410,6 +420,20 @@ export default function LiveTrackingScreen() {
     riderId,
     actions,
   } = session;
+
+  const [routeEditMode, setRouteEditMode] = useState<'destination' | 'stop' | null>(null);
+  const phaseForCancel = (tripStatus || 'pending') as NormalizedTripStatus;
+  const canCancelLive = riderTripCanCancel(phaseForCancel);
+  const cancelFeeNgn = riderCancelFeePreviewNgn(
+    phaseForCancel,
+    (currentTrip as { cancellation_fee?: number } | null)?.cancellation_fee,
+  );
+  const cancelFeeNote =
+    cancelFeeNgn == null
+      ? null
+      : cancelFeeNgn <= 0
+        ? 'No cancellation fee while searching for a driver.'
+        : `A cancellation fee of about ${CURRENCY}${cancelFeeNgn.toLocaleString()} may apply.`;
 
   type NearbyDriverRow = {
     driver_id: string;
@@ -672,8 +696,22 @@ export default function LiveTrackingScreen() {
       visible={cancelModalOpen}
       role="rider"
       cancelling={cancellingRide}
+      errorMessage={cancelError}
+      feePreviewNote={cancelFeeNote}
       onKeepTrip={actions.closeCancelModal}
       onConfirm={(reason) => void actions.onCancelRide(reason)}
+    />
+  );
+
+  const routeEditSheet = (
+    <ChangeTripRouteModal
+      visible={routeEditMode != null}
+      tripId={effectiveTripId}
+      mode={routeEditMode || 'destination'}
+      driverLat={mapModel.driver?.lat}
+      driverLng={mapModel.driver?.lng}
+      onClose={() => setRouteEditMode(null)}
+      onSuccess={() => void actions.retrySync()}
     />
   );
 
@@ -739,6 +777,7 @@ export default function LiveTrackingScreen() {
           nearbyDrivers={nearbyDrivers}
         />
         {cancelSheet}
+        {routeEditSheet}
       </View>
     );
   }
@@ -789,6 +828,7 @@ export default function LiveTrackingScreen() {
         <StatusBar barStyle="light-content" backgroundColor={LIVE.bg} />
         <LiveTrackingSkeleton />
         {cancelSheet}
+        {routeEditSheet}
       </View>
     );
   }
@@ -914,8 +954,8 @@ export default function LiveTrackingScreen() {
         rating={driverRating}
         totalTrips={totalTrips}
         verified={verified}
-        etaMinutes={showConnecting || tripStatus === 'arrived' ? 0 : displayEtaMinutes}
-        distanceKm={showConnecting || tripStatus === 'arrived' ? 0 : displayDistanceKm}
+        etaMinutes={showConnecting || tripStatus === 'arrived' ? null : displayEtaMinutes}
+        distanceKm={showConnecting || tripStatus === 'arrived' ? null : displayDistanceKm}
         arrived={tripStatus === 'arrived'}
         hydrated={driverHydrated}
         pickupCode={pickupCode}
@@ -930,6 +970,28 @@ export default function LiveTrackingScreen() {
         onSos={actions.onEmergency}
         destEtaMinutes={showConnecting ? null : tripStatus === 'ongoing' ? displayEtaMinutes : null}
         destAddress={tripStatus === 'ongoing' ? destinationLabel : null}
+        canCancel={canCancelLive}
+        onCancel={actions.promptCancelRide}
+        cancelFeeNote={cancelFeeNote}
+        canEditRoute={tripStatus === 'ongoing'}
+        onChangeDestination={() => setRouteEditMode('destination')}
+        onAddStop={() => setRouteEditMode('stop')}
+        canSplitFare={tripStatus === 'ongoing'}
+        onSplitFare={() => {
+          const fare = Number(currentTrip?.fare ?? fareDisplay ?? 0);
+          router.push({
+            pathname: '/rider/split-fare',
+            params: {
+              tripId: effectiveTripId,
+              fare: String(Number.isFinite(fare) && fare > 0 ? Math.round(fare) : ''),
+            },
+          } as never);
+        }}
+        waitCard={
+          tripStatus === 'arrived' ? (
+            <PickupWaitTimerCard wait={pickupWait} variant="rider" compact />
+          ) : null
+        }
       />
 
       {/* Status subline pill */}
@@ -945,6 +1007,7 @@ export default function LiveTrackingScreen() {
 
       <TrackingLiveDebugPanel debug={tripSyncDebug} />
       {cancelSheet}
+      {routeEditSheet}
     </View>
   );
 }

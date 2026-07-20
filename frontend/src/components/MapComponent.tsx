@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Platform, ActivityIndicator } from 'react-nativ
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '../constants/theme';
 import { DIRECTIONS_ROUTE_MIN_POINTS } from '../navigation/navUtils';
+import { NEXRYDE_MAP_STYLE } from '../constants/nexrydeMapBehavior';
 
 interface Location {
   latitude: number;
@@ -58,21 +59,6 @@ const WebPlaceholder: React.FC<MapComponentProps> = ({ pickup, dropoff, style })
     </View>
   </View>
 );
-
-/* ─── Premium dark map (matches rider booking) ───────────────── */
-const DARK_STYLE = [
-  { elementType: 'geometry', stylers: [{ color: '#0B1220' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#94A3B8' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#0B1220' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1A2838' }] },
-  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#0F172A' }] },
-  { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#243447' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2D3F56' }] },
-  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#1E293B' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#060D18' }] },
-  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
-];
 
 /* ─── Native map component ────────────────────────────────────── */
 const NativeMap: React.FC<MapComponentProps> = ({
@@ -181,7 +167,7 @@ const NativeMap: React.FC<MapComponentProps> = ({
         showsIndoors={false}
         toolbarEnabled={false}
         onMapReady={onMapReady}
-        customMapStyle={DARK_STYLE}
+        customMapStyle={NEXRYDE_MAP_STYLE}
       >
         {/* Route polyline — layered Nexryde greens */}
         {cleanRoute.length >= DIRECTIONS_ROUTE_MIN_POINTS ? (

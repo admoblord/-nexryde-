@@ -12,18 +12,21 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/src/constants/theme';
 import {
-  BOOKING_MAP_DARK_STYLE,
   MAP,
   mapTealRouteLayers,
 } from '@/src/constants/nexrydeMapBehavior';
+import { getNexrydeMapStyleAuto, MAP_3D } from '@/src/constants/nexrydeMap3d';
 import { DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
 import { MapAnimatedTaxiMarker } from '@/src/components/map/MapAnimatedTaxiMarker';
 import { NexrydeMapFloatingControls } from '@/src/components/map/NexrydeMapFloatingControls';
 import { MapClusterMarker } from '@/src/components/map/MapClusterMarker';
 import { MapBookingDestinationPin } from '@/src/components/map/MapBookingDestinationPin';
 import { MapBookingUserPulse } from '@/src/components/map/MapBookingUserPulse';
+import { RiderDemandHeatOverlay } from '@/src/components/map/RiderDemandHeatOverlay';
 import { clusterMapMarkers } from '@/src/utils/mapMarkerCluster';
 import { useAnimatedRouteCoords } from '@/src/hooks/useAnimatedRouteCoords';
+import { useRiderDemandZones } from '@/src/hooks/useRiderDemandZones';
+import type { HeatZonePoint } from '@/src/utils/driverHeatmapZones';
 
 const ROUTE_FIT_MAX_POINTS = 48;
 
@@ -135,13 +138,17 @@ const bookingMapStyles = StyleSheet.create({
 export type RiderBookingMapNativeProps = {
   pickupCoords: { lat: number; lng: number };
   destinationCoords: { lat: number; lng: number } | null;
+  stopCoords?: { lat: number; lng: number } | null;
   routePolyline: { latitude: number; longitude: number }[];
   pickup: string;
   destination: string;
+  stop?: string;
   routeLoading?: boolean;
   pulseDropoffHalo?: boolean;
   searchMode?: boolean;
   matchLocked?: boolean;
+  /** Optional force for map night style; omit for sun-auto (Uber/Bolt). */
+  isDark?: boolean | null;
   nearbyDrivers: Array<{
     driver_id: string;
     name?: string;
@@ -150,6 +157,12 @@ export type RiderBookingMapNativeProps = {
     status?: string;
     vehicle?: string;
   }>;
+  /** Fare demand ratio — powers surge blush when heatmap API unavailable. */
+  demandRatio?: number | null;
+  surgeMultiplier?: number | null;
+  /** Prefetched demand zones; when omitted, hook fetches/synthesizes. */
+  demandZones?: HeatZonePoint[];
+  showDemandOverlay?: boolean;
   controlsBottom?: number;
   /** Show live debug overlay (map ready, tile status, camera, driver count). */
   debugOverlay?: boolean;
@@ -163,6 +176,18 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
   const dropPulseScale = useRef(new Animated.Value(1)).current;
   const [trafficOn, setTrafficOn] = useState(true);
   const [latitudeDelta, setLatitudeDelta] = useState(0.04);
+  const mapStyle = getNexrydeMapStyleAuto(
+    props.isDark === true ? true : props.isDark === false ? false : null,
+  );
+  const hookedDemandZones = useRiderDemandZones(
+    props.pickupCoords,
+    props.showDemandOverlay !== false && !props.searchMode,
+    {
+      demandRatio: props.demandRatio,
+      surgeMultiplier: props.surgeMultiplier,
+    },
+  );
+  const demandZones = props.demandZones ?? hookedDemandZones;
 
   // ── debug overlay state ──────────────────────────────────────────────────
   const [dbgMapReady, setDbgMapReady] = useState(false);
@@ -178,7 +203,7 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
 
   const handleMapReady = useCallback(async () => {
     setDbgMapReady(true);
-    console.log('[RiderMap] onMapReady');
+    if (__DEV__) console.log('[RiderMap] onMapReady');
     // Fetch initial camera
     try {
       const cam = await mapRef.current?.getCamera?.();
@@ -187,14 +212,16 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
         const lng = Number(cam.center?.longitude ?? cam.longitude);
         const zoom = Number(cam.zoom ?? 0);
         setDbgCam({ lat, lng, zoom });
-        console.log(`[RiderMap] camera lat=${lat.toFixed(5)} lng=${lng.toFixed(5)} zoom=${zoom.toFixed(1)}`);
+        if (__DEV__) {
+          console.log(`[RiderMap] camera lat=${lat.toFixed(5)} lng=${lng.toFixed(5)} zoom=${zoom.toFixed(1)}`);
+        }
       }
     } catch { /* silent */ }
   }, []);
 
   const handleMapLoaded = useCallback(() => {
     setDbgTilesLoaded(true);
-    console.log('[RiderMap] onMapLoaded (tiles ready)');
+    if (__DEV__) console.log('[RiderMap] onMapLoaded (tiles ready)');
   }, []);
   const routeLen = props.routePolyline.length;
   const safeDrivers = useMemo(
@@ -261,17 +288,31 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
     const pad = sm
       ? { top: 110, right: 18, bottom: locked ? 260 : 240, left: 18 }
       : { top: 88, right: 20, bottom: 132, left: 20 };
+    const applyTilt = () => {
+      if (!m.getCamera || !m.animateCamera) return;
+      void m.getCamera().then((cam: { pitch?: number; zoom?: number }) => {
+        void m.animateCamera(
+          { ...cam, pitch: sm ? MAP_3D.bookingPitch + 6 : MAP_3D.bookingPitch },
+          { duration: 420 },
+        );
+      }).catch(() => undefined);
+    };
     try {
       if (props.destinationCoords && props.routePolyline.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
         m.fitToCoordinates(sampleCoordsForFit(props.routePolyline), { edgePadding: pad, animated: true });
+        setTimeout(applyTilt, 380);
       } else if (props.destinationCoords) {
         m.fitToCoordinates(
           [
             { latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng },
+            ...(props.stopCoords
+              ? [{ latitude: props.stopCoords.lat, longitude: props.stopCoords.lng }]
+              : []),
             { latitude: props.destinationCoords.lat, longitude: props.destinationCoords.lng },
           ],
           { edgePadding: pad, animated: true },
         );
+        setTimeout(applyTilt, 380);
       } else {
         m.animateToRegion(
           {
@@ -353,7 +394,8 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
           loadingEnabled
           loadingBackgroundColor="#0e1a2d"
           loadingIndicatorColor="#00D084"
-          showsBuildings={false}
+          showsBuildings
+          pitchEnabled
           showsPointsOfInterest={false}
           showsCompass={false}
           showsIndoors={false}
@@ -361,7 +403,7 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
           showsTraffic={trafficOn}
           minZoomLevel={MAP.minZoom}
           maxZoomLevel={MAP.maxZoom}
-          customMapStyle={BOOKING_MAP_DARK_STYLE}
+          customMapStyle={mapStyle}
           mapPadding={sm ? { top: 0, right: 0, bottom: locked ? 260 : 300, left: 0 } : undefined}
           onMapReady={handleMapReady}
           onMapLoaded={handleMapLoaded}
@@ -378,7 +420,9 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
                 lng: region.longitude,
                 zoom: Math.round(-Math.log2(region.latitudeDelta / 0.7) * 10) / 10,
               });
-              console.log(`[RiderMap] camera moved lat=${region.latitude.toFixed(5)} lng=${region.longitude.toFixed(5)} Δ=${region.latitudeDelta.toFixed(4)}`);
+              if (__DEV__) {
+                console.log(`[RiderMap] camera moved lat=${region.latitude.toFixed(5)} lng=${region.longitude.toFixed(5)} Δ=${region.latitudeDelta.toFixed(4)}`);
+              }
             }
           }}
           onLongPress={(e: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) => {
@@ -387,6 +431,9 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
             props.onLongPressMap({ lat: latitude, lng: longitude });
           }}
         >
+          {!sm && demandZones.length > 0 ? (
+            <RiderDemandHeatOverlay zones={demandZones} maxZones={4} />
+          ) : null}
           {!sm && (
             <Circle
               center={{ latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng }}
@@ -480,6 +527,23 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
           >
             <MapBookingUserPulse size={sm ? 44 : 40} />
           </Marker>
+          {props.stopCoords ? (
+            <Marker
+              coordinate={{
+                latitude: props.stopCoords.lat,
+                longitude: props.stopCoords.lng,
+              }}
+              title="Stop"
+              description={props.stop || 'Stop'}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={false}
+              zIndex={4}
+            >
+              <View style={bookingMapStyles.dropHalo}>
+                <View style={[bookingMapStyles.dropCore, { backgroundColor: '#F59E0B' }]} />
+              </View>
+            </Marker>
+          ) : null}
           {props.destinationCoords ? (
             <Marker
               coordinate={{
@@ -589,7 +653,7 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
               </Text>
             </Text>
             <Text style={styles.debugRow}>
-              Style: <Text style={styles.dbgVal}>BOOKING_DARK ({BOOKING_MAP_DARK_STYLE.length} rules)</Text>
+              Style: <Text style={styles.dbgVal}>NEXRYDE_NIGHT ({mapStyle.length} rules)</Text>
             </Text>
           </View>
         ) : null}

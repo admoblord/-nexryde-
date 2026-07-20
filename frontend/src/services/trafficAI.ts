@@ -1,5 +1,5 @@
 /**
- * NEXRYDE AI Traffic Intelligence System
+ * NEXRYDE Traffic Intelligence System
  * Real-time traffic updates, predictions, and route optimization
  */
 import React from 'react';
@@ -67,7 +67,7 @@ export interface TrafficAlert {
   alternativeRoute?: TrafficRoute;
 }
 
-export class TrafficAI {
+export class TrafficIntelligence {
   // Traffic Severity Colors
   static readonly TRAFFIC_COLORS = {
     light: '#00D084',      // Green - Free flowing
@@ -92,35 +92,7 @@ export class TrafficAI {
     longitude: number,
     radius: number = 5000 // 5km default
   ): Promise<TrafficHotspot[]> {
-    try {
-      const response = await fetch(
-        `${BACKEND_URL}/api/ai/traffic/predict?origin_lat=${latitude}&origin_lng=${longitude}`
-      );
-      if (!response.ok) return [];
-      const data = await response.json();
-      const hotspots = data?.hotspots || data?.traffic_hotspots || [];
-      if (!Array.isArray(hotspots)) return [];
-      return hotspots.map((h: any, idx: number) => ({
-        id: h.id || h.zone_id || `hotspot-${idx}`,
-        location: {
-          latitude: h.location?.latitude ?? latitude,
-          longitude: h.location?.longitude ?? longitude,
-          address: h.location?.address || h.address || 'Unknown',
-        },
-        severity: h.severity || 'moderate',
-        type: h.type || 'congestion',
-        delayMinutes: Number(h.delay_minutes || h.delayMinutes || 0),
-        affectedRadius: Number(h.affected_radius || radius),
-        startTime: new Date(h.start_time || Date.now()),
-        estimatedClearTime: h.estimated_clear_time ? new Date(h.estimated_clear_time) : undefined,
-        description: h.description || '',
-        verifiedReports: Number(h.verified_reports || 0),
-        aiConfidence: Number(h.ai_confidence || 0),
-      }));
-    } catch (error) {
-      console.error('Failed to get traffic status:', error);
-      return [];
-    }
+    return [];
   }
 
   /** Coerce API / partial objects into a safe TrafficRoute (avoids render crashes). */
@@ -162,7 +134,7 @@ export class TrafficAI {
   }
 
   /**
-   * Get AI-optimized routes with traffic analysis
+   * Get optimized routes with traffic analysis
    */
   static async getOptimizedRoutes(
     origin: { latitude: number; longitude: number },
@@ -183,27 +155,8 @@ export class TrafficAI {
     }
     const originN = { latitude: ola, longitude: olo };
     const destinationN = { latitude: dla, longitude: dlo };
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/traffic/optimize-routes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ origin: originN, destination: destinationN, preferences }),
-      });
-      if (!response.ok) {
-        return await this.buildFallbackOptimizedRoutes(originN, destinationN, preferences);
-      }
-      const data = await response.json().catch(() => ({}));
-      if (Array.isArray(data?.routes) && data.routes.length > 0) {
-        const cleaned = (data.routes as unknown[])
-          .map((row) => this.normalizeTrafficRoute(row))
-          .filter((x): x is TrafficRoute => x != null);
-        if (cleaned.length) return cleaned;
-      }
-      return await this.buildFallbackOptimizedRoutes(originN, destinationN, preferences);
-    } catch (error) {
-      console.error('Failed to get optimized routes:', error);
-      return await this.buildFallbackOptimizedRoutes(originN, destinationN, preferences);
-    }
+    // Traffic optimize API was removed with AI routers — use deterministic client fallback.
+    return this.buildFallbackOptimizedRoutes(originN, destinationN, preferences);
   }
 
   /**
@@ -258,7 +211,7 @@ export class TrafficAI {
   }
 
   /**
-   * Calculate time saved by using AI route vs standard route
+   * Calculate time saved by using the selected route vs standard route
    */
   static calculateTimeSaved(aiRoute: TrafficRoute, standardDuration: number): number {
     const std = Number(standardDuration);
@@ -436,7 +389,7 @@ export class TrafficAI {
 /**
  * React Hook for Traffic Intelligence
  */
-export const useTrafficAI = () => {
+export const useTrafficIntelligence = () => {
   const [hotspots, setHotspots] = React.useState<TrafficHotspot[]>([]);
   const [routes, setRoutes] = React.useState<TrafficRoute[]>([]);
   const [alerts, setAlerts] = React.useState<TrafficAlert[]>([]);
@@ -449,7 +402,7 @@ export const useTrafficAI = () => {
   ) => {
     setLoading(true);
     try {
-      const data = await TrafficAI.getTrafficStatus(latitude, longitude, radius);
+      const data = await TrafficIntelligence.getTrafficStatus(latitude, longitude, radius);
       setHotspots(data);
     } catch (error) {
       console.error('Failed to fetch traffic status:', error);
@@ -465,7 +418,7 @@ export const useTrafficAI = () => {
   ) => {
     setLoading(true);
     try {
-      const data = await TrafficAI.getOptimizedRoutes(origin, destination, preferences);
+      const data = await TrafficIntelligence.getOptimizedRoutes(origin, destination, preferences);
       setRoutes(data);
     } catch (error) {
       console.error('Failed to fetch routes:', error);
@@ -481,7 +434,7 @@ export const useTrafficAI = () => {
   ) => {
     setLoading(true);
     try {
-      const data = await TrafficAI.getTrafficAlerts(driverId, currentLocation, destination);
+      const data = await TrafficIntelligence.getTrafficAlerts(driverId, currentLocation, destination);
       setAlerts(data);
     } catch (error) {
       console.error('Failed to fetch alerts:', error);

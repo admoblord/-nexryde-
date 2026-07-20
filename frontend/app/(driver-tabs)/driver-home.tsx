@@ -45,6 +45,7 @@ import {
   formatApiDetail,
   extractApiDetailPayload,
   messageFromAxiosError,
+  getDriverSubscriptionStatus,
   getDriverWithdrawals,
   getTrip,
   arriveTrip,
@@ -52,7 +53,10 @@ import {
   cancelTrip,
   completeTrip,
   rateTrip,
+  confirmTripPayment,
+  triggerSOS,
 } from '@/src/services/api';
+import CancellationReasonModal from '@/src/components/shared/CancellationReasonModal';
 import { parseDriverOnlineError } from '@/src/constants/driverOnlineErrors';
 import {
   evaluateDriverPermissionPreflight,
@@ -60,7 +64,6 @@ import {
   type DriverPermissionPreflight,
 } from '@/src/services/driverPermissionPreflight';
 import { DriverGoOnlinePermissionGate } from '@/src/components/driver/DriverGoOnlinePermissionGate';
-import Constants from 'expo-constants';
 import { apiFetch } from '@/src/utils/sessionRefresh';
 import { verifyDriverTripAssignment } from '@/src/utils/verifyDriverTripAssignment';
 import { getValidToken, getCachedToken } from '@/src/lib/tokenStore';
@@ -118,13 +121,16 @@ import { ensureCriticalSessionReady } from '@/src/lib/sessionReadiness';
 import {
   applyOptimisticGoOffline,
   GO_OFFLINE_FAIL_MESSAGE,
-  restoreOnlineAfterOfflineFailure,
 } from '@/src/services/driverGoOfflineOptimistic';
 import {
   armGoOnlineWatchdog,
   clearGoOnlineWatchdog,
   GO_ONLINE_TIMEOUT_MS,
 } from '@/src/services/driverGoOnlineWatchdog';
+import {
+  armGoOfflineWatchdog,
+  clearGoOfflineWatchdog,
+} from '@/src/services/driverGoOfflineWatchdog';
 import {
   buildOnlineToggleUrl,
   createStatusRequestId,
@@ -143,20 +149,18 @@ import {
 } from '@/src/services/driverHeartbeat';
 import * as Haptics from 'expo-haptics';
 import { DRIVER_OFFER_COUNTDOWN_SECONDS } from '@/src/constants/driverOffer';
-import { buildDriverPriorityFeatures, buildDriverToolFeatures } from '@/src/config/driverHomeFeatures';
 import { buildTrialBannerText, splitTrialBannerForEmphasis } from '@/src/utils/driverTrialDisplay';
 import DriverRideRequestModal from '@/src/components/DriverRideRequestModal';
 import { suggestedCounter } from '@/src/components/driver/DriverOfferBidActions';
 import { FeatureHubDrawer } from '@/src/components/FeatureHubDrawer';
-import { PrayerStripWidget } from '@/src/components/PrayerStripWidget';
 import { SkeletonBlock } from '@/src/components/SkeletonBlock';
-import { COLORS } from '@/src/constants/theme';
-import { HOME_PALETTE, BRAND } from '@/src/constants/designSystem';
+import { SURFACE,  HOME_PALETTE, BRAND } from '@/src/constants/designSystem';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import DriverLiveMapView, {
   NEXRYDE_MAP_STYLE,
   type ActiveTrip,
 } from '@/src/components/DriverLiveMapView';
+import { subscribeDriverTripMapCoords } from '@/src/services/driverTripMapGps';
 import DriverTripCompletionPanel, {
   type TripCompletionPayload,
 } from '@/src/components/driver/DriverTripCompletionPanel';
@@ -336,7 +340,8 @@ function tripToCompletionPayload(merged: Trip & Record<string, unknown>): TripCo
 }
 
 // Navigation helpers are imported from the shared utility
-import { openGoogleNavigation, promptExternalNavigation } from '@/src/utils/openExternalNavigation';
+import { promptExternalNavigation } from '@/src/utils/openExternalNavigation';
+import { useThemeColors } from '@/src/constants/theme';
 
 /** Map backend `ride_offer` WebSocket payload to the trip shape used by the offer modal + accept API. */
 function mapWsRideOfferToTrip(data: Record<string, unknown>) {
@@ -366,7 +371,7 @@ function mapWsRideOfferToTrip(data: Record<string, unknown>) {
     status: data.status,
     preferred: data.preferred,
     offer_expires_at: data.expires_at,
-    // Map preview data — forwarded so DriverOfferRoutePreview renders correctly
+    // Map preview data for offer dock route context
     route_preview_coordinates: data.route_preview_coordinates ?? data.polyline_coords ?? null,
     map_preview_region: data.map_preview_region ?? null,
     area_summary_line: data.area_summary_line ?? data.area_label ?? null,
@@ -446,6 +451,8 @@ export default function ModernDriverHome() {
   const pendingAction = typeof rawAction === 'string' ? rawAction : '';
   const autoActionFiredRef = useRef(false);
   const { language, setLanguage, availableLanguages, t } = useLanguage();
+  const { colors, isDark } = useThemeColors();
+  const dashboardBg = isDark ? '#0a0f1e' : colors.background;
   const operationalState = useDriverSessionStore((s) => s.operationalState);
   const isDashboardVisible = useDriverSessionStore((s) => s.isDashboardVisible);
   const connectionPhase = useDriverSessionStore((s) => s.connectionPhase);
@@ -529,14 +536,6 @@ export default function ModernDriverHome() {
     void loadWorkZoneOnce(driverId);
   }, [driverId]);
 
-  const priorityFeatures = useMemo(
-    () => buildDriverPriorityFeatures(t),
-    [language, t.home.myTrips, t.home.support, t.wallet.payment]
-  );
-  const toolFeatures = useMemo(
-    () => buildDriverToolFeatures(t),
-    [language, t.verification.vehicleVerified, t.verification.uploadDocuments, t.safety.safetyTips, t.driver.rating]
-  );
   const [earnings, setEarnings] = useState({
     today: 0,
     week: 0,
@@ -721,6 +720,8 @@ export default function ModernDriverHome() {
   const lastLocationPushAtRef = useRef<number>(0);
   const lastLocationPushCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
   const onlineToggleInFlightRef = useRef(false);
+  /** Sticky: intentional Go Offline must not be undone by hydrate while server still says online. */
+  const desiredOfflineUntilSyncedRef = useRef(false);
   /** Bumps on each go-online intent so stale session awaits cannot start a second PUT. */
   const goOnlineToggleGenRef = useRef(0);
   const [earningsLoading, setEarningsLoading] = useState(true);
@@ -733,7 +734,7 @@ export default function ModernDriverHome() {
 
   // ─── Ride category selection ─────────────────────────────────────────────
   const CATEGORY_OPTIONS = [
-    { id: 'economy', label: 'Standard', icon: 'car-outline' as const, color: '#00D46A', desc: 'Affordable rides' },
+    { id: 'economy', label: 'Standard', icon: 'car-outline' as const, color: BRAND.primary, desc: 'Affordable rides' },
     { id: 'comfort', label: 'Comfort', icon: 'car-sport-outline' as const, color: '#0EA5E9', desc: 'More space & style' },
     { id: 'xl', label: 'XL', icon: 'bus-outline' as const, color: '#FFB800', desc: '6-seat vehicles' },
     { id: 'premium', label: 'Premium', icon: 'rocket-outline' as const, color: '#9333EA', desc: 'Luxury experience' },
@@ -819,37 +820,62 @@ export default function ModernDriverHome() {
     [currentTrip, driverProfile],
   );
 
+  const launchDriverNavigation = useCallback(
+    (dest: { lat: number; lng: number; label?: string; phase?: string }) => {
+      const { isGoogleNavigationEnabled } = require('@/src/constants/mapEngines') as typeof import('@/src/constants/mapEngines');
+      if (isGoogleNavigationEnabled()) {
+        guardedPush({
+          pathname: '/driver/in-app-navigation',
+          params: {
+            lat: String(dest.lat),
+            lng: String(dest.lng),
+            label: dest.label || 'Destination',
+            tripId: currentTrip?.id || '',
+            phase: dest.phase || String(currentTrip?.status || ''),
+          },
+        } as Href);
+        return;
+      }
+      promptExternalNavigation(dest);
+    },
+    [currentTrip?.id, currentTrip?.status, guardedPush],
+  );
+
   const handleTripOpenNavigation = useCallback(() => {
     if (!currentTrip) return;
     const st  = currentTrip.status;
     const pick = currentTrip.pickup_location;
     const drop = currentTrip.dropoff_location;
-    // Phase-aware navigation: pickup when heading there, destination when on trip
+    // Phase-aware: accepted/arrived Directions → pickup; ongoing → drop-off.
+    // Arrived dock also has a dedicated Navigate-to-destination handler.
     if ((st === 'accepted' || st === 'arrived') && pick) {
-      promptExternalNavigation({
+      launchDriverNavigation({
         lat: Number(pick.lat),
         lng: Number(pick.lng),
         label: pick.address || 'Pickup',
+        phase: st,
       });
     } else if (st === 'ongoing' && drop) {
-      promptExternalNavigation({
+      launchDriverNavigation({
         lat: Number(drop.lat),
         lng: Number(drop.lng),
         label: drop.address || 'Destination',
+        phase: 'ongoing',
       });
     }
-  }, [currentTrip]);
+  }, [currentTrip, launchDriverNavigation]);
 
-  // Dedicated handler to navigate to the trip destination (used by arrived dock preview)
+  // Dedicated handler to navigate to the trip destination (arrived / start docks)
   const handleTripNavigateToDestination = useCallback(() => {
     if (!currentTrip?.dropoff_location) return;
     const drop = currentTrip.dropoff_location;
-    promptExternalNavigation({
+    launchDriverNavigation({
       lat: Number(drop.lat),
       lng: Number(drop.lng),
       label: drop.address || 'Destination',
+      phase: String(currentTrip.status || 'arrived'),
     });
-  }, [currentTrip]);
+  }, [currentTrip, launchDriverNavigation]);
 
   const handleTripMarkArrived = useCallback(async () => {
     if (!currentTrip?.id || !driverId) return;
@@ -892,28 +918,134 @@ export default function ModernDriverHome() {
     }
   }, [currentTrip, setCurrentTrip, toast]);
 
-  const handleTripCancelFromDock = useCallback(async () => {
+  const [driverCancelOpen, setDriverCancelOpen] = useState(false);
+  const [driverCancelError, setDriverCancelError] = useState<string | null>(null);
+  const [driverCancelReasonPrefill, setDriverCancelReasonPrefill] = useState<string | null>(null);
+
+  const handleTripCancelFromDock = useCallback(() => {
     if (!currentTrip?.id || !driverId) return;
-    setTripActionBusy('cancel');
-    try {
-      await cancelTrip(currentTrip.id, driverId);
-      setCurrentTrip(null);
-      if (Platform.OS !== 'web') {
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    setDriverCancelError(null);
+    setDriverCancelReasonPrefill(null);
+    setDriverCancelOpen(true);
+  }, [currentTrip?.id, driverId]);
+
+  const handleTripRiderNoShow = useCallback(() => {
+    if (!currentTrip?.id || !driverId) return;
+    setDriverCancelError(null);
+    setDriverCancelReasonPrefill('Rider no-show');
+    setDriverCancelOpen(true);
+  }, [currentTrip?.id, driverId]);
+
+  const confirmDriverCancel = useCallback(
+    async (reason?: string) => {
+      if (!currentTrip?.id || !driverId) return;
+      setTripActionBusy('cancel');
+      setDriverCancelError(null);
+      try {
+        await cancelTrip(currentTrip.id, driverId);
+        // Best-effort: reason is stored client-side for support if backend ignores it.
+        if (reason) {
+          try {
+            await fetchWithTimeout(`${BACKEND_URL}/api/trips/${currentTrip.id}/cancel-reason`, {
+              method: 'POST',
+              headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+              body: JSON.stringify({ reason, cancelled_by: 'driver' }),
+              timeoutMs: 4000,
+            });
+          } catch {
+            /* optional endpoint */
+          }
+        }
+        setDriverCancelOpen(false);
+        setCurrentTrip(null);
+        if (Platform.OS !== 'web') {
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        }
+        toast.show(reason === 'Rider no-show' ? 'Trip cancelled — rider no-show.' : 'Trip cancelled.', 'success');
+      } catch (e: unknown) {
+        const msg = messageFromAxiosError(e, 'Could not cancel trip. Try again in a moment.');
+        setDriverCancelError(msg);
+        toast.show(msg, 'error');
+      } finally {
+        setTripActionBusy(null);
       }
-    } catch (e: unknown) {
-      toast.show(messageFromAxiosError(e, 'Could not cancel trip. Try again in a moment.'), 'error');
-    } finally {
-      setTripActionBusy(null);
-    }
-  }, [currentTrip?.id, driverId, setCurrentTrip, toast]);
+    },
+    [currentTrip?.id, driverId, setCurrentTrip, toast],
+  );
+
+  const handleTripEmergency = useCallback(() => {
+    if (!currentTrip?.id) return;
+    Alert.alert(
+      'Emergency SOS',
+      'This alerts NEXRYDE safety with your live GPS. Only use in a real emergency.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send SOS',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              try {
+                const permission = await Location.requestForegroundPermissionsAsync();
+                if (permission.status !== 'granted') {
+                  Alert.alert('Location required', 'Enable location to send SOS with live GPS.');
+                  return;
+                }
+                const loc = await Location.getCurrentPositionAsync({
+                  accuracy: Location.Accuracy.High,
+                });
+                await triggerSOS({
+                  trip_id: currentTrip.id,
+                  location_lat: loc.coords.latitude,
+                  location_lng: loc.coords.longitude,
+                });
+                if (Platform.OS !== 'web') {
+                  void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                }
+                Alert.alert('SOS sent', 'Emergency alert sent to NEXRYDE support and your safety contacts.');
+              } catch (err: any) {
+                Alert.alert(
+                  'SOS failed',
+                  err?.response?.data?.detail || 'Could not send SOS. Call local emergency services if needed.',
+                );
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [currentTrip?.id]);
 
   const handleTripPauseFromDock = useCallback(() => {
     Alert.alert(
-      'Pause trip',
-      'Full trip pause from here is not available yet. Pull over safely, then use Chat or Call if you need a moment with your rider.',
+      'Need a moment?',
+      'Pull over safely. Use Call or Message to update your rider. Trip pause logging is coming soon.',
+      [
+        { text: 'OK', style: 'cancel' },
+        {
+          text: 'Message rider',
+          onPress: () => {
+            if (currentTrip?.id) {
+              guardedPush(`/chat?tripId=${encodeURIComponent(currentTrip.id)}&role=driver` as Href);
+            }
+          },
+        },
+      ],
     );
-  }, []);
+  }, [currentTrip?.id, guardedPush]);
+
+  const handleCompletionConfirmCash = useCallback(async () => {
+    const tid = tripCompletion?.tripId;
+    if (!tid) return;
+    try {
+      await confirmTripPayment(tid);
+      setTripCompletion((prev) => (prev ? { ...prev, paymentPending: false } : prev));
+      toast.show('Cash payment confirmed.', 'success');
+    } catch (e: unknown) {
+      toast.show(messageFromAxiosError(e, 'Could not confirm cash payment.'), 'error');
+      throw e;
+    }
+  }, [tripCompletion?.tripId, toast]);
 
   const performCompleteTrip = useCallback(async () => {
     if (!currentTrip?.id) return;
@@ -1018,6 +1150,32 @@ export default function ModernDriverHome() {
         return;
       }
       if (serverOnline && localPhase === 'offline') {
+        if (desiredOfflineUntilSyncedRef.current) {
+          // Driver just went offline locally — keep Offline and keep reconciling server.
+          driverFlowLog('GO_ONLINE_DESYNC', {
+            action: 'ignore_hydrate_restore_desired_offline',
+            serverOnline: true,
+          });
+          const requestId = createStatusRequestId('offline');
+          void fetchWithTimeout(
+            buildOnlineToggleUrl(BACKEND_URL, { driverId, isOnline: false, requestId }),
+            {
+              method: 'PUT',
+              headers: { ...getAuthHeaders(), 'X-Request-Id': requestId },
+              timeoutMs: 8000,
+            },
+          )
+            .then((res) => {
+              if (res.ok) desiredOfflineUntilSyncedRef.current = false;
+            })
+            .catch(() => {});
+          startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
+            ok: true,
+            isOnline: false,
+            skipped: 'desired_offline',
+          });
+          return;
+        }
         driverFlowLog('GO_ONLINE_DESYNC', { action: 'hydrate_restore_online', serverOnline: true });
         hydrateServerOnline(true);
         driverOffersSocket.connect(driverId);
@@ -1163,6 +1321,19 @@ export default function ModernDriverHome() {
     ['accepted', 'arrived', 'ongoing'].includes(String(currentTrip?.status || '').toLowerCase())
   );
   bridgeActiveRef.current = bridgeActive;
+
+  // Keep live map car marker moving while bridge owns GPS (was freezing on trip).
+  useEffect(() => {
+    if (!bridgeActive) return;
+    return subscribeDriverTripMapCoords((c) => {
+      setDriverCoords({
+        lat: c.lat,
+        lng: c.lng,
+        heading: c.heading,
+        speedKmh: c.speedKmh,
+      });
+    });
+  }, [bridgeActive]);
   const driverPollingHighPriority = isDriverHighPriorityPolling(currentTrip?.status);
 
   useEffect(() => {
@@ -1353,8 +1524,8 @@ export default function ModernDriverHome() {
         const created = await Location.watchPositionAsync(
           {
             accuracy: Location.Accuracy.Balanced,
-            timeInterval: 5000,
-            distanceInterval: 10,
+            timeInterval: 2000,
+            distanceInterval: 8,
           },
           (update) => {
             if (cancelled) return;
@@ -1898,37 +2069,10 @@ export default function ModernDriverHome() {
     Alert.alert(title, message);
   }, [guardedPush, router]);
 
-  const restoreOnlineAfterFailedOffline = useCallback(() => {
-    if (!driverId) {
-      confirmOnline();
-      setStoreIsOnline(true);
-      return;
-    }
-    restoreOnlineAfterOfflineFailure({
-      confirmOnline: () => {
-        confirmOnline();
-        setStoreIsOnline(true);
-      },
-      connectOffersSocket: () => {
-        driverOffersSocket.connect(driverId);
-      },
-      fetchIncomingRide: () => {
-        void fetchIncomingRide();
-      },
-      startBackgroundLocation: () => {
-        import('@/src/tasks/backgroundLocationTask').then(({ startDriverBackgroundLocation }) => {
-          void startDriverBackgroundLocation();
-        });
-      },
-      persistLocalOnline: () => {
-        void updateDriverOnlineStatus(true, driverId);
-      },
-    });
-    driverFlowLog('GO_OFFLINE_RESTORED_ONLINE');
-  }, [driverId, confirmOnline, fetchIncomingRide, setStoreIsOnline]);
-
   const applyLocalOptimisticGoOffline = useCallback(() => {
     clearGoOnlineWatchdog();
+    clearGoOfflineWatchdog();
+    desiredOfflineUntilSyncedRef.current = true;
     driverFlowLog('GO_OFFLINE_TAP');
     const result = applyOptimisticGoOffline({
       clearIncomingOffer,
@@ -2115,9 +2259,13 @@ export default function ModernDriverHome() {
     toast,
   ]);
 
-  /** Offline API after optimistic UI. Does not wait to change Offline UI. */
+  /**
+   * Offline API after optimistic UI. Never restores ONLINE on failure —
+   * driver must stay offline (safety). Retry sync in background.
+   */
   const syncOfflineStatusBackground = useCallback(async () => {
     if (!driverId) {
+      clearGoOfflineWatchdog();
       onlineToggleInFlightRef.current = false;
       setStatusToggleBusy(false);
       return;
@@ -2132,7 +2280,8 @@ export default function ModernDriverHome() {
     try {
       let res: Response | null = null;
       let data: any = {};
-      for (let attempt = 0; attempt < 3; attempt += 1) {
+      // Keep wall-clock short so watchdog (~10s) can release busy without rollback.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
           res = await fetchWithTimeout(url, {
             method: 'PUT',
@@ -2140,7 +2289,7 @@ export default function ModernDriverHome() {
               ...getAuthHeaders(),
               'X-Request-Id': requestId,
             },
-            timeoutMs: 8000,
+            timeoutMs: 5000,
           });
           data = await res.json().catch(() => ({}));
           if (res.ok) break;
@@ -2148,32 +2297,47 @@ export default function ModernDriverHome() {
         } catch {
           res = null;
         }
-        await new Promise((resolve) => setTimeout(resolve, Math.min(8000, 1000 * 2 ** attempt)));
+        await new Promise((resolve) => setTimeout(resolve, Math.min(1500, 500 * 2 ** attempt)));
       }
 
       const apiMs = Date.now() - apiStarted;
       if (!res?.ok) {
-        restoreOnlineAfterFailedOffline();
-        toast.show(GO_OFFLINE_FAIL_MESSAGE, 'error');
-        driverFlowLog('GO_OFFLINE_API_FAILED', {
+        // Stay OFFLINE locally — queue another reconcile; do not bounce back online.
+        void updateDriverOnlineStatus(false, driverId);
+        toast.show(GO_OFFLINE_FAIL_MESSAGE, 'info');
+        driverFlowLog('GO_OFFLINE_API_FAILED_STAY_OFFLINE', {
           apiMs,
           status: res?.status ?? null,
           requestId,
           detail: formatApiDetail(data?.detail) || null,
         });
+        // Best-effort delayed reconcile (no UI rollback).
+        setTimeout(() => {
+          if (useDriverSessionStore.getState().connectionPhase !== 'offline') return;
+          void fetchWithTimeout(url, {
+            method: 'PUT',
+            headers: { ...getAuthHeaders(), 'X-Request-Id': createStatusRequestId('offline') },
+            timeoutMs: 8000,
+          }).catch(() => {});
+        }, 8000);
         return;
       }
       void updateDriverOnlineStatus(false, driverId);
+      desiredOfflineUntilSyncedRef.current = false;
       driverFlowLog('GO_OFFLINE_API_OK', { apiMs, requestId });
     } catch {
-      restoreOnlineAfterFailedOffline();
-      toast.show(GO_OFFLINE_FAIL_MESSAGE, 'error');
-      driverFlowLog('GO_OFFLINE_API_FAILED', { apiMs: Date.now() - apiStarted, requestId });
+      void updateDriverOnlineStatus(false, driverId);
+      toast.show(GO_OFFLINE_FAIL_MESSAGE, 'info');
+      driverFlowLog('GO_OFFLINE_API_FAILED_STAY_OFFLINE', {
+        apiMs: Date.now() - apiStarted,
+        requestId,
+      });
     } finally {
+      clearGoOfflineWatchdog();
       onlineToggleInFlightRef.current = false;
       setStatusToggleBusy(false);
     }
-  }, [driverId, restoreOnlineAfterFailedOffline, toast]);
+  }, [driverId, toast]);
 
   const handleToggleOnline = () => {
     if (onlineToggleInFlightRef.current) return;
@@ -2184,7 +2348,7 @@ export default function ModernDriverHome() {
 
     const goOnlineIntent = connectionPhase === 'offline';
 
-    // Go Offline: optimistic UI first — never await network before Offline state.
+    // Go Offline: optimistic UI first — never await network / socket before Offline state.
     if (!goOnlineIntent) {
       if (bridgeActive || operationalState === 'ON_TRIP') {
         driverFlowLog('GO_OFFLINE_BLOCKED_ACTIVE_TRIP', { source: 'toggle' });
@@ -2194,22 +2358,39 @@ export default function ModernDriverHome() {
       onlineToggleInFlightRef.current = true;
       setStatusToggleBusy(true);
       applyLocalOptimisticGoOffline();
+      armGoOfflineWatchdog({
+        isOfflineSyncInFlight: () => onlineToggleInFlightRef.current,
+        releaseBusy: () => {
+          onlineToggleInFlightRef.current = false;
+          setStatusToggleBusy(false);
+        },
+        onTimeout: () => {
+          // Local Offline already applied — just soft-notify and keep reconciling.
+          toast.show(GO_OFFLINE_FAIL_MESSAGE, 'info');
+          driverFlowLog('GO_OFFLINE_WATCHDOG_STAY_OFFLINE');
+        },
+      });
       void (async () => {
         try {
           const session = await ensureCriticalSessionReady();
           if (!session.ok || !session.token) {
-            restoreOnlineAfterFailedOffline();
-            toast.show(GO_OFFLINE_FAIL_MESSAGE, 'error');
+            // Still stay offline — cannot receive trips without session either.
+            void updateDriverOnlineStatus(false, driverId);
+            toast.show(GO_OFFLINE_FAIL_MESSAGE, 'info');
+            clearGoOfflineWatchdog();
             onlineToggleInFlightRef.current = false;
             setStatusToggleBusy(false);
+            driverFlowLog('GO_OFFLINE_SESSION_FAIL_STAY_OFFLINE');
             return;
           }
           await syncOfflineStatusBackground();
         } catch {
-          restoreOnlineAfterFailedOffline();
-          toast.show(GO_OFFLINE_FAIL_MESSAGE, 'error');
+          void updateDriverOnlineStatus(false, driverId);
+          toast.show(GO_OFFLINE_FAIL_MESSAGE, 'info');
+          clearGoOfflineWatchdog();
           onlineToggleInFlightRef.current = false;
           setStatusToggleBusy(false);
+          driverFlowLog('GO_OFFLINE_EXCEPTION_STAY_OFFLINE');
         }
       })();
       return;
@@ -2297,12 +2478,11 @@ export default function ModernDriverHome() {
           return;
         }
 
+        desiredOfflineUntilSyncedRef.current = false;
         beginConnecting();
         armGoOnlineWatchdog({
-          isStillConnecting: () => {
-            const phase = useDriverSessionStore.getState().connectionPhase;
-            return phase === 'connecting' || phase === 'reconnecting';
-          },
+          isStillConnecting: () =>
+            useDriverSessionStore.getState().connectionPhase === 'connecting',
           abortConnecting: () => {
             abortConnecting();
             releaseGoOnlineLock();
@@ -2322,11 +2502,18 @@ export default function ModernDriverHome() {
     })();
   };
   
+  // Online map dock owns offers; modal only when dashboard cannot show the dock.
+  const dockOwnsOffer = isDashboardVisible && sessionEngaged && !activeTripForMap;
+
   /* ── LIVE MAP MODE: confirmed / reconnecting / trip only (never during CONNECTING) ── */
   if (isDashboardVisible) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#0a0f1e' }}>
-        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <View style={{ flex: 1, backgroundColor: dashboardBg }}>
+        <StatusBar
+          barStyle={isDark ? 'light-content' : 'dark-content'}
+          backgroundColor="transparent"
+          translucent
+        />
 
         <DriverLiveMapView
           driverCoords={driverCoords}
@@ -2334,13 +2521,7 @@ export default function ModernDriverHome() {
           isReconnecting={connectionPhase === 'reconnecting'}
           driverCanReceiveOffers={driverCanReceiveOffers}
           todayEarnings={earnings.today}
-          todayTrips={earnings.trips}
-          todayTripHours={earnings.tripHoursToday}
-          driverRating={typeof user?.rating === 'number' ? user.rating : null}
-          weekEarnings={earnings.week}
           driverOffersWsConnected={driverOffersWsConnected}
-          surgeActive={!!(surgePricing?.is_surge)}
-          surgeMultiplier={Number(surgePricing?.multiplier ?? 1)}
           workZoneActive={workZoneActive}
           workZoneLabel={workZoneLabel}
           onGoOnline={handleToggleOnline}
@@ -2363,16 +2544,19 @@ export default function ModernDriverHome() {
           onEmbeddedOfferDecline={() => void handleDeclineRide()}
           embeddedOfferAccepting={acceptingRide}
           onTripOpenNavigation={handleTripOpenNavigation}
+          onTripNavigateToDestination={handleTripNavigateToDestination}
           onTripMarkArrived={handleTripMarkArrived}
           onTripStart={handleTripStart}
           onTripConfirmStart={handleTripConfirmStart}
           onTripCancel={handleTripCancelFromDock}
+          onTripRiderNoShow={handleTripRiderNoShow}
           onTripComplete={handleTripComplete}
           onTripPause={handleTripPauseFromDock}
           onTripCallRider={handleTripCallRider}
           onTripMessageRider={handleTripMessageRider}
+          onTripEmergency={handleTripEmergency}
           tripActionBusy={tripActionBusy}
-          suppressTripDock={!!tripCompletion || completeTripConfirmOpen}
+          suppressTripDock={!!tripCompletion || completeTripConfirmOpen || driverCancelOpen}
         />
 
         <DriverCompleteTripConfirmModal
@@ -2384,32 +2568,64 @@ export default function ModernDriverHome() {
           onConfirm={() => void performCompleteTrip()}
         />
 
+        <CancellationReasonModal
+          visible={driverCancelOpen}
+          role="driver"
+          cancelling={tripActionBusy === 'cancel'}
+          errorMessage={driverCancelError}
+          feePreviewNote={
+            driverCancelReasonPrefill === 'Rider no-show'
+              ? 'Free wait ended. Cancelling as rider no-show protects your acceptance metrics when used correctly.'
+              : 'Frequent cancellations can lower your trip offer priority.'
+          }
+          onKeepTrip={() => {
+            if (tripActionBusy !== 'cancel') {
+              setDriverCancelOpen(false);
+              setDriverCancelError(null);
+              setDriverCancelReasonPrefill(null);
+            }
+          }}
+          onConfirm={(reason) =>
+            void confirmDriverCancel(driverCancelReasonPrefill || reason || 'Other')
+          }
+        />
+
         {tripCompletion ? (
           <DriverTripCompletionPanel
             payload={tripCompletion}
             onDismiss={() => setTripCompletion(null)}
             onSubmitRating={handleCompletionRate}
+            onConfirmCash={
+              tripCompletion.paymentPending ? () => handleCompletionConfirmCash() : undefined
+            }
             onViewDetails={() => {
+              const tid = tripCompletion.tripId;
               setTripCompletion(null);
-              guardedPush('/(driver-tabs)/driver-trips' as Href);
+              if (tid) {
+                guardedPush(`/driver/trip-detail?tripId=${encodeURIComponent(tid)}` as Href);
+              } else {
+                guardedPush('/(driver-tabs)/driver-trips' as Href);
+              }
             }}
           />
         ) : null}
-        {/* Ride request: on-map dock while online; full modal when offline */}
-        <DriverRideRequestModal
-          visible={!!incomingRide && !isDashboardVisible}
-          trip={incomingRide}
-          countdownSeconds={rideCountdown}
-          countdownTotal={DRIVER_OFFER_COUNTDOWN_SECONDS}
-          fareInput={counterFareInput}
-          onFareInputChange={setCounterFareInput}
-          accepting={acceptingRide}
-          onAcceptRiderPrice={() => void handleAcceptIncomingAtRiderOffer()}
-          onSendCounterPrice={() => void handleAcceptIncomingAtCounterFare()}
-          onIgnore={handleDeclineRide}
-          driverLat={driverCoords?.lat}
-          driverLng={driverCoords?.lng}
-        />
+        {/* Offer modal only when map dock cannot own the offer (offline / no session). */}
+        {!dockOwnsOffer ? (
+          <DriverRideRequestModal
+            visible={!!incomingRide}
+            trip={incomingRide}
+            countdownSeconds={rideCountdown}
+            countdownTotal={DRIVER_OFFER_COUNTDOWN_SECONDS}
+            fareInput={counterFareInput}
+            onFareInputChange={setCounterFareInput}
+            accepting={acceptingRide}
+            onAcceptRiderPrice={() => void handleAcceptIncomingAtRiderOffer()}
+            onSendCounterPrice={() => void handleAcceptIncomingAtCounterFare()}
+            onIgnore={handleDeclineRide}
+            driverLat={driverCoords?.lat}
+            driverLng={driverCoords?.lng}
+          />
+        ) : null}
 
         {/* Feature hub drawer */}
         <FeatureHubDrawer visible={featureHubOpen} onClose={() => setFeatureHubOpen(false)} role="driver" />
@@ -2431,12 +2647,7 @@ export default function ModernDriverHome() {
     >
       <DriverOfflineHome
     driverCoords={driverCoords}
-    earnings={earnings}
-    earningsLoading={earningsLoading}
     profileImageUri={user?.profile_image ?? null}
-    driverRating={typeof user?.rating === 'number' && Number.isFinite(user.rating) ? user.rating : 0}
-    surgeActive={!!(surgePricing?.is_surge)}
-    surgePricing={surgePricing}
     driverApproved={driverApproved}
     trialReady={trialReady}
     subscriptionStatus={subscriptionStatus}
@@ -2462,13 +2673,27 @@ export default function ModernDriverHome() {
     onShield={() => guardedPush('/(driver-tabs)/driver-safety')}
     onHeatmap={() => guardedPush('/driver/heatmap')}
     onWorkZone={() => guardedPush('/driver/work-zone')}
-    onEarnings={() => guardedPush('/(driver-tabs)/driver-earnings')}
-    onTrips={() => guardedPush('/(driver-tabs)/driver-trips')}
     onProfile={() => guardedPush('/(driver-tabs)/driver-profile')}
     onOpenSubscription={() => guardedPush('/driver/subscription')}
+    onActivateTrial={async () => {
+      // GET /driver/subscription-status auto-provisions trial for verified drivers.
+      try {
+        const res = await getDriverSubscriptionStatus();
+        const status = String(res?.data?.status || '');
+        // Refresh verification + subscription so CTA flips to GO ONLINE without leaving home.
+        boot.retry();
+        if (['trial', 'active', 'grace_period'].includes(status)) {
+          toast.show('Free trial activated — tap GO ONLINE to start.', 'success');
+          return;
+        }
+      } catch {
+        /* fall through to subscription screen */
+      }
+      guardedPush('/driver/subscription');
+    }}
     rideRequestModal={
       <DriverRideRequestModal
-        visible={!!incomingRide}
+        visible={!!incomingRide && !dockOwnsOffer}
         trip={incomingRide}
         countdownSeconds={rideCountdown}
         countdownTotal={DRIVER_OFFER_COUNTDOWN_SECONDS}
@@ -2497,10 +2722,7 @@ export default function ModernDriverHome() {
 const OFFLINE_MAP_LAYER_HEIGHT = 208;
 const OFFLINE_MAP_FOOTER_HEIGHT = 48;
 const OFFLINE_MAP_CARD_HEIGHT = OFFLINE_MAP_LAYER_HEIGHT + OFFLINE_MAP_FOOTER_HEIGHT;
-const OFFLINE_STATS_ROW_HEIGHT = 72;
 const OFFLINE_TRIAL_SLOT_HEIGHT = 60;
-const OFFLINE_SURGE_SLOT_HEIGHT = 52;
-
 const INITIAL_OFFLINE_MAP_REGION = {
   latitude: 6.5244,
   longitude: 3.3792,
@@ -2579,7 +2801,7 @@ const DriverOfflineMapPreview = React.memo(function DriverOfflineMapPreview({
           showsUserLocation={false}
           showsMyLocationButton={false}
           showsCompass={false}
-          showsPointsOfInterest
+          showsPointsOfInterest={false}
           showsBuildings={false}
           showsTraffic={false}
           toolbarEnabled={false}
@@ -2632,41 +2854,12 @@ const DriverOfflineMapPreview = React.memo(function DriverOfflineMapPreview({
   );
 });
 
-function DriverOfflineStatCell({
-  icon,
-  label,
-  value,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  value: string;
-  onPress: () => void;
-}) {
-  return (
-    <TouchableOpacity style={ohStyles.statChip} onPress={onPress} activeOpacity={0.78}>
-      <View style={[ohStyles.statIconWrap, ohStyles.statIconWrapGreen]}>
-        <Ionicons name={icon} size={17} color={BRAND.primary} />
-      </View>
-      <Text style={ohStyles.statChipValue} numberOfLines={1}>
-        {value}
-      </Text>
-      <Text style={ohStyles.statChipLabel}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
 /* ═══════════════════════════════════════════════════════════════════════════
    OFFLINE HOME COMPONENT
    ═══════════════════════════════════════════════════════════════════════════ */
 function DriverOfflineHome({
   driverCoords,
-  earnings,
-  earningsLoading: _earningsLoading,
   profileImageUri,
-  driverRating,
-  surgeActive,
-  surgePricing,
   driverApproved,
   trialReady,
   subscriptionStatus,
@@ -2690,20 +2883,14 @@ function DriverOfflineHome({
   onShield: _onShield,
   onHeatmap,
   onWorkZone: _onWorkZone,
-  onEarnings,
-  onTrips,
   onProfile,
   onOpenSubscription,
+  onActivateTrial,
   rideRequestModal,
   featureHubDrawer,
 }: {
   driverCoords: { lat: number; lng: number; heading?: number } | null;
-  earnings: { today: number; trips: number; week: number; tripHoursToday?: number };
-  earningsLoading: boolean;
   profileImageUri: string | null;
-  driverRating: number;
-  surgeActive: boolean;
-  surgePricing: { driver_message?: string; is_peak_window?: boolean; heatmap?: { top_zone?: string } } | null;
   driverApproved: boolean;
   trialReady: boolean;
   subscriptionStatus: string | null;
@@ -2727,38 +2914,22 @@ function DriverOfflineHome({
   onShield: () => void;
   onHeatmap: () => void;
   onWorkZone: () => void;
-  onEarnings: () => void;
-  onTrips: () => void;
   onProfile: () => void;
   onOpenSubscription: () => void;
+  onActivateTrial: () => void;
   rideRequestModal: React.ReactNode;
   featureHubDrawer: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
   const tabPad = useTabBottomPad(8);
   const flow = useFlowLayout();
+  const { colors, isDark } = useThemeColors();
+  const offlineBg = isDark ? '#050A12' : colors.background;
   const goPulse = useRef(new Animated.Value(1)).current;
 
   const mapPinLat = driverCoords?.lat ?? null;
   const mapPinLng = driverCoords?.lng ?? null;
   const handleHeatmapPress = useCallback(() => onHeatmap(), [onHeatmap]);
-
-  /* Time-based greeting */
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-
-  /* LIVE badge pulse */
-  const livePulse = useRef(new Animated.Value(0.4)).current;
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(livePulse, { toValue: 1, duration: 700, useNativeDriver: true }),
-        Animated.timing(livePulse, { toValue: 0.4, duration: 700, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* GO button outer ring */
   const goRingOuter = useRef(new Animated.Value(0)).current;
@@ -2787,30 +2958,8 @@ function DriverOfflineHome({
     return () => loop.stop();
   }, [driverApproved, trialReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fmtNGN = (n: number) =>
-    n >= 1000 ? `₦${(n / 1000).toFixed(1)}k` : `₦${Math.round(n).toLocaleString()}`;
-
-  const earningsLabel = fmtNGN(earnings.today);
-  const tripsLabel = String(earnings.trips ?? 0);
-  const ratingLabel =
-    driverRating > 0 && driverRating <= 5
-      ? driverRating.toFixed(1)
-      : '5.0';
-
   const permissionsReady = !permissionPreflight || permissionPreflight.ready;
   const canTapGoOnline = driverApproved && trialReady && permissionsReady && !toggling;
-  const appVersion =
-    Constants.expoConfig?.version ||
-    (Constants.manifest as { version?: string } | null)?.version ||
-    '—';
-  const androidVersionCode =
-    Platform.OS === 'android'
-      ? String(
-          (Constants.expoConfig?.android as { versionCode?: number } | undefined)?.versionCode ??
-            (Constants.manifest as { android?: { versionCode?: number } } | null)?.android?.versionCode ??
-            '',
-        )
-      : '';
   const notApproved = !driverApproved;
   const trialEnded = subscriptionStatus === 'pending_payment';
   const needsSubscription = driverApproved && !trialReady;
@@ -2822,7 +2971,6 @@ function DriverOfflineHome({
     emphasis: trialEmphasis,
   });
   const showTrialProgress = driverApproved && subscriptionStatus === 'trial' && trialTripsTarget > 0;
-  const showSurgeStrip = surgeActive || surgePricing?.is_peak_window;
   const profileReadyDot = driverApproved && trialReady;
 
   const goHalftoneDots = useMemo(
@@ -2831,8 +2979,12 @@ function DriverOfflineHome({
   );
 
   return (
-    <View style={ohStyles.screenRoot}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+    <View style={[ohStyles.screenRoot, { backgroundColor: offlineBg }]}>
+      <StatusBar
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor="transparent"
+        translucent
+      />
 
       <ScrollView
         contentContainerStyle={{
@@ -2846,8 +2998,15 @@ function DriverOfflineHome({
         <View style={{ width: '100%', maxWidth: flow.maxContentWidth, alignSelf: 'center' }}>
         {/* Driver offline — go-online (reference UI) */}
         <View style={[ohStyles.topBar, { paddingTop: insets.top + 10 }]}>
-          <TouchableOpacity style={ohStyles.topIconBtn} onPress={onFeatureHub} activeOpacity={0.8}>
-            <Ionicons name="menu" size={22} color="#E2E8F0" />
+          <TouchableOpacity
+            style={[
+              ohStyles.topIconBtn,
+              !isDark && { backgroundColor: colors.surfaceAlt, borderColor: colors.border },
+            ]}
+            onPress={onFeatureHub}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="menu" size={22} color={isDark ? '#E2E8F0' : colors.text} />
           </TouchableOpacity>
 
           <View style={ohStyles.topBarCenterSlot} pointerEvents="box-none">
@@ -2872,12 +3031,6 @@ function DriverOfflineHome({
               />
             </View>
           </TouchableOpacity>
-        </View>
-
-        <View style={ohStyles.heroWrap}>
-          <Text style={ohStyles.heroGreeting}>{greeting}</Text>
-          <Text style={ohStyles.heroTitle}>You're offline</Text>
-          <Text style={ohStyles.heroSub}>Tap GO to start receiving trips</Text>
         </View>
 
         <View style={ohStyles.trialProgressSlot}>
@@ -2916,41 +3069,7 @@ function DriverOfflineHome({
           onHeatmapPress={handleHeatmapPress}
         />
 
-        <View style={ohStyles.statsStrip}>
-          <DriverOfflineStatCell icon="wallet-outline" label="Earnings" value={earningsLabel} onPress={onEarnings} />
-          <View style={ohStyles.statDivider} />
-          <DriverOfflineStatCell icon="car-outline" label="Trips" value={tripsLabel} onPress={onTrips} />
-          <View style={ohStyles.statDivider} />
-          <DriverOfflineStatCell icon="stats-chart" label="Rating" value={ratingLabel} onPress={onProfile} />
-        </View>
-
-        <View style={ohStyles.surgeSlot}>
-          {showSurgeStrip ? (
-            <TouchableOpacity
-              style={ohStyles.surgeStrip}
-              onPress={onHeatmap}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Open demand heatmap"
-            >
-              <Ionicons name={surgeActive ? 'flash' : 'time'} size={15} color="#FBBF24" />
-              <Text style={ohStyles.surgeStripText} numberOfLines={2}>
-                {typeof surgePricing?.driver_message === 'string' && surgePricing.driver_message.trim().length > 0
-                  ? surgePricing.driver_message
-                  : surgeActive
-                    ? 'Surge is on — open Heatmap for the best zones'
-                    : 'Peak hour — open Heatmap to position for more trips'}
-              </Text>
-              <Ionicons name="chevron-forward" size={14} color="#FCD34D" />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-
-        <View style={ohStyles.prayerSlot}>
-          <PrayerStripWidget />
-        </View>
-
-        {/* ── Verification / approval banner ── */}
+        {/* Gates only — map + GO carry the rest */}
         {notApproved && (
           <View style={ohStyles.bannerWarn}>
             <Ionicons name="time-outline" size={18} color="#FBBF24" />
@@ -2998,11 +3117,6 @@ function DriverOfflineHome({
             onRequestItem={onRequestPermission}
           />
         ) : null}
-
-        <Text style={ohStyles.buildTag}>
-          Build {appVersion}
-          {androidVersionCode ? ` (${androidVersionCode})` : ''}
-        </Text>
 
         </View>
       </ScrollView>
@@ -3082,12 +3196,12 @@ function DriverOfflineHome({
             onPress={() => {
               Alert.alert(
                 'Activate Your Account',
-                'Your documents are approved! Start your free trial to receive ride requests.',
+                'Start your free trial to receive ride requests.',
                 [
                   { text: 'Later', style: 'cancel' },
                   {
                     text: 'Activate Now',
-                    onPress: onOpenSubscription,
+                    onPress: onActivateTrial,
                   },
                 ]
               );
@@ -3108,7 +3222,7 @@ function DriverOfflineHome({
 
 /* ── Offline home styles ─────────────────────────────────────── */
 const ohStyles = StyleSheet.create({
-  screenRoot: { flex: 1, backgroundColor: '#050A12' },
+  screenRoot: { flex: 1 },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3176,26 +3290,6 @@ const ohStyles = StyleSheet.create({
   offlineDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#64748B' },
   offlinePillText: { fontSize: 11, fontWeight: '800', color: '#94A3B8', letterSpacing: 2 },
 
-  /* Hero */
-  heroWrap: { paddingTop: 8, paddingBottom: 20 },
-  heroGreeting: { fontSize: 11, fontWeight: '700', color: BRAND.primary, marginBottom: 8, letterSpacing: 1.6, textTransform: 'uppercase' },
-  heroTitle: {
-    fontSize: 34,
-    fontWeight: '900',
-    color: '#F8FAFC',
-    letterSpacing: -1.2,
-    lineHeight: 40,
-  },
-  heroSub: { fontSize: 15, fontWeight: '500', color: '#64748B', marginTop: 6, letterSpacing: 0.1, lineHeight: 22 },
-  buildTag: {
-    marginTop: 8,
-    marginBottom: 4,
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#475569',
-    letterSpacing: 0.4,
-    textAlign: 'center',
-  },
   trialProgressSlot: {
     height: OFFLINE_TRIAL_SLOT_HEIGHT,
     marginBottom: 12,
@@ -3329,68 +3423,6 @@ const ohStyles = StyleSheet.create({
   },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#F87171' },
   liveBadgeText: { fontSize: 10, fontWeight: '900', color: '#94A3B8', letterSpacing: 1.2 },
-
-  /* Stats — earnings / trips / rating (fixed row — placeholders same size as values) */
-  statsStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: OFFLINE_STATS_ROW_HEIGHT,
-    marginHorizontal: 0,
-    marginBottom: 14,
-    backgroundColor: 'rgba(15,23,42,0.55)',
-    borderRadius: 22,
-    paddingHorizontal: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.1)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.28,
-    shadowRadius: 14,
-    elevation: 5,
-  },
-  statChip: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2 },
-  statIconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 3,
-  },
-  statChipValue: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#E2E8F0',
-    letterSpacing: -0.5,
-    minHeight: 22,
-    lineHeight: 22,
-    textAlign: 'center',
-  },
-  statChipLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.55, textTransform: 'uppercase' },
-  statDivider: { width: 1, height: 40, backgroundColor: 'rgba(255,255,255,0.07)' },
-  statIconWrapGreen: {
-    backgroundColor: 'rgba(34,229,160,0.11)',
-    borderWidth: 1,
-    borderColor: 'rgba(34,229,160,0.2)',
-  },
-  surgeSlot: {
-    height: OFFLINE_SURGE_SLOT_HEIGHT,
-    marginBottom: 12,
-    justifyContent: 'center',
-  },
-  surgeStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 16,
-    backgroundColor: 'rgba(245,158,11,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(245,158,11,0.28)',
-  },
-  surgeStripText: { flex: 1, fontSize: 12, fontWeight: '600', color: '#FCD34D', lineHeight: 17 },
-  prayerSlot: { marginBottom: 12 },
 
   /* Banners */
   bannerWarn: {
@@ -3606,7 +3638,7 @@ const ohStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.gray50,
+    backgroundColor: BRAND.bgDeep,
   },
   simSwapBanner: {
     backgroundColor: '#991B1B',
@@ -3688,7 +3720,7 @@ const styles = StyleSheet.create({
     height: 48,
   },
   statusCard: {
-    backgroundColor: COLORS.white,
+    backgroundColor: SURFACE.cardDark,
     borderRadius: 20,
     padding: 18,
     flexDirection: 'row',
@@ -3704,7 +3736,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.5)',
   },
   statusCardOnlineGlow: {
-    shadowColor: '#00D46A',
+    shadowColor: BRAND.primary,
     shadowOpacity: 0.35,
     shadowRadius: 18,
     borderColor: 'rgba(0, 212, 106, 0.45)',
@@ -3756,14 +3788,14 @@ const styles = StyleSheet.create({
   statusTitle: {
     fontSize: 18,
     fontWeight: '900',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     marginBottom: 3,
     letterSpacing: 0.3,
   },
   statusSubtitle: {
     fontSize: 13,
     fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    color: BRAND.textSecondary,
   },
   // Trial progress bar inside status card
   trialBarBg: {
@@ -3787,9 +3819,9 @@ const styles = StyleSheet.create({
     borderColor: '#CBD5E1',
   },
   toggleButtonActive: {
-    backgroundColor: COLORS.accentGreen,
-    borderColor: COLORS.accentGreenDark,
-    shadowColor: '#00D46A',
+    backgroundColor: BRAND.primary,
+    borderColor: BRAND.primaryDark,
+    shadowColor: BRAND.primary,
     shadowOpacity: 0.45,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 0 },
@@ -3883,20 +3915,20 @@ const styles = StyleSheet.create({
   roadmapBadge: {
     fontSize: 10,
     fontWeight: '900',
-    color: COLORS.accentGreen,
+    color: BRAND.primary,
     letterSpacing: 0.8,
     marginBottom: 3,
   },
   roadmapTitle: {
     fontSize: 17,
     fontWeight: '900',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     marginBottom: 4,
   },
   roadmapSubtitle: {
     fontSize: 13,
     lineHeight: 19,
-    color: COLORS.lightTextSecondary,
+    color: BRAND.textSecondary,
   },
   roadmapSteps: {
     marginTop: 16,
@@ -3925,7 +3957,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
   },
   roadmapActions: {
     flexDirection: 'row',
@@ -3935,7 +3967,7 @@ const styles = StyleSheet.create({
   roadmapPrimary: {
     flex: 1,
     borderRadius: 14,
-    backgroundColor: COLORS.accentGreen,
+    backgroundColor: BRAND.primary,
     paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
@@ -3943,7 +3975,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   roadmapPrimaryText: {
-    color: COLORS.white,
+    color: BRAND.textPrimary,
     fontSize: 13,
     fontWeight: '900',
   },
@@ -3952,12 +3984,12 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: '#F8FAFC',
     borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderColor: SURFACE.hairline,
     paddingVertical: 12,
     alignItems: 'center',
   },
   roadmapSecondaryText: {
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     fontSize: 13,
     fontWeight: '900',
   },
@@ -4043,13 +4075,13 @@ const styles = StyleSheet.create({
   offlineSyncTitle: {
     fontSize: 15,
     fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     marginBottom: 4,
   },
   offlineSyncSubtitle: {
     fontSize: 13,
     lineHeight: 19,
-    color: COLORS.lightTextSecondary,
+    color: BRAND.textSecondary,
   },
   section: {
     marginTop: 24,
@@ -4063,13 +4095,13 @@ const styles = StyleSheet.create({
   toolsHint: {
     fontSize: 12,
     lineHeight: 16,
-    color: COLORS.lightTextSecondary,
+    color: BRAND.textSecondary,
     marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 22,
     fontWeight: '900',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     marginBottom: 16,
     letterSpacing: 0.5,
   },
@@ -4086,7 +4118,7 @@ const styles = StyleSheet.create({
   walletWithdrawBtnText: { fontSize: 12, fontWeight: '900', color: '#022C22' },
   seeAll: {
     fontSize: 15,
-    color: COLORS.accentGreen,
+    color: BRAND.primary,
     fontWeight: '800',
     letterSpacing: 0.3,
   },
@@ -4129,7 +4161,7 @@ const styles = StyleSheet.create({
   earningLabel: {
     fontSize: 12,
     fontWeight: '700',
-    color: COLORS.lightTextSecondary,
+    color: BRAND.textSecondary,
     marginBottom: 6,
     textAlign: 'center',
     letterSpacing: 0.3,
@@ -4137,7 +4169,7 @@ const styles = StyleSheet.create({
   earningValue: {
     fontSize: 22,
     fontWeight: '900',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     letterSpacing: 1,
   },
   earningCardOnGreen: {
@@ -4188,7 +4220,7 @@ const styles = StyleSheet.create({
   featureCount: {
     fontSize: 14,
     fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    color: BRAND.textSecondary,
   },
   allFeaturesGrid: {
     flexDirection: 'row',
@@ -4220,13 +4252,13 @@ const styles = StyleSheet.create({
   featureText: {
     fontSize: 12,
     fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     textAlign: 'center',
     letterSpacing: 0.2,
     lineHeight: 14,
   },
   moreList: {
-    backgroundColor: COLORS.white,
+    backgroundColor: SURFACE.cardDark,
     borderRadius: 20,
     overflow: 'hidden',
     shadowColor: HOME_PALETTE.cardShadowColor,
@@ -4240,13 +4272,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.lightBorder,
+    borderBottomColor: SURFACE.hairline,
   },
   moreIcon: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: COLORS.accentGreenSoft,
+    backgroundColor: BRAND.primaryMuted,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -4255,11 +4287,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
   },
   // ── Category selector ───────────────────────────────────────────────────
   catCard: {
-    backgroundColor: COLORS.white,
+    backgroundColor: SURFACE.cardDark,
     borderRadius: 20,
     marginHorizontal: 16,
     marginTop: 12,
@@ -4280,7 +4312,7 @@ const styles = StyleSheet.create({
   catCardTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     marginLeft: 4,
   },
   catCardHint: {
@@ -4314,7 +4346,7 @@ const styles = StyleSheet.create({
   catTileLabel: {
     fontSize: 14,
     fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    color: BRAND.textPrimary,
     marginBottom: 2,
   },
   catTileDesc: {

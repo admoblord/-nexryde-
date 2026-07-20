@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
@@ -10,21 +11,22 @@ from database import db
 from work_zone_areas import (
     WORK_ZONE_AREAS,
     build_zone_label,
-    corridor_area_ids,
     point_in_zone,
     resolve_area_id,
-    validate_area_selection,
 )
 from work_zone_config import (
+    WORK_ZONE_DEFAULT_RADIUS_M,
     WORK_ZONE_EARLY_ACCESS_EMAILS,
     WORK_ZONE_ENABLED,
     WORK_ZONE_EXPIRY_HOUR_WAT,
-    WORK_ZONE_MAX_ZONED_SHARE,
-    WORK_ZONE_MIN_ONLINE_DRIVERS,
+    WORK_ZONE_MAX_ZONES,
+    WORK_ZONE_MAX_RADIUS_M,
+    WORK_ZONE_MIN_RADIUS_M,
 )
 
 logger = logging.getLogger("server")
 _WAT = ZoneInfo("Africa/Lagos")
+_EARTH_RADIUS_M = 6_371_000
 
 
 def _now_utc() -> datetime:
@@ -172,6 +174,124 @@ async def _count_online_in_areas(area_ids: set[str]) -> int:
     return count
 
 
+def _coerce_float(value: Any, default: Optional[float] = None) -> Optional[float]:
+    try:
+        f = float(value)
+        if math.isfinite(f):
+            return f
+    except (TypeError, ValueError):
+        pass
+    return default
+
+
+def _coerce_radius_m(value: Any) -> int:
+    raw = _coerce_float(value, WORK_ZONE_DEFAULT_RADIUS_M) or WORK_ZONE_DEFAULT_RADIUS_M
+    return int(max(WORK_ZONE_MIN_RADIUS_M, min(WORK_ZONE_MAX_RADIUS_M, raw)))
+
+
+def distance_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Haversine distance in metres."""
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    d_phi = math.radians(lat2 - lat1)
+    d_lam = math.radians(lng2 - lng1)
+    a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lam / 2) ** 2
+    return _EARTH_RADIUS_M * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def normalize_work_zone_place(raw: dict[str, Any], index: int = 0) -> dict[str, Any]:
+    """Normalize a Google Places/geocode selection for profile storage."""
+    lat = _coerce_float(raw.get("lat", raw.get("latitude")))
+    lng = _coerce_float(raw.get("lng", raw.get("longitude")))
+    if lat is None or lng is None:
+        raise ValueError("Each work zone needs latitude and longitude")
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        raise ValueError("Invalid work zone coordinates")
+    label = str(
+        raw.get("label")
+        or raw.get("name")
+        or raw.get("short_label")
+        or raw.get("address")
+        or raw.get("description")
+        or ""
+    ).strip()
+    if not label:
+        label = f"Zone {index + 1}"
+    place_id = str(raw.get("place_id") or raw.get("placeId") or "").strip()
+    zone_id = str(raw.get("id") or place_id or f"{round(lat, 5)}:{round(lng, 5)}").strip()
+    return {
+        "id": zone_id[:160],
+        "place_id": place_id,
+        "label": label[:160],
+        "address": str(raw.get("address") or raw.get("formatted_address") or raw.get("description") or label).strip()[:260],
+        "lat": lat,
+        "lng": lng,
+        "radius_m": _coerce_radius_m(raw.get("radius_m")),
+        "country": str(raw.get("country") or "Nigeria").strip()[:80],
+        "state": str(raw.get("state") or "").strip()[:100],
+        "source": str(raw.get("source") or "places").strip()[:40],
+    }
+
+
+def normalize_work_zone_places(raw_zones: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not raw_zones:
+        raise ValueError("Select at least one work zone")
+    if len(raw_zones) > WORK_ZONE_MAX_ZONES:
+        raise ValueError(f"Select up to {WORK_ZONE_MAX_ZONES} work zones")
+    zones = [normalize_work_zone_place(z, idx) for idx, z in enumerate(raw_zones)]
+    seen: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for z in zones:
+        key = z.get("place_id") or f"{round(z['lat'], 5)}:{round(z['lng'], 5)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(z)
+    return unique
+
+
+def build_zone_label_from_places(zones: list[dict[str, Any]]) -> str:
+    names = [str(z.get("label") or "Zone").strip() for z in zones if z]
+    if not names:
+        return ""
+    if len(names) <= 2:
+        return " · ".join(names)
+    return f"{names[0]} · {names[1]} +{len(names) - 2}"
+
+
+def point_in_work_zone_places(lat: Optional[float], lng: Optional[float], zones: list[dict[str, Any]]) -> bool:
+    if lat is None or lng is None:
+        return False
+    try:
+        p_lat = float(lat)
+        p_lng = float(lng)
+    except (TypeError, ValueError):
+        return False
+    for zone in zones or []:
+        z_lat = _coerce_float(zone.get("lat"))
+        z_lng = _coerce_float(zone.get("lng"))
+        if z_lat is None or z_lng is None:
+            continue
+        if distance_m(p_lat, p_lng, z_lat, z_lng) <= _coerce_radius_m(zone.get("radius_m")):
+            return True
+    return False
+
+
+async def _count_online_near_zones(zones: list[dict[str, Any]]) -> int:
+    if not zones:
+        return 0
+    profiles = await db.driver_profiles.find(
+        {"is_online": True, "verification_status": "approved"},
+        {"_id": 0, "user_id": 1, "current_location": 1},
+    ).to_list(1000)
+    count = 0
+    for p in profiles:
+        loc = p.get("current_location") or {}
+        if point_in_work_zone_places(loc.get("lat"), loc.get("lng"), zones):
+            count += 1
+    return count
+
+
 async def _count_zoned_online_in_areas(area_ids: set[str]) -> int:
     profiles = await db.driver_profiles.find(
         {
@@ -196,23 +316,30 @@ async def check_activation_guardrails(
     *,
     bypass_share_cap: bool = False,
 ) -> tuple[bool, str]:
-    corridor = corridor_area_ids(area_ids)
-    online = await _count_online_in_areas(corridor)
-    if online < WORK_ZONE_MIN_ONLINE_DRIVERS:
-        return (
-            False,
-            f"Not enough drivers online in this corridor right now "
-            f"({online}/{WORK_ZONE_MIN_ONLINE_DRIVERS} required). Try again later.",
-        )
-    if not bypass_share_cap:
-        zoned = await _count_zoned_online_in_areas(corridor)
-        share = zoned / max(online, 1)
-        if share >= WORK_ZONE_MAX_ZONED_SHARE:
-            return (
-                False,
-                "Zone slots full for this area right now — try later.",
-            )
+    # New marketplace policy: never block activation because an area is new,
+    # quiet, or has too few online drivers. Counts remain informational only.
     return True, "ok"
+
+
+async def get_zone_demand_stats(zones: list[dict[str, Any]]) -> dict[str, int]:
+    """Rough trips/week per arbitrary zone from last 7 days completed trips."""
+    since = (_now_utc() - timedelta(days=7)).isoformat()
+    counts = {str(z.get("id") or idx): 0 for idx, z in enumerate(zones or [])}
+    if not counts:
+        return counts
+    trips = await db.trips.find(
+        {"status": "completed", "created_at": {"$gte": since}},
+        {"_id": 0, "pickup_location": 1, "dropoff_location": 1},
+    ).to_list(5000)
+    for trip in trips:
+        for zone in zones:
+            zid = str(zone.get("id") or "")
+            for loc_key in ("pickup_location", "dropoff_location"):
+                loc = trip.get(loc_key) or {}
+                if point_in_work_zone_places(loc.get("lat"), loc.get("lng"), [zone]):
+                    counts[zid] = counts.get(zid, 0) + 1
+                    break
+    return counts
 
 
 def normalize_profile_work_zone(profile: dict) -> dict:
@@ -285,15 +412,34 @@ async def work_zone_public_state(profile: dict, user_id: str) -> dict[str, Any]:
     plan = await resolve_driver_plan_entitlement(user_id)
     trial_active = bool(plan.get("trial_active"))
     area_ids = profile.get("work_zone_area_ids") or []
+    zones = profile.get("work_zone_zones") or []
+    if not zones and area_ids:
+        # Legacy profiles keep working until a driver updates to flexible zones.
+        zones = [
+            {
+                "id": aid,
+                "place_id": "",
+                "label": WORK_ZONE_AREAS[aid].name,
+                "address": f"{WORK_ZONE_AREAS[aid].name}, {WORK_ZONE_AREAS[aid].city}",
+                "lat": WORK_ZONE_AREAS[aid].centroid_lat,
+                "lng": WORK_ZONE_AREAS[aid].centroid_lng,
+                "radius_m": WORK_ZONE_DEFAULT_RADIUS_M,
+                "country": "Nigeria",
+                "source": "legacy_area",
+            }
+            for aid in area_ids
+            if aid in WORK_ZONE_AREAS
+        ]
     available, avail_reason = await feature_available_for_driver(user_id)
     early = await driver_has_early_access(user_id)
     zone_running_grace = bool(
         not entitled and profile.get("work_zone_active") and _zone_still_valid_today(profile)
     )
     return {
-        "active": bool(profile.get("work_zone_active") and area_ids),
+        "active": bool(profile.get("work_zone_active") and (zones or area_ids)),
         "area_ids": area_ids,
-        "label": profile.get("work_zone_label") or build_zone_label(area_ids),
+        "zones": zones,
+        "label": profile.get("work_zone_label") or build_zone_label_from_places(zones) or build_zone_label(area_ids),
         "set_at": profile.get("work_zone_set_at"),
         "expires_at": profile.get("work_zone_expires_at"),
         "feature_available": available,
@@ -327,6 +473,25 @@ def driver_work_zone_allows_trip(profile: dict, trip: dict) -> tuple[bool, dict[
     """
     if not profile.get("work_zone_active"):
         return True, {"work_zone_filter": False}
+    zones = profile.get("work_zone_zones") or []
+    if zones:
+        pickup = trip.get("pickup_location") or {}
+        dropoff = trip.get("dropoff_location") or {}
+        pickup_in = point_in_work_zone_places(pickup.get("lat"), pickup.get("lng"), zones)
+        dropoff_in = point_in_work_zone_places(dropoff.get("lat"), dropoff.get("lng"), zones)
+        # Scalable work zones primarily constrain pickup territory. Dropoff is
+        # logged for transparency but does not block a driver from serving a
+        # local pickup that leaves the zone.
+        allowed = pickup_in or (pickup.get("lat") is None and dropoff_in)
+        meta = {
+            "work_zone_filter": True,
+            "matching_mode": "radius_geofence",
+            "pickup_in": pickup_in,
+            "dropoff_in": dropoff_in,
+            "zone_count": len(zones),
+            "zone_labels": [z.get("label") for z in zones],
+        }
+        return allowed, meta
     area_ids = set(profile.get("work_zone_area_ids") or [])
     if not area_ids:
         return True, {"work_zone_filter": False}

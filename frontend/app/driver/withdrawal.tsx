@@ -355,7 +355,7 @@ function BankLinkCard({ bank, bankReady, onLink }: { bank: { bank_name: string; 
         <View style={{ flex: 1 }}>
           <Text style={bl.title}>Payout account linked</Text>
           <Text style={bl.sub}>
-            {bank.bank_name} · ****{bank.account_number.slice(-4)} · {bank.account_name}
+            {bank.bank_name} · ****{(bank.account_number || '').slice(-4)} · {bank.account_name}
           </Text>
         </View>
         <TouchableOpacity style={bl.changeBtn} onPress={onLink}>
@@ -525,11 +525,15 @@ export default function WithdrawalScreen() {
     try {
       const res = await getDriverWithdrawals(driverId);
       const d = res.data;
-      setWalletBalance(d.wallet_balance);
-      setEarningsFrozen(d.earnings_frozen);
-      setBankReady(d.bank_ready);
-      setBank(d.bank);
-      setWithdrawals(d.withdrawals);
+      setWalletBalance(Number(d.wallet_balance ?? 0));
+      setEarningsFrozen(Boolean(d.earnings_frozen));
+      setBankReady(Boolean(d.bank_ready));
+      setBank({
+        bank_name: String(d.bank?.bank_name ?? ''),
+        account_number: String(d.bank?.account_number ?? ''),
+        account_name: String(d.bank?.account_name ?? ''),
+      });
+      setWithdrawals(Array.isArray(d.withdrawals) ? d.withdrawals : []);
     } catch {
       // keep existing
     } finally {
@@ -740,7 +744,7 @@ export default function WithdrawalScreen() {
             <View style={s.bankRow}>
               <Ionicons name="checkmark-circle" size={14} color="#86efac" />
               <Text style={s.bankRowText}>
-                {bank.bank_name} · ****{bank.account_number.slice(-4)} · {bank.account_name}
+                {bank.bank_name} · ****{(bank.account_number || '').slice(-4)} · {bank.account_name}
               </Text>
             </View>
           )}
@@ -875,7 +879,7 @@ export default function WithdrawalScreen() {
                   {/* Bank info */}
                   <View style={m.bankInfoRow}>
                     <Ionicons name="business-outline" size={16} color="#64748b" />
-                    <Text style={m.bankInfoText}>{bank.bank_name} · ****{bank.account_number.slice(-4)} · {bank.account_name}</Text>
+                    <Text style={m.bankInfoText}>{bank.bank_name} · ****{(bank.account_number || '').slice(-4)} · {bank.account_name}</Text>
                   </View>
 
                   {/* Amount input */}
@@ -955,7 +959,7 @@ export default function WithdrawalScreen() {
                     </View>
                     <View style={m.summaryRow}>
                       <Text style={m.summaryLabel}>Account</Text>
-                      <Text style={m.summaryValue}>{bank.account_name} · ****{bank.account_number.slice(-4)}</Text>
+                      <Text style={m.summaryValue}>{bank.account_name} · ****{(bank.account_number || '').slice(-4)}</Text>
                     </View>
                     <View style={m.summaryRow}>
                       <Text style={m.summaryLabel}>Fee</Text>

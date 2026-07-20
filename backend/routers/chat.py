@@ -1,4 +1,4 @@
-"""Chat Router - AI Chat, Driver-Rider Messaging, WebSocket, masked in-trip calling."""
+"""Chat Router - Driver-Rider Messaging, WebSocket, masked in-trip calling."""
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Set
@@ -12,17 +12,9 @@ from database import db
 from auth_guard import require_authenticated, verify_trip_participant, verify_owner_strict
 from security_advanced import verify_jwt_token
 
-try:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-except ImportError:
-    LlmChat = None
-    UserMessage = None
-
 logger = logging.getLogger('server')
 chat_router = APIRouter(prefix="/api", tags=["Chat"])
 
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 VOICE_PROVIDER = os.environ.get('VOICE_PROVIDER', '').strip().lower()
 VOICE_API_KEY = os.environ.get('VOICE_API_KEY', '')
 VOICE_API_SECRET = os.environ.get('VOICE_API_SECRET', '')
@@ -31,12 +23,6 @@ CALL_SESSION_EXPIRY_MINUTES = int(os.environ.get('CALL_SESSION_EXPIRY_MINUTES', 
 CALL_COOLDOWN_SECONDS = 30
 
 # ==================== MODELS ====================
-
-class AIChatRequest(BaseModel):
-    user_id: str
-    message: str
-    user_role: str = "rider"
-    session_id: Optional[str] = None
 
 class ChatMessageRequest(BaseModel):
     trip_id: str
@@ -60,30 +46,6 @@ class CallSessionRequest(BaseModel):
     userId: Optional[str] = None  # compatibility fallback when auth header is unavailable
 
 # ==================== CONSTANTS ====================
-
-AI_CHAT_SYSTEM_PROMPT = """You are NEXRYDE AI, a smart and friendly assistant for Nigeria's premier ride-hailing platform.
-
-About NEXRYDE:
-- Driver-first platform: Drivers pay from ₦15,000 (launch) then ₦18,000/month, keep 100% of earnings
-- No per-trip commission - drivers keep what they earn
-- Safety features: SOS button, trip sharing, verified drivers, route monitoring
-- Cash and bank transfer payments (peer-to-peer)
-
-Your personality:
-- Friendly, helpful, and concise
-- Use Nigerian context and expressions naturally
-- Be empathetic and solution-oriented
-- Keep responses under 150 words
-
-You can help with:
-- Fare estimates and pricing questions
-- Safety features and emergency help
-- Account and payment questions  
-- Trip information and status
-- Driver/rider ratings and feedback
-- General platform questions
-
-Always be helpful and if you don't know something specific, guide users to contact support."""
 
 PRESET_MESSAGES = {
     "driver": [
@@ -155,75 +117,6 @@ class ConnectionManager:
                 logger.error(f"Error broadcasting: {e}")
 
 chat_manager = ConnectionManager()
-
-# ==================== AI CHAT ====================
-
-@chat_router.post("/chat/ai")
-async def ai_chat(request: AIChatRequest, http_request: Request):
-    verify_owner_strict(http_request, request.user_id)
-    session_id = request.session_id or f"ai-{request.user_id}"
-    user_text = request.message.strip()
-    if not user_text:
-        raise HTTPException(status_code=400, detail="message is required")
-
-    history_collection = db.ai_chat_messages
-    now = datetime.now(timezone.utc)
-    await history_collection.insert_one({
-        "id": str(uuid.uuid4()),
-        "user_id": request.user_id,
-        "role": "user",
-        "message": user_text,
-        "session_id": session_id,
-        "timestamp": now,
-    })
-
-    reply = "I’m here to help. Please share more details and I’ll guide you."
-    if LlmChat and EMERGENT_LLM_KEY:
-        try:
-            chat = LlmChat(
-                api_key=EMERGENT_LLM_KEY,
-                session_id=session_id,
-                system_message=AI_CHAT_SYSTEM_PROMPT,
-            ).with_model("openai", "gpt-4o")
-            llm_response = await chat.send_message(UserMessage(text=user_text))
-            if llm_response:
-                reply = str(llm_response).strip()
-        except Exception as e:
-            logger.warning(f"AI chat fallback used: {e}")
-
-    await history_collection.insert_one({
-        "id": str(uuid.uuid4()),
-        "user_id": request.user_id,
-        "role": "assistant",
-        "message": reply,
-        "session_id": session_id,
-        "timestamp": datetime.now(timezone.utc),
-    })
-
-    return {"success": True, "message": reply, "session_id": session_id}
-
-
-@chat_router.get("/chat/ai/history/{user_id}")
-async def get_ai_chat_history(user_id: str, request: Request):
-    verify_owner_strict(request, user_id)
-    messages = await db.ai_chat_messages.find(
-        {"user_id": user_id},
-        {"_id": 0},
-    ).sort("timestamp", 1).limit(100).to_list(100)
-
-    session_id = messages[-1]["session_id"] if messages else f"ai-{user_id}"
-    return {
-        "session_id": session_id,
-        "messages": [
-            {
-                "id": msg["id"],
-                "role": "user" if msg.get("role") == "user" else "assistant",
-                "message": msg.get("message", ""),
-                "timestamp": msg["timestamp"].isoformat() if hasattr(msg.get("timestamp"), "isoformat") else str(msg.get("timestamp")),
-            }
-            for msg in messages
-        ],
-    }
 
 # ==================== DRIVER-RIDER MESSAGING ====================
 

@@ -38,7 +38,16 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error((err as { detail?: string }).detail || res.statusText);
+    const detail = (err as { detail?: unknown }).detail;
+    let message = res.statusText;
+    if (typeof detail === 'string') {
+      message = detail;
+    } else if (Array.isArray(detail)) {
+      message = detail
+        .map((d) => (typeof d === 'object' && d && 'msg' in d ? String((d as { msg: unknown }).msg) : String(d)))
+        .join('; ');
+    }
+    throw new Error(message);
   }
   return res.json() as Promise<T>;
 }
@@ -48,6 +57,9 @@ export async function login(email: string, password: string) {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });
+  if (!data.token) {
+    throw new Error('Login failed');
+  }
   setToken(data.token);
   if (data.role) setRole(data.role);
   return data;

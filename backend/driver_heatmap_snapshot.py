@@ -18,7 +18,7 @@ def build_driver_heatmap_snapshot(
     lng: Optional[float] = None,
     city: Optional[str] = None,
 ) -> dict[str, Any]:
-    from routers.ai_features import detect_city
+    from city_detection import detect_city
 
     loc = detect_city(lat, lng, city)
     city_name = loc["city"]

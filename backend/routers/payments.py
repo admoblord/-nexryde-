@@ -21,8 +21,6 @@ import httpx
 import hashlib
 import hmac
 
-from openai import OpenAI
-
 from squad_checkout_parse import (
     extract_squad_checkout_url,
     extract_squad_field,
@@ -55,21 +53,31 @@ from smart_pricing import (
 )
 from auth_guard import verify_owner_strict, verify_trip_participant, require_authenticated
 from admin_guard import require_admin_request
-from security_advanced import general_limiter
+from security_advanced import general_limiter, verify_jwt_token
 from route_cache import get_cached_directions, store_cached_directions, log_api_call, haversine_route_estimate
 from routing_quality import is_directions_road_route
 
 logger = logging.getLogger('server')
 payments_router = APIRouter(prefix="/api", tags=["Payments"])
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY", "")
 SQUAD_SECRET_KEY = os.environ.get("SQUAD_SECRET_KEY", "")
 SQUAD_PUBLIC_KEY = os.environ.get("SQUAD_PUBLIC_KEY", "")
 SQUAD_WEBHOOK_SECRET = os.environ.get("SQUAD_WEBHOOK_SECRET", "")
 # Squad live: SQUAD_BASE_URL (default https://api-d.squadco.com), SQUAD_SECRET_KEY, SQUAD_PUBLIC_KEY.
 # Optional: SQUAD_INITIATE_URL if checkout POST host differs; NEXRYDE_PUBLIC_BACKEND_URL for CallBack_URL.
-# Live: https://api-d.squadco.com — set SQUAD_BASE_URL explicitly for production (no sandbox).
-SQUAD_BASE_URL = os.environ.get("SQUAD_BASE_URL", "https://api-d.squadco.com").rstrip("/")
+# Live: https://api-d.squadco.com — NEVER use https://api.squadco.com (not the payment API).
+def _normalize_squad_live_base(url: str) -> str:
+    u = (url or "").strip().rstrip("/")
+    if not u:
+        return "https://api-d.squadco.com"
+    if u.lower() in ("https://api.squadco.com", "http://api.squadco.com"):
+        return "https://api-d.squadco.com"
+    return u
+
+
+SQUAD_BASE_URL = _normalize_squad_live_base(
+    os.environ.get("SQUAD_BASE_URL", "https://api-d.squadco.com")
+)
 # Optional override if Squad uses a different host for inline checkout initiate.
 SQUAD_INITIATE_URL = (os.environ.get("SQUAD_INITIATE_URL") or "").rstrip("/")
 NEXRYDE_PUBLIC_URL = (
@@ -742,13 +750,30 @@ async def _credit_wallet_checkout_intent(
 
 
 async def _ensure_auto_trial_for_verified_driver(driver_id: str) -> Optional[dict]:
-    """Auto-provision trial once driver verification is complete (per-driver trial_config)."""
+    """Auto-provision trial once driver verification is complete (per-driver trial_config).
+
+    Gate matches go-online: ``verification_status == approved`` and ``documents_verified``.
+    ``profile_completed`` alone must not block trial — admin-approved drivers with docs
+    verified should be able to Activate / go online without a stuck "Activate to Drive".
+    """
     existing = await db.subscriptions.find_one({"driver_id": driver_id}, sort=[("created_at", -1)])
     if existing:
         return existing
 
-    profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0}) or {}
-    is_verified = (profile.get("verification_status") == "approved") and bool(profile.get("profile_completed"))
+    profile = await db.driver_profiles.find_one(
+        {"user_id": driver_id},
+        {
+            "_id": 0,
+            "verification_status": 1,
+            "documents_verified": 1,
+            "profile_completed": 1,
+            "trial_config": 1,
+        },
+    ) or {}
+    is_verified = (
+        profile.get("verification_status") == "approved"
+        and bool(profile.get("documents_verified"))
+    )
     if not is_verified:
         return None
 
@@ -1085,89 +1110,6 @@ async def _verify_reference_with_paystack(reference: str, expected_amount: float
     }
 
 
-async def _run_ai_payment_review(screenshot_data_url: str, expected_amount: float, payment_reference: Optional[str]) -> dict:
-    if not OPENAI_API_KEY:
-        return {
-            "ai_available": False,
-            "approved": False,
-            "confidence": 0.0,
-            "reason": "OPENAI_API_KEY not configured",
-        }
-
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    prompt = (
-        "You are a payment proof verification system for NEXRYDE subscriptions in Nigeria. "
-        "Extract transfer evidence from the screenshot and return STRICT JSON only.\n"
-        "Rules:\n"
-        "1) Confirm if this is a real bank transfer/payment receipt screenshot.\n"
-        "2) Extract transferred amount in NGN if visible.\n"
-        "3) Check whether amount approximately matches expected amount.\n"
-        "4) Detect transfer reference if visible.\n"
-        "5) Verify beneficiary appears to match a SquadCo-generated virtual account for this driver.\n"
-        "6) Set confidence 0.0-1.0 and approved true only when evidence is strong.\n"
-        "Return JSON with keys: is_receipt, extracted_amount, amount_match, extracted_reference, "
-        "reference_match, beneficiary_match, confidence, approved, issues, summary.\n"
-        f"Expected amount: {expected_amount}\n"
-        f"Provided reference: {payment_reference or ''}"
-    )
-
-    try:
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",
-            temperature=0,
-            response_format={"type": "json_object"},
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": screenshot_data_url}},
-                    ],
-                }
-            ],
-        )
-        raw_content = completion.choices[0].message.content or "{}"
-        parsed = json.loads(raw_content)
-    except Exception as exc:
-        return {
-            "ai_available": True,
-            "approved": False,
-            "confidence": 0.0,
-            "reason": f"AI verification failed: {str(exc)}",
-        }
-
-    extracted_amount = _normalize_amount(parsed.get("extracted_amount"))
-    amount_match = bool(parsed.get("amount_match", False))
-    if extracted_amount is not None:
-        amount_match = amount_match or abs(extracted_amount - expected_amount) <= 500
-
-    extracted_reference = (parsed.get("extracted_reference") or "").strip()
-    reference_match = bool(parsed.get("reference_match", False))
-    if payment_reference and extracted_reference:
-        reference_match = reference_match or (payment_reference.lower() in extracted_reference.lower())
-    beneficiary_match = bool(parsed.get("beneficiary_match", False))
-    is_receipt = bool(parsed.get("is_receipt", False))
-    confidence = float(parsed.get("confidence", 0.0) or 0.0)
-    confidence = max(0.0, min(1.0, confidence))
-
-    approved = bool(parsed.get("approved", False))
-    approved = approved and is_receipt and amount_match and beneficiary_match and confidence >= 0.75
-
-    return {
-        "ai_available": True,
-        "approved": approved,
-        "confidence": confidence,
-        "is_receipt": is_receipt,
-        "beneficiary_match": beneficiary_match,
-        "amount_match": amount_match,
-        "extracted_amount": extracted_amount,
-        "extracted_reference": extracted_reference or None,
-        "reference_match": reference_match,
-        "issues": parsed.get("issues", []),
-        "summary": parsed.get("summary", "No summary returned"),
-    }
-
-
 # Tier config (matches fare_config.py / server.calculate_fare)
 TIER_CONFIG = {
     "basic": {
@@ -1447,7 +1389,7 @@ def _squad_checkout_initiate_bases() -> list[str]:
     Live secret → live API only (skip sandbox-looking SQUAD_INITIATE_URL).
     """
     bases: list[str] = []
-    live_default = (SQUAD_BASE_URL or "https://api-d.squadco.com").rstrip("/")
+    live_default = _normalize_squad_live_base(SQUAD_BASE_URL or "https://api-d.squadco.com")
 
     if _squad_secret_is_sandbox():
         if SQUAD_INITIATE_URL:
@@ -1467,9 +1409,12 @@ def _squad_checkout_initiate_bases() -> list[str]:
                 u,
             )
         else:
-            bases.append(u)
+            bases.append(_normalize_squad_live_base(u))
     if live_default not in bases:
         bases.append(live_default)
+    # Always keep the canonical live host as a fallback if someone set a wrong custom base.
+    if "https://api-d.squadco.com" not in bases and not any(_squad_url_looks_sandbox(b) for b in bases):
+        bases.append("https://api-d.squadco.com")
     logger.info("Squad checkout bases (live secret, no sandbox host): %s", bases)
     return bases
 
@@ -3399,7 +3344,7 @@ async def create_or_renew_subscription(driver_id: str, request: Request, body: O
 
 @payments_router.post("/subscriptions/{driver_id}/submit-payment")
 async def submit_payment_proof(driver_id: str, request: PaymentProofSubmission, http_request: Request):
-    """Submit payment screenshot and run AI + provider verification."""
+    """Submit payment screenshot and run provider verification when a reference is available."""
     verify_owner_strict(http_request, driver_id)
     await _assert_driver_account(driver_id)
     await _assert_driver_can_activate_subscription(driver_id)
@@ -3455,14 +3400,13 @@ async def submit_payment_proof(driver_id: str, request: PaymentProofSubmission, 
         verified = await _activate_subscription(driver_id)
         instant_audit = {
             "verified_at": datetime.utcnow(),
-            "ai_result": None,
             "provider_result": provider_result,
             "verification_mode": "provider_instant",
             "approved": True,
         }
         await db.subscriptions.update_one(
             {"driver_id": driver_id},
-            {"$set": {"ai_verification": instant_audit}}
+            {"$set": {"payment_verification": instant_audit}}
         )
         return {
             "message": "Payment verified successfully via gateway. Subscription activated.",
@@ -3471,47 +3415,17 @@ async def submit_payment_proof(driver_id: str, request: PaymentProofSubmission, 
             "subscription": verified,
         }
 
-    # Slow path fallback: run AI review only when provider check is missing/failed.
-    ai_result = await _run_ai_payment_review(
-        screenshot_data_url=request.screenshot,
-        expected_amount=expected_amount,
-        payment_reference=request.payment_reference,
-    )
-    ai_approved = bool(ai_result.get("approved"))
-
-    # Approval policy fallback:
-    # approve on strong AI evidence when provider check is unavailable/failed.
-    should_approve = (
-        ai_approved
-        and bool(ai_result.get("beneficiary_match"))
-        and bool(ai_result.get("amount_match"))
-        and float(ai_result.get("confidence", 0.0)) >= 0.88
-    )
-
     audit_payload = {
         "verified_at": datetime.utcnow(),
-        "ai_result": ai_result,
         "provider_result": provider_result,
-        "verification_mode": "ai_fallback",
-        "approved": should_approve,
+        "verification_mode": "manual_review",
+        "approved": False,
+        "reason": "Gateway verification was unavailable or did not confirm the payment.",
     }
-
-    if should_approve:
-        verified = await _activate_subscription(driver_id)
-        await db.subscriptions.update_one(
-            {"driver_id": driver_id},
-            {"$set": {"ai_verification": audit_payload}}
-        )
-        return {
-            "message": "Payment verified successfully. Subscription activated.",
-            "status": "active",
-            "verification": audit_payload,
-            "subscription": verified,
-        }
 
     await db.subscriptions.update_one(
         {"driver_id": driver_id},
-        {"$set": {"status": "pending_verification", "ai_verification": audit_payload}}
+        {"$set": {"status": "pending_verification", "payment_verification": audit_payload}}
     )
     return {
         "message": "Payment submitted. Verification pending admin review.",
@@ -3584,14 +3498,14 @@ async def verify_payment(driver_id: str, request: Request):
 
 @payments_router.get("/subscriptions/{driver_id}/payment-verification")
 async def get_payment_verification_status(driver_id: str, request: Request):
-    """Get latest AI/provider verification payload for subscription payment."""
+    """Get latest provider/manual verification payload for subscription payment."""
     verify_owner_strict(request, driver_id)
     await _assert_driver_account(driver_id)
     subscription = await db.subscriptions.find_one({"driver_id": driver_id})
     if not subscription:
         raise HTTPException(status_code=404, detail="No subscription found")
 
-    verification = subscription.get("ai_verification")
+    verification = subscription.get("payment_verification") or subscription.get("ai_verification")
     if not verification:
         return {
             "driver_id": driver_id,
@@ -3742,7 +3656,7 @@ def _client_google_route_plausible(straight_km: float, distance_m: float, durati
 
 # ==================== FARE ESTIMATE ====================
 @payments_router.post("/fare/estimate")
-async def estimate_fare(request: FareEstimateRequest):
+async def estimate_fare(request: FareEstimateRequest, http_request: Request):
     svc = (request.service_type or "economy").strip().lower()
     if svc == "standard":
         svc = "economy"
@@ -3867,6 +3781,13 @@ async def estimate_fare(request: FareEstimateRequest):
     original_total_fare = fare["total_fare"]
     rider_id_for_discount = (str(request.rider_id).strip() if request.rider_id is not None else "") or None
     if rider_id_for_discount:
+        auth_header = http_request.headers.get("authorization", "")
+        raw_token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+        if not raw_token:
+            raise HTTPException(status_code=401, detail="Authentication required for rider-specific fare discounts")
+        payload = verify_jwt_token(raw_token)
+        if payload.get("sub") != rider_id_for_discount:
+            raise HTTPException(status_code=403, detail="You do not have permission to estimate this rider's discounts")
         try:
             prior_completed = await db.trips.count_documents({
                 "rider_id": rider_id_for_discount,
@@ -4581,8 +4502,9 @@ async def get_driver_tier(driver_id: str, request: Request):
     }
 
 @payments_router.post("/driver/tier/upgrade")
-async def request_tier_upgrade(driver_id: str, request: DriverTierUpgradeRequest):
+async def request_tier_upgrade(driver_id: str, request: DriverTierUpgradeRequest, http_request: Request):
     """Request upgrade to Premium tier"""
+    verify_owner_strict(http_request, driver_id)
     driver = await db.driver_profiles.find_one({"user_id": driver_id})
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")

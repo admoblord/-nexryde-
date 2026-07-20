@@ -44,6 +44,25 @@ PROTECTED_PATH_PREFIXES: tuple[str, ...] = (
     "/api/community/",
     "/api/safety/",
     "/api/shield/",
+    "/api/voice/",
+    "/api/loyalty/",
+    "/api/matching/",
+    "/api/driver-of-the-month/",
+    # Previously optional-auth surfaces that still accept Bearer — require JWT + jti check.
+    "/api/enforcement/",
+    "/api/work-zone/",
+    "/api/incentives/",
+    "/api/challenges/",
+    "/api/leaderboard/",
+    "/api/notifications/",
+    "/api/support/",
+    "/api/family/",
+    "/api/lost-found/",
+    "/api/messages/",
+    "/api/rider/",
+    "/api/smart-mode/",
+    "/api/smart-route-planner/",
+    "/api/delivery/",
 )
 
 

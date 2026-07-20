@@ -35,21 +35,23 @@ import { useRedirectIfAuthed } from '@/src/hooks/useRedirectIfAuthed';
 import { initiateEmailLogin, publicFetchErrorMessage } from '@/src/utils/publicApi';
 import { warmBackendConnection, warmBackendWhileWaiting } from '@/src/utils/warmBackend';
 
-// Colors based on NEXRYDE logo
+import { BRAND } from '@/src/constants/designSystem';
+
+// Login chrome — aligned with designSystem.BRAND
 const COLORS = {
-  background: '#0D1420',
-  primary: '#19253F',
-  surface: '#19253F',
-  surfaceLight: '#243654',
-  green: '#22E180',
-  greenLight: '#6DFFC3',
-  greenSoft: 'rgba(34,225,128,0.12)',
-  blue: '#0066FF',
+  background: BRAND.bgDeep,
+  primary: BRAND.bgElevated,
+  surface: BRAND.bgCard,
+  surfaceLight: BRAND.bgElevated,
+  green: BRAND.primary,
+  greenLight: BRAND.primaryLight,
+  greenSoft: BRAND.primaryMuted,
+  blue: BRAND.accentBlue,
   blueDark: '#1A4FCC',
   blueSoft: 'rgba(0,102,255,0.12)',
   white: '#FFFFFF',
-  textSecondary: '#A8B8D0',
-  textMuted: '#6B7A94',
+  textSecondary: BRAND.textSecondary,
+  textMuted: BRAND.textMuted,
   gray700: '#2D3748',
   google: '#4285F4',
   googleSoft: 'rgba(66, 133, 244, 0.15)',

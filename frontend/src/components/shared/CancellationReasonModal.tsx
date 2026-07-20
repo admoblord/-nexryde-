@@ -1,9 +1,9 @@
 /**
- * Shared trip-cancellation sheet — one step: pick an optional reason + confirm.
- * Used by the driver (heading-to-pickup / arrived docks) and the rider
- * (finding / accepted / en-route screens). Reason selection is optional.
+ * Shared trip-cancellation sheet.
+ * Rider: required reason + optional “Other” note (Uber/Bolt-style).
+ * Driver: optional short reason list (unchanged behaviour).
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -12,14 +12,13 @@ import {
   TouchableOpacity,
   Pressable,
   ActivityIndicator,
-  Animated,
-  Easing,
   Platform,
+  TextInput,
+  KeyboardAvoidingView,
+  ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 
 export const DRIVER_CANCEL_REASONS = [
@@ -31,8 +30,10 @@ export const DRIVER_CANCEL_REASONS = [
 
 export const RIDER_CANCEL_REASONS = [
   'Driver taking too long',
-  'Changed mind',
+  'Changed my mind',
   'Found another ride',
+  'Driver asked me to cancel',
+  'Wrong pickup location',
   'Other',
 ] as const;
 
@@ -40,156 +41,187 @@ type Props = {
   visible: boolean;
   role: 'driver' | 'rider';
   cancelling: boolean;
-  /** Confirmed — reason is undefined when the user skipped selection. */
+  /** Backend / network error — keep sheet open so the rider can retry. */
+  errorMessage?: string | null;
+  /** Uber-style fee preview shown above reasons (e.g. "₦300 may apply"). */
+  feePreviewNote?: string | null;
+  /** Confirmed — reason string always set for riders; optional for drivers. */
   onConfirm: (reason?: string) => void;
   onKeepTrip: () => void;
 };
+
+function resolveSubmitReason(
+  role: 'driver' | 'rider',
+  selected: string | null,
+  otherText: string,
+): string | undefined {
+  if (!selected) return undefined;
+  if (selected === 'Other') {
+    const note = otherText.trim();
+    if (role === 'rider') return note ? `Other: ${note}` : 'Other';
+    return note || 'Other';
+  }
+  return selected;
+}
 
 export default function CancellationReasonModal({
   visible,
   role,
   cancelling,
+  errorMessage,
+  feePreviewNote,
   onConfirm,
   onKeepTrip,
 }: Props) {
   const insets = useSafeAreaInsets();
-  const scale = useRef(new Animated.Value(0.94)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
   const [selected, setSelected] = useState<string | null>(null);
+  const [otherText, setOtherText] = useState('');
 
   const reasons = role === 'driver' ? DRIVER_CANCEL_REASONS : RIDER_CANCEL_REASONS;
+  const requireReason = role === 'rider';
+  const canSubmit = !cancelling && (!requireReason || Boolean(selected));
 
   useEffect(() => {
     if (!visible) {
-      scale.setValue(0.94);
-      opacity.setValue(0);
       setSelected(null);
-      return;
+      setOtherText('');
+    } else if (Platform.OS !== 'web') {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Animated.parallel([
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 220,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.spring(scale, { toValue: 1, friction: 8, tension: 78, useNativeDriver: true }),
-    ]).start();
-  }, [visible, opacity, scale]);
+  }, [visible]);
 
   const handleConfirm = () => {
-    if (cancelling) return;
-    if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    onConfirm(selected ?? undefined);
+    if (!canSubmit) return;
+    const reason = resolveSubmitReason(role, selected, otherText);
+    if (requireReason && !reason) return;
+    if (Platform.OS !== 'web') {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    }
+    onConfirm(reason);
   };
 
   const subText =
     role === 'driver'
       ? 'The rider will be notified immediately. Frequent cancellations affect your visibility score.'
-      : 'Your driver may already be on the way. Tell us why so we can improve matching.';
+      : 'Pick a reason to cancel. Your request is sent as soon as you confirm.';
 
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={cancelling ? undefined : onKeepTrip}>
-      <View style={styles.root}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={cancelling ? undefined : onKeepTrip}
+    >
+      <KeyboardAvoidingView
+        style={styles.root}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         <Pressable style={styles.backdrop} onPress={cancelling ? undefined : onKeepTrip} />
-        <Animated.View
-          style={[
-            styles.cardShell,
-            { marginBottom: Math.max(insets.bottom, 20), opacity, transform: [{ scale }] },
-          ]}
-        >
-          {Platform.OS === 'ios' || Platform.OS === 'android' ? (
-            <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFillObject} />
-          ) : (
-            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(11,14,17,0.97)' }]} />
-          )}
-          <LinearGradient
-            colors={['rgba(239,68,68,0.07)', 'rgba(15,23,42,0.96)', '#020617']}
-            style={StyleSheet.absoluteFillObject}
-            start={{ x: 0.5, y: 0 }}
-            end={{ x: 0.5, y: 1 }}
-            pointerEvents="none"
-          />
-          <View style={styles.cardBody}>
-            <View style={styles.handleRail}>
-              <View style={styles.handle} />
-            </View>
-            <View style={styles.pill}>
-              <Text style={styles.pillTxt}>CANCEL TRIP</Text>
-            </View>
-            <Text style={styles.title}>Cancel this trip?</Text>
-            <Text style={styles.sub}>{subText}</Text>
-
-            <Text style={styles.reasonLabel}>Reason (optional)</Text>
-            <View style={styles.reasonList}>
-              {reasons.map((r) => {
-                const isSel = selected === r;
-                return (
-                  <TouchableOpacity
-                    key={r}
-                    style={[styles.reasonRow, isSel && styles.reasonRowSel]}
-                    onPress={() => {
-                      if (Platform.OS !== 'web') void Haptics.selectionAsync();
-                      setSelected((prev) => (prev === r ? null : r));
-                    }}
-                    disabled={cancelling}
-                    activeOpacity={0.85}
-                    accessibilityRole="radio"
-                    accessibilityLabel={r}
-                    accessibilityState={{ selected: isSel, disabled: cancelling }}
-                  >
-                    <Ionicons
-                      name={isSel ? 'radio-button-on' : 'radio-button-off'}
-                      size={19}
-                      color={isSel ? '#F87171' : '#64748B'}
-                    />
-                    <Text style={[styles.reasonTxt, isSel && styles.reasonTxtSel]}>{r}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <View style={styles.actions}>
-              <TouchableOpacity
-                style={styles.keepBtn}
-                onPress={onKeepTrip}
-                disabled={cancelling}
-                activeOpacity={0.88}
-                accessibilityRole="button"
-                accessibilityLabel="Keep trip"
-              >
-                <Text style={styles.keepTxt}>Keep trip</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.confirmOuter}
-                onPress={handleConfirm}
-                disabled={cancelling}
-                activeOpacity={0.9}
-                accessibilityRole="button"
-                accessibilityLabel="Confirm cancellation"
-                accessibilityState={{ disabled: cancelling }}
-              >
-                <LinearGradient
-                  colors={['#F87171', '#EF4444', '#B91C1C']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.confirmGrad}
-                >
-                  {cancelling ? (
-                    <ActivityIndicator color="#FFF" />
-                  ) : (
-                    <>
-                      <Ionicons name="close-circle" size={20} color="#FFF" />
-                      <Text style={styles.confirmTxt}>Cancel trip</Text>
-                    </>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
+        <View style={[styles.cardShell, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <View style={styles.handleRail}>
+            <View style={styles.handle} />
           </View>
-        </Animated.View>
-      </View>
+          <Text style={styles.title}>Cancel this trip?</Text>
+          <Text style={styles.sub}>{subText}</Text>
+          {feePreviewNote ? (
+            <View style={styles.feeBox}>
+              <Ionicons name="cash-outline" size={16} color="#FBBF24" />
+              <Text style={styles.feeTxt}>{feePreviewNote}</Text>
+            </View>
+          ) : null}
+
+          <Text style={styles.reasonLabel}>
+            {requireReason ? 'Why are you cancelling?' : 'Reason (optional)'}
+          </Text>
+          <ScrollView
+            style={styles.reasonScroll}
+            contentContainerStyle={styles.reasonList}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {reasons.map((r) => {
+              const isSel = selected === r;
+              return (
+                <TouchableOpacity
+                  key={r}
+                  style={[styles.reasonRow, isSel && styles.reasonRowSel]}
+                  onPress={() => {
+                    if (cancelling) return;
+                    if (Platform.OS !== 'web') void Haptics.selectionAsync();
+                    setSelected(r);
+                    if (r !== 'Other') setOtherText('');
+                  }}
+                  disabled={cancelling}
+                  activeOpacity={0.85}
+                  accessibilityRole="radio"
+                  accessibilityLabel={r}
+                  accessibilityState={{ selected: isSel, disabled: cancelling }}
+                >
+                  <Ionicons
+                    name={isSel ? 'radio-button-on' : 'radio-button-off'}
+                    size={19}
+                    color={isSel ? '#F87171' : '#64748B'}
+                  />
+                  <Text style={[styles.reasonTxt, isSel && styles.reasonTxtSel]}>{r}</Text>
+                </TouchableOpacity>
+              );
+            })}
+
+            {selected === 'Other' ? (
+              <TextInput
+                style={styles.otherInput}
+                value={otherText}
+                onChangeText={setOtherText}
+                placeholder="Add a short note (optional)"
+                placeholderTextColor="#64748B"
+                editable={!cancelling}
+                multiline
+                maxLength={200}
+                autoFocus
+                accessibilityLabel="Custom cancellation reason"
+              />
+            ) : null}
+          </ScrollView>
+
+          {errorMessage ? (
+            <View style={styles.errorBox} accessibilityLiveRegion="polite">
+              <Ionicons name="alert-circle" size={16} color="#FCA5A5" />
+              <Text style={styles.errorTxt}>{errorMessage}</Text>
+            </View>
+          ) : null}
+
+          <View style={styles.actions}>
+            <TouchableOpacity
+              style={styles.keepBtn}
+              onPress={onKeepTrip}
+              disabled={cancelling}
+              activeOpacity={0.88}
+              accessibilityRole="button"
+              accessibilityLabel="Keep trip"
+            >
+              <Text style={styles.keepTxt}>Keep trip</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.confirmBtn, !canSubmit && styles.confirmBtnDisabled]}
+              onPress={handleConfirm}
+              disabled={!canSubmit}
+              activeOpacity={0.9}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel Ride"
+              accessibilityState={{ disabled: !canSubmit }}
+            >
+              {cancelling ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
+                <>
+                  <Ionicons name="close-circle" size={20} color="#FFF" />
+                  <Text style={styles.confirmTxt}>Cancel Ride</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -202,73 +234,67 @@ const styles = StyleSheet.create({
   },
   backdrop: { ...StyleSheet.absoluteFillObject },
   cardShell: {
-    position: 'relative',
-    marginHorizontal: 16,
-    borderRadius: 28,
+    marginHorizontal: 12,
+    borderRadius: 24,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.3)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.5,
-    shadowRadius: 26,
-    elevation: 22,
-  },
-  cardBody: {
-    paddingHorizontal: 20,
+    borderColor: 'rgba(239,68,68,0.32)',
+    backgroundColor: '#0B1220',
+    paddingHorizontal: 18,
     paddingTop: 10,
-    paddingBottom: 18,
-    zIndex: 1,
   },
-  handleRail: { alignItems: 'center', marginBottom: 12 },
+  handleRail: { alignItems: 'center', marginBottom: 10 },
   handle: {
-    width: 48,
+    width: 44,
     height: 4,
     borderRadius: 100,
     backgroundColor: 'rgba(148,163,184,0.5)',
   },
-  pill: {
-    alignSelf: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.45)',
-    backgroundColor: 'rgba(239,68,68,0.12)',
-    marginBottom: 12,
-  },
-  pillTxt: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: '#FCA5A5',
-    letterSpacing: 1.1,
-  },
   title: {
-    fontSize: 22,
+    fontSize: 21,
     fontWeight: '900',
     color: '#F8FAFC',
     textAlign: 'center',
-    letterSpacing: -0.4,
-    marginBottom: 8,
+    letterSpacing: -0.3,
+    marginBottom: 6,
   },
   sub: {
-    fontSize: 13.5,
+    fontSize: 13,
     fontWeight: '600',
     color: '#94A3B8',
     textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 16,
-    paddingHorizontal: 4,
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  feeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(251,191,36,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.35)',
+    marginBottom: 14,
+  },
+  feeTxt: {
+    flex: 1,
+    color: '#FDE68A',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
   },
   reasonLabel: {
     fontSize: 11,
     fontWeight: '800',
     color: '#64748B',
-    letterSpacing: 0.8,
+    letterSpacing: 0.7,
     textTransform: 'uppercase',
     marginBottom: 8,
   },
-  reasonList: { gap: 8, marginBottom: 18 },
+  reasonScroll: { maxHeight: 320 },
+  reasonList: { gap: 8, paddingBottom: 8 },
   reasonRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -276,7 +302,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 14,
     borderRadius: 14,
-    backgroundColor: 'rgba(15,23,42,0.65)',
+    backgroundColor: 'rgba(15,23,42,0.85)',
     borderWidth: 1,
     borderColor: 'rgba(51,65,85,0.55)',
   },
@@ -286,26 +312,56 @@ const styles = StyleSheet.create({
   },
   reasonTxt: { flex: 1, fontSize: 14.5, fontWeight: '700', color: '#CBD5E1' },
   reasonTxtSel: { color: '#FECACA' },
-  actions: { flexDirection: 'row', gap: 12, alignItems: 'stretch' },
+  otherInput: {
+    minHeight: 72,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.35)',
+    backgroundColor: 'rgba(15,23,42,0.9)',
+    color: '#F8FAFC',
+    fontSize: 14,
+    fontWeight: '600',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    textAlignVertical: 'top',
+  },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 4,
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(127,29,29,0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.4)',
+  },
+  errorTxt: { flex: 1, fontSize: 13, fontWeight: '700', color: '#FECACA', lineHeight: 18 },
+  actions: { flexDirection: 'row', gap: 10, alignItems: 'stretch', marginTop: 12 },
   keepBtn: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 15,
+    paddingVertical: 14,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(71,85,105,0.8)',
     backgroundColor: 'rgba(15,23,42,0.6)',
   },
-  keepTxt: { fontSize: 15.5, fontWeight: '800', color: '#CBD5E1' },
-  confirmOuter: { flex: 1.25, borderRadius: 16, overflow: 'hidden' },
-  confirmGrad: {
+  keepTxt: { fontSize: 15, fontWeight: '800', color: '#CBD5E1' },
+  confirmBtn: {
+    flex: 1.3,
+    borderRadius: 16,
+    overflow: 'hidden',
+    minHeight: 50,
+    backgroundColor: '#EF4444',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 15,
-    minHeight: 52,
+    paddingVertical: 14,
   },
-  confirmTxt: { fontSize: 15.5, fontWeight: '900', color: '#FFF', letterSpacing: 0.1 },
+  confirmBtnDisabled: { opacity: 0.42 },
+  confirmTxt: { fontSize: 15.5, fontWeight: '900', color: '#FFF' },
 });

@@ -5,6 +5,8 @@ export type TrackingRoutePoint = { latitude: number; longitude: number };
 export type TrackingMapModel = {
   pickup: TripLatLng | null;
   dropoff: TripLatLng | null;
+  /** Ordered intermediate stops between pickup and dropoff. */
+  stops?: TripLatLng[];
   driver: TripLatLng | null;
   driverHeading?: number | null;
   routePolyline: TrackingRoutePoint[];

@@ -9,7 +9,6 @@ import uuid
 import math
 import base64
 import hashlib
-from openai import OpenAI
 
 from cryptography.fernet import Fernet
 
@@ -22,7 +21,6 @@ from security_advanced import general_limiter
 logger = logging.getLogger('server')
 support_router = APIRouter(prefix="/api", tags=["Support"])
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 POLICE_ALERT_NUMBERS = [n.strip() for n in (os.environ.get("NEXRYDE_POLICE_ALERT_NUMBERS", "")).split(",") if n.strip()]
 MAX_TRIP_VIDEO_BYTES = 25 * 1024 * 1024  # 25MB guard for in-DB payload storage
 
@@ -132,13 +130,6 @@ class DriverWitnessReportRequest(BaseModel):
     occurred_at: Optional[str] = None
     anonymous: bool = True
     evidence_notes: Optional[str] = Field(default=None, max_length=600)
-
-
-class SupportBotRequest(BaseModel):
-    message: str
-    user_id: Optional[str] = None
-    trip_id: Optional[str] = None
-    language: str = "auto"  # auto | en | pcm
 
 
 class RadioStation(BaseModel):
@@ -387,126 +378,6 @@ async def respond_to_safety_check(request: SafetyResponseRequest, http_request: 
         await db.sos_alerts.insert_one(sos.model_dump() if hasattr(sos, "model_dump") else sos.dict())
     return {"message": "Response recorded"}
 
-
-def _detect_support_language(text: str, preferred: str = "auto") -> str:
-    if preferred in {"en", "pcm"}:
-        return preferred
-    lower = (text or "").lower()
-    pidgin_markers = [
-        "abeg", "dey", "wetin", "wahala", "no dey", "make i", "una", "fit", "wan", "na", "how far"
-    ]
-    return "pcm" if any(marker in lower for marker in pidgin_markers) else "en"
-
-
-def _rule_support_answer(message: str, language: str) -> dict:
-    lower = (message or "").lower()
-    intent = "general_support"
-    quick_actions = ["call_support", "open_chat", "report_issue"]
-    escalate = False
-
-    if any(k in lower for k in ["stop", "stopped", "driver stop", "not moving", "safety"]):
-        intent = "trip_guardian"
-        quick_actions = ["safety_check", "trigger_sos", "call_support"]
-    elif any(k in lower for k in ["otp", "sms", "code", "verification"]):
-        intent = "otp_issue"
-        quick_actions = ["resend_otp", "verify_number", "call_support"]
-    elif any(k in lower for k in ["payment", "wallet", "charge", "refund"]):
-        intent = "payment_issue"
-        quick_actions = ["payment_history", "raise_dispute", "call_support"]
-    elif any(k in lower for k in ["cancel", "driver no come", "no show"]):
-        intent = "trip_cancellation"
-        quick_actions = ["cancel_trip", "find_new_driver", "contact_support"]
-    elif any(k in lower for k in ["accident", "emergency", "help me", "danger"]):
-        intent = "emergency"
-        quick_actions = ["trigger_sos", "call_support", "share_trip"]
-        escalate = True
-
-    if language == "pcm":
-        responses = {
-            "trip_guardian": "I don hear you. If motor stop too long, tap 'I Need Help' make we trigger SOS sharp sharp.",
-            "otp_issue": "No wahala. Check say your number correct (+234 format), then tap resend OTP. If e still fail, I fit escalate am now.",
-            "payment_issue": "For payment wahala, open receipt/wallet first. If charge no correct, raise dispute and support go check am fast.",
-            "trip_cancellation": "If driver no show, you fit cancel and request another ride. If fare don deduct, open support ticket immediately.",
-            "emergency": "Emergency detected. Tap SOS now and call support immediately. We go follow up your trip live.",
-            "general_support": "I dey here to help. Tell me wetin happen for your trip, OTP, payment, or safety issue.",
-        }
-    else:
-        responses = {
-            "trip_guardian": "Understood. If the car stops for too long, tap 'I Need Help' so we can trigger SOS immediately.",
-            "otp_issue": "Please confirm your phone is in +234 format and tap resend OTP. If it still fails, I can escalate this now.",
-            "payment_issue": "Open your receipt/wallet first. If a charge is incorrect, raise a dispute and support will review quickly.",
-            "trip_cancellation": "If the driver is a no-show, cancel and request another ride. If you were charged, open a support ticket immediately.",
-            "emergency": "Emergency detected. Trigger SOS now and call support immediately. We will monitor your trip live.",
-            "general_support": "I can help with trip, OTP, payment, and safety issues. Tell me what happened.",
-        }
-
-    return {
-        "intent": intent,
-        "response": responses[intent],
-        "quick_actions": quick_actions,
-        "escalate": escalate,
-    }
-
-
-@support_router.post("/support/voice-bot/reply")
-async def support_voice_bot_reply(request: SupportBotRequest, http_request: Request):
-    actor_id = require_authenticated(http_request)
-    if request.user_id and request.user_id != actor_id:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    message = (request.message or "").strip()
-    if not message:
-        raise HTTPException(status_code=400, detail="message is required")
-
-    language = _detect_support_language(message, request.language)
-    rule_answer = _rule_support_answer(message, language)
-
-    # Add realtime context from current trip for faster, practical guidance.
-    trip_context = None
-    if request.trip_id:
-        trip = await db.trips.find_one({"id": request.trip_id}, {"_id": 0})
-        if trip:
-            if actor_id not in {trip.get("rider_id"), trip.get("driver_id")}:
-                raise HTTPException(status_code=403, detail="Not authorized for this trip")
-            trip_context = {
-                "trip_id": trip.get("id"),
-                "status": trip.get("status"),
-                "guardian_alert_active": bool(trip.get("guardian_alert")),
-                "sos_triggered": bool(trip.get("sos_triggered")),
-            }
-
-    if OPENAI_API_KEY:
-        try:
-            client = OpenAI(api_key=OPENAI_API_KEY)
-            system_prompt = (
-                "You are NEXRYDE support voice bot. Reply very briefly (max 3 short sentences), "
-                "action-focused, with clear next steps. "
-                f"Respond in {'Nigerian Pidgin' if language == 'pcm' else 'English'}."
-            )
-            context_text = f"Trip context: {trip_context}" if trip_context else "Trip context: none"
-            llm = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"{context_text}\nUser issue: {message}"},
-                ],
-                temperature=0.2,
-                max_tokens=180,
-            )
-            llm_text = (llm.choices[0].message.content or "").strip()
-            if llm_text:
-                rule_answer["response"] = llm_text
-        except Exception as e:
-            logger.warning(f"Support voice bot LLM fallback to rules: {e}")
-
-    return {
-        "success": True,
-        "language": language,
-        "intent": rule_answer["intent"],
-        "response": rule_answer["response"],
-        "quick_actions": rule_answer["quick_actions"],
-        "escalate": rule_answer["escalate"],
-        "trip_context": trip_context,
-    }
 
 @support_router.post("/trips/{trip_id}/risk-alert")
 async def trigger_risk_alert(trip_id: str, user_id: str, request: RiskAlertRequest, http_request: Request):
@@ -1286,7 +1157,14 @@ async def get_feature_announcements(request: Request):
 # ==================== SMART MATCHING ====================
 
 @support_router.post("/matching/find-driver")
-async def find_best_matched_driver(rider_id: str, pickup_lat: float, pickup_lng: float, service_type: str = "economy"):
+async def find_best_matched_driver(
+    rider_id: str,
+    request: Request,
+    pickup_lat: float,
+    pickup_lng: float,
+    service_type: str = "economy",
+):
+    verify_owner_strict(request, rider_id)
     rider_prefs = await db.rider_preferences.find_one({"user_id": rider_id})
     rider = await db.users.find_one({"id": rider_id})
     available_drivers = await db.driver_profiles.find({"is_online": True, "verification_status": "approved"}).to_list(50)

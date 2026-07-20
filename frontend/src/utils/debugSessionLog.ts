@@ -6,6 +6,8 @@ export function debugSessionLog(
   hypothesisId: string,
   runId = 'run1',
 ): void {
+  if (process.env.NODE_ENV === 'production') return;
+
   // #region agent log
   fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7', {
     method: 'POST',

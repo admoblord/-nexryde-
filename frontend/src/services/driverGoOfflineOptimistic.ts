@@ -3,8 +3,12 @@
  * Keep this module free of React so timing and rollback can be validated in isolation.
  */
 
+/** Soft notice when server sync lags — local Offline must already be applied. */
 export const GO_OFFLINE_FAIL_MESSAGE =
-  'Unable to go offline. Please check your connection and try again.';
+  "You're offline. We'll sync with the server when your connection improves.";
+
+/** @deprecated Kept for older callers; go-offline no longer rolls the driver back online. */
+export const GO_OFFLINE_SYNC_PENDING_MESSAGE = GO_OFFLINE_FAIL_MESSAGE;
 
 /** UI must reflect Offline under this budget (requirement: < 100 ms). */
 export const GO_OFFLINE_UI_BUDGET_MS = 100;

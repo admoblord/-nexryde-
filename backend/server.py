@@ -94,7 +94,6 @@ import hashlib
 import json
 import asyncio
 import time
-from openai import OpenAI
 # rate_limit (SlowAPI) removed — using security_advanced.RateLimiter
 from fare_config import FARE_CONFIG, SHORT_TRIP_KM_THRESHOLD, normalize_fare_city_key, resolve_fare_rate_card
 from nexryde_pricing import (
@@ -108,7 +107,7 @@ from nexryde_pricing import (
 from surge_pricing import compute_max_style_surge_multiplier
 from lagride_lagos_pricing import build_lagos_lagride_fare_breakdown
 
-# LLM Chat disabled - emergentintegrations removed
+# Chat is limited to rider-driver messaging for the launch surface.
 # from emergentintegrations.llm.chat import LlmChat, UserMessage
 LlmChat = None
 UserMessage = None
@@ -134,13 +133,12 @@ from safety_data_service import safety_data_router
 # Import Call Service (Privacy Protected)
 from call_service import call_router
 
-# Import Smart Mode AI (NEW)
+# Import Smart Mode
 from smart_mode_ai import router as smart_mode_router
 
 # Import Community & Safety Routers (REFACTORED)
 from routers.community import community_router, seed_community_groups, seed_community_content, cleanup_test_community_events
 from routers.safety import safety_router, seed_danger_zones
-from routers.ai_features import ai_router
 from routers.admin import admin_router, require_admin_access
 from routers.admin_ops import admin_ops_router
 from routers.admin_driver_profile import admin_driver_profile_router
@@ -155,7 +153,6 @@ from routers.realtime_dispatch import realtime_dispatch_router
 from routers.voice import voice_router
 from enforcement_system import enforcement_router, record_violation, check_user_status
 from driver_compliance import compliance_router, start_compliance_background_tasks
-from routers.ai_intelligence import ai_intelligence_router, set_ai_intelligence_db
 
 ROOT_DIR = Path(__file__).parent
 ADMIN_DIR = ROOT_DIR / 'admin'  # admin folder is inside backend/
@@ -186,18 +183,43 @@ for k, desc in _WARN_ENV.items():
 # MongoDB — use the single pooled client from database.py (no duplicate).
 from database import client, db  # noqa: E402 — after load_dotenv
 
+_ENGAGEMENT_LOOP_ENABLED = os.environ.get("ENGAGEMENT_LOOP_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+if _ENGAGEMENT_LOOP_ENABLED:
+    try:
+        from notification_service import validate_firebase_admin_config
+
+        _firebase_status = validate_firebase_admin_config(require=True)
+        logging.getLogger(__name__).info(
+            "STARTUP: Firebase Admin ready for engagement notifications configured=%s initialized=%s",
+            _firebase_status.get("configured"),
+            _firebase_status.get("initialized"),
+        )
+    except Exception as _firebase_startup_exc:
+        logging.getLogger(__name__).critical(
+            "STARTUP ABORT: Engagement notifications are enabled but Firebase Admin is not ready: %s",
+            _firebase_startup_exc,
+        )
+        import sys as _sys
+        _sys.exit(1)
+
 # Google Maps API Key
 GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
-
-# Emergent LLM Key for AI Assistants
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 
 # Emergent Auth URL
 EMERGENT_AUTH_URL = os.environ.get('EMERGENT_AUTH_URL', '')
 
 # Create the main app
-app = FastAPI(title="NEXRYDE API", version="2.0.0", docs_url=None if os.environ.get("ENVIRONMENT") == "production" else "/docs")
+_is_production_env = (
+    os.environ.get("NEXRYDE_ENV", os.environ.get("ENVIRONMENT", "production")).strip().lower()
+    == "production"
+)
+app = FastAPI(
+    title="NEXRYDE API",
+    version="2.0.0",
+    docs_url=None if _is_production_env else "/docs",
+    redoc_url=None if _is_production_env else "/redoc",
+    openapi_url=None if _is_production_env else "/openapi.json",
+)
 
 # limiter removed (SlowAPI fully replaced by security_advanced.RateLimiter)
 
@@ -566,7 +588,7 @@ class User(BaseModel):
     google_id: Optional[str] = None  # Google OAuth ID
     rating: float = 5.0
     total_trips: int = 0
-    behavior_score: float = 100.0  # AI Behavior Score (hidden)
+    behavior_score: float = 100.0  # Behavior score (hidden)
     emergency_contacts: List[dict] = []  # [{name, phone, relationship}]
     favorite_drivers: List[str] = []  # List of driver IDs
     blocked_drivers: List[str] = []  # List of driver IDs
@@ -700,7 +722,7 @@ class SOSAlert(BaseModel):
     user_role: str  # rider or driver
     location: dict  # {lat, lng}
     triggered_at: datetime = Field(default_factory=datetime.utcnow)
-    auto_triggered: bool = False  # If triggered by AI (scream detection)
+    auto_triggered: bool = False  # If triggered automatically
     status: str = "active"  # active, resolved, false_alarm
     emergency_contacts_notified: List[str] = []
     admin_notified: bool = False
@@ -1690,6 +1712,55 @@ async def get_active_trip(user_id: str, request: Request):
                 trip["estate_gate_access"] = gate
         except Exception:
             pass
+        try:
+            if user_id == trip.get("driver_id") and trip.get("rider_id"):
+                rider_doc = await db.users.find_one(
+                    {"id": trip["rider_id"]},
+                    {
+                        "_id": 0,
+                        "name": 1,
+                        "phone": 1,
+                        "profile_image": 1,
+                        "rating": 1,
+                        "rider_reputation_trip_count": 1,
+                    },
+                ) or {}
+                rider_trip_count = int(rider_doc.get("rider_reputation_trip_count") or 0)
+                trip["rider_name"] = trip.get("rider_name") or rider_doc.get("name")
+                trip["rider_phone"] = rider_doc.get("phone")
+                trip["rider_profile_image"] = rider_doc.get("profile_image")
+                trip["rider_photo"] = rider_doc.get("profile_image")
+                trip["rider_reputation_avg"] = (
+                    round(float(rider_doc.get("rating") or 0.0), 2)
+                    if rider_trip_count > 0
+                    else None
+                )
+                trip["rider_trip_count"] = rider_trip_count
+                trip["rider_new_account"] = rider_trip_count < 3
+            elif user_id == trip.get("rider_id") and trip.get("driver_id"):
+                driver_doc = await db.users.find_one(
+                    {"id": trip["driver_id"]},
+                    {
+                        "_id": 0,
+                        "name": 1,
+                        "profile_image": 1,
+                        "rating": 1,
+                        "total_trips": 1,
+                        "trips_completed": 1,
+                        "is_verified": 1,
+                    },
+                ) or {}
+                trip["driver_name"] = trip.get("driver_name") or driver_doc.get("name")
+                trip["driver_profile_image"] = trip.get("driver_profile_image") or driver_doc.get("profile_image")
+                trip["driver_rating"] = trip.get("driver_rating") or driver_doc.get("rating")
+                trip["driver_total_trips"] = (
+                    trip.get("driver_total_trips")
+                    or driver_doc.get("total_trips")
+                    or driver_doc.get("trips_completed")
+                )
+                trip["driver_verified"] = bool(trip.get("driver_verified") or driver_doc.get("is_verified"))
+        except Exception:
+            pass
         return {"active": True, "trip": trip}
     except HTTPException:
         raise
@@ -1900,7 +1971,6 @@ app.include_router(call_router)
 app.include_router(community_router)
 app.include_router(safety_router)
 app.include_router(safety_data_router)
-app.include_router(ai_router)
 app.include_router(admin_router)
 app.include_router(admin_ops_router)
 app.include_router(admin_driver_profile_router)
@@ -1921,8 +1991,6 @@ app.include_router(payments_router)
 app.include_router(voice_router)
 app.include_router(enforcement_router)
 app.include_router(compliance_router)
-app.include_router(ai_intelligence_router)
-set_ai_intelligence_db(db)
 
 from routers.chat import chat_router, start_call_session_cleanup_task
 app.include_router(chat_router)
@@ -2006,23 +2074,45 @@ async def _driver_heartbeat_watchdog_loop():
     """
     Every 3 minutes: auto-offline drivers whose last heartbeat is > 15 minutes old.
     Prevents ghost-online drivers from receiving dispatch offers they can't accept.
+    Matches both datetime and legacy ISO-string heartbeat fields; clears Redis presence.
     """
     await asyncio.sleep(60)
     while True:
         try:
-            cutoff = datetime.utcnow() - timedelta(minutes=15)
-            result = await db.driver_profiles.update_many(
-                {
-                    "is_online": True,
-                    "$or": [
-                        {"last_heartbeat": {"$lt": cutoff.isoformat()}},
-                        {"last_heartbeat": {"$exists": False}},
-                    ],
-                },
-                {"$set": {"is_online": False, "went_offline_reason": "heartbeat_timeout"}},
-            )
-            if result.modified_count:
-                logger.info("Heartbeat watchdog: auto-offlined %d ghost drivers", result.modified_count)
+            from driver_presence import set_driver_offline
+
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+            query = {
+                "is_online": True,
+                "$or": [
+                    {"last_heartbeat": {"$lt": cutoff}},
+                    {"last_heartbeat": {"$lt": cutoff.isoformat()}},
+                    {"last_heartbeat": {"$exists": False}},
+                ],
+            }
+            stale = await db.driver_profiles.find(query, {"_id": 0, "user_id": 1}).to_list(500)
+            if stale:
+                ids = [d["user_id"] for d in stale if d.get("user_id")]
+                result = await db.driver_profiles.update_many(
+                    {"user_id": {"$in": ids}, "is_online": True},
+                    {
+                        "$set": {
+                            "is_online": False,
+                            "went_offline_reason": "heartbeat_timeout",
+                            "went_offline_at": datetime.now(timezone.utc),
+                        }
+                    },
+                )
+                for did in ids:
+                    try:
+                        await set_driver_offline(did)
+                    except Exception:
+                        logger.exception("heartbeat_watchdog_presence_clear driver=%s", did)
+                if result.modified_count:
+                    logger.info(
+                        "Heartbeat watchdog: auto-offlined %d ghost drivers",
+                        result.modified_count,
+                    )
         except Exception:
             logger.exception("heartbeat_watchdog_tick")
         await asyncio.sleep(180)
@@ -2032,23 +2122,32 @@ async def _stranded_trip_cleanup_loop():
     """
     Every 5 minutes: expire trips stuck in pending/searching states for > 10 minutes.
     Prevents orphaned trips from blocking rider booking.
+
+    Matches both datetime and legacy ISO-string created_at (Mongo type order otherwise
+    never expires Date fields against a string cutoff).
     """
     await asyncio.sleep(90)
     while True:
         try:
-            cutoff = datetime.utcnow() - timedelta(minutes=10)
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+            # Naive UTC also, since trips.py often stores datetime.now() without tz.
+            cutoff_naive = datetime.utcnow() - timedelta(minutes=10)
             stale_statuses = [
                 "pending", "pending_driver_offers", "searching",
             ]
             result = await db.trips.update_many(
                 {
                     "status": {"$in": stale_statuses},
-                    "created_at": {"$lt": cutoff.isoformat()},
+                    "$or": [
+                        {"created_at": {"$lt": cutoff}},
+                        {"created_at": {"$lt": cutoff_naive}},
+                        {"created_at": {"$lt": cutoff.isoformat()}},
+                    ],
                 },
                 {
                     "$set": {
                         "status": "expired",
-                        "expired_at": datetime.utcnow().isoformat(),
+                        "expired_at": datetime.now(timezone.utc).isoformat(),
                         "expired_reason": "no_driver_found_timeout",
                     }
                 },
@@ -2057,11 +2156,16 @@ async def _stranded_trip_cleanup_loop():
                 logger.info("Stranded trip cleanup: expired %d stuck trips", result.modified_count)
 
             # Also close stale trip_offers
-            offer_cutoff = datetime.utcnow() - timedelta(minutes=6)
+            offer_cutoff = datetime.now(timezone.utc) - timedelta(minutes=6)
+            offer_cutoff_naive = datetime.utcnow() - timedelta(minutes=6)
             await db.trip_offers.update_many(
                 {
                     "status": "pending",
-                    "created_at": {"$lt": offer_cutoff.isoformat()},
+                    "$or": [
+                        {"created_at": {"$lt": offer_cutoff}},
+                        {"created_at": {"$lt": offer_cutoff_naive}},
+                        {"created_at": {"$lt": offer_cutoff.isoformat()}},
+                    ],
                 },
                 {"$set": {"status": "expired"}},
             )
@@ -2074,16 +2178,26 @@ async def _subscription_expiry_watchdog_loop():
     """
     Every 2 minutes: find drivers whose subscription has lapsed while they are online
     and force them offline so they stop receiving trip offers.
+
+    Subscriptions store end_date (datetime or ISO), not expires_at.
     """
     await asyncio.sleep(120)
     while True:
         try:
-            now_iso = datetime.utcnow().isoformat()
-            # Find subscriptions that have expired
+            from driver_presence import set_driver_offline
+
+            now = datetime.now(timezone.utc)
+            now_naive = datetime.utcnow()
+            now_iso = now.isoformat()
+            # Find subscriptions that have expired (field is end_date in payments.py).
             expired_subs = await db.subscriptions.find(
                 {
                     "status": {"$in": ["active", "grace_period"]},
-                    "expires_at": {"$lt": now_iso},
+                    "$or": [
+                        {"end_date": {"$lt": now}},
+                        {"end_date": {"$lt": now_naive}},
+                        {"end_date": {"$lt": now_iso}},
+                    ],
                 }
             ).to_list(500)
 
@@ -2096,11 +2210,23 @@ async def _subscription_expiry_watchdog_loop():
                     {"_id": sub["_id"]},
                     {"$set": {"status": "expired"}},
                 )
-                # Force driver offline
+                # Force driver offline (Mongo + Redis presence)
                 result = await db.driver_profiles.update_one(
                     {"user_id": driver_id, "is_online": True},
-                    {"$set": {"is_online": False, "went_offline_reason": "subscription_expired"}},
+                    {
+                        "$set": {
+                            "is_online": False,
+                            "went_offline_reason": "subscription_expired",
+                            "went_offline_at": now,
+                        }
+                    },
                 )
+                try:
+                    await set_driver_offline(driver_id)
+                except Exception:
+                    logger.exception(
+                        "subscription_expiry_watchdog_presence_clear driver=%s", driver_id
+                    )
                 if result.modified_count:
                     logger.info("subscription_expiry_watchdog: driver %s offlined (subscription lapsed)", driver_id)
                     # Push realtime notification to driver
@@ -2206,14 +2332,20 @@ async def _deferred_startup():
         from db_indexes import ensure_indexes
 
         await ensure_indexes(db)
+        logger.info("Startup validation: Mongo indexes ensured")
         from notification_scheduler import start_notification_scheduler
 
         start_notification_scheduler()
+        logger.info("Startup validation: scheduled notification service initialized")
         asyncio.create_task(_squad_webhook_dlq_autoreplay_loop())
         asyncio.create_task(_driver_heartbeat_watchdog_loop())
         asyncio.create_task(_stranded_trip_cleanup_loop())
         asyncio.create_task(_subscription_expiry_watchdog_loop())
         asyncio.create_task(_engagement_push_loop())
+        logger.info(
+            "Startup validation: engagement scheduler task created enabled=%s",
+            os.environ.get("ENGAGEMENT_LOOP_ENABLED", "").strip().lower() in ("1", "true", "yes", "on"),
+        )
         asyncio.create_task(_trial_driver_idle_guardrail_loop())
         # One-time migration: lift all monthly_verification_overdue suspensions
         # so verified drivers are never hard-blocked by this soft reminder system
@@ -2322,6 +2454,23 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     )
                 request.state.user_id = payload.get("sub")
                 request.state.user_role = payload.get("role")
+                request.state.jwt_payload = payload
+                jti = payload.get("jti")
+                if jti:
+                    try:
+                        from redis_store import store
+                        if await store.exists(f"auth:revoked_jti:{jti}"):
+                            return JSONResponse(
+                                status_code=401,
+                                content={"detail": "Token revoked"},
+                            )
+                    except Exception:
+                        # Fail closed — never accept a possibly-revoked token when Redis is down.
+                        logger.exception("auth_revocation_check_failed")
+                        return JSONResponse(
+                            status_code=503,
+                            content={"detail": "Session validation temporarily unavailable"},
+                        )
                 return await call_next(request)
             if admin_ns:
                 return await call_next(request)
@@ -2330,8 +2479,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if has_bearer:
             try:
                 payload = verify_jwt_token(raw_token)
+                jti = payload.get("jti")
+                if jti:
+                    try:
+                        from redis_store import store
+                        if await store.exists(f"auth:revoked_jti:{jti}"):
+                            return JSONResponse(
+                                status_code=401,
+                                content={"detail": "Token revoked"},
+                            )
+                    except Exception:
+                        logger.exception("auth_revocation_check_failed_optional_path")
+                        return JSONResponse(
+                            status_code=503,
+                            content={"detail": "Session validation temporarily unavailable"},
+                        )
                 request.state.user_id = payload.get("sub")
                 request.state.user_role = payload.get("role")
+                request.state.jwt_payload = payload
             except Exception:
                 pass
         return await call_next(request)

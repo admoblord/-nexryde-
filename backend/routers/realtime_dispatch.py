@@ -37,8 +37,28 @@ logger = logging.getLogger("server")
 
 realtime_dispatch_router = APIRouter(prefix="/api", tags=["Realtime"])
 
+
+def _is_ws_ping(data: str) -> bool:
+    """Accept plain ping or legacy JSON {\"type\":\"ping\"} keepalive frames."""
+    if data in ("ping", "PING"):
+        return True
+    try:
+        payload = json.loads(data)
+        return isinstance(payload, dict) and str(payload.get("type", "")).lower() == "ping"
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
 _redis_raw = os.environ.get("REDIS_URL") or os.environ.get("REDISCLOUD_URL") or ""
 REDIS_URL: Optional[str] = _redis_raw if _redis_raw.startswith(("redis://", "rediss://")) else None
+REDIS_REQUIRED = (
+    os.environ.get("NEXRYDE_ENV", os.environ.get("ENVIRONMENT", "development")).strip().lower()
+    == "production"
+    and os.environ.get("REDIS_REQUIRED", "true").lower() != "false"
+)
+
+if REDIS_REQUIRED and not REDIS_URL:
+    raise RuntimeError("REDIS_URL is required in production for realtime cross-instance dispatch")
 
 
 # ── Redis publish helper ──────────────────────────────────────────────────────
@@ -63,6 +83,8 @@ async def _get_publish_client() -> Any:
             _publish_client = c
             logger.info("realtime_dispatch: Redis publish client connected")
         except Exception as exc:
+            if REDIS_REQUIRED:
+                raise RuntimeError("Realtime Redis publish client is required in production") from exc
             logger.warning("realtime_dispatch: Redis unavailable, using in-memory fallback: %s", exc)
             _publish_client = None
     return _publish_client
@@ -117,6 +139,8 @@ class _UserSocketHub:
             logger.info("realtime_dispatch: hub=%s pubsub listener started", self._name)
             return True
         except Exception as exc:
+            if REDIS_REQUIRED:
+                raise RuntimeError(f"Realtime Redis pubsub is required in production for hub={self._name}") from exc
             logger.warning("realtime_dispatch: hub=%s pubsub init failed: %s", self._name, exc)
             return False
 
@@ -241,7 +265,7 @@ async def websocket_driver_offers(websocket: WebSocket, driver_id: str):
         while True:
             # Keep connection alive; client should send periodic pings.
             data = await asyncio.wait_for(websocket.receive_text(), timeout=90)
-            if data in ("ping", "PING"):
+            if _is_ws_ping(data):
                 await websocket.send_text("pong")
     except (WebSocketDisconnect, asyncio.TimeoutError):
         pass
@@ -261,7 +285,7 @@ async def websocket_rider_trips(websocket: WebSocket, rider_id: str):
     try:
         while True:
             data = await asyncio.wait_for(websocket.receive_text(), timeout=90)
-            if data in ("ping", "PING"):
+            if _is_ws_ping(data):
                 await websocket.send_text("pong")
     except (WebSocketDisconnect, asyncio.TimeoutError):
         pass
@@ -300,7 +324,7 @@ async def _get_poll_message(user_id: str) -> Optional[dict]:
 
 # ── HTTP polling endpoint — WS reconnect fallback ─────────────────────────────
 
-@realtime_dispatch_router.get("/api/trips/poll/{rider_id}")
+@realtime_dispatch_router.get("/trips/poll/{rider_id}")
 async def poll_rider_trip_update(rider_id: str, request: Request):
     """
     Lightweight polling fallback for riders whose WS is disconnected or on a

@@ -52,7 +52,8 @@ async def fetch_document_binary(driver_id: str, doc_key: str, doc_meta: dict) ->
     if not isinstance(doc_meta, dict):
         return None
 
-    gcs_key = doc_meta.get("gcs_key")
+    # Prefer gcs_key; older rows may use file_key for the same private object path.
+    gcs_key = doc_meta.get("gcs_key") or doc_meta.get("file_key")
     if gcs_key:
         from gcs_cdn import download_bytes
 

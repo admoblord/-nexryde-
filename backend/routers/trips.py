@@ -1164,7 +1164,7 @@ async def _refresh_driver_visibility_score(driver_id: str):
 
 def _analyze_one_star_rating_consistency(trip: dict, has_rider_complaint: bool, comment: Optional[str]) -> dict:
     """
-    Heuristic AI-style consistency review for one-star ratings.
+    Heuristic consistency review for one-star ratings.
     """
     safe_checks = {
         "no_guardian_alert": not bool((trip.get("guardian_alert") or {}).get("active")),
@@ -2455,15 +2455,32 @@ async def get_driver_trip_offers(driver_id: str, request: Request):
             driver_profile = await db.driver_profiles.find_one(
                 {"user_id": driver_id, "is_online": True},
                 {"_id": 0, "current_lat": 1, "current_lng": 1, "current_location": 1,
-                 "vehicle_type": 1, "blocked_riders": 1, "work_zone_active": 1, "work_zone_area_ids": 1},
+                 "vehicle_type": 1, "blocked_riders": 1, "work_zone_active": 1,
+                 "work_zone_area_ids": 1, "work_zone_zones": 1},
             )
             if driver_profile:
                 d_lat = driver_profile.get("current_lat")
                 d_lng = driver_profile.get("current_lng")
                 if d_lat and d_lng:
-                    redispatch_window = (datetime.now(timezone.utc) - timedelta(minutes=8)).isoformat()
+                    # Date $gte ISO-string is always true in Mongo type order — never OR that in.
+                    # Cover tz-aware Date, naive Date, and legacy ISO strings separately.
+                    redispatch_dt = datetime.now(timezone.utc) - timedelta(minutes=8)
+                    redispatch_naive = datetime.utcnow() - timedelta(minutes=8)
+                    redispatch_iso = redispatch_dt.isoformat()
                     pending_trips = await db.trips.find(
-                        {"status": {"$in": ["pending", "pending_driver_offers"]}, "created_at": {"$gte": redispatch_window}},
+                        {
+                            "status": {"$in": ["pending", "pending_driver_offers"]},
+                            "$or": [
+                                {"created_at": {"$gte": redispatch_dt}},
+                                {"created_at": {"$gte": redispatch_naive}},
+                                {
+                                    "$and": [
+                                        {"created_at": {"$type": "string"}},
+                                        {"created_at": {"$gte": redispatch_iso}},
+                                    ]
+                                },
+                            ],
+                        },
                         {"_id": 0, "id": 1, "rider_id": 1, "pickup_location": 1, "dropoff_location": 1, "vehicle_type": 1},
                     ).to_list(20)
                     new_offer_exp = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
@@ -2725,12 +2742,27 @@ async def accept_trip(trip_id: str, request: dict, http_request: Request):
         )
         trip = await db.trips.find_one({"id": trip_id})
         trip["_id"] = str(trip["_id"])
-        driver_user = await db.users.find_one({"id": driver_id}, {"_id": 0, "name": 1}) or {}
+        driver_user = await db.users.find_one(
+            {"id": driver_id},
+            {
+                "_id": 0,
+                "name": 1,
+                "profile_image": 1,
+                "rating": 1,
+                "total_trips": 1,
+                "trips_completed": 1,
+                "is_verified": 1,
+            },
+        ) or {}
         driver_profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0}) or {}
         await db.trips.update_one(
             {"id": trip_id},
             {"$set": {
                 "driver_name": driver_user.get("name", "Driver"),
+                "driver_profile_image": driver_user.get("profile_image"),
+                "driver_rating": driver_user.get("rating") or driver_profile.get("avg_rating"),
+                "driver_total_trips": driver_user.get("total_trips") or driver_user.get("trips_completed"),
+                "driver_verified": bool(driver_user.get("is_verified") or driver_profile.get("verification_status") == "approved"),
                 "vehicle_type": driver_profile.get("vehicle_type"),
                 "vehicle_model": driver_profile.get("vehicle_model"),
                 "vehicle_plate": driver_profile.get("vehicle_plate") or driver_profile.get("vehicle_plate_number"),
@@ -2743,6 +2775,10 @@ async def accept_trip(trip_id: str, request: dict, http_request: Request):
         )
         trip.update({
             "driver_name": driver_user.get("name", "Driver"),
+            "driver_profile_image": driver_user.get("profile_image"),
+            "driver_rating": driver_user.get("rating") or driver_profile.get("avg_rating"),
+            "driver_total_trips": driver_user.get("total_trips") or driver_user.get("trips_completed"),
+            "driver_verified": bool(driver_user.get("is_verified") or driver_profile.get("verification_status") == "approved"),
             "vehicle_type": driver_profile.get("vehicle_type"),
             "vehicle_model": driver_profile.get("vehicle_model"),
             "vehicle_plate": driver_profile.get("vehicle_plate") or driver_profile.get("vehicle_plate_number"),
@@ -3436,6 +3472,9 @@ async def arrive_at_pickup(trip_id: str, request: dict, http_request: Request):
 
     if trip.get("driver_id") != driver_id:
         raise HTTPException(status_code=403, detail="Only the assigned driver can mark arrival")
+    if trip.get("status") in {"arrived", "ongoing"}:
+        trip["_id"] = str(trip["_id"])
+        return enrich_ride_payload(trip)
     if trip.get("status") != "accepted":
         raise HTTPException(status_code=400, detail="Trip must be accepted before arrival")
 
@@ -4254,7 +4293,7 @@ async def get_trip_status(trip_id: str, request: Request):
     if driver_id:
         user = await db.users.find_one(
             {"id": driver_id},
-            {"_id": 0, "name": 1, "phone": 1, "profile_image": 1, "rating": 1},
+            {"_id": 0, "name": 1, "phone": 1, "profile_image": 1, "rating": 1, "total_trips": 1, "trips_completed": 1, "is_verified": 1},
         ) or {}
         profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"face_image": 0}) or {}
         driver_face_image = await get_reference_face_image(driver_id)
@@ -4327,6 +4366,8 @@ async def get_trip_status(trip_id: str, request: Request):
             "name": user.get("name", "Driver"),
             "rating": float(user.get("rating") or profile.get("avg_rating") or 4.5),
             "avg_rating": float(profile.get("avg_rating") or user.get("rating") or 4.5),
+            "total_trips": int(user.get("total_trips") or user.get("trips_completed") or profile.get("completed_trips") or 0),
+            "verified": bool(user.get("is_verified") or profile.get("verification_status") == "approved"),
             # Visual identity fields — critical for arrival verification
             "profile_image": user.get("profile_image") or None,
             "face_image": driver_face_image,
@@ -4367,6 +4408,10 @@ async def get_trip_status(trip_id: str, request: Request):
         "success": True,
         "trip_id": trip_id,
         "status": trip.get("status"),
+        "ride_version": int(trip.get("ride_version") or 0),
+        "state_sequence": int(trip.get("state_sequence") or trip.get("ride_version") or 0),
+        "state_updated_at": _iso(trip.get("state_updated_at") or trip.get("updated_at") or trip.get("created_at")),
+        "updated_at": _iso(trip.get("updated_at") or trip.get("state_updated_at") or trip.get("created_at")),
         "payment_status": trip.get("payment_status"),
         "payment_method": trip.get("payment_method"),
         # Lifecycle timestamps — required by rider/driver timers
@@ -4829,6 +4874,23 @@ async def confirm_trip_payment(trip_id: str, request: Request):
     await _log_trip_event(trip_id, "payment_confirmed", actor_id, {"payment_status": "completed"})
     schedule_trip_receipt_emails_after_payment(trip_id)
     await _emit_rider_trip_realtime(trip_id)
+    fare = trip_fare_amount(trip)
+    if trip.get("rider_id"):
+        await send_push_notification(
+            trip["rider_id"],
+            "Payment Successful",
+            f"Your payment of ₦{fare:,.0f} was successful.",
+            {"type": "payment_successful", "trip_id": trip_id, "delivery_slot": "payment"},
+            source="trip",
+        )
+    if trip.get("driver_id"):
+        await send_push_notification(
+            trip["driver_id"],
+            "Payment Received",
+            f"₦{fare:,.0f} was credited for this trip.",
+            {"type": "payment_received", "trip_id": trip_id, "delivery_slot": "payment"},
+            source="trip",
+        )
     return {"success": True, "payment_status": "completed", "message": "Payment confirmed"}
 
 @trips_router.put("/trips/{trip_id}/cancel")
@@ -4856,6 +4918,12 @@ async def cancel_trip(trip_id: str, request: dict, http_request: Request):
         )
 
     # Atomic cancel: only transitions from a pre-start, non-terminal status.
+    _cancel_reason = str(
+        request.get("cancellation_reason")
+        or request.get("reason")
+        or request.get("cancel_reason")
+        or ""
+    ).strip()[:280]
     cancel_result = await db.trips.update_one(
         {"id": trip_id, "status": {"$nin": NON_CANCELLABLE_STATUSES}},
         {
@@ -4868,6 +4936,14 @@ async def cancel_trip(trip_id: str, request: dict, http_request: Request):
                 ),
                 "cancelled_by": cancelled_by,
                 "cancelled_at": datetime.utcnow(),
+                **(
+                    {
+                        "cancellation_reason": _cancel_reason,
+                        "cancel_reason": _cancel_reason,
+                    }
+                    if _cancel_reason
+                    else {}
+                ),
             },
             "$inc": ride_state_inc_fields(),
         },
@@ -4905,6 +4981,24 @@ async def cancel_trip(trip_id: str, request: dict, http_request: Request):
         ),
     )
     await _emit_rider_trip_realtime(trip_id)
+
+    # Role-aware cancel pushes — only the counterparty on this trip.
+    if cancelled_by == trip.get("driver_id") and trip.get("rider_id"):
+        await send_push_notification(
+            trip["rider_id"],
+            "Driver Cancelled",
+            "Your driver cancelled this trip. You can request another NexRyde.",
+            {"type": "driver_cancelled", "trip_id": trip_id, "delivery_slot": "cancel"},
+            source="trip",
+        )
+    elif cancelled_by == trip.get("rider_id") and trip.get("driver_id"):
+        await send_push_notification(
+            trip["driver_id"],
+            "Rider Cancelled",
+            "The rider cancelled this trip request.",
+            {"type": "rider_cancelled", "trip_id": trip_id, "delivery_slot": "cancel"},
+            source="trip",
+        )
 
     if cancelled_by == trip.get("driver_id"):
         await db.driver_profiles.update_one(
@@ -5124,6 +5218,29 @@ async def get_trip(trip_id: str, request: Request):
                 if not trip.get("rider_name"):
                     trip["rider_name"] = rider_doc.get("name")
                 trip["rider_profile_image"] = rider_doc.get("profile_image")
+    elif actor_id == trip.get("rider_id") and trip.get("driver_id"):
+        driver_doc = await db.users.find_one(
+            {"id": trip["driver_id"]},
+            {
+                "_id": 0,
+                "name": 1,
+                "profile_image": 1,
+                "rating": 1,
+                "total_trips": 1,
+                "trips_completed": 1,
+                "is_verified": 1,
+            },
+        )
+        if driver_doc:
+            trip["driver_name"] = trip.get("driver_name") or driver_doc.get("name")
+            trip["driver_profile_image"] = trip.get("driver_profile_image") or driver_doc.get("profile_image")
+            trip["driver_rating"] = trip.get("driver_rating") or driver_doc.get("rating")
+            trip["driver_total_trips"] = (
+                trip.get("driver_total_trips")
+                or driver_doc.get("total_trips")
+                or driver_doc.get("trips_completed")
+            )
+            trip["driver_verified"] = bool(trip.get("driver_verified") or driver_doc.get("is_verified"))
     return trip
 
 

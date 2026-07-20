@@ -2,9 +2,10 @@
 
 ## What this is
 
-A driver declares a **work zone** for the day (e.g. "Victoria Island ↔ Lekki Phase 1 & 2").
-From that moment, dispatch only offers him trips where **BOTH pickup AND dropoff are inside his
-zone**. He drives his corridor all day and ends near where he started. Set once, system filters —
+A driver declares one or more **work zones** for the day using real searchable places
+(state, city, LGA, town, district, estate, neighborhood, or landmark).
+From that moment, dispatch prioritizes trips whose pickup is inside one of those radius geofences.
+He can work familiar areas without waiting for NexRyde to predefine a city list. Set once, system filters —
 no browsing/rejecting a feed (that's inDrive's tiring model; ours is set-and-forget).
 
 Designed with our founding drivers (Timmaj). The strategic pairing: **work zones = the driver
@@ -25,12 +26,10 @@ The current 3-per-day "trip to destination" in the driver map is the Uber destin
 **Where:** Driver app — a "Work Zone" section in the hub/home (near go-online).
 
 **Zone picker:**
-- Driver selects one or more **adjacent named areas** from our existing area definitions (the same
-  areas shown on the driver home map: Victoria Island, Lekki Phase 1, Lekki Phase 2, Sangotedo,
-  Ajah, etc.). Selecting 1–4 adjacent areas forms the zone.
-- Show the zone visually on the map (highlight the covered areas) before confirming.
-- Store as a set of area IDs + a computed geo boundary (polygon or union of area polygons) on the
-  driver's active state.
+- Driver searches Google Places through the backend proxy and selects one or more real places.
+- Supported searches include state, city, LGA, town, district, estate, neighborhood, and landmark.
+- Each selected zone stores `place_id`, label, address, lat/lng, country/state metadata, and radius.
+- The old hardcoded Lagos area registry is legacy-only for already-saved profiles and old clients.
 
 **Lifecycle:**
 - Zone is **per-day**: activates when set, auto-expires at end of day (config: expiry hour) or when
@@ -45,29 +44,29 @@ In the dispatch/offer flow (where favorite-priority and radius checks already ru
 ```
 eligible(driver, trip):
   if driver.work_zone is active:
-      return point_in_zone(trip.pickup) AND point_in_zone(trip.dropoff)
+      return point_in_any_radius_zone(trip.pickup)
   else:
       normal eligibility rules
 ```
 
-- **Both endpoints inside the zone** — pickup AND dropoff.
+- **Pickup inside the zone** is the primary filter. Dropoff-inside is logged for transparency but does
+  not block a local pickup from being served.
 - Zone filtering **composes with existing rules**: favorite-driver priority still applies within
   the zone; full trip visibility still shows; free decline unchanged.
 - Use existing Redis geo-presence for driver location; zone check is an additional filter on trip
   endpoints.
-- **Performance:** precompute area membership for pickup/dropoff once per trip request.
+- **Performance:** use radius/geofence checks against normalized profile zones; add coarse geospatial
+  prefilters when volume grows.
 
-## 3. Marketplace guardrails (critical — protects riders)
+## 3. Marketplace telemetry
 
-Two throttles, both **server config**:
+These values are information only and must never block activation:
 
-- `work_zone.max_zoned_share` (e.g. 0.3): at most X% of currently-online drivers in an area may be
-  zoned at once. When the cap is reached: "Zone slots full for this area right now — try later."
-  (Founding drivers bypass the cap.)
-- `work_zone.min_online_drivers` (e.g. 5): zone activation requires at least N drivers online in
-  the corridor.
+- Online driver count near selected zones.
+- Recent demand/trips near selected zones.
+- `activation_requires_online_driver_count` is always `false`.
 
-Both values adjustable without redeploy.
+A single driver can activate any work zone, including a brand-new neighborhood.
 
 ## 4. Pricing — included with driver plan (trial + subscription)
 
@@ -104,30 +103,30 @@ The decision remains entirely with the driver.
 
 ## 5. Driver economics display
 
-On the zone picker, show simple demand context per area:
-- "VI ↔ Lekki: ~40 trips/day this week" (from trip history aggregates).
+On the zone picker, show simple demand context per selected place:
+- "Sangotedo: ~40 trips/week · 3 drivers online nearby" (from trip history aggregates).
 - Low volume warning: "Low demand here — you may wait long between trips."
 
 ## 6. What NOT to build
 
 - No inDrive-style open request feed.
 - No per-trip price bidding.
-- No dropoff-only or pickup-only zone variants.
+- No hardcoded city list as the primary selector.
 
 ## Rollout
 
 1. Feature flag `work_zone.enabled` — default **OFF**.
 2. Early access for founding drivers (`work_zone_early_access` + `WORK_ZONE_EARLY_ACCESS_EMAILS`).
-3. General availability when corridor density clears `min_online_drivers` comfortably.
+3. General availability can launch city by city, but activation must not depend on online-driver density.
 
 ## Acceptance criteria
 
 1. Old 3-per-day trip-to-destination removed; no orphaned UI/copy.
-2. Zoned driver (VI + Lekki Ph1 + Ph2) → every offer has pickup AND dropoff inside zone;
-   VI→Ikeja never offered. Logged: `[ZONE] driver=X trip=Y pickup_in=true dropoff_in=false → skipped`.
+2. Zoned driver selects any real place; pickup inside the selected radius is eligible.
+   Pickup outside all selected radii is skipped and logged with `[ZONE]`.
 3. Zoned driver still gets favorite-priority within zone; full trip details; free decline.
 4. Zone expires end-of-day; chip shows state; going offline preserves it.
-5. Caps enforced server-side with clear messages; founding drivers bypass share cap.
+5. Online driver counts and demand are shown as context only; they never disable activation.
 6. Entitlement = **active trial, grace period, or paid subscription** (server-enforced); zone cleared on lapse; early-access flag for rollout only.
 7. Feature flag OFF by default; ON for founding-driver accounts for testing.
 8. Cross-zone rider trips still dispatch to non-zoned drivers with no added latency.
@@ -137,7 +136,7 @@ On the zone picker, show simple demand context per area:
 | Layer | Location |
 |-------|----------|
 | Config | `backend/work_zone_config.py` |
-| Areas | `backend/work_zone_areas.py` |
+| Legacy area adapter | `backend/work_zone_areas.py` |
 | Service | `backend/work_zone_service.py` |
 | API | `backend/routers/work_zone.py` |
 | Dispatch filter | `backend/routers/trips.py` → `_get_eligible_drivers_for_trip` |
@@ -148,11 +147,12 @@ On the zone picker, show simple demand context per area:
 | Env key | Default | Purpose |
 |---------|---------|---------|
 | `WORK_ZONE_ENABLED` | `false` | Global feature flag |
-| `WORK_ZONE_MAX_ZONED_SHARE` | `0.3` | Share cap per corridor |
-| `WORK_ZONE_MIN_ONLINE_DRIVERS` | `5` | Minimum online before activation |
+| `WORK_ZONE_MAX_ZONED_SHARE` | `0.3` | Informational marketplace telemetry |
+| `WORK_ZONE_MIN_ONLINE_DRIVERS` | `1` | Informational telemetry only |
 | `WORK_ZONE_EXPIRY_HOUR_WAT` | `23` | End-of-day expiry (WAT) |
 | `WORK_ZONE_EARLY_ACCESS_EMAILS` | `loopy9ice@gmail.com` | Rollout bypass when flag OFF |
-| `WORK_ZONE_MAX_AREAS` | `4` | Max adjacent areas per zone |
+| `WORK_ZONE_MAX_ZONES` | `4` | Max selected place zones |
+| `WORK_ZONE_DEFAULT_RADIUS_M` | `5000` | Default radius for a selected place |
 | `idle_suggestion_minutes` | `30` | Client idle prompt (from `/work-zone/config`) |
 
 ## Driver pitch (Timmaj)

@@ -53,6 +53,17 @@ type Props = {
   onSos: () => void;
   destEtaMinutes?: number | null;
   destAddress?: string | null;
+  /** Uber: cancel always available until trip starts */
+  canCancel?: boolean;
+  onCancel?: () => void;
+  cancelFeeNote?: string | null;
+  /** Ongoing: change destination / add stop / split fare */
+  canEditRoute?: boolean;
+  onChangeDestination?: () => void;
+  onAddStop?: () => void;
+  canSplitFare?: boolean;
+  onSplitFare?: () => void;
+  waitCard?: React.ReactElement | null;
 };
 
 const COLOR_SWATCHES: Record<string, string> = {
@@ -165,6 +176,15 @@ function LiveDriverSheetInner({
   onSos,
   destEtaMinutes,
   destAddress,
+  canCancel = false,
+  onCancel,
+  cancelFeeNote,
+  canEditRoute = false,
+  onChangeDestination,
+  onAddStop,
+  canSplitFare = false,
+  onSplitFare,
+  waitCard,
 }: Props) {
   const expandedH = LIVE_LAYOUT.sheetExpandedH + bottomInset;
   const collapsedH = LIVE_LAYOUT.sheetCollapsedH + bottomInset;
@@ -261,6 +281,11 @@ function LiveDriverSheetInner({
           <Text style={styles.collapsedName} numberOfLines={1}>{displayName}</Text>
           <View style={styles.collapsedBadgeRow}>
             <PhaseBadge phase={tripPhase} />
+            {displayPlate !== '—' ? (
+              <View style={styles.collapsedPlateChip}>
+                <Text style={styles.collapsedPlateTxt} numberOfLines={1}>{displayPlate}</Text>
+              </View>
+            ) : null}
           </View>
         </View>
         <View style={styles.collapsedEta}>
@@ -371,6 +396,8 @@ function LiveDriverSheetInner({
           </TouchableOpacity>
         </View>
 
+        {waitCard}
+
         {/* Pickup code — very prominent when visible */}
         {showPickupCode && pickupCode ? (
           <TouchableOpacity
@@ -410,12 +437,44 @@ function LiveDriverSheetInner({
           </View>
         ) : null}
 
+        {canEditRoute && tripPhase === 'ongoing' ? (
+          <View style={styles.routeEditRow}>
+            <TouchableOpacity style={styles.routeEditBtn} onPress={onChangeDestination} accessibilityRole="button">
+              <Ionicons name="navigate-outline" size={16} color={LIVE.blue} />
+              <Text style={styles.routeEditTxt}>Change destination</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.routeEditBtn} onPress={onAddStop} accessibilityRole="button">
+              <Ionicons name="add-circle-outline" size={16} color="#F59E0B" />
+              <Text style={styles.routeEditTxt}>Add stop</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {canSplitFare && tripPhase === 'ongoing' && onSplitFare ? (
+          <TouchableOpacity style={styles.splitRow} onPress={onSplitFare} activeOpacity={0.88} accessibilityRole="button">
+            <Ionicons name="people-outline" size={18} color={LIVE.green} />
+            <Text style={styles.splitTxt}>Split fare with friends</Text>
+            <Ionicons name="chevron-forward" size={16} color={LIVE.faint} />
+          </TouchableOpacity>
+        ) : null}
+
         {/* Safety tools */}
         <TouchableOpacity style={styles.safetyRow} onPress={onSos} activeOpacity={0.88} accessibilityRole="button">
           <Ionicons name="warning" size={18} color={LIVE.red} />
           <Text style={styles.safetyTxt}>Safety tools and SOS</Text>
           <Ionicons name="chevron-forward" size={16} color={LIVE.faint} />
         </TouchableOpacity>
+
+        {canCancel && onCancel ? (
+          <TouchableOpacity style={styles.cancelRow} onPress={onCancel} activeOpacity={0.88} accessibilityRole="button">
+            <Ionicons name="close-circle-outline" size={18} color={LIVE.red} />
+            <View style={styles.cancelTextCol}>
+              <Text style={styles.cancelTxt}>Cancel trip</Text>
+              {cancelFeeNote ? <Text style={styles.cancelFee}>{cancelFeeNote}</Text> : null}
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={LIVE.faint} />
+          </TouchableOpacity>
+        ) : null}
       </ScrollView>
     </Animated.View>
   );
@@ -457,7 +516,21 @@ const styles = StyleSheet.create({
   collapsedAvatar: { width: 38, height: 38 },
   collapsedLeft: { flex: 1, minWidth: 0, gap: 4 },
   collapsedName: { fontSize: 15, fontWeight: '900', color: LIVE.text },
-  collapsedBadgeRow: { flexDirection: 'row' },
+  collapsedBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  collapsedPlateChip: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'rgba(34,197,94,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(34,197,94,0.28)',
+  },
+  collapsedPlateTxt: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: LIVE.greenBright,
+    letterSpacing: 0.8,
+  },
   collapsedEta: { alignItems: 'flex-end', minWidth: 52 },
   collapsedEtaVal: { fontSize: 18, fontWeight: '900', color: LIVE.green, fontVariant: ['tabular-nums'] },
   collapsedEtaSub: { fontSize: 10, fontWeight: '700', color: LIVE.faint, marginTop: 2 },
@@ -477,6 +550,46 @@ const styles = StyleSheet.create({
   },
   verifiedTxt: { fontSize: 10, fontWeight: '800', color: LIVE.green },
   phaseLine: { fontSize: 12, fontWeight: '700', color: LIVE.sub },
+  routeEditRow: { flexDirection: 'row', gap: 8 },
+  routeEditBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: LIVE.tile,
+    borderWidth: 1,
+    borderColor: LIVE.hairline,
+  },
+  routeEditTxt: { fontSize: 12, fontWeight: '800', color: LIVE.text },
+  splitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,208,132,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,208,132,0.28)',
+  },
+  splitTxt: { flex: 1, fontSize: 13, fontWeight: '800', color: LIVE.text },
+  cancelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.28)',
+  },
+  cancelTextCol: { flex: 1, gap: 2 },
+  cancelTxt: { fontSize: 13, fontWeight: '800', color: '#FCA5A5' },
+  cancelFee: { fontSize: 11, fontWeight: '600', color: '#FDE68A' },
   vehicleSection: { gap: 8 },
   vehicleSectionLabel: { fontSize: 11, fontWeight: '700', color: LIVE.faint, letterSpacing: 0.5 },
   vehicleGrid: { flexDirection: 'row', gap: 8, height: 64 },

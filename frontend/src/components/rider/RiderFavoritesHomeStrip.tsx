@@ -24,7 +24,7 @@ import {
   type RiderFavoriteDriverRow,
 } from '@/src/constants/riderFavorites';
 import { RiderFavoriteIcon } from '@/src/components/rider/RiderFavoriteIcon';
-import { BORDER_RADIUS, COLORS, FONT_SIZE, SPACING } from '@/src/constants/theme';
+import { BORDER_RADIUS, COLORS, FONT_SIZE, SPACING, useThemeColors } from '@/src/constants/theme';
 
 function mapRow(d: Record<string, unknown>): RiderFavoriteDriverRow {
   const id = String(d.driver_id || d.id || '');
@@ -45,6 +45,7 @@ export function RiderFavoritesHomeStrip() {
   const { userId: riderId, canCallAuthedApi } = useAuthedUserId();
   const [loading, setLoading] = useState(true);
   const [drivers, setDrivers] = useState<RiderFavoriteDriverRow[]>([]);
+  const { colors, isDark } = useThemeColors();
 
   const load = useCallback(async () => {
     if (!riderId || !canCallAuthedApi) {
@@ -101,8 +102,8 @@ export function RiderFavoritesHomeStrip() {
         <View style={styles.headerLeft}>
           <RiderFavoriteIcon size={32} filled />
           <View>
-            <Text style={styles.title}>Favourite drivers</Text>
-            <Text style={styles.sub}>
+            <Text style={[styles.title, { color: colors.text }]}>Favourite drivers</Text>
+            <Text style={[styles.sub, { color: colors.textMuted }]}>
               {drivers.length === 0
                 ? RIDER_FAV_PERK_SHORT
                 : onlineCount > 0
@@ -123,36 +124,46 @@ export function RiderFavoritesHomeStrip() {
         <ActivityIndicator color={RIDER_FAV_ACCENT} style={{ marginVertical: 20 }} />
       ) : drivers.length === 0 ? (
         <TouchableOpacity
-          style={styles.emptyCard}
+          style={[styles.emptyLine, { borderColor: colors.border }]}
           onPress={() => router.push('/rider/favorite-drivers' as any)}
-          activeOpacity={0.88}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Set up favourite drivers"
         >
-          <LinearGradient colors={['rgba(236,72,153,0.12)', 'rgba(15,23,42,0.6)']} style={styles.emptyGrad}>
-            <Ionicons name="heart-circle" size={36} color={RIDER_FAV_ACCENT} />
-            <Text style={styles.emptyTitle}>Save drivers you trust</Text>
-            <Text style={styles.emptySub}>
-              After a great trip, tap the heart on your receipt. They’ll show up here for quick rebooking.
-            </Text>
-            <View style={styles.emptyCta}>
-              <Text style={styles.emptyCtaTxt}>Learn more</Text>
-              <Ionicons name="arrow-forward" size={16} color={RIDER_FAV_ACCENT} />
-            </View>
-          </LinearGradient>
+          <Ionicons name="heart-outline" size={16} color={RIDER_FAV_ACCENT} />
+          <Text style={[styles.emptyLineTxt, { color: colors.textMuted }]} numberOfLines={1}>
+            Set up favourites
+          </Text>
+          <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
         </TouchableOpacity>
       ) : (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
           {drivers.slice(0, 8).map((d) => (
             <TouchableOpacity
               key={d.id}
-              style={[styles.chip, d.isOnline && styles.chipOnline]}
+              style={[
+                styles.chip,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+                d.isOnline && [
+                  styles.chipOnline,
+                  {
+                    backgroundColor: isDark ? 'rgba(236,72,153,0.10)' : 'rgba(236,72,153,0.06)',
+                  },
+                ],
+              ]}
               onPress={() => bookDriver(d)}
               activeOpacity={0.9}
               accessibilityLabel={`Book ${d.name}`}
             >
               <View style={styles.chipTop}>
-                <View style={styles.chipAvatar}>
-                  <Text style={styles.chipLetter}>{d.name.charAt(0).toUpperCase()}</Text>
-                  {d.isOnline ? <View style={styles.chipDot} /> : null}
+                <View style={[styles.chipAvatar, { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
+                  <Text style={[styles.chipLetter, { color: isDark ? '#F8FAFC' : '#0F172A' }]}>
+                    {d.name.charAt(0).toUpperCase()}
+                  </Text>
+                  {d.isOnline ? <View style={[styles.chipDot, { borderColor: colors.card }]} /> : null}
                 </View>
                 {d.rating > 0 ? (
                   <View style={styles.ratingPill}>
@@ -161,10 +172,10 @@ export function RiderFavoritesHomeStrip() {
                   </View>
                 ) : null}
               </View>
-              <Text style={styles.chipName} numberOfLines={1}>
+              <Text style={[styles.chipName, { color: colors.text }]} numberOfLines={1}>
                 {d.name.split(' ')[0]}
               </Text>
-              <Text style={styles.chipVehicle} numberOfLines={1}>
+              <Text style={[styles.chipVehicle, { color: colors.textMuted }]} numberOfLines={1}>
                 {d.vehicle}
               </Text>
               <View style={[styles.bookPill, d.isOnline ? styles.bookPillOn : styles.bookPillOff]}>
@@ -183,7 +194,7 @@ export function RiderFavoritesHomeStrip() {
             <LinearGradient colors={[...RIDER_FAV_GRADIENT]} style={styles.addGrad}>
               <Ionicons name="add" size={28} color="#FFF" />
             </LinearGradient>
-            <Text style={styles.addLabel}>Manage</Text>
+            <Text style={[styles.addLabel, { color: RIDER_FAV_ACCENT }]}>Manage</Text>
           </TouchableOpacity>
         </ScrollView>
       )}
@@ -269,10 +280,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addLabel: { fontSize: 11, fontWeight: '800', color: RIDER_FAV_ACCENT },
-  emptyCard: { borderRadius: BORDER_RADIUS.xl, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(236,72,153,0.2)' },
-  emptyGrad: { padding: SPACING.lg, alignItems: 'center', gap: 8 },
-  emptyTitle: { fontSize: FONT_SIZE.md, fontWeight: '900', color: COLORS.lightTextPrimary },
-  emptySub: { fontSize: FONT_SIZE.sm, color: COLORS.gray500, textAlign: 'center', lineHeight: 20 },
-  emptyCta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
-  emptyCtaTxt: { fontSize: FONT_SIZE.sm, fontWeight: '800', color: RIDER_FAV_ACCENT },
+  emptyLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  emptyLineTxt: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '600' },
 });

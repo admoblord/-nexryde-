@@ -36,11 +36,12 @@ import {
   mergeTripFromStatusPayload,
 } from '@/src/utils/tripCoords';
 import { pickDriverPhotoRaw } from '@/src/utils/tripProfilePhotos';
-const driverInfoFromTripDocument = pickDriverPhotoRaw;
 import { driverPingMovedEnough, parseTrackingPing } from '@/src/utils/riderTripLiveSync';
 import { logLocationUpdated } from '@/src/utils/trackingLiveLogger';
 import { getTripDriverCache, setTripDriverCache, clearTripDriverCache } from '@/src/utils/tripDriverCache';
 import { openShareTrip } from '@/src/utils/openShareTrip';
+import { useErrorToast } from '@/src/components/shared/ErrorToast';
+import { breadcrumbTripCancelled } from '@/src/utils/sentryBreadcrumbs';
 import {
   riderFinancialPaymentPending,
   isCashPaymentMethod,
@@ -85,6 +86,28 @@ import { fetchWithTimeout } from '@/src/utils/fetchWithTimeout';
 import { safeReplace } from '@/src/utils/navigationSafe';
 import { managedFetch } from '@/src/services/networkManager';
 
+function driverInfoFromTripDocument(trip: Record<string, unknown> | null | undefined) {
+  if (!trip) return null;
+  const photos = pickDriverPhotoRaw(trip);
+  const info = {
+    driver_id: trip.driver_id,
+    name: trip.driver_name,
+    vehicle: trip.vehicle_model || trip.vehicle_type,
+    vehicle_model: trip.vehicle_model,
+    vehicle_type: trip.vehicle_type,
+    plate: trip.vehicle_plate,
+    vehicle_plate: trip.vehicle_plate,
+    color: trip.vehicle_color,
+    vehicle_color: trip.vehicle_color,
+    rating: trip.driver_rating,
+    total_trips: trip.driver_total_trips || trip.driver_trips_completed,
+    verified: trip.driver_verified,
+    face_image: photos.face,
+    profile_image: photos.profile,
+  };
+  return Object.values(info).some((value) => value != null && value !== '') ? info : null;
+}
+
 export function useRiderTrackingSession() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -127,6 +150,9 @@ export function useRiderTrackingSession() {
   const [acceptedBanner, setAcceptedBanner] = useState(false);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancellingRide, setCancellingRide] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const cancelInFlightRef = useRef(false);
+  const toast = useErrorToast();
   /** Consecutive failed status syncs — drives the "live updates interrupted" banner. */
   const syncFailCountRef = useRef(0);
   const [syncError, setSyncError] = useState(false);
@@ -160,6 +186,11 @@ export function useRiderTrackingSession() {
 
   const pickupCoords = getCoords(currentTrip?.pickup_location);
   const dropoffCoords = getCoords(currentTrip?.dropoff_location);
+  const stopCoordsList = useMemo(() => {
+    const raw = currentTrip?.stop_location;
+    const one = getCoords(raw);
+    return one ? [one] : [];
+  }, [currentTrip?.stop_location, getCoords]);
   const liveDriverCoords = getCoords(driverLocation) ?? lastKnownDriverRef.current;
 
   const navigateOnce = useCallback((key: string, run: () => void) => {
@@ -365,6 +396,7 @@ export function useRiderTrackingSession() {
     () => ({
       pickup: pickupCoords,
       dropoff: dropoffCoords,
+      stops: stopCoordsList,
       driver: liveDriverCoords,
       driverHeading:
         driverLocation?.heading != null ? Number(driverLocation.heading) : null,
@@ -378,6 +410,7 @@ export function useRiderTrackingSession() {
     [
       pickupCoords,
       dropoffCoords,
+      stopCoordsList,
       liveDriverCoords,
       driverLocation,
       snappedPolyline,
@@ -621,6 +654,24 @@ export function useRiderTrackingSession() {
             ...(typeof t.driver_info === 'object' ? (t.driver_info as Record<string, unknown>) : {}),
             driver_id: (t.driver_id as string) || prev?.driver_id,
             name: (t.driver_name as string) || prev?.name || 'Driver',
+            profile_image:
+              (t.driver_profile_image as string | undefined) ||
+              (t.profile_image as string | undefined) ||
+              prev?.profile_image,
+            face_image:
+              (t.driver_face_image as string | undefined) ||
+              (t.face_image as string | undefined) ||
+              prev?.face_image,
+            rating: t.driver_rating ?? prev?.rating,
+            total_trips: t.driver_total_trips ?? prev?.total_trips,
+            verified: t.driver_verified ?? prev?.verified,
+            vehicle: t.vehicle_model || t.vehicle_type || prev?.vehicle,
+            vehicle_model: t.vehicle_model || prev?.vehicle_model,
+            vehicle_type: t.vehicle_type || prev?.vehicle_type,
+            plate: t.vehicle_plate || prev?.plate,
+            vehicle_plate: t.vehicle_plate || prev?.vehicle_plate,
+            color: t.vehicle_color || prev?.color,
+            vehicle_color: t.vehicle_color || prev?.vehicle_color,
           }),
         );
       }
@@ -944,7 +995,6 @@ export function useRiderTrackingSession() {
     if (!effectiveTripId || !riderId) return;
     // For terminal / payment states don't cancel — just close tracking safely
     if (tripStatus === 'pending_payment') {
-      // Trip is over but payment pending — go to receipt; do not trigger a cancel
       safeReplace(router, { pathname: '/rider/trip-receipt', params: { tripId: effectiveTripId } });
       return;
     }
@@ -957,40 +1007,62 @@ export function useRiderTrackingSession() {
       router.back();
       return;
     }
+    if (cancelInFlightRef.current) return;
+    cancelInFlightRef.current = true;
+    setCancelError(null);
     setCancellingRide(true);
     try {
+      const payload: Record<string, string> = { cancelled_by: riderId };
+      const trimmed = String(reason || '').trim();
+      if (trimmed) {
+        payload.reason = trimmed;
+        payload.cancellation_reason = trimmed;
+      }
       const res = await managedFetch(`${BACKEND_URL}/api/trips/${effectiveTripId}/cancel`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cancelled_by: riderId, ...(reason ? { reason } : {}) }),
+        body: JSON.stringify(payload),
         authed: true,
-        timeoutMs: 10_000,
-        retries: 1,
+        timeoutMs: 8_000,
+        retries: 0,
       });
-      const data = await res.json();
+      let data: { detail?: string; message?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        /* non-JSON body */
+      }
       if (!res.ok) {
         const detail = String(data?.detail || '');
         // Trip may already be cancelled server-side while UI still shows finding.
         if (res.status === 400 && /cannot cancel|already cancel/i.test(detail)) {
+          clearTripDriverCache();
           setCancelModalOpen(false);
           setCurrentTrip(null);
+          toast.show('Trip cancelled successfully.', 'success');
           safeReplace(router, '/(rider-tabs)/rider-home');
           return;
         }
-        setCancelModalOpen(false);
-        Alert.alert('Cannot cancel', detail || 'Unable to cancel this trip.');
+        setCancelError(detail || 'Unable to cancel this trip. Tap Cancel Ride to retry.');
         return;
       }
+      breadcrumbTripCancelled(effectiveTripId, trimmed || 'unspecified', 'rider');
+      clearTripDriverCache();
       setCancelModalOpen(false);
       setCurrentTrip(null);
-      router.replace('/(rider-tabs)/rider-home');
-    } catch {
-      setCancelModalOpen(false);
-      Alert.alert('Error', 'Could not cancel ride.');
+      toast.show('Trip cancelled successfully.', 'success');
+      safeReplace(router, '/(rider-tabs)/rider-home');
+    } catch (err) {
+      const msg =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Could not cancel ride. Check your connection and retry.';
+      setCancelError(msg);
     } finally {
+      cancelInFlightRef.current = false;
       setCancellingRide(false);
     }
-  }, [effectiveTripId, riderId, tripStatus, router, setCurrentTrip]);
+  }, [effectiveTripId, riderId, tripStatus, router, setCurrentTrip, toast]);
 
   /** Opens the reason sheet for cancellable phases; otherwise just leaves the screen. */
   const promptCancelRide = useCallback(() => {
@@ -998,11 +1070,15 @@ export function useRiderTrackingSession() {
       void onCancelRide();
       return;
     }
+    setCancelError(null);
     setCancelModalOpen(true);
   }, [tripStatus, onCancelRide]);
 
   const closeCancelModal = useCallback(() => {
-    if (!cancellingRide) setCancelModalOpen(false);
+    if (!cancellingRide) {
+      setCancelError(null);
+      setCancelModalOpen(false);
+    }
   }, [cancellingRide]);
 
   const onToggleFavorite = useCallback(async () => {
@@ -1064,6 +1140,7 @@ export function useRiderTrackingSession() {
     currentTrip,
     cancelModalOpen,
     cancellingRide,
+    cancelError,
     actions: {
       retrySync: fetchStatus,
       onBack,

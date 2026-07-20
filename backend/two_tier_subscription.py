@@ -229,7 +229,7 @@ async def get_pricing_info():
                 "✅ Unlimited inter-city trips",
                 "✅ Unlimited intra-city trips",
                 "✅ Priority route matching",
-                "✅ Smart Route Planner (AI)",
+                "✅ Smart Route Planner",
                 "✅ 3x API call allowance",
                 "✅ Road Warrior badge",
                 "✅ Access to all routes nationwide"

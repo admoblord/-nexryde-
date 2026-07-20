@@ -11,7 +11,7 @@ export function TripDetailsPage() {
 
   useEffect(() => {
     if (!tripId) return;
-    api(`/admin/trips/${tripId}/operations-detail`).then(setData).catch(() => setData(null));
+    api<Record<string, unknown>>(`/admin/trips/${tripId}/operations-detail`).then(setData).catch(() => setData(null));
   }, [tripId]);
 
   if (!data) return <div className="card text-slate-400">Loading trip details…</div>;
@@ -39,11 +39,11 @@ export function TripDetailsPage() {
       <div className="mb-6 grid gap-4 lg:grid-cols-2">
         <div className="card">
           <h3 className="mb-3 font-bold">Pickup</h3>
-          <p className="text-sm text-slate-300">{(trip.pickup_location as Record<string, unknown>)?.address ?? JSON.stringify(trip.pickup_location)}</p>
+          <p className="text-sm text-slate-300">{String((trip.pickup_location as Record<string, unknown> | undefined)?.address ?? JSON.stringify(trip.pickup_location ?? {}))}</p>
         </div>
         <div className="card">
           <h3 className="mb-3 font-bold">Destination</h3>
-          <p className="text-sm text-slate-300">{(trip.dropoff_location as Record<string, unknown>)?.address ?? JSON.stringify(trip.dropoff_location)}</p>
+          <p className="text-sm text-slate-300">{String((trip.dropoff_location as Record<string, unknown> | undefined)?.address ?? JSON.stringify(trip.dropoff_location ?? {}))}</p>
         </div>
       </div>
       <div className="mb-6 grid gap-4 sm:grid-cols-2">

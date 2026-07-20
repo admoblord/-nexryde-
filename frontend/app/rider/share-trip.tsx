@@ -31,10 +31,11 @@ import { formatEtaClockFromSeconds } from '@/src/utils/onTripDisplay';
 import { formatDriverDisplayField } from '@/src/utils/tripCoords';
 import { driverAvatarSources } from '@/src/utils/tripProfilePhotos';
 import { getTripDriverCache } from '@/src/utils/tripDriverCache';
+import { useThemeColors } from '@/src/constants/theme';
+import { TripRouteMiniMap } from '@/src/components/map/TripRouteMiniMap';
 
 const NEON = '#22C55E';
 const CYAN = '#06B6D4';
-const BG = '#0B1220';
 
 function formatClockTime(iso: string | null | undefined): string {
   if (!iso) return '—';
@@ -62,6 +63,7 @@ export default function ShareTripScreen() {
   const params = useLocalSearchParams<{ tripId?: string }>();
   const { currentTrip } = useAppStore();
   const { userId: riderId, canCallAuthedApi } = useAuthedUserId();
+  const { colors, isDark } = useThemeColors();
 
   const tripId = (params.tripId as string) || currentTrip?.id || null;
 
@@ -108,7 +110,7 @@ export default function ShareTripScreen() {
     if (diff < 60) return `${diff}s ago`;
     if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
     return lastRefresh.toLocaleTimeString();
-  }, [lastRefresh, refreshing]);
+  }, [lastRefresh]);
 
   const shareMessage = `Track my NEXRYDE trip in real time: ${shareLink}\nDriver: ${driverName}\nVehicle: ${plate || vehicleLine}`;
 
@@ -173,12 +175,12 @@ export default function ShareTripScreen() {
 
   if (!tripId) {
     return (
-      <SafeAreaView style={[styles.safe, { paddingTop: insets.top }]}>
+      <SafeAreaView style={[styles.safe, { paddingTop: insets.top, backgroundColor: colors.background }]}>
         <Header onBack={() => router.back()} />
         <View style={styles.centered}>
-          <Ionicons name="car-outline" size={48} color="#64748B" />
-          <Text style={styles.emptyTitle}>No active trip</Text>
-          <Text style={styles.emptySub}>Book a ride to share live tracking with friends.</Text>
+          <Ionicons name="car-outline" size={48} color={colors.textMuted} />
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>No active trip</Text>
+          <Text style={[styles.emptySub, { color: colors.textMuted }]}>Book a ride to share live tracking with friends.</Text>
         </View>
       </SafeAreaView>
     );
@@ -186,18 +188,18 @@ export default function ShareTripScreen() {
 
   if (loading && !shareData) {
     return (
-      <SafeAreaView style={[styles.safe, { paddingTop: insets.top }]}>
+      <SafeAreaView style={[styles.safe, { paddingTop: insets.top, backgroundColor: colors.background }]}>
         <Header onBack={() => router.back()} />
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={NEON} />
-          <Text style={styles.loadingTxt}>Loading trip data…</Text>
+          <Text style={[styles.loadingTxt, { color: colors.textMuted }]}>Loading trip data…</Text>
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.safe, { paddingTop: insets.top }]} edges={['left', 'right']}>
+    <SafeAreaView style={[styles.safe, { paddingTop: insets.top, backgroundColor: colors.background }]} edges={['left', 'right']}>
       <Header onBack={() => router.back()} />
 
       <ScrollView
@@ -222,9 +224,13 @@ export default function ShareTripScreen() {
           </View>
         ) : null}
 
-        <View style={styles.liveCard}>
+        <View style={[styles.liveCard, { borderColor: isDark ? 'rgba(34,197,94,0.35)' : 'rgba(34,197,94,0.22)' }]}>
           <LinearGradient
-            colors={['rgba(34,197,94,0.35)', 'rgba(6,182,212,0.12)', 'rgba(15,23,42,0.9)']}
+            colors={
+              isDark
+                ? ['rgba(34,197,94,0.35)', 'rgba(6,182,212,0.12)', 'rgba(15,23,42,0.9)']
+                : ['rgba(34,197,94,0.22)', 'rgba(6,182,212,0.10)', 'rgba(248,250,252,0.95)']
+            }
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={StyleSheet.absoluteFillObject}
@@ -235,21 +241,26 @@ export default function ShareTripScreen() {
                 <View style={styles.liveDot} />
                 <Text style={styles.liveTitle}>Live Tracking Active</Text>
               </View>
-              <Text style={styles.liveSub}>Your location is being shared in real-time</Text>
+              <Text style={[styles.liveSub, { color: colors.textSecondary }]}>Your location is being shared in real-time</Text>
               <View style={styles.lastUpRow}>
                 <Ionicons name="time-outline" size={14} color={NEON} />
                 <Text style={styles.lastUpTxt}>Last updated: {lastUpdateLabel}</Text>
               </View>
             </View>
             <View style={styles.miniMap}>
-              <Ionicons name="map" size={28} color="rgba(6,182,212,0.5)" />
-              <Ionicons name="car-sport" size={22} color={CYAN} style={styles.miniCar} />
+              <TripRouteMiniMap
+                pickup={currentTrip?.pickup_location}
+                dropoff={currentTrip?.dropoff_location}
+                stop={currentTrip?.stop_location}
+                routePreview={currentTrip?.route_preview_coordinates}
+                height={96}
+              />
             </View>
           </View>
         </View>
 
         <SectionTitle icon="location" color="#EF4444" title="Current Trip" />
-        <View style={styles.tripCard}>
+        <View style={[styles.tripCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.driverTopRow}>
             <TripProfileAvatar
               size={64}
@@ -260,10 +271,10 @@ export default function ShareTripScreen() {
               showOnlineDot
             />
             <View style={styles.driverMid}>
-              <Text style={styles.driverName} numberOfLines={1}>
+              <Text style={[styles.driverName, { color: colors.text }]} numberOfLines={1}>
                 {driverName}
               </Text>
-              <Text style={styles.vehicleLine} numberOfLines={2}>
+              <Text style={[styles.vehicleLine, { color: colors.textMuted }]} numberOfLines={2}>
                 {vehicleLine}
               </Text>
               {plate ? (
@@ -283,8 +294,8 @@ export default function ShareTripScreen() {
             <View style={styles.routeRow}>
               <View style={[styles.routeDot, { backgroundColor: '#EF4444' }]} />
               <View style={styles.routeTextCol}>
-                <Text style={styles.routeLbl}>Pickup Location</Text>
-                <Text style={styles.routeVal} numberOfLines={2}>
+                <Text style={[styles.routeLbl, { color: colors.textMuted }]}>Pickup Location</Text>
+                <Text style={[styles.routeVal, { color: colors.text }]} numberOfLines={2}>
                   {shortAddress(shareData?.pickup_address || currentTrip?.pickup_location?.address)}
                 </Text>
               </View>
@@ -293,8 +304,8 @@ export default function ShareTripScreen() {
             <View style={styles.routeRow}>
               <View style={[styles.routeDot, { backgroundColor: CYAN }]} />
               <View style={styles.routeTextCol}>
-                <Text style={styles.routeLbl}>Destination</Text>
-                <Text style={styles.routeVal} numberOfLines={2}>
+                <Text style={[styles.routeLbl, { color: colors.textMuted }]}>Destination</Text>
+                <Text style={[styles.routeVal, { color: colors.text }]} numberOfLines={2}>
                   {shortAddress(
                     shareData?.destination_address || currentTrip?.dropoff_location?.address,
                   )}
@@ -304,21 +315,21 @@ export default function ShareTripScreen() {
           </View>
 
           <View style={styles.statRow}>
-            <View style={styles.statBox}>
+            <View style={[styles.statBox, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
               <Ionicons name="git-network-outline" size={18} color="#94A3B8" />
-              <Text style={styles.statLbl}>Distance</Text>
-              <Text style={styles.statVal}>{distanceLabel}</Text>
+              <Text style={[styles.statLbl, { color: colors.textMuted }]}>Distance</Text>
+              <Text style={[styles.statVal, { color: colors.text }]}>{distanceLabel}</Text>
             </View>
-            <View style={styles.statBox}>
+            <View style={[styles.statBox, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
               <Ionicons name="alarm-outline" size={18} color="#94A3B8" />
-              <Text style={styles.statLbl}>Est. Arrival</Text>
-              <Text style={styles.statVal}>{etaClock}</Text>
+              <Text style={[styles.statLbl, { color: colors.textMuted }]}>Est. Arrival</Text>
+              <Text style={[styles.statVal, { color: colors.text }]}>{etaClock}</Text>
             </View>
           </View>
         </View>
 
         <SectionTitle icon="link" color={NEON} title="Share Link" />
-        <View style={styles.linkCard}>
+        <View style={[styles.linkCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={styles.linkTxt} numberOfLines={1} selectable>
             {shareLink || 'Generating link…'}
           </Text>
@@ -329,7 +340,7 @@ export default function ShareTripScreen() {
             </LinearGradient>
           </TouchableOpacity>
         </View>
-        <Text style={styles.linkHint}>Anyone with this link can track your trip in real-time.</Text>
+        <Text style={[styles.linkHint, { color: colors.textMuted }]}>Anyone with this link can track your trip in real-time.</Text>
 
         <SectionTitle icon="share-social" color={NEON} title="Quick Share" />
         <View style={styles.quickGrid}>
@@ -340,8 +351,8 @@ export default function ShareTripScreen() {
         </View>
 
         <SectionTitle icon="shield" color="#EF4444" title="Emergency Contacts" />
-        <View style={styles.emergencyCard}>
-          <Text style={styles.emergencyDesc}>
+        <View style={[styles.emergencyCard, { backgroundColor: colors.card }]}>
+          <Text style={[styles.emergencyDesc, { color: colors.textMuted }]}>
             Share your trip with trusted contacts or request immediate help.
           </Text>
           <TouchableOpacity
@@ -396,12 +407,17 @@ export default function ShareTripScreen() {
 }
 
 function Header({ onBack }: { onBack: () => void }) {
+  const { colors } = useThemeColors();
   return (
     <View style={styles.header}>
-      <TouchableOpacity style={styles.backBtn} onPress={onBack} accessibilityLabel="Go back">
-        <Ionicons name="chevron-back" size={22} color="#F8FAFC" />
+      <TouchableOpacity
+        style={[styles.backBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+        onPress={onBack}
+        accessibilityLabel="Go back"
+      >
+        <Ionicons name="chevron-back" size={22} color={colors.text} />
       </TouchableOpacity>
-      <Text style={styles.headerTitle}>Share Trip</Text>
+      <Text style={[styles.headerTitle, { color: colors.text }]}>Share Trip</Text>
       <View style={styles.headerSpacer} />
     </View>
   );
@@ -416,10 +432,11 @@ function SectionTitle({
   color: string;
   title: string;
 }) {
+  const { colors } = useThemeColors();
   return (
     <View style={styles.sectionHead}>
       <Ionicons name={icon} size={18} color={color} />
-      <Text style={styles.sectionTitle}>{title}</Text>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
     </View>
   );
 }
@@ -448,7 +465,7 @@ function QuickShareBtn({
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: BG },
+  safe: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -470,14 +487,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 20,
     fontWeight: '800',
-    color: '#F8FAFC',
   },
   headerSpacer: { width: 44 },
   scroll: { flex: 1 },
   scrollInner: { paddingHorizontal: 16, paddingTop: 8 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
   loadingTxt: { fontSize: 14, color: '#94A3B8', fontWeight: '600' },
-  emptyTitle: { fontSize: 18, fontWeight: '800', color: '#F8FAFC' },
+  emptyTitle: { fontSize: 18, fontWeight: '800' },
   emptySub: { fontSize: 14, color: '#94A3B8', textAlign: 'center' },
   warnBanner: {
     flexDirection: 'row',
@@ -508,16 +524,14 @@ const styles = StyleSheet.create({
   lastUpRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   lastUpTxt: { fontSize: 12, fontWeight: '600', color: NEON },
   miniMap: {
-    width: 72,
-    height: 72,
+    width: 112,
+    height: 96,
     borderRadius: 12,
+    overflow: 'hidden',
     backgroundColor: 'rgba(15,23,42,0.6)',
     borderWidth: 1,
     borderColor: 'rgba(6,182,212,0.25)',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  miniCar: { position: 'absolute', bottom: 10, right: 10 },
   sectionHead: {
     flexDirection: 'row',
     alignItems: 'center',

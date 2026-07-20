@@ -31,7 +31,8 @@ import { useAppStore } from '@/src/store/appStore';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { useFlowLayout } from '@/src/constants/flowLayout';
-import { SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY } from '@/src/constants/theme';
+import { CURRENCY, useThemeColors } from '@/src/constants/theme';
+import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
 import { useResource } from '@/src/hooks/useResource';
 import { Skeleton } from '@/src/components/Skeleton';
 import { InlineError } from '@/src/components/InlineError';
@@ -40,21 +41,33 @@ import {
   type EarningsPeriod,
 } from '@/src/services/driverEarningsScreenData';
 
-// ─── Design tokens ─────────────────────────────────────────────────────────
-const D = {
-  bg:      '#050D1A',
-  card:    '#0D1829',
-  card2:   '#0A1422',
-  border:  'rgba(255,255,255,0.07)',
-  green:   '#22C55E',
-  neon:    '#00D46A',
-  amber:   '#F59E0B',
-  blue:    '#3B82F6',
-  sub:     '#94A3B8',
-  muted:   '#475569',
-  text:    '#F1F5F9',
-  textDim: '#CBD5E1',
+// ─── Design tokens (appearance-aware) ──────────────────────────────────────
+type EarnPalette = {
+  bg: string; card: string; card2: string; border: string;
+  green: string; neon: string; amber: string; blue: string;
+  sub: string; muted: string; text: string; textDim: string;
 };
+function buildEarnPalette(isDark: boolean, colors: { background: string; card: string; surfaceAlt: string; border: string; text: string; textSecondary: string; textMuted: string }): EarnPalette {
+  if (isDark) {
+    return {
+      bg: BRAND.bgDeep, card: SURFACE.cardDark, card2: SURFACE.cardElevated, border: SURFACE.hairline,
+      green: BRAND.primaryDark, neon: BRAND.primary, amber: BRAND.warning, blue: BRAND.info,
+      sub: BRAND.textSecondary, muted: BRAND.textMuted, text: BRAND.textPrimary, textDim: BRAND.textSecondary,
+    };
+  }
+  return {
+    bg: colors.background, card: colors.card, card2: colors.surfaceAlt, border: colors.border,
+    green: BRAND.primaryDark, neon: BRAND.primary, amber: BRAND.warning, blue: BRAND.info,
+    sub: colors.textSecondary, muted: colors.textMuted, text: colors.text, textDim: colors.textSecondary,
+  };
+}
+const BORDER_RADIUS = RADIUS;
+const FONT_SIZE = {
+  xs: 11,
+  sm: 13,
+  md: 15,
+  xl: 22,
+} as const;
 
 function formatTripHours(totalTimeMins: number): string {
   const hrs = totalTimeMins / 60;
@@ -90,44 +103,45 @@ function EarningsSkeleton() {
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
-function SectionLabel({ text }: { text: string }) {
-  return <Text style={s.sectionLabel}>{text}</Text>;
-}
-
-function DarkCard({ children, style }: { children: React.ReactNode; style?: object }) {
-  return <View style={[s.darkCard, style]}>{children}</View>;
-}
-
-function StatCell({
-  icon, iconColor, value, label, hint,
-}: {
-  icon: React.ComponentProps<typeof Ionicons>['name'];
-  iconColor: string;
-  value: string;
-  label: string;
-  hint?: string;
-}) {
-  return (
-    <View style={s.statCell}>
-      <View style={[s.statIconWrap, { backgroundColor: `${iconColor}18` }]}>
-        <Ionicons name={icon} size={18} color={iconColor} />
-      </View>
-      <Text style={s.statValue}>{value}</Text>
-      <Text style={s.statLabel}>{label}</Text>
-      {hint ? <Text style={s.statHint}>{hint}</Text> : null}
-    </View>
-  );
-}
-
 export default function DriverEarningsScreen() {
   const router = useRouter();
   const user         = useAppStore((s) => s.user);
   const subscription = useAppStore((s) => s.subscription) as any;
   const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
+  const { colors, isDark } = useThemeColors();
+  const D = useMemo(() => buildEarnPalette(isDark, colors), [isDark, colors]);
+  const s = useMemo(() => createEarnStyles(D), [D]);
   const [period, setPeriod]         = useState<Period>('today');
   const [refreshing, setRefreshing] = useState(false);
   const tabPad = useTabBottomPad(8);
   const flow   = useFlowLayout();
+
+  function SectionLabel({ text }: { text: string }) {
+    return <Text style={s.sectionLabel}>{text}</Text>;
+  }
+  function DarkCard({ children, style }: { children: React.ReactNode; style?: object }) {
+    return <View style={[s.darkCard, style]}>{children}</View>;
+  }
+  function StatCell({
+    icon, iconColor, value, label, hint,
+  }: {
+    icon: React.ComponentProps<typeof Ionicons>['name'];
+    iconColor: string;
+    value: string;
+    label: string;
+    hint?: string;
+  }) {
+    return (
+      <View style={s.statCell}>
+        <View style={[s.statIconWrap, { backgroundColor: `${iconColor}18` }]}>
+          <Ionicons name={icon} size={18} color={iconColor} />
+        </View>
+        <Text style={s.statValue}>{value}</Text>
+        <Text style={s.statLabel}>{label}</Text>
+        {hint ? <Text style={s.statHint}>{hint}</Text> : null}
+      </View>
+    );
+  }
 
   const resourceKey = `driver-earnings:${driverId ?? 'none'}:${period}`;
   const { data, loading, error, retry } = useResource(
@@ -216,7 +230,7 @@ export default function DriverEarningsScreen() {
       <View style={[s.header, { paddingHorizontal: flow.padH }]}>
         <View>
           <Text style={s.headerTitle}>Earnings</Text>
-          <Text style={s.headerSub}>Keep 100% of every fare</Text>
+          <Text style={s.headerSub}>You keep 100% of every fare</Text>
         </View>
         <TouchableOpacity
           style={s.withdrawBtn}
@@ -271,7 +285,7 @@ export default function DriverEarningsScreen() {
                 <Ionicons name="wallet" size={22} color={D.neon} />
               </View>
               <View>
-                <Text style={s.walletLabel}>WALLET BALANCE</Text>
+                <Text style={s.walletLabel}>Wallet balance</Text>
                 <Text style={s.walletAmount}>
                   {walletBal !== null ? fmtMoney(walletBal) : '—'}
                 </Text>
@@ -314,7 +328,7 @@ export default function DriverEarningsScreen() {
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
           style={s.earningsHero}
         >
-          <Text style={s.earningsLabel}>TOTAL EARNINGS</Text>
+          <Text style={s.earningsLabel}>Total earnings</Text>
           <Text style={s.earningsAmount}>
             {fmtMoney(Number(summary.total_earnings ?? 0))}
           </Text>
@@ -335,7 +349,7 @@ export default function DriverEarningsScreen() {
         </LinearGradient>
 
         {/* ── Stats grid ─────────────────────────────────────────────────── */}
-        <SectionLabel text="YOUR STATS" />
+        <SectionLabel text="Your stats" />
         <DarkCard>
           <View style={s.statsGrid}>
             <StatCell icon="briefcase-outline" iconColor={D.blue} value={String(Number(summary.total_trips ?? 0))} label="Trips" hint={periodLabel} />
@@ -378,7 +392,7 @@ export default function DriverEarningsScreen() {
         {/* ── Live area pricing / surge ───────────────────────────────────── */}
         {surge && surgeExtras ? (
           <>
-            <SectionLabel text="LIVE AREA PRICING" />
+            <SectionLabel text="Live area pricing" />
             <DarkCard style={s.surgeOuter}>
               <View style={[s.surgeAccent, { backgroundColor: surgeExtras.accent }]} />
               <View style={s.surgeBody}>
@@ -459,7 +473,7 @@ export default function DriverEarningsScreen() {
         ) : null}
 
         {/* ── 7-day chart ────────────────────────────────────────────────── */}
-        <SectionLabel text="EARNINGS CHART" />
+        <SectionLabel text="Earnings chart" />
         <DarkCard>
           <View style={s.chartHeader}>
             <Text style={s.chartTitle}>{periodLabel} breakdown</Text>
@@ -491,7 +505,7 @@ export default function DriverEarningsScreen() {
         </DarkCard>
 
         {/* ── Earnings outlook ───────────────────────────────────────────── */}
-        <SectionLabel text="EARNINGS OUTLOOK" />
+        <SectionLabel text="Earnings outlook" />
         <View style={s.outlookRow}>
           {([
             { label: 'Daily', val: projections.daily },
@@ -508,7 +522,7 @@ export default function DriverEarningsScreen() {
         {/* ── Salary mode ────────────────────────────────────────────────── */}
         {salaryMode?.enabled ? (
           <>
-            <SectionLabel text="SALARY MODE" />
+            <SectionLabel text="Salary mode" />
             <DarkCard style={[salaryMode.status === 'behind' ? s.salaryBehind : s.salaryOnTrack]}>
               <View style={s.salaryTop}>
                 <Ionicons
@@ -543,7 +557,7 @@ export default function DriverEarningsScreen() {
         ) : null}
 
         {/* ── Bank & payout route ─────────────────────────────────────────── */}
-        <SectionLabel text="PAYOUT ROUTE" />
+        <SectionLabel text="Payout route" />
         <View style={s.payoutRow}>
           <TouchableOpacity style={s.payoutCard} onPress={() => router.push('/driver/bank')} activeOpacity={0.85}>
             <View style={s.payoutIcon}>
@@ -586,7 +600,8 @@ export default function DriverEarningsScreen() {
   );
 }
 
-const s = StyleSheet.create({
+function createEarnStyles(D: EarnPalette) {
+  return StyleSheet.create({
   root: { flex: 1, backgroundColor: D.bg },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -600,7 +615,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: `${D.neon}30`,
   },
   withdrawBtnTxt: { fontSize: FONT_SIZE.sm, fontWeight: '800', color: D.neon },
-  scroll: { paddingTop: SPACING.md, gap: 10 },
+  scroll: { paddingTop: SPACING.md, gap: SPACING.stack },
 
   errorBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -667,8 +682,8 @@ const s = StyleSheet.create({
   periodTxtActive: { color: '#022C16', fontWeight: '900' },
 
   sectionLabel: {
-    fontSize: 10, fontWeight: '900', color: D.muted, letterSpacing: 1.5,
-    textTransform: 'uppercase', marginTop: 6, marginBottom: 2, marginLeft: 2,
+    ...TYPOGRAPHY.label, color: D.muted, textTransform: 'uppercase',
+    marginTop: SPACING.sm, marginBottom: 2, marginLeft: 2,
   },
 
   darkCard: {
@@ -782,3 +797,4 @@ const s = StyleSheet.create({
   payoutBadgeTxtReady:   { color: D.neon },
   payoutBadgeTxtPending: { color: D.amber },
 });
+}

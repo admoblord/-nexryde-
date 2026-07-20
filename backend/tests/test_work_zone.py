@@ -15,8 +15,11 @@ from work_zone_areas import (
 )
 from work_zone_config import work_zone_public_config
 from work_zone_service import (
+    build_zone_label_from_places,
     driver_work_zone_allows_trip,
+    normalize_work_zone_places,
     normalize_profile_work_zone,
+    point_in_work_zone_places,
 )
 
 
@@ -53,6 +56,39 @@ def test_build_zone_label():
     assert "Lekki" in label
 
 
+def test_normalize_google_places_zones():
+    zones = normalize_work_zone_places([
+        {
+            "place_id": "abc123",
+            "label": "Sangotedo",
+            "address": "Sangotedo, Lagos, Nigeria",
+            "lat": 6.4698,
+            "lng": 3.6389,
+            "radius_m": 7000,
+        }
+    ])
+    assert zones[0]["place_id"] == "abc123"
+    assert zones[0]["label"] == "Sangotedo"
+    assert zones[0]["radius_m"] == 7000
+
+
+def test_place_zone_radius_matching():
+    zones = normalize_work_zone_places([
+        {"label": "Lekki Phase 1", "lat": 6.4474, "lng": 3.4723, "radius_m": 5000}
+    ])
+    assert point_in_work_zone_places(6.4478, 3.4729, zones) is True
+    assert point_in_work_zone_places(6.6018, 3.3515, zones) is False
+
+
+def test_build_place_zone_label():
+    label = build_zone_label_from_places([
+        {"label": "Lekki Phase 1"},
+        {"label": "Sangotedo"},
+        {"label": "Ikeja GRA"},
+    ])
+    assert label == "Lekki Phase 1 · Sangotedo +1"
+
+
 # ── Dispatch filter ─────────────────────────────────────────────────────────
 
 
@@ -61,6 +97,16 @@ def zoned_profile():
     return {
         "work_zone_active": True,
         "work_zone_area_ids": ["victoria_island", "lekki_phase_1", "lekki_phase_2"],
+    }
+
+
+@pytest.fixture
+def flexible_zoned_profile():
+    return {
+        "work_zone_active": True,
+        "work_zone_zones": [
+            {"label": "Lekki Phase 1", "lat": 6.4474, "lng": 3.4723, "radius_m": 5000}
+        ],
     }
 
 
@@ -85,6 +131,29 @@ def test_non_zoned_driver_passes_through():
     allowed, meta = driver_work_zone_allows_trip({"work_zone_active": False}, trip)
     assert allowed is True
     assert meta.get("work_zone_filter") is False
+
+
+def test_flexible_zone_pickup_inside_eligible(flexible_zoned_profile):
+    trip = {
+        "pickup_location": {"lat": 6.448, "lng": 3.473},
+        "dropoff_location": {"lat": 6.6018, "lng": 3.3515},
+    }
+    allowed, meta = driver_work_zone_allows_trip(flexible_zoned_profile, trip)
+    assert allowed is True
+    assert meta["matching_mode"] == "radius_geofence"
+    assert meta["pickup_in"] is True
+    assert meta["dropoff_in"] is False
+
+
+def test_flexible_zone_pickup_outside_skipped(flexible_zoned_profile):
+    trip = {
+        "pickup_location": {"lat": 6.6018, "lng": 3.3515},
+        "dropoff_location": {"lat": 6.448, "lng": 3.473},
+    }
+    allowed, meta = driver_work_zone_allows_trip(flexible_zoned_profile, trip)
+    assert allowed is False
+    assert meta["pickup_in"] is False
+    assert meta["dropoff_in"] is True
 
 
 def test_point_in_zone_bbox():
@@ -137,17 +206,17 @@ def test_public_config_included_with_subscription():
 
 
 @pytest.mark.asyncio
-async def test_guardrail_blocks_when_too_few_online():
+async def test_guardrail_never_blocks_when_too_few_online():
     from work_zone_service import check_activation_guardrails
 
     with patch("work_zone_service._count_online_in_areas", new=AsyncMock(return_value=2)):
         ok, msg = await check_activation_guardrails("u1", ["victoria_island"])
-    assert ok is False
-    assert "Not enough drivers online" in msg
+    assert ok is True
+    assert msg == "ok"
 
 
 @pytest.mark.asyncio
-async def test_guardrail_blocks_when_share_cap_full():
+async def test_guardrail_never_blocks_when_share_cap_full():
     from work_zone_service import check_activation_guardrails
 
     with (
@@ -155,8 +224,8 @@ async def test_guardrail_blocks_when_share_cap_full():
         patch("work_zone_service._count_zoned_online_in_areas", new=AsyncMock(return_value=4)),
     ):
         ok, msg = await check_activation_guardrails("u1", ["victoria_island"])
-    assert ok is False
-    assert "Zone slots full" in msg
+    assert ok is True
+    assert msg == "ok"
 
 
 @pytest.mark.asyncio

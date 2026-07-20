@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import Constants from 'expo-constants';
-import { useErrorToast } from '@/src/components/shared/ErrorToast';
 import { ProfileScreenSkeleton } from '@/src/components/shared/SkeletonLoader';
 import {
   View,
@@ -16,7 +15,7 @@ import {
   UIManager,
   StatusBar,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -39,20 +38,15 @@ import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { useThemeColors } from '@/src/constants/theme';
+import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-/* ─── Stat chip ─────────────────────────────────────────────── */
-function StatChip({ value, label, color }: { value: string; label: string; color: string }) {
-  return (
-    <View style={s.statChip}>
-      <Text style={[s.statValue, { color }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{value}</Text>
-      <Text style={s.statLabel} numberOfLines={1}>{label}</Text>
-    </View>
-  );
-}
+const PROFILE_GREEN = BRAND.primary;
+const PROFILE_GREEN_SOFT = BRAND.primaryMuted;
 
 /* ─── Earned achievement card ───────────────────────────────── */
 function RiderBadgeCard({
@@ -62,9 +56,10 @@ function RiderBadgeCard({
   badge: RiderAchievementBadgeMeta;
   onShare: () => void;
 }) {
+  const { colors, isDark } = useThemeColors();
   return (
     <LinearGradient
-      colors={[`${badge.accent}22`, 'rgba(15,23,42,0.55)']}
+      colors={[`${badge.accent}22`, isDark ? 'rgba(15,23,42,0.55)' : colors.card]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={s.badgeCard}
@@ -74,13 +69,13 @@ function RiderBadgeCard({
       </View>
       <View style={s.badgeTextCol}>
         <View style={s.badgeTitleRow}>
-          <Text style={s.badgeTitle}>{badge.title}</Text>
+          <Text style={[s.badgeTitle, { color: colors.text }]}>{badge.title}</Text>
           <View style={[s.badgeEarnedPill, { backgroundColor: `${badge.accent}22`, borderColor: `${badge.accent}44` }]}>
             <Ionicons name="checkmark-circle" size={11} color={badge.accent} />
             <Text style={[s.badgeEarnedText, { color: badge.accent }]}>Earned</Text>
           </View>
         </View>
-        <Text style={s.badgeSub} numberOfLines={2}>
+        <Text style={[s.badgeSub, { color: colors.textMuted }]} numberOfLines={2}>
           {badge.description}
         </Text>
       </View>
@@ -99,15 +94,16 @@ function RiderBadgeCard({
 
 /* ─── Locked badge preview ──────────────────────────────────── */
 function LockedBadgeChip({ badge }: { badge: RiderAchievementBadgeMeta }) {
+  const { colors } = useThemeColors();
   return (
-    <View style={s.lockedBadgeChip}>
-      <View style={s.lockedBadgeIcon}>
+    <View style={[s.lockedBadgeChip, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+      <View style={[s.lockedBadgeIcon, { backgroundColor: colors.surface }]}>
         <Ionicons name={badge.icon} size={14} color="#475569" />
-        <View style={s.lockedBadgeLock}>
+        <View style={[s.lockedBadgeLock, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Ionicons name="lock-closed" size={9} color="#64748B" />
         </View>
       </View>
-      <Text style={s.lockedBadgeTitle} numberOfLines={1}>
+      <Text style={[s.lockedBadgeTitle, { color: colors.textMuted }]} numberOfLines={1}>
         {badge.title}
       </Text>
     </View>
@@ -129,6 +125,7 @@ function ActionTile({
   tileWidth: number;
 }) {
   const scale = useRef(new Animated.Value(1)).current;
+  const { colors } = useThemeColors();
   const press = () => {
     Animated.sequence([
       Animated.timing(scale, { toValue: 0.93, duration: 80, useNativeDriver: true }),
@@ -138,11 +135,15 @@ function ActionTile({
   };
   return (
     <Animated.View style={{ transform: [{ scale }], width: tileWidth }}>
-      <TouchableOpacity style={s.actionTile} onPress={press} activeOpacity={1}>
+      <TouchableOpacity
+        style={[s.actionTile, { backgroundColor: colors.card, borderColor: colors.border }]}
+        onPress={press}
+        activeOpacity={1}
+      >
         <LinearGradient colors={gradColors} style={s.actionTileIcon} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
           <Ionicons name={icon} size={22} color="#FFF" />
         </LinearGradient>
-        <Text style={s.actionTileLabel}>{label}</Text>
+        <Text style={[s.actionTileLabel, { color: colors.text }]}>{label}</Text>
       </TouchableOpacity>
     </Animated.View>
   );
@@ -166,19 +167,20 @@ function MenuRow({
   danger?: boolean;
   badge?: string;
 }) {
+  const { colors } = useThemeColors();
   return (
-    <TouchableOpacity style={s.menuRow} onPress={onPress} activeOpacity={0.75}>
+    <TouchableOpacity style={[s.menuRow, { borderTopColor: colors.border }]} onPress={onPress} activeOpacity={0.75}>
       <LinearGradient colors={danger ? ['#7f1d1d', '#991b1b'] : gradColors} style={s.menuIconWrap} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
         <Ionicons name={icon} size={18} color="#FFF" />
       </LinearGradient>
       <View style={s.menuRowBody}>
-        <Text style={[s.menuTitle, danger && { color: '#F87171' }]}>{title}</Text>
-        {subtitle ? <Text style={s.menuSubtitle}>{subtitle}</Text> : null}
+        <Text style={[s.menuTitle, { color: colors.text }, danger && { color: '#F87171' }]}>{title}</Text>
+        {subtitle ? <Text style={[s.menuSubtitle, { color: colors.textMuted }]}>{subtitle}</Text> : null}
       </View>
       {badge ? (
         <View style={s.menuBadge}><Text style={s.menuBadgeText}>{badge}</Text></View>
       ) : (
-        <Ionicons name="chevron-forward" size={16} color="#475569" />
+        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
       )}
     </TouchableOpacity>
   );
@@ -186,23 +188,35 @@ function MenuRow({
 
 /* ─── Section wrapper ────────────────────────────────────────── */
 function Section({ title, children }: { title?: string; children: React.ReactNode }) {
+  const { colors, isDark } = useThemeColors();
   return (
     <View style={s.section}>
-      {title ? <Text style={s.sectionTitle}>{title}</Text> : null}
-      <View style={s.sectionCard}>{children}</View>
+      {title ? <Text style={[s.sectionTitle, { color: colors.textMuted }]}>{title}</Text> : null}
+      <View
+        style={[
+          s.sectionCard,
+          {
+            backgroundColor: isDark ? SURFACE.cardDark : colors.card,
+            borderColor: isDark ? SURFACE.hairline : colors.border,
+          },
+        ]}
+      >
+        {children}
+      </View>
     </View>
   );
 }
 
 /* ─── Score bar ──────────────────────────────────────────────── */
 function ScoreBar({ label, value, color }: { label: string; value: number; color: string }) {
+  const { colors } = useThemeColors();
   return (
     <View style={s.scoreBarWrap}>
       <View style={s.scoreBarRow}>
-        <Text style={s.scoreBarLabel}>{label}</Text>
+        <Text style={[s.scoreBarLabel, { color: colors.textMuted }]}>{label}</Text>
         <Text style={[s.scoreBarValue, { color }]}>{Math.round(value)}</Text>
       </View>
-      <View style={s.scoreBarTrack}>
+      <View style={[s.scoreBarTrack, { backgroundColor: colors.surfaceAlt }]}>
         <View style={[s.scoreBarFill, { width: `${Math.min(value, 100)}%` as any, backgroundColor: color }]} />
       </View>
     </View>
@@ -213,9 +227,8 @@ function ScoreBar({ label, value, color }: { label: string; value: number; color
    MAIN SCREEN
 ═══════════════════════════════════════════════════════════════ */
 export default function RiderProfileScreen() {
-  const toast = useErrorToast();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  const { colors } = useThemeColors();
   const tabPad = useTabBottomPad(16);
   const flow = useFlowLayout();
   const actionTileW = useMemo(
@@ -418,8 +431,8 @@ export default function RiderProfileScreen() {
 
   if (!user) {
     return (
-      <SafeAreaView style={s.root} edges={['top']}>
-        <StatusBar barStyle="light-content" backgroundColor="#080E17" />
+      <SafeAreaView style={[s.root, { backgroundColor: colors.background }]} edges={['top']}>
+        <StatusBar barStyle={colors.statusBar} backgroundColor={colors.background} />
         <TabBrandStrip role="rider" />
         <ProfileScreenSkeleton />
       </SafeAreaView>
@@ -427,36 +440,38 @@ export default function RiderProfileScreen() {
   }
 
   return (
-    <SafeAreaView style={s.root} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor="#080E17" />
+    <SafeAreaView style={[s.root, { backgroundColor: colors.background }]} edges={['top']}>
+      <StatusBar barStyle={colors.statusBar} backgroundColor={colors.background} />
       <TabBrandStrip role="rider" />
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           s.scroll,
           {
-            paddingHorizontal: flow.padH,
-            paddingBottom: tabPad + 24,
+            paddingBottom: tabPad + 28,
             maxWidth: flow.maxContentWidth,
             alignSelf: 'center',
             width: '100%',
           },
         ]}
       >
-        {/* ── HERO ── */}
-        <LinearGradient colors={['#0A1628', '#0D1A2E', '#091320']} style={s.hero} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}>
-          {/* Green ambient glow behind avatar */}
+        {/* ── HERO (full-bleed brand plane) ── */}
+        <LinearGradient
+          colors={[BRAND.bgDeep, BRAND.bgCard, BRAND.bgDeep]}
+          style={s.hero}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+        >
           <View style={s.heroGlow} />
 
-          {/* Top-right action buttons */}
-          <View style={s.heroActions}>
+          <View style={[s.heroActions, { right: flow.padH }]}>
             <TouchableOpacity
               style={s.heroActionBtn}
               onPress={() => router.push('/edit-profile')}
               accessibilityRole="button"
               accessibilityLabel="Edit profile"
             >
-              <Ionicons name="create-outline" size={19} color="#CBD5E1" />
+              <Ionicons name="create-outline" size={18} color={BRAND.textSecondary} />
             </TouchableOpacity>
             <TouchableOpacity
               style={s.heroActionBtn}
@@ -464,79 +479,106 @@ export default function RiderProfileScreen() {
               accessibilityRole="button"
               accessibilityLabel="Open settings"
             >
-              <Ionicons name="settings-outline" size={19} color="#CBD5E1" />
+              <Ionicons name="settings-outline" size={18} color={BRAND.textSecondary} />
             </TouchableOpacity>
           </View>
 
-          {/* Avatar */}
           <Animated.View style={[s.avatarWrap, { transform: [{ scale: avatarScale }] }]}>
-            <LinearGradient colors={['#00D084', '#0EA5E9', '#7C3AED']} style={s.avatarRing} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+            <LinearGradient
+              colors={[PROFILE_GREEN, BRAND.info, BRAND.accentPurple]}
+              style={s.avatarRing}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
               <TouchableOpacity style={s.avatarInner} onPress={pickImage} activeOpacity={0.85}>
                 {profileImage ? (
                   <Image source={{ uri: profileImage }} style={s.avatarImg} />
                 ) : (
-                  <LinearGradient colors={['#1A3050', '#0D2040']} style={s.avatarFallback}>
+                  <LinearGradient colors={[BRAND.bgElevated, BRAND.bgDeep]} style={s.avatarFallback}>
                     <Text style={s.avatarInitial}>{initial}</Text>
                   </LinearGradient>
                 )}
                 <View style={s.avatarEditBadge}>
-                  <Ionicons name="camera" size={11} color="#FFF" />
+                  <Ionicons name="camera" size={11} color={BRAND.textInverse} />
                 </View>
               </TouchableOpacity>
             </LinearGradient>
           </Animated.View>
 
-          <Animated.View style={{ alignItems: 'center', opacity: fadeIn, width: '100%', paddingHorizontal: 20 }}>
-            {/* Name + verified */}
+          <Animated.View
+            style={{
+              alignItems: 'center',
+              opacity: fadeIn,
+              width: '100%',
+              paddingHorizontal: flow.padH,
+            }}
+          >
             <View style={s.nameRow}>
               <Text style={s.heroName}>{displayName}</Text>
               {isVerified ? (
                 <View style={s.verifiedBadge}>
-                  <Ionicons name="shield-checkmark" size={14} color="#00D084" />
+                  <Ionicons name="shield-checkmark" size={14} color={PROFILE_GREEN} />
                 </View>
               ) : null}
             </View>
 
-            {/* Contact */}
-            <Text style={s.heroPhone}>{user?.phone || user?.email || 'NEXRYDE Rider'}</Text>
+            <Text style={s.heroPhone}>{user?.phone || user?.email || 'NexRyde Rider'}</Text>
 
-            {/* Role badge */}
             <View style={s.roleBadge}>
-              <Ionicons name="bicycle-outline" size={12} color="#60A5FA" />
-              <Text style={s.roleBadgeText}>Rider Account</Text>
+              <Ionicons name="bicycle-outline" size={12} color={BRAND.info} />
+              <Text style={s.roleBadgeText}>Rider</Text>
             </View>
 
-            {/* Stats row — fixed columns, no flex wrapping */}
             <View style={s.statsGlass}>
               <View style={s.statChip}>
-                <Text style={[s.statValue, { color: '#00D084' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>
+                <Text
+                  style={[s.statValue, { color: PROFILE_GREEN }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.65}
+                >
                   {String(badgeStats.totalTrips)}
                 </Text>
-                <Text style={s.statLabel} numberOfLines={1}>Trips</Text>
+                <Text style={s.statLabel} numberOfLines={1}>
+                  Trips
+                </Text>
               </View>
               <View style={s.statsDivider} />
               <View style={s.statChip}>
-                <Text style={[s.statValue, { color: '#FBBF24' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>
+                <Text
+                  style={[s.statValue, { color: BRAND.warning }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.65}
+                >
                   {`${badgeStats.rating.toFixed(1)}★`}
                 </Text>
-                <Text style={s.statLabel} numberOfLines={1}>Rating</Text>
+                <Text style={s.statLabel} numberOfLines={1}>
+                  Rating
+                </Text>
               </View>
               <View style={s.statsDivider} />
               <View style={s.statChip}>
-                <Text style={[s.statValue, { color: '#60A5FA' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>
+                <Text
+                  style={[s.statValue, { color: BRAND.info }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.65}
+                >
                   {String(memberYear)}
                 </Text>
-                <Text style={s.statLabel} numberOfLines={1}>Member</Text>
+                <Text style={s.statLabel} numberOfLines={1}>
+                  Member
+                </Text>
               </View>
             </View>
           </Animated.View>
 
-          {/* Achievements — outside fade animation (Android layout safe) */}
-          <View style={s.achievementsPanel}>
+          <View style={[s.achievementsPanel, { marginHorizontal: flow.padH }]}>
             <View style={s.achievementsHeader}>
               <View style={s.achievementsHeaderLeft}>
                 <View style={s.achievementsIconWrap}>
-                  <Ionicons name="ribbon" size={16} color="#00D084" />
+                  <Ionicons name="ribbon" size={16} color={PROFILE_GREEN} />
                 </View>
                 <Text style={s.achievementsTitle}>Achievements</Text>
               </View>
@@ -628,10 +670,11 @@ export default function RiderProfileScreen() {
           </View>
         </LinearGradient>
 
+        <View style={[s.body, { paddingHorizontal: flow.padH }]}>
         {/* ── QUICK ACTIONS GRID ── */}
         <View style={s.gridSection}>
-          <Text style={s.gridTitle}>QUICK ACCESS</Text>
-          <View style={s.grid}>
+          <Text style={[s.gridTitle, { color: colors.textMuted }]}>Quick access</Text>
+          <View style={[s.grid, { gap: flow.isTablet ? 14 : 12 }]}>
             <ActionTile icon="create" label="Edit Profile" gradColors={['#1D4ED8', '#2563EB']} tileWidth={actionTileW} onPress={() => router.push('/edit-profile')} />
             <ActionTile icon="time" label="Ride History" gradColors={['#5B21B6', '#7C3AED']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-trips' as any)} />
             <ActionTile icon="location" label="Saved Places" gradColors={['#065F46', '#059669']} tileWidth={actionTileW} onPress={() => router.push('/rider/saved-places' as any)} />
@@ -643,51 +686,65 @@ export default function RiderProfileScreen() {
 
         {/* ── TRUST SCORE ── */}
         {loadingTrust ? (
-          <Section title="NEXRYDE SCORE">
+          <Section title="NexRyde score">
             <View style={s.loadingRow}>
-              <Ionicons name="reload" size={16} color="#64748B" />
-              <Text style={s.loadingText}>Loading your score…</Text>
+              <Ionicons name="reload" size={16} color={colors.textMuted} />
+              <Text style={[s.loadingText, { color: colors.textMuted }]}>Loading your score…</Text>
             </View>
           </Section>
         ) : trustSummary ? (
-          <Section title="NEXRYDE SCORE">
-            {/* Score hero */}
-            <LinearGradient colors={['rgba(0,212,106,0.08)', 'rgba(14,165,233,0.04)']} style={s.scoreHero}>
+          <Section title="NexRyde score">
+            <LinearGradient colors={[PROFILE_GREEN_SOFT, 'rgba(56,189,248,0.06)']} style={s.scoreHero}>
               <View style={s.scoreHeroLeft}>
-                <Text style={s.scoreMainValue}>{Math.round(trustSummary.nexryde_score)}</Text>
-                <Text style={s.scoreMainLabel}>Nexryde Score</Text>
+                <Text style={[s.scoreMainValue, { color: colors.text }]}>
+                  {Math.round(trustSummary.nexryde_score)}
+                </Text>
+                <Text style={[s.scoreMainLabel, { color: colors.textMuted }]}>Your score</Text>
               </View>
               <View style={s.scoreHeroRight}>
-                <View style={[s.scoreTierPill, { borderColor: '#00D46A44' }]}>
+                <View style={[s.scoreTierPill, { borderColor: `${PROFILE_GREEN}44` }]}>
                   <Text style={s.scoreTierText}>{trustSummary.score_tier?.label ?? '—'}</Text>
                 </View>
                 {trustSummary.priority_matching_enabled ? (
                   <View style={s.scorePerksChip}>
-                    <Ionicons name="flash" size={11} color="#FBBF24" />
+                    <Ionicons name="flash" size={11} color={BRAND.warning} />
                     <Text style={s.scorePerksChipText}>Priority Match</Text>
                   </View>
                 ) : null}
               </View>
             </LinearGradient>
 
-            {/* Score breakdown bars */}
             <View style={s.scoreBreak}>
-              <ScoreBar label="Service" value={trustSummary.score_breakdown?.service_quality ?? 0} color="#00D46A" />
-              <ScoreBar label="Punctuality" value={trustSummary.score_breakdown?.punctuality ?? 0} color="#0EA5E9" />
-              <ScoreBar label="Verification" value={trustSummary.score_breakdown?.verification ?? 0} color="#8B5CF6" />
-              <ScoreBar label="Payments" value={trustSummary.score_breakdown?.payment_behavior ?? 0} color="#F59E0B" />
+              <ScoreBar label="Service" value={trustSummary.score_breakdown?.service_quality ?? 0} color={PROFILE_GREEN} />
+              <ScoreBar label="Punctuality" value={trustSummary.score_breakdown?.punctuality ?? 0} color={BRAND.info} />
+              <ScoreBar label="Verification" value={trustSummary.score_breakdown?.verification ?? 0} color={BRAND.accentPurple} />
+              <ScoreBar label="Payments" value={trustSummary.score_breakdown?.payment_behavior ?? 0} color={BRAND.warning} />
             </View>
 
-            {/* Verification badges */}
             <View style={s.verifRow}>
               {[
                 { label: 'Account', ok: trustSummary.verification_status?.account_verified },
                 { label: 'Face', ok: trustSummary.verification_status?.face_verified },
                 { label: 'NIN', ok: trustSummary.verification_status?.nin_verified },
               ].map(({ label, ok }) => (
-                <View key={label} style={[s.verifChip, { borderColor: ok ? '#00D46A44' : '#334155' }]}>
-                  <Ionicons name={ok ? 'checkmark-circle' : 'close-circle'} size={13} color={ok ? '#00D46A' : '#475569'} />
-                  <Text style={[s.verifChipText, { color: ok ? '#00D46A' : '#475569' }]}>{label}</Text>
+                <View
+                  key={label}
+                  style={[
+                    s.verifChip,
+                    {
+                      borderColor: ok ? `${PROFILE_GREEN}55` : colors.border,
+                      backgroundColor: ok ? PROFILE_GREEN_SOFT : 'transparent',
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={ok ? 'checkmark-circle' : 'close-circle'}
+                    size={13}
+                    color={ok ? PROFILE_GREEN : colors.textMuted}
+                  />
+                  <Text style={[s.verifChipText, { color: ok ? PROFILE_GREEN : colors.textMuted }]}>
+                    {label}
+                  </Text>
                 </View>
               ))}
             </View>
@@ -698,7 +755,7 @@ export default function RiderProfileScreen() {
                 <Text style={s.perksHeader}>Unlocked perks</Text>
                 {trustSummary.unlocked_perks.map((p: string) => (
                   <View key={p} style={s.perkRow}>
-                    <Ionicons name="checkmark-circle" size={14} color="#00D46A" />
+                    <Ionicons name="checkmark-circle" size={14} color={PROFILE_GREEN} />
                     <Text style={s.perkText}>{p}</Text>
                   </View>
                 ))}
@@ -708,7 +765,7 @@ export default function RiderProfileScreen() {
         ) : null}
 
         {/* ── SAFETY ── */}
-        <Section title="SAFETY">
+        <Section title="Safety">
           <TouchableOpacity style={s.sosButton} onPress={() => router.push('/(rider-tabs)/rider-safety' as any)} activeOpacity={0.85}>
             <LinearGradient colors={['#7f1d1d', '#991b1b', '#b91c1c']} style={s.sosInner} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
               <Ionicons name="warning" size={20} color="#FFF" />
@@ -717,28 +774,27 @@ export default function RiderProfileScreen() {
             </LinearGradient>
           </TouchableOpacity>
           <MenuRow icon="shield-checkmark" gradColors={['#78350F', '#D97706']} title="Safety Center" subtitle="Emergency contacts & trip protection" onPress={() => router.push('/(rider-tabs)/rider-safety' as any)} />
-          <MenuRow icon="ribbon" gradColors={['#134E4A', '#0D9488']} title="Nexryde Shield" subtitle="Disputes and ride protection" onPress={() => router.push('/shield-disputes')} />
+          <MenuRow icon="ribbon" gradColors={['#134E4A', '#0D9488']} title="NexRyde Shield" subtitle="Disputes and ride protection" onPress={() => router.push('/shield-disputes')} />
         </Section>
 
         {/* ── ACCOUNT & PREFERENCES ── */}
-        <Section title="PREFERENCES">
-          <MenuRow icon="settings" gradColors={['#166534', '#00D46A']} title="Settings" subtitle="App preferences & defaults" onPress={() => router.push('/settings')} />
-          <MenuRow icon="car-sport" gradColors={['#3730A3', '#4F46E5']} title="Switch to Driver Mode" subtitle="Drive and earn on NEXRYDE" onPress={() => setShowDriverModal(true)} />
+        <Section title="Preferences">
+          <MenuRow icon="settings" gradColors={['#166534', PROFILE_GREEN]} title="Settings" subtitle="App preferences & defaults" onPress={() => router.push('/settings')} />
+          <MenuRow icon="car-sport" gradColors={['#3730A3', '#4F46E5']} title="Switch to Driver Mode" subtitle="Drive and earn on NexRyde" onPress={() => setShowDriverModal(true)} />
         </Section>
 
         {/* ── SUPPORT & LEGAL ── */}
-        <Section title="SUPPORT & LEGAL">
+        <Section title="Support & legal">
           <MenuRow icon="help-circle" gradColors={['#7C2D12', '#EA580C']} title="Help & Support" onPress={() => router.push('/support')} />
           <MenuRow icon="document-text" gradColors={['#4C1D95', '#7C3AED']} title="Privacy Policy" onPress={() => router.push('/privacy-policy')} />
           <MenuRow icon="reader" gradColors={['#0C4A6E', '#0EA5E9']} title="Terms of Service" onPress={() => router.push('/terms-of-service')} />
         </Section>
 
         {/* ── ACCOUNT ── */}
-        <Section title="ACCOUNT">
+        <Section title="Account">
           <MenuRow icon="trash" gradColors={['#7f1d1d', '#991b1b']} title="Delete Account" subtitle="Permanently deactivate this profile" onPress={handleDelete} danger />
         </Section>
 
-        {/* ── VERSION ── (long-press fires a deliberate Sentry test event) */}
         <TouchableOpacity
           activeOpacity={1}
           delayLongPress={800}
@@ -747,16 +803,18 @@ export default function RiderProfileScreen() {
             Alert.alert(r.sent ? 'Sentry test sent' : 'Sentry not active', r.message);
           }}
         >
-          <Text style={s.version}>NEXRYDE v{Constants.expoConfig?.version ?? '1.0.0'}</Text>
+          <Text style={[s.version, { color: colors.textMuted }]}>
+            NexRyde v{Constants.expoConfig?.version ?? '1.0.0'}
+          </Text>
         </TouchableOpacity>
 
-        {/* ── LOGOUT ── */}
         <TouchableOpacity style={s.logoutBtn} onPress={handleLogout} activeOpacity={0.8}>
           <LinearGradient colors={['rgba(239,68,68,0.12)', 'rgba(239,68,68,0.06)']} style={s.logoutInner}>
-            <Ionicons name="log-out-outline" size={20} color="#F87171" />
+            <Ionicons name="log-out-outline" size={20} color={BRAND.danger} />
             <Text style={s.logoutText}>Log Out</Text>
           </LinearGradient>
         </TouchableOpacity>
+        </View>
       </ScrollView>
 
       {/* ── SWITCH TO DRIVER MODAL ── */}
@@ -791,16 +849,17 @@ export default function RiderProfileScreen() {
 
 /* ─── Styles ─────────────────────────────────────────────────── */
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#080E17' },
+  root: { flex: 1, backgroundColor: BRAND.bgDeep },
   scroll: { paddingHorizontal: 0 },
+  body: { width: '100%', paddingTop: SPACING.sm },
 
   /* Hero */
   hero: {
-    paddingTop: 28,
-    paddingBottom: 28,
+    paddingTop: SPACING.xl,
+    paddingBottom: SPACING.xl,
     alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,208,132,0.08)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: SURFACE.glassBorder,
     overflow: 'hidden',
     position: 'relative',
   },
@@ -811,89 +870,105 @@ const s = StyleSheet.create({
     width: 220,
     height: 220,
     borderRadius: 110,
-    backgroundColor: 'rgba(0,208,132,0.07)',
+    backgroundColor: PROFILE_GREEN_SOFT,
   },
   heroActions: {
     position: 'absolute',
-    top: 14,
-    right: 14,
+    top: SPACING.md,
     flexDirection: 'row',
-    gap: 8,
+    gap: SPACING.sm,
+    zIndex: 2,
   },
   heroActionBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    width: 40,
+    height: 40,
+    borderRadius: RADIUS.md,
+    backgroundColor: SURFACE.tile,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACE.hairline,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarWrap: { marginBottom: 14 },
+  avatarWrap: { marginBottom: SPACING.md },
   avatarRing: {
-    width: 108,
-    height: 108,
-    borderRadius: 54,
+    width: 104,
+    height: 104,
+    borderRadius: 52,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 3,
   },
   avatarInner: {
-    width: 102,
-    height: 102,
-    borderRadius: 51,
+    width: 98,
+    height: 98,
+    borderRadius: 49,
     overflow: 'hidden',
     position: 'relative',
   },
-  avatarImg: { width: 102, height: 102, borderRadius: 51 },
+  avatarImg: { width: 98, height: 98, borderRadius: 49 },
   avatarFallback: {
-    width: 102,
-    height: 102,
-    borderRadius: 51,
+    width: 98,
+    height: 98,
+    borderRadius: 49,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarInitial: { fontSize: 38, fontWeight: '900', color: '#FFF', letterSpacing: -1 },
+  avatarInitial: { fontSize: 36, fontWeight: '900', color: BRAND.textPrimary, letterSpacing: -1 },
   avatarEditBadge: {
     position: 'absolute',
-    bottom: 5,
-    right: 5,
+    bottom: 4,
+    right: 4,
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#00D084',
+    backgroundColor: PROFILE_GREEN,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#080E17',
+    borderColor: BRAND.bgDeep,
   },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 4 },
-  heroName: { fontSize: 24, fontWeight: '900', color: '#F1F5F9', letterSpacing: -0.5 },
+  heroName: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: BRAND.textPrimary,
+    letterSpacing: -0.55,
+  },
   verifiedBadge: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: 'rgba(0,208,132,0.14)',
+    backgroundColor: PROFILE_GREEN_SOFT,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(0,208,132,0.3)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: `${PROFILE_GREEN}55`,
   },
-  heroPhone: { fontSize: 13, color: '#64748B', marginBottom: 12 },
+  heroPhone: {
+    fontSize: 13,
+    color: BRAND.textSecondary,
+    marginBottom: SPACING.md,
+    fontWeight: '500',
+  },
   roleBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: 'rgba(14,165,233,0.10)',
-    borderRadius: 20,
+    backgroundColor: 'rgba(56,189,248,0.10)',
+    borderRadius: RADIUS.full,
     paddingHorizontal: 12,
     paddingVertical: 5,
-    borderWidth: 1,
-    borderColor: 'rgba(14,165,233,0.22)',
-    marginBottom: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(56,189,248,0.28)',
+    marginBottom: SPACING.lg,
   },
-  roleBadgeText: { fontSize: 11, fontWeight: '700', color: '#60A5FA', letterSpacing: 0.3 },
+  roleBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: BRAND.info,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
 
   /* Stats */
   statsGlass: {
@@ -902,10 +977,10 @@ const s = StyleSheet.create({
     alignSelf: 'stretch',
     paddingVertical: 14,
     paddingHorizontal: 12,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.09)',
+    borderRadius: RADIUS.lg,
+    backgroundColor: SURFACE.tile,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACE.hairline,
   },
   statChip: {
     flex: 1,
@@ -916,61 +991,67 @@ const s = StyleSheet.create({
   statValue: {
     fontSize: 20,
     fontWeight: '900',
-    letterSpacing: -0.3,
+    letterSpacing: -0.35,
     width: '100%',
     textAlign: 'center',
   },
   statLabel: {
-    fontSize: 10,
-    color: '#475569',
-    fontWeight: '600',
-    marginTop: 3,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
+    ...TYPOGRAPHY.label,
+    color: BRAND.textMuted,
+    marginTop: 4,
     width: '100%',
     textAlign: 'center',
   },
-  statsDivider: { width: 1, height: 32, backgroundColor: 'rgba(255,255,255,0.07)', marginHorizontal: 2 },
+  statsDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 32,
+    backgroundColor: SURFACE.hairline,
+    marginHorizontal: 2,
+  },
 
   achievementsPanel: {
     alignSelf: 'stretch',
-    marginTop: 20,
-    marginHorizontal: 16,
-    paddingHorizontal: 14,
-    paddingTop: 14,
-    paddingBottom: 14,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,208,132,0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(0,208,132,0.12)',
+    marginTop: SPACING.lg,
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.md,
+    borderRadius: RADIUS.xl,
+    backgroundColor: PROFILE_GREEN_SOFT,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACE.glassBorder,
   },
   achievementsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: SPACING.md,
   },
   achievementsHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   achievementsIconWrap: {
     width: 30,
     height: 30,
-    borderRadius: 10,
-    backgroundColor: 'rgba(0,208,132,0.14)',
+    borderRadius: RADIUS.sm,
+    backgroundColor: PROFILE_GREEN_SOFT,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(0,208,132,0.28)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACE.glassBorder,
   },
-  achievementsTitle: { fontSize: 14, fontWeight: '800', color: '#E2E8F0', letterSpacing: -0.2 },
+  achievementsTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: BRAND.textPrimary,
+    letterSpacing: -0.25,
+  },
   achievementsCountPill: {
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: RADIUS.full,
+    backgroundColor: SURFACE.tile,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACE.hairline,
   },
-  achievementsCountText: { fontSize: 11, fontWeight: '800', color: '#94A3B8' },
+  achievementsCountText: { fontSize: 11, fontWeight: '800', color: BRAND.textSecondary },
   achievementsCompleteBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1009,12 +1090,12 @@ const s = StyleSheet.create({
   badgeCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    gap: SPACING.stack,
+    borderRadius: RADIUS.md,
+    paddingVertical: SPACING.stack,
+    paddingHorizontal: SPACING.stack,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACE.hairline,
     width: '100%',
   },
   badgeIconRing: {
@@ -1027,32 +1108,29 @@ const s = StyleSheet.create({
   },
   badgeTextCol: { flexShrink: 1, flexGrow: 1, minWidth: 0, gap: 3 },
   badgeTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
-  badgeTitle: { fontSize: 13, fontWeight: '900', color: '#F1F5F9' },
+  badgeTitle: { fontSize: 13, fontWeight: '900', color: BRAND.textPrimary },
   badgeEarnedPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
     paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: 8,
-    borderWidth: 1,
+    borderRadius: RADIUS.sm,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   badgeEarnedText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.3 },
-  badgeSub: { fontSize: 11, fontWeight: '600', color: '#94A3B8', lineHeight: 15 },
+  badgeSub: { fontSize: 11, fontWeight: '600', color: BRAND.textSecondary, lineHeight: 15 },
   badgeWaBtn: {
     width: 40,
     height: 40,
-    borderRadius: 12,
+    borderRadius: RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   lockedSectionLabel: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#475569',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
+    ...TYPOGRAPHY.label,
+    color: BRAND.textMuted,
     marginTop: 6,
     marginBottom: 8,
   },
@@ -1062,10 +1140,7 @@ const s = StyleSheet.create({
     gap: 6,
     paddingVertical: 10,
     paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderRadius: RADIUS.md,
     minWidth: 96,
     flex: 1,
     maxWidth: 120,
@@ -1074,7 +1149,6 @@ const s = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.05)',
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
@@ -1086,165 +1160,240 @@ const s = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: '#1E293B',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#334155',
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  lockedBadgeTitle: { fontSize: 10, fontWeight: '700', color: '#64748B', textAlign: 'center' },
-  referralWaRow: { marginTop: 12, borderRadius: 14, overflow: 'hidden' },
+  lockedBadgeTitle: { fontSize: 10, fontWeight: '700', textAlign: 'center' },
+  referralWaRow: { marginTop: SPACING.stack, borderRadius: RADIUS.md, overflow: 'hidden' },
   referralWaGrad: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: SPACING.stack,
     paddingVertical: 14,
     paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(37,211,102,0.25)',
-    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(37,211,102,0.28)',
+    borderRadius: RADIUS.md,
   },
   referralWaCopy: { flex: 1, gap: 2 },
-  referralWaTitle: { fontSize: 13, fontWeight: '800', color: '#E2E8F0' },
-  referralWaSub: { fontSize: 11, fontWeight: '600', color: '#64748B' },
+  referralWaTitle: { fontSize: 13, fontWeight: '800', color: BRAND.textPrimary },
+  referralWaSub: { fontSize: 11, fontWeight: '600', color: BRAND.textSecondary },
 
   /* Grid */
-  gridSection: { paddingTop: 24, paddingBottom: 4 },
-  gridTitle: { fontSize: 11, fontWeight: '800', color: '#475569', letterSpacing: 1.5, marginBottom: 14 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  gridSection: { paddingTop: SPACING.lg, paddingBottom: SPACING.xs },
+  gridTitle: {
+    ...TYPOGRAPHY.label,
+    marginBottom: SPACING.md,
+    textTransform: 'uppercase',
+  },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.stack },
   actionTile: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.07)',
-    padding: 16,
+    borderRadius: RADIUS.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: SPACING.md,
     alignItems: 'flex-start',
-    gap: 12,
+    gap: SPACING.stack,
+    minHeight: 96,
   },
   actionTileIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: 42,
+    height: 42,
+    borderRadius: RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  actionTileLabel: { fontSize: 12, fontWeight: '700', color: '#CBD5E1' },
+  actionTileLabel: { fontSize: 13, fontWeight: '700', letterSpacing: -0.1 },
 
   /* Section */
-  section: { paddingTop: 24 },
-  sectionTitle: { fontSize: 11, fontWeight: '800', color: '#475569', letterSpacing: 1.5, marginBottom: 10 },
+  section: { paddingTop: SPACING.lg },
+  sectionTitle: {
+    ...TYPOGRAPHY.label,
+    marginBottom: SPACING.sm,
+    textTransform: 'uppercase',
+  },
   sectionCard: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: RADIUS.xl,
+    borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
 
   /* Loading */
-  loadingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 16 },
-  loadingText: { fontSize: 13, color: '#475569' },
+  loadingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: SPACING.md },
+  loadingText: { fontSize: 13, fontWeight: '600' },
 
   /* Score */
   scoreHero: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 18,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
+    padding: SPACING.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: SURFACE.hairline,
   },
   scoreHeroLeft: { flex: 1 },
-  scoreMainValue: { fontSize: 40, fontWeight: '900', color: '#F1F5F9', letterSpacing: -1 },
-  scoreMainLabel: { fontSize: 12, color: '#64748B', fontWeight: '600', marginTop: 2 },
+  scoreMainValue: { fontSize: 40, fontWeight: '900', letterSpacing: -1.2 },
+  scoreMainLabel: { fontSize: 12, fontWeight: '600', marginTop: 2 },
   scoreHeroRight: { alignItems: 'flex-end', gap: 8 },
   scoreTierPill: {
-    borderRadius: 20,
-    borderWidth: 1,
+    borderRadius: RADIUS.full,
+    borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 12,
     paddingVertical: 5,
-    backgroundColor: 'rgba(0,212,106,0.06)',
+    backgroundColor: PROFILE_GREEN_SOFT,
   },
-  scoreTierText: { fontSize: 11, fontWeight: '800', color: '#00D46A' },
+  scoreTierText: { fontSize: 11, fontWeight: '800', color: PROFILE_GREEN },
   scorePerksChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(251,191,36,0.1)',
-    borderRadius: 10,
+    backgroundColor: 'rgba(245,158,11,0.12)',
+    borderRadius: RADIUS.sm,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
-  scorePerksChipText: { fontSize: 11, fontWeight: '700', color: '#FBBF24' },
-  scoreBreak: { padding: 16, gap: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
+  scorePerksChipText: { fontSize: 11, fontWeight: '700', color: BRAND.warning },
+  scoreBreak: {
+    padding: SPACING.md,
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: SURFACE.hairline,
+  },
   scoreBarWrap: { gap: 5 },
   scoreBarRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  scoreBarLabel: { fontSize: 11, color: '#64748B', fontWeight: '600' },
+  scoreBarLabel: { fontSize: 11, color: BRAND.textSecondary, fontWeight: '600' },
   scoreBarValue: { fontSize: 11, fontWeight: '800' },
-  scoreBarTrack: { height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' },
+  scoreBarTrack: {
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: SURFACE.tile,
+    overflow: 'hidden',
+  },
   scoreBarFill: { height: '100%', borderRadius: 3 },
-  verifRow: { flexDirection: 'row', gap: 8, padding: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
-  verifChip: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  verifRow: {
+    flexDirection: 'row',
+    gap: 8,
+    padding: SPACING.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: SURFACE.hairline,
+  },
+  verifChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: RADIUS.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
   verifChipText: { fontSize: 11, fontWeight: '700' },
-  perksWrap: { padding: 14, gap: 8 },
-  perksHeader: { fontSize: 11, fontWeight: '800', color: '#475569', marginBottom: 2 },
+  perksWrap: { padding: SPACING.md, gap: 8 },
+  perksHeader: { fontSize: 11, fontWeight: '800', color: BRAND.textMuted, marginBottom: 2 },
   perkRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  perkText: { fontSize: 12, color: '#94A3B8', flex: 1 },
+  perkText: { fontSize: 12, color: BRAND.textSecondary, flex: 1 },
 
   /* SOS */
-  sosButton: { margin: 14, marginBottom: 8, borderRadius: 14, overflow: 'hidden' },
-  sosInner: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14 },
+  sosButton: { margin: SPACING.md, marginBottom: SPACING.sm, borderRadius: RADIUS.md, overflow: 'hidden' },
+  sosInner: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: SPACING.md },
   sosText: { flex: 1, fontSize: 13, fontWeight: '800', color: '#FFF' },
 
   /* Menu row */
   menuRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.06)',
-    gap: 12,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 14,
+    minHeight: 56,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: SPACING.stack,
   },
   menuIconWrap: {
     width: 36,
     height: 36,
-    borderRadius: 10,
+    borderRadius: RADIUS.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
   menuRowBody: { flex: 1 },
-  menuTitle: { fontSize: 13, fontWeight: '700', color: '#E2E8F0' },
-  menuSubtitle: { fontSize: 11, color: '#475569', marginTop: 1 },
-  menuBadge: { backgroundColor: 'rgba(245,158,11,0.12)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3 },
-  menuBadgeText: { fontSize: 11, fontWeight: '800', color: '#F59E0B' },
+  menuTitle: { fontSize: 14, fontWeight: '700', letterSpacing: -0.15 },
+  menuSubtitle: { fontSize: 12, marginTop: 2, fontWeight: '500' },
+  menuBadge: {
+    backgroundColor: 'rgba(245,158,11,0.12)',
+    borderRadius: RADIUS.sm,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  menuBadgeText: { fontSize: 11, fontWeight: '800', color: BRAND.warning },
 
   /* Version & logout */
-  version: { textAlign: 'center', fontSize: 11, color: '#334155', marginTop: 28, marginBottom: 12, fontWeight: '600', letterSpacing: 1 },
-  logoutBtn: { marginHorizontal: 20, borderRadius: 16, overflow: 'hidden', marginBottom: 8 },
-  logoutInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 16, borderWidth: 1, borderColor: 'rgba(239,68,68,0.15)', borderRadius: 16 },
-  logoutText: { fontSize: 14, fontWeight: '800', color: '#F87171' },
+  version: {
+    textAlign: 'center',
+    fontSize: 11,
+    marginTop: SPACING.xl,
+    marginBottom: SPACING.md,
+    fontWeight: '600',
+    letterSpacing: 0.8,
+  },
+  logoutBtn: { borderRadius: RADIUS.lg, overflow: 'hidden', marginBottom: SPACING.sm },
+  logoutInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    padding: SPACING.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(239,68,68,0.22)',
+    borderRadius: RADIUS.lg,
+  },
+  logoutText: { fontSize: 14, fontWeight: '800', color: BRAND.danger },
 
   /* Modal */
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' },
+  modalOverlay: { flex: 1, backgroundColor: BRAND.bgOverlay, justifyContent: 'flex-end' },
   modalSheet: {
-    backgroundColor: '#111827',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    padding: 24,
-    paddingTop: 12,
-    borderWidth: 1,
+    backgroundColor: BRAND.bgElevated,
+    borderTopLeftRadius: RADIUS.xl + 4,
+    borderTopRightRadius: RADIUS.xl + 4,
+    padding: SPACING.lg,
+    paddingTop: SPACING.md,
+    borderWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: 0,
-    borderColor: 'rgba(255,255,255,0.07)',
+    borderColor: SURFACE.hairline,
     alignItems: 'center',
   },
-  modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#1E293B', marginBottom: 20 },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: SURFACE.hairline,
+    marginBottom: SPACING.lg,
+  },
   modalCloseBtn: { position: 'absolute', top: 14, right: 16, padding: 6 },
-  modalIconWrap: { width: 70, height: 70, borderRadius: 35, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  modalTitle: { fontSize: 20, fontWeight: '900', color: '#F1F5F9', marginBottom: 8, textAlign: 'center' },
-  modalSubtitle: { fontSize: 13, color: '#64748B', textAlign: 'center', lineHeight: 20, marginBottom: 24, paddingHorizontal: 10 },
-  modalConfirmBtn: { width: '100%', borderRadius: 16, overflow: 'hidden', marginBottom: 10 },
-  modalConfirmGrad: { padding: 16, alignItems: 'center' },
+  modalIconWrap: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.md,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: BRAND.textPrimary,
+    marginBottom: 8,
+    textAlign: 'center',
+    letterSpacing: -0.3,
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    color: BRAND.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: SPACING.lg,
+    paddingHorizontal: 10,
+  },
+  modalConfirmBtn: { width: '100%', borderRadius: RADIUS.lg, overflow: 'hidden', marginBottom: 10 },
+  modalConfirmGrad: { padding: SPACING.md, alignItems: 'center' },
   modalConfirmText: { fontSize: 15, fontWeight: '800', color: '#FFF' },
   modalCancelBtn: { padding: 12 },
-  modalCancelText: { fontSize: 14, color: '#475569', fontWeight: '600' },
+  modalCancelText: { fontSize: 14, color: BRAND.textMuted, fontWeight: '600' },
 });

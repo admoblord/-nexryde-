@@ -15,12 +15,21 @@ export function isDriverShiftSessionKeeperActive(): boolean {
   return keeperRunning;
 }
 
+async function refreshShiftSessionAndNative(): Promise<void> {
+  const result = await ensureCriticalSessionReady(CRITICAL_ACTION_MIN_TTL_SEC);
+  // Push fresh JWT into Android FGS so native heartbeat does not 401-stop while JS is valid.
+  if (result.ok && result.refreshed) {
+    const { refreshNativeDriverSession } = await import('@/src/services/driverNativeExperience');
+    void refreshNativeDriverSession();
+  }
+}
+
 export function startDriverShiftSessionKeeper(): void {
   if (keeperRunning) return;
   keeperRunning = true;
-  void ensureCriticalSessionReady(CRITICAL_ACTION_MIN_TTL_SEC);
+  void refreshShiftSessionAndNative();
   keeperInterval = setInterval(() => {
-    void ensureCriticalSessionReady(CRITICAL_ACTION_MIN_TTL_SEC);
+    void refreshShiftSessionAndNative();
   }, SHIFT_SESSION_KEEPER_INTERVAL_MS);
 }
 

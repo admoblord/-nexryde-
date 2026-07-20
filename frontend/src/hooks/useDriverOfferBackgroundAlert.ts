@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { AppState, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { useAppStore } from '@/src/store/appStore';
+import { useDriverSessionStore } from '@/src/store/driverSessionStore';
 import { driverOffersSocket } from '@/src/services/driverOffersSocket';
 import { normalizeExpoPushData } from '@/src/utils/expoPushData';
 import {
@@ -18,6 +19,11 @@ import {
  */
 export function useDriverOfferBackgroundAlert() {
   const role = useAppStore((s) => s.user?.role);
+  const driverId = useAppStore((s) => s.user?.id);
+  // Confirm + reconnecting: brief WS drop must not drop offer alerts.
+  const driverOnline = useDriverSessionStore(
+    (s) => s.connectionPhase === 'confirmed' || s.connectionPhase === 'reconnecting',
+  );
   const isDriver = role === 'driver';
 
   useEffect(() => {
@@ -27,7 +33,7 @@ export function useDriverOfferBackgroundAlert() {
 
     const appSub = AppState.addEventListener('change', (next) => {
       if (next === 'active') {
-        void stopDriverOfferBackgroundAlert();
+        void stopDriverOfferBackgroundAlert({ stopNative: false });
       }
     });
 
@@ -37,6 +43,7 @@ export function useDriverOfferBackgroundAlert() {
       );
       if (data?.type !== 'ride_request') return;
       if (AppState.currentState === 'active') return;
+      if (!driverOnline) return;
 
       const tripId = typeof data.trip_id === 'string' ? data.trip_id : undefined;
       const offerId = typeof data.offer_id === 'string' ? data.offer_id : undefined;
@@ -48,12 +55,14 @@ export function useDriverOfferBackgroundAlert() {
         body: notification.request.content.body ?? undefined,
         tripId,
         offerId,
+        driverId,
         source: 'push',
       });
     });
 
     const unsubOffer = driverOffersSocket.subscribeOffers((offer) => {
       if (AppState.currentState === 'active') return;
+      if (!driverOnline) return;
 
       const tripId =
         typeof offer.trip_id === 'string'
@@ -89,14 +98,17 @@ export function useDriverOfferBackgroundAlert() {
         offerKey,
         tripId,
         offerId,
+        driverId,
         source: 'socket',
       });
-      void presentDriverOfferLocalNotification({
-        title: '🚗 New ride offer',
-        body: `${pickup}${fareText}`,
-        tripId,
-        offerId,
-      });
+      if (Platform.OS !== 'android') {
+        void presentDriverOfferLocalNotification({
+          title: '🚗 New ride offer',
+          body: `${pickup}${fareText}`,
+          tripId,
+          offerId,
+        });
+      }
     });
 
     return () => {
@@ -105,5 +117,5 @@ export function useDriverOfferBackgroundAlert() {
       unsubOffer();
       void stopDriverOfferBackgroundAlert();
     };
-  }, [isDriver]);
+  }, [driverId, driverOnline, isDriver]);
 }

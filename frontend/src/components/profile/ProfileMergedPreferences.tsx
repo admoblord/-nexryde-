@@ -24,20 +24,11 @@ import {
   getUser,
   getUserPreferences,
   updateUserPreferences,
-  updateUserTheme,
   toggleWomenOnlyMode,
 } from '@/src/services/api';
 import { DriverOfferSoundPreferences } from '@/src/components/profile/DriverOfferSoundPreferences';
-import {
-  applyThemePreference,
-  persistThemePreference,
-  loadStoredThemePreference,
-  type ThemePreference,
-} from '@/src/theme/appearanceTheme';
 
 type Variant = 'rider' | 'driver';
-
-type ThemePref = ThemePreference;
 
 export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
   const { user } = useAppStore();
@@ -46,10 +37,11 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
   const { language, setLanguage } = useLanguage();
 
   const [loading, setLoading] = useState(true);
-  const [themePref, setThemePref] = useState<ThemePref>('auto');
   const [showLanguages, setShowLanguages] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(true);
   const [emailEnabled, setEmailEnabled] = useState(true);
+  const [engagementEnabled, setEngagementEnabled] = useState(true);
+  const [promotionsEnabled, setPromotionsEnabled] = useState(true);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricSupported, setBiometricSupported] = useState(false);
   const [womenOnly, setWomenOnly] = useState(false);
@@ -132,27 +124,24 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
     }
   };
 
-  const applyTheme = async (next: ThemePref) => {
-    const prev = themePref;
-    setThemePref(next);
-    applyThemePreference(next);
-    try {
-      await persistThemePreference(next);
-    } catch {
-      /* non-fatal — appearance already updated */
-    }
+  const persistNotificationTypes = async (next: { engagement?: boolean; promotions?: boolean }) => {
     if (!userId || !canCallAuthedApi) return;
+    const engagement = next.engagement ?? engagementEnabled;
+    const promotions = next.promotions ?? promotionsEnabled;
     try {
-      await updateUserTheme(userId, next);
+      const res = await getUserPreferences(userId);
+      const prevTypes = (res.data?.notification_types || {}) as Record<string, boolean>;
+      await updateUserPreferences(userId, {
+        notification_types: {
+          ...prevTypes,
+          engagement,
+          promotions,
+          driver_engagement: variant === 'driver' ? engagement : prevTypes.driver_engagement ?? true,
+          rider_engagement: variant === 'rider' ? engagement : prevTypes.rider_engagement ?? true,
+        },
+      });
     } catch {
-      setThemePref(prev);
-      applyThemePreference(prev);
-      try {
-        await persistThemePreference(prev);
-      } catch {
-        /* ignore */
-      }
-      Alert.alert('Error', 'Could not save theme preference.');
+      Alert.alert('Error', 'Could not save notification preferences.');
     }
   };
 
@@ -189,19 +178,8 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
 
   useEffect(() => {
     if (!userId || !canCallAuthedApi) {
-      let alive = true;
-      void (async () => {
-        const stored = await loadStoredThemePreference();
-        if (!alive) return;
-        if (stored) {
-          setThemePref(stored);
-          applyThemePreference(stored);
-        }
-        setLoading(false);
-      })();
-      return () => {
-        alive = false;
-      };
+      setLoading(false);
+      return;
     }
 
     let cancelled = false;
@@ -214,21 +192,23 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
         ]);
         if (cancelled) return;
         const pref = prefRes.data || {};
-        if (pref.theme === 'light' || pref.theme === 'dark' || pref.theme === 'auto') {
-          setThemePref(pref.theme);
-          applyThemePreference(pref.theme);
-          try {
-            await persistThemePreference(pref.theme);
-          } catch {
-            /* ignore */
-          }
-        }
         if (typeof pref.notifications_enabled === 'boolean') {
           setPushEnabled(pref.notifications_enabled);
         }
         const channels = pref.notification_channels || {};
         if (typeof channels.email === 'boolean') {
           setEmailEnabled(channels.email);
+        }
+        const types = pref.notification_types || {};
+        if (typeof types.engagement === 'boolean') {
+          setEngagementEnabled(types.engagement);
+        } else if (variant === 'driver' && typeof types.driver_engagement === 'boolean') {
+          setEngagementEnabled(types.driver_engagement);
+        } else if (variant === 'rider' && typeof types.rider_engagement === 'boolean') {
+          setEngagementEnabled(types.rider_engagement);
+        }
+        if (typeof types.promotions === 'boolean') {
+          setPromotionsEnabled(types.promotions);
         }
         const serverLang = pref.language as SupportedLanguage | undefined;
         const codes: SupportedLanguage[] = ['en', 'yo', 'ig', 'ha', 'pcm'];
@@ -251,7 +231,7 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
     return () => {
       cancelled = true;
     };
-  }, [userId, canCallAuthedApi, showFemaleDriverRow, setLanguage]);
+  }, [userId, canCallAuthedApi, showFemaleDriverRow, setLanguage, variant]);
 
   const currentLang =
     SUPPORTED_LANGUAGES.find((l) => l.code === language) || SUPPORTED_LANGUAGES[0];
@@ -328,6 +308,52 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
           thumbColor={emailEnabled ? COLORS.accent : COLORS.gray100}
         />
       </View>
+
+      <View style={[styles.menuItem, { borderBottomColor: COLORS.gray100 }]}>
+        <View style={[styles.menuIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
+          <Ionicons name="sparkles-outline" size={20} color={COLORS.accentGreen} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.menuText, { color: colors.text }]}>Smart Reminders</Text>
+          <Text style={[styles.menuSubtext, { color: colors.textMuted }]}>
+            {variant === 'driver'
+              ? 'Rush-hour and nearby demand nudges'
+              : 'Commute and travel reminders'}
+          </Text>
+        </View>
+        <Switch
+          value={engagementEnabled}
+          onValueChange={(v) => {
+            setEngagementEnabled(v);
+            persistNotificationTypes({ engagement: v });
+          }}
+          trackColor={{ false: COLORS.gray200, true: COLORS.accentGreen + '50' }}
+          thumbColor={engagementEnabled ? COLORS.accentGreen : COLORS.gray100}
+        />
+      </View>
+
+      {variant === 'rider' && (
+        <View style={[styles.menuItem, { borderBottomColor: COLORS.gray100 }]}>
+          <View style={[styles.menuIcon, { backgroundColor: COLORS.warningSoft }]}>
+            <Ionicons name="pricetag-outline" size={20} color={COLORS.warning} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.menuText, { color: colors.text }]}>Promotions</Text>
+            <Text style={[styles.menuSubtext, { color: colors.textMuted }]}>
+              Offers and future weather-based ride tips
+            </Text>
+          </View>
+          <Switch
+            value={promotionsEnabled}
+            onValueChange={(v) => {
+              setPromotionsEnabled(v);
+              persistNotificationTypes({ promotions: v });
+            }}
+            trackColor={{ false: COLORS.gray200, true: COLORS.warning + '50' }}
+            thumbColor={promotionsEnabled ? COLORS.warning : COLORS.gray100}
+          />
+        </View>
+      )}
 
       {variant === 'driver' && <DriverOfferSoundPreferences />}
 
@@ -424,80 +450,6 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
             })}
           </View>
         )}
-      </View>
-
-      <View style={[styles.themeBlock, { borderBottomColor: colors.border }]}>
-        <View style={styles.themeHeaderRow}>
-          <View style={[styles.menuIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
-            <Ionicons name="color-palette-outline" size={20} color={COLORS.accentBlue} />
-          </View>
-          <View style={styles.themeHeaderText}>
-            <Text style={[styles.themeLabel, { color: colors.text }]}>Appearance</Text>
-            <Text style={[styles.themeSubtitle, { color: colors.textMuted }]}>
-              Light or dark look, or match your device setting.
-            </Text>
-          </View>
-        </View>
-        <View style={styles.themeRow}>
-          {(
-            [
-              {
-                key: 'light' as const,
-                icon: 'sunny-outline' as const,
-                label: 'Light',
-                hint: 'Always bright',
-              },
-              {
-                key: 'dark' as const,
-                icon: 'moon-outline' as const,
-                label: 'Dark',
-                hint: 'Easier at night',
-              },
-              {
-                key: 'auto' as const,
-                icon: 'contrast-outline' as const,
-                label: 'Auto',
-                hint: 'Follow system',
-              },
-            ] as const
-          ).map(({ key, icon, label, hint }) => {
-            const active = themePref === key;
-            return (
-              <TouchableOpacity
-                key={key}
-                style={[
-                  styles.themeChip,
-                  {
-                    borderColor: active ? COLORS.accentGreen : colors.border,
-                    backgroundColor: active ? COLORS.accentGreenSoft : colors.surface,
-                  },
-                  active && styles.themeChipActive,
-                ]}
-                onPress={() => void applyTheme(key)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={`${label}. ${hint}`}
-              >
-                <Ionicons
-                  name={icon}
-                  size={20}
-                  color={active ? COLORS.accentGreen : colors.textMuted}
-                />
-                <Text
-                  style={[
-                    styles.themeChipText,
-                    { color: active ? COLORS.accentGreen : colors.text },
-                  ]}
-                >
-                  {label}
-                </Text>
-                <Text style={[styles.themeChipHint, { color: colors.textMuted }]} numberOfLines={1}>
-                  {hint}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
       </View>
 
       {showFemaleDriverRow && (
@@ -600,60 +552,5 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.xs,
     fontWeight: '600',
     marginTop: 2,
-  },
-  themeBlock: {
-    padding: SPACING.md,
-    borderBottomWidth: 1,
-  },
-  themeHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: SPACING.md,
-    gap: SPACING.sm,
-  },
-  themeHeaderText: {
-    flex: 1,
-    paddingTop: 2,
-  },
-  themeLabel: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-  },
-  themeSubtitle: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '500',
-    marginTop: 4,
-    lineHeight: 20,
-  },
-  themeRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACING.sm,
-  },
-  themeChip: {
-    flexGrow: 1,
-    flexBasis: '30%',
-    minWidth: 96,
-    minHeight: 88,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.sm,
-    paddingHorizontal: SPACING.xs,
-    borderRadius: BORDER_RADIUS.lg,
-    borderWidth: 1.5,
-  },
-  themeChipActive: {
-    borderWidth: 2,
-  },
-  themeChipText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '800',
-    marginTop: 4,
-  },
-  themeChipHint: {
-    fontSize: FONT_SIZE.xxs,
-    fontWeight: '600',
-    marginTop: 2,
-    textAlign: 'center',
   },
 });

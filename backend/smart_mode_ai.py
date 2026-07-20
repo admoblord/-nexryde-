@@ -1,5 +1,5 @@
 """
-Smart Mode AI - Intelligent Trip Auto-Accept System
+Smart Mode - Trip Preference Evaluation System
 Analyzes incoming trip requests and auto-accepts based on driver preferences
 """
 
@@ -10,7 +10,7 @@ from datetime import datetime
 import logging
 from database import db
 
-router = APIRouter(prefix="/api/smart-mode", tags=["Smart Mode AI"])
+router = APIRouter(prefix="/api/smart-mode", tags=["Smart Mode"])
 
 class SmartModeSettings(BaseModel):
     driver_id: str
@@ -89,7 +89,7 @@ async def get_smart_mode_settings(driver_id: str):
 @router.post("/analyze-trip/{driver_id}")
 async def analyze_trip_request(driver_id: str, trip: TripRequest):
     """
-    AI-powered trip analysis - Should driver accept this trip?
+    Rule-based trip analysis - should the ride match the driver's preferences?
     """
     try:
         # Get driver's settings

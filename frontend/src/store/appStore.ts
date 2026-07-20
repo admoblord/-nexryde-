@@ -69,6 +69,8 @@ export interface Trip {
   driver_id: string | null;
   pickup_location: { lat: number; lng: number; address: string };
   dropoff_location: { lat: number; lng: number; address: string };
+  /** Optional intermediate stop (pickup → stop → dropoff). */
+  stop_location?: { lat: number; lng: number; address?: string } | null;
   distance_km: number;
   duration_mins: number;
   fare: number;
@@ -115,6 +117,15 @@ export interface Trip {
   state_sequence?: number;
   state_updated_at?: string;
   updated_at?: string;
+  driver_name?: string | null;
+  driver_profile_image?: string | null;
+  driver_face_image?: string | null;
+  driver_total_trips?: number | null;
+  driver_verified?: boolean;
+  vehicle_type?: string | null;
+  vehicle_model?: string | null;
+  vehicle_plate?: string | null;
+  vehicle_color?: string | null;
 }
 
 export interface Location {
@@ -214,6 +225,34 @@ export const useAppStore = create<AppState>()(
       },
       
       logout: async () => {
+        try {
+          const { stopNativeDriverExperience } = await import('@/src/services/driverNativeExperience');
+          stopNativeDriverExperience();
+        } catch {
+          /* non-fatal */
+        }
+
+        try {
+          const { useDriverSessionStore } = await import('@/src/store/driverSessionStore');
+          useDriverSessionStore.getState().confirmOffline();
+        } catch {
+          /* non-fatal */
+        }
+
+        try {
+          const { driverOffersSocket } = await import('@/src/services/driverOffersSocket');
+          driverOffersSocket.disconnect();
+        } catch {
+          /* non-fatal */
+        }
+
+        try {
+          const { stopDriverBackgroundLocation } = await import('@/src/tasks/backgroundLocationTask');
+          await stopDriverBackgroundLocation();
+        } catch {
+          /* non-fatal */
+        }
+
         try {
           const { getCachedToken } = await import('@/src/lib/tokenStore');
           const { clearTokens } = await import('@/src/lib/tokenStore');

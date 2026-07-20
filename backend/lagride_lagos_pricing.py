@@ -1,16 +1,21 @@
 """
 NEXRYDE EXACT LAGRIDE PRICING FOR LAGOS
 
-Rider product goal: **transparent, route-based Lagos fares**—easy to read (distance × area × tier × surge),
-competitive for riders, without the clutter of separate base + per-minute stacks.
+Rider product goal: **transparent, route-based Lagos fares**—km + time, area rate, vehicle tier, surge.
 
-FORMULA (no base fare, no time term — road distance from Directions / Routes):
+FORMULA (no separate base fare — road distance + traffic-aware minutes from Directions / Routes):
 
-  Price = Distance × Area_Rate × Service_Multiplier × [Lagos_Market_Multiplier] × Surge_Multiplier
+  Price = (Distance × Area_Rate + Time_Min × Per_Min) × Service_Multiplier
+          × [Lagos_Market_Multiplier] × Surge_Multiplier
 
-Optional ``Lagos_Market_Multiplier`` (currently **1.02**) is a single city-wide factor on all Lagos pickups and vehicle tiers; tune via ``LAGOS_MARKET_WIDE_FARE_MULTIPLIER``.
+``Per_Min`` = economy card per-minute (``FARE_CONFIG['lagos']['economy']['per_min']``);
+vehicle tier scales the whole (distance + time) line via ``Service_Multiplier``.
 
-``Distance`` = driving route km. ``Area_Rate`` = ₦/km from **symmetric** zone logic:
+Optional ``Lagos_Market_Multiplier`` (currently **1.01**) is a single city-wide factor; tune via
+``LAGOS_MARKET_WIDE_FARE_MULTIPLIER``.
+
+``Distance`` = driving route km. ``Time_Min`` = traffic-aware route minutes.
+``Area_Rate`` = ₦/km from **symmetric** zone logic:
 the engine evaluates the trip A→B and B→A (swap pickup/dropoff roles) and uses
 ``min(rate_ab, rate_ba)`` so the same corridor costs about the same in both directions
 (surge may still differ slightly at booking time). Peace Garden ↔ Ikorodu/Ikeja
@@ -22,9 +27,9 @@ AREA RATES (baseline card)
 
 • 0–3 km: ₦1,850/km (minimum-fare protection band)
 
-• 3–15 km: ₦875/km
+• 3–15 km: ₦700/km (moderate Lagride step-down; Jul 2026)
 
-• 15+ km: ₦812/km
+• 15+ km: ₦660/km (Lagride-aligned long haul; Jul 2026)
 
 Areas (pickup must fall in approx. polygon — see ``classify_lagos_lagride_pickup``):
 Sangotedo, Lekki, Ikoyi, Yaba, Ojuelegba, VI, Surulere, Ajah, Banana Island,
@@ -34,9 +39,9 @@ Ibeju-Lekki, Festac, Gbagada, Magodo — plus Sky Mall (Jakande) sub-polygon und
 
 • 0–3 km: ₦1,850/km (same short band as Tier 1)
 
-• 3–15 km: ₦3,255/km (premium / far medium haul)
+• 3–15 km: ₦1,400/km (moderate mainland mid; was ₦2,600)
 
-• 15+ km: ₦812/km (same long-haul band as Tier 1 — prevents runaway totals)
+• 15+ km: ₦660/km (same long-haul band as Tier 1)
 
 Corridor trips (Peace Garden ↔ Ikorodu/Ikeja) use calibrated ₦/km up to 20 km, then taper toward the 15+ band.
 
@@ -50,29 +55,30 @@ Verification overlays (optional, on top of baseline)
 ----------------------------------------------------
 • **Sky Mall** 0–3 km: calibrated ₦/km = ₦4,896 ÷ 2.7 km.
 
-• **Tier 1** 15+ km: Lekki / VI–Ikoyi–Banana / Yaba / Festac use route-calibrated
-  ₦/km to match sampled Lagride totals; all other Tier-1 15+ km use ₦812/km.
-
 • **Peace Garden** pickup: Ikorodu / Ikeja dropoff corridors use calibrated ₦/km
-  (see ``PEACE_GARDEN_TO_*`` constants).
+  (see ``PEACE_GARDEN_TO_*`` constants). Special corridors are not overridden by the ₦660 long-haul card.
 
-SERVICE MULTIPLIERS (NEXRYDE Lagos — same tier spread as ``FARE_CONFIG['lagos']`` per-km)
+SERVICE MULTIPLIERS (NEXRYDE Lagos — distance-banded)
 ----------------------------------------------------------------------------------------
-Distance×area line is scaled by **per_km / economy per_km** (economy baseline = **1.0×**):
+**≤5 km** (short hops — higher tier spread; fares still scale with km + time, no flat floor):
 
-• **Standard** — ``economy`` / ``standard`` → **1.0×** (₦400/km card baseline)
+• **Standard** → **1.0×** · **XL** → **1.20×** · **Comfort** → **1.30×** · **Premium** → **1.45×**
 
-• **Comfort** → **1.25×** (₦500/km)
+**5–15 km** (softened mid ladder):
 
-• **XL** → **1.125×** (₦450/km)
+• **Standard** → **1.0×** · **XL** → **1.08×** · **Comfort** → **1.15×** · **Premium** → **1.28×**
 
-• **Premium** → **1.5×** (₦600/km)
+**15+ km** (long-trip soft ladder — does not change Standard):
+
+• **Standard** → **1.0×** · **XL** → **1.02×** · **Comfort** → **1.04×** · **Premium** → **1.10×**
+
+Sangotedo ↔ Ikorodu corridor keeps its own Lagride-aligned ladder (not the global bands).
 
 • **Pro** — alias for **premium** (driver / legacy)
 
 • **EV** → **1.0×** (economy-class energy tier)
 
-• **Omni / budget** → **0.35×** *(Lagride Omni compatibility; not on the main per-km card)*
+• **Omni / budget** — not NEXRYDE vehicles; normalized to **economy** (1.0×)
 
 Unknown keys fall back to **economy** (1.0×). Surge caps still come from each tier’s
 ``max_multiplier`` in ``FARE_CONFIG``.
@@ -91,26 +97,21 @@ Result is clamped to the ride tier ``max_multiplier`` from ``FARE_CONFIG``.
 
 WORKED EXAMPLES (product sheet vs this engine)
 ----------------------------------------------
-Illustrative **Standard / Premium / Omni** trips at **1.0× surge**. Rounded to whole ₦.
+Illustrative **Standard / Premium** trips at **1.0× surge**. Rounded to whole ₦.
 
 **Ex 1 — Sky Mall, 2.7 km, Standard** — Sheet: ``2.7 × ₦1,850 × 1.0`` → ₦4,995, observed
 ≈ **₦4,896**. Engine: **Sky Mall** sub-zone uses calibrated **₦4,896 ÷ 2.7** ₦/km so total
 **₦4,896** (not ₦1,850/km on that strip).
 
-**Ex 2 — Lekki, 21.65 km, Standard** — Sheet: ``21.65 × ₦812 × 1.0`` ≈ ₦17,600 → **₦17,604**.
-Engine: Lekki 15+ band uses calibrated rate → **₦17,604**.
+**Ex 2 — Lekki, 21.65 km, Standard** — ``21.65 × ₦660 × 1.02`` → **₦14,575**.
 
-**Ex 3 — Festac, 50.43 km, Standard** — Same idea → **₦40,959** in engine.
+**Ex 3 — Festac, 50.43 km, Standard** — ``50.43 × ₦660 × 1.02`` → **₦33,949**.
 
-**Ex 4 — Peace Garden → Ikorodu, 18 km, Standard** — Sheet sometimes shows **₦3,255/km**
-Tier-2 average; this corridor is calibrated → **₦57,424** (not ``18 × 3,255``).
+**Ex 4 — Peace Garden → Ikorodu, 18 km, Standard** — Tier-2 / PG corridor at **₦2,600/km**:
+``18 × 2,600 × 1.02`` → **₦47,736** (market multiplier applied).
 
-**Ex 5 — 18 km, Premium (1.5×)** — Generic Tier-2 pickup (no PG→Ikorodu): ``18 × 3,255 × 1.5``
-→ **₦87,885**. **Peace Garden → Ikorodu + Premium**: ``round(57,424 × 1.5)`` → **₦86,136**.
-
-**Ex 6 — Lekki, 21.65 km, Omni (0.35×)** — Baseline ``×812`` ≈ ₦6,160; with **Lekki
-calibrated** line (₦17,604) → ``round(17,604 × 0.35)`` → **₦6,161**. (Sheet “≈₦7,038”
-does not match ``21.65 × 812 × 0.35``; engine follows the distance×rate×service formula.)
+**Ex 5 — 18 km, Premium (long-trip 1.12×)** — Generic Tier-2 pickup uses 15+ area band
+₦660/km: ``18 × 660 × 1.12 × 1.02``. Peace Garden → Ikorodu keeps ₦2,600/km × **1.12×**.
 
 IMPLEMENTATION (10 steps) — for Lagos, ``build_lagos_lagride_fare_breakdown`` attaches
 ``lagride_profile`` with ``implementation_checklist`` mirroring:
@@ -141,69 +142,94 @@ from surge_pricing import SURGE_CONFIG
 
 # ── AREA RATES: Tier 1 banded baseline (₦/km) ───────────────────────────────
 TIER1_RATE_0_3_KM = 1850.0
-TIER1_RATE_3_15_KM = 875.0
-TIER1_RATE_15_PLUS_KM = 812.0
+TIER1_RATE_3_15_KM = 700.0
+# Long haul (15+ km) — Lagride video mid/long cluster ~₦650–670/km effective.
+TIER1_RATE_15_PLUS_KM = 660.0
 # Tier-1 trips under 3 km: zone-specific benchmark ÷ sample km (short budget samples).
 TIER1_0_3_CALIBRATED_RATES_BY_ZONE: dict[str, float] = {
     "lagride_t1_sky_mall": 4896 / 2.7,
 }
-# Tier-1 long trips: observed Lagride totals ÷ route km (verification samples).
-TIER1_15_PLUS_RATES_BY_ZONE: dict[str, float] = {
-    "lagride_t1_lekki": 17604 / 21.65,
-    "lagride_t1_vi_ikoyi_banana": 24829 / 30.50,
-    "lagride_t1_yaba": 37175 / 45.79,
-    "lagride_t1_festac": 40959 / 50.43,
-}
-# Tier 2 flat (average) — Ikeja, Peace Garden, Ikorodu, Berger, Badagry, Epe, Mainland, etc.
-TIER2_FLAT_PER_KM = 3255.0
-# Peace Garden pickup × destination (Lagride premium samples @ 18 km)
-PEACE_GARDEN_TO_IKORODU_PER_KM = 57424 / 18.0
+# Optional per-zone 15+ overlays (empty = use TIER1_RATE_15_PLUS_KM citywide).
+TIER1_15_PLUS_RATES_BY_ZONE: dict[str, float] = {}
+# Tier 2 mid — moderate step-down Jul 2026: ₦3,255 → ₦3,000 → ₦2,600 → ₦1,400/km.
+TIER2_FLAT_PER_KM = 1400.0
+# Peace Garden ↔ Ikorodu corridor aligned to Tier-2 mid.
+PEACE_GARDEN_TO_IKORODU_PER_KM = 1400.0
 PEACE_GARDEN_TO_IKEJA_PER_KM = 48236 / 18.0  # legacy reference; live Ikeja corridor uses satellite rate below
-# North satellite (Ikorodu / Peace Garden) ↔ Ikeja — ~₦19k @ 20 km vs legacy ₦54k+
-LAGOS_IKORODU_IKEJA_CORRIDOR_PER_KM = 950.0
+# North satellite (Ikorodu / Peace Garden) ↔ Ikeja — moderate soften ₦950 → ₦780.
+LAGOS_IKORODU_IKEJA_CORRIDOR_PER_KM = 780.0
 
-# City-wide fare factor (all zones, all service tiers) — applied after distance×area×service, before surge.
-LAGOS_MARKET_WIDE_FARE_MULTIPLIER = 1.02
+# City-wide fare factor — eased 1.02 → 1.01 (small uniform relief).
+LAGOS_MARKET_WIDE_FARE_MULTIPLIER = 1.01
 
-# Sangotedo / Ajah axis ↔ Ikorodu — calibrated to Lagride std ₦39,547 @ 63.64 km.
+# Sangotedo / Ajah axis ↔ Ikorodu — restore old Standard ceiling ₦39,547 @ 63.64 km.
 _LAGRIDE_SANGOTEDO_IKORODU_SAMPLE_KM = 63.64
 _LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN = 39_547.0
-_LAGRIDE_SANGOTEDO_IKORODU_PRO_NGN = 43_874.0
-_LAGRIDE_SANGOTEDO_IKORODU_OMNI_NGN = 12_675.0
 LAGOS_SANGOTEDO_IKORODU_CORRIDOR_PER_KM = _LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN / (
     _LAGRIDE_SANGOTEDO_IKORODU_SAMPLE_KM * LAGOS_MARKET_WIDE_FARE_MULTIPLIER
 )
-# Lagride-aligned tier spread on this corridor only (not global 1.25 / 1.125 / 1.5×).
+# Very soft distinct ladder (NEXRYDE tiers only — no Omni).
+_LAGRIDE_SANGOTEDO_XL_M = 1.005
+_LAGRIDE_SANGOTEDO_COMFORT_M = 1.01
+_LAGRIDE_SANGOTEDO_PREMIUM_M = 1.02
 LAGOS_SANGOTEDO_IKORODU_SERVICE_MULTIPLIERS: dict[str, float] = {
     "economy": 1.0,
     "standard": 1.0,
     "ev": 1.0,
-    "xl": 1.02,
-    "comfort": 1.04,
-    "premium": 1.11,
-    "pro": 1.11,
-    "executive": 1.11,
-    "omni": 0.32,
-    "budget": 0.32,
+    "xl": _LAGRIDE_SANGOTEDO_XL_M,
+    "comfort": _LAGRIDE_SANGOTEDO_COMFORT_M,
+    "premium": _LAGRIDE_SANGOTEDO_PREMIUM_M,
+    "pro": _LAGRIDE_SANGOTEDO_PREMIUM_M,
+    "executive": _LAGRIDE_SANGOTEDO_PREMIUM_M,
 }
 LAGOS_SANGOTEDO_IKORODU_TIER_CEILINGS: dict[str, float] = {
     "economy": _LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN,
     "standard": _LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN,
     "ev": _LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN,
-    "xl": round(_LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN * 1.02),
-    "comfort": round(_LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN * 1.04),
-    "premium": _LAGRIDE_SANGOTEDO_IKORODU_PRO_NGN,
-    "pro": _LAGRIDE_SANGOTEDO_IKORODU_PRO_NGN,
-    "executive": _LAGRIDE_SANGOTEDO_IKORODU_PRO_NGN,
-    "omni": _LAGRIDE_SANGOTEDO_IKORODU_OMNI_NGN,
-    "budget": _LAGRIDE_SANGOTEDO_IKORODU_OMNI_NGN,
+    "xl": round(_LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN * _LAGRIDE_SANGOTEDO_XL_M),
+    "comfort": round(_LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN * _LAGRIDE_SANGOTEDO_COMFORT_M),
+    "premium": round(_LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN * _LAGRIDE_SANGOTEDO_PREMIUM_M),
+    "pro": round(_LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN * _LAGRIDE_SANGOTEDO_PREMIUM_M),
+    "executive": round(_LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN * _LAGRIDE_SANGOTEDO_PREMIUM_M),
 }
 
-# SERVICE MULTIPLIERS — legacy Lagride “Pro” card (1.1×); NEXRYDE Lagos uses FARE_CONFIG ratios.
+# SERVICE MULTIPLIERS — ≤5 km elevated for driver economics; 5–15 softened; 15+ softest.
 LAGRIDE_SERVICE_PRO = 1.1
 LAGRIDE_SERVICE_STANDARD = 1.0
 LAGRIDE_SERVICE_EV = 1.0
-LAGRIDE_SERVICE_OMNI = 0.35
+LAGRIDE_VERY_SHORT_MAX_KM = 5.0
+LAGRIDE_LONG_TRIP_SERVICE_KM = 15.0
+# Short hops (3–5 km band especially): bump Comfort/XL/Premium a bit for drivers.
+LAGRIDE_VERY_SHORT_SERVICE_MULTIPLIERS: dict[str, float] = {
+    "economy": 1.0,
+    "standard": 1.0,
+    "ev": 1.0,
+    "xl": 1.20,
+    "comfort": 1.30,
+    "premium": 1.45,
+    "pro": 1.45,
+    "executive": 1.45,
+}
+LAGRIDE_SHORT_TRIP_SERVICE_MULTIPLIERS: dict[str, float] = {
+    "economy": 1.0,
+    "standard": 1.0,
+    "ev": 1.0,
+    "xl": 1.08,
+    "comfort": 1.15,
+    "premium": 1.28,
+    "pro": 1.28,
+    "executive": 1.28,
+}
+LAGRIDE_LONG_TRIP_SERVICE_MULTIPLIERS: dict[str, float] = {
+    "economy": 1.0,
+    "standard": 1.0,
+    "ev": 1.0,
+    "xl": 1.02,
+    "comfort": 1.04,
+    "premium": 1.10,
+    "pro": 1.10,
+    "executive": 1.10,
+}
 
 # SURGE MULTIPLIERS — combined as max(applicable); see _lagride_lagos_surge_payload
 NORMAL_SURGE_LAGride = 1.0
@@ -217,6 +243,7 @@ LAGOS_MAX_TRIP_FARE_NGN = 100_000.0
 # When rider adds an intermediate stop, bill driving time at the service tier per-minute card
 # (distance×area Lagride formula unchanged; time is additive only for stop trips).
 def lagos_stop_time_per_min(service_key: str) -> float:
+    """Service-tier per-minute card (used for display / stop overlays)."""
     sk = (service_key or "economy").strip().lower()
     if sk == "standard":
         sk = "economy"
@@ -226,11 +253,24 @@ def lagos_stop_time_per_min(service_key: str) -> float:
     return float(row.get("per_min", 80))
 
 
+def lagos_route_time_per_min_baseline() -> float:
+    """Economy per-minute — time line is scaled by service multiplier with distance."""
+    return lagos_stop_time_per_min("economy")
+
+
 def lagos_stop_time_fee(service_key: str, route_time_min: int) -> float:
     mins = max(0, int(route_time_min))
     if mins <= 0:
         return 0.0
     return round(mins * lagos_stop_time_per_min(service_key), 2)
+
+
+def lagos_route_time_line(route_time_min: int) -> float:
+    """₦ time component before service × market (economy per-min × minutes)."""
+    mins = max(0, int(route_time_min))
+    if mins <= 0:
+        return 0.0
+    return round(mins * lagos_route_time_per_min_baseline(), 2)
 
 # Above this ₦/km, long trips (>20 km) taper toward Tier-1 15+ band.
 LAGOS_LONG_HAUL_TAPER_KM = 20.0
@@ -330,8 +370,8 @@ def classify_lagos_lagride_pickup(pickup_lat: float | None, pickup_lng: float | 
     """
     Returns (tier, zone_label).
 
-    **Tier 1** — AREA RATES 0–3 / 3–15 / 15+ km (₦1,850 / ₦875 / ₦812 baseline).
-    **Tier 2** — flat ₦3,255/km (``TIER2_FLAT_PER_KM``), except Peace Garden + dropoff.
+    **Tier 1** — AREA RATES 0–3 / 3–15 / 15+ km (₦1,850 / ₦700 / ₦660 baseline).
+    **Tier 2** — mid ₦1,400/km (``TIER2_FLAT_PER_KM``), except Peace Garden + dropoff overlays.
 
     Tier 1 polygons are evaluated **before** Tier 2 so overlapping areas (e.g. Eti-Osa
     vs Lekki/VI) resolve to Tier 1 when inside a Tier-1 box.
@@ -645,16 +685,16 @@ def lagride_rate_source_descriptor(
                 return "peace_garden_to_ikorodu_route_rate"
             if pg == PEACE_GARDEN_TO_IKEJA_PER_KM:
                 return "peace_garden_to_ikeja_route_rate"
-        return "tier2_flat_3255"
+        return "tier2_flat_1400"
     if d < 3.0 and z == "lagride_t1_sky_mall":
         return "tier1_sky_mall_short_trip_calibrated"
     if d < 3.0:
         return "tier1_0_3_baseline_1850"
     if d < 15.0:
-        return "tier1_3_15_baseline_875"
+        return "tier1_3_15_baseline_700"
     if z in TIER1_15_PLUS_RATES_BY_ZONE:
         return "tier1_15_plus_corridor_calibrated"
-    return "tier1_15_plus_baseline_812"
+    return "tier1_15_plus_baseline_660"
 
 
 def build_lagride_profile_payload(
@@ -746,6 +786,9 @@ def _normalize_lagos_service_key(service_key: str) -> str:
         return "economy"
     if k == "pro":
         return "premium"
+    # Omni/budget are not NEXRYDE vehicles — treat as Standard.
+    if k in ("omni", "budget"):
+        return "economy"
     return k
 
 
@@ -768,32 +811,35 @@ def lagride_lagos_service_multiplier(
     pickup_lng: float | None = None,
     dropoff_lat: float | None = None,
     dropoff_lng: float | None = None,
+    distance_km: float | None = None,
 ) -> float:
     """
-    Scale the distance×area line by NEXRYDE Lagos tier, using the same **per_km ratios**
-    as ``FARE_CONFIG['lagos']`` (economy = 1.0×).
+    Scale the distance×area line by NEXRYDE Lagos tier.
 
-    Sangotedo ↔ Ikorodu corridor uses tighter local multipliers (Premium ≤ ₦55k).
+    ≤5 km: elevated XL 1.20 / Comfort 1.30 / Premium 1.45 (short-hop driver economics).
+    5–15 km: XL 1.08 / Comfort 1.15 / Premium 1.28.
+    15+ km: XL 1.02 / Comfort 1.04 / Premium 1.10.
+    Sangotedo ↔ Ikorodu corridor: tighter local multipliers (Premium ≤ ₦55k).
 
-    ``standard`` → economy. ``pro`` → premium. ``budget`` / ``omni`` → 0.35×. ``ev`` → 1.0×.
+    ``standard`` → economy. ``pro`` → premium. ``omni`` / ``budget`` → economy (not a vehicle). ``ev`` → 1.0×.
     """
     if sangotedo_ikorodu_corridor_rate_per_km(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng) is not None:
         return sangotedo_ikorodu_corridor_service_multiplier(service_key)
 
     k = _normalize_lagos_service_key(service_key)
-    if k in ("omni", "budget"):
-        return float(LAGRIDE_SERVICE_OMNI)
     if k == "ev":
         return float(LAGRIDE_SERVICE_EV)
 
-    fc = FARE_CONFIG.get("lagos") or FARE_CONFIG["default"]
-    fe = fc["economy"]
-    base_pk = float(fe.get("per_km") or 400)
-    row = fc.get(k) or fe
-    pk = float(row.get("per_km") or base_pk)
-    if base_pk <= 0:
-        return float(LAGRIDE_SERVICE_STANDARD)
-    return pk / base_pk
+    d = max(0.0, float(distance_km)) if distance_km is not None else None
+    if d is not None and d >= LAGRIDE_LONG_TRIP_SERVICE_KM:
+        return float(LAGRIDE_LONG_TRIP_SERVICE_MULTIPLIERS.get(k, LAGRIDE_SERVICE_STANDARD))
+    if d is not None and d <= LAGRIDE_VERY_SHORT_MAX_KM:
+        return float(LAGRIDE_VERY_SHORT_SERVICE_MULTIPLIERS.get(k, LAGRIDE_SERVICE_STANDARD))
+    if d is not None:
+        return float(LAGRIDE_SHORT_TRIP_SERVICE_MULTIPLIERS.get(k, LAGRIDE_SERVICE_STANDARD))
+
+    # No distance context (tests / legacy): use mid short ladder (5–15).
+    return float(LAGRIDE_SHORT_TRIP_SERVICE_MULTIPLIERS.get(k, LAGRIDE_SERVICE_STANDARD))
 
 
 def _lagride_lagos_surge_payload(
@@ -945,6 +991,7 @@ def build_lagos_lagride_fare_breakdown(
         pickup_lng=pickup_lng,
         dropoff_lat=dropoff_lat,
         dropoff_lng=dropoff_lng,
+        distance_km=distance_km,
     )
     corridor_tier_ceiling = (
         sangotedo_ikorodu_corridor_tier_ceiling(service_key)
@@ -973,11 +1020,12 @@ def build_lagos_lagride_fare_breakdown(
 
     d = max(0.0, float(distance_km))
     distance_line = round(d * rate, 2)
+    time_line = lagos_route_time_line(route_time_min)
+    # (km×area + min×per_min) × service × market — no flat short-trip floor (fares must differ by km/time).
+    combined_line = round(distance_line + time_line, 2)
+    subtotal = round(combined_line * svc_m * float(LAGOS_MARKET_WIDE_FARE_MULTIPLIER), 2)
+    time_fee = float(time_line)  # exposed as route time component (always on)
     distance_subtotal = round(distance_line * svc_m * float(LAGOS_MARKET_WIDE_FARE_MULTIPLIER), 2)
-    time_fee = (
-        lagos_stop_time_fee(service_key, route_time_min) if has_intermediate_stop else 0.0
-    )
-    subtotal = round(distance_subtotal + time_fee, 2)
     total_raw = subtotal * dynamic_multiplier
     total_fare = max(200.0, round(total_raw))
     if corridor_tier_ceiling is not None and total_fare > corridor_tier_ceiling:
@@ -996,7 +1044,7 @@ def build_lagos_lagride_fare_breakdown(
         else:
             band_note = "0–3 km @ ₦1,850/km"
     elif tier == 1 and d < 15:
-        band_note = "3–15 km @ ₦875/km"
+        band_note = f"3–15 km @ ₦{int(TIER1_RATE_3_15_KM)}/km"
     elif tier == 1:
         band_note = (
             f"15+ km @ ₦{round(rate)}/km (calibrated)"
@@ -1018,7 +1066,7 @@ def build_lagos_lagride_fare_breakdown(
     elif tier == 2 and d < 3:
         band_note = "0–3 km @ ₦1,850/km"
     elif tier == 2 and d < 15:
-        band_note = "3–15 km @ ₦3,255/km"
+        band_note = f"3–15 km @ ₦{int(TIER2_FLAT_PER_KM)}/km"
     elif tier == 2:
         band_note = f"15+ km @ ₦{round(rate)}/km"
     else:
@@ -1046,25 +1094,26 @@ def build_lagos_lagride_fare_breakdown(
     lagride_profile["dropoff_zone_key"] = drop_zone
     lagride_profile["fare_capped"] = fare_capped
     lagride_profile["lagos_max_fare_ngn"] = LAGOS_MAX_TRIP_FARE_NGN
-    if has_intermediate_stop and time_fee > 0:
+    lagride_profile["route_time_minutes"] = route_time_min
+    lagride_profile["route_time_per_min"] = lagos_route_time_per_min_baseline()
+    lagride_profile["route_time_line"] = time_line
+    if has_intermediate_stop:
         lagride_profile["has_intermediate_stop"] = True
-        lagride_profile["stop_time_fee_applied"] = True
-        lagride_profile["stop_time_per_min"] = lagos_stop_time_per_min(service_key)
-        lagride_profile["stop_route_minutes"] = route_time_min
 
     lm_pb = float(LAGOS_MARKET_WIDE_FARE_MULTIPLIER)
+    per_min_base = lagos_route_time_per_min_baseline()
     price_breakdown = (
-        f"{round(d, 2)}km × ₦{round(rate, 2)}/km ({band_note}) × svc {round(svc_m, 2)} × surge {round(dynamic_multiplier, 2)} [{zone}]"
+        f"({round(d, 2)}km × ₦{round(rate, 2)}/km + {route_time_min}min × ₦{per_min_base:g}/min) "
+        f"× svc {round(svc_m, 2)} × surge {round(dynamic_multiplier, 2)} [{zone}] · {band_note}"
         if lm_pb == 1.0
         else (
-            f"{round(d, 2)}km × ₦{round(rate, 2)}/km ({band_note}) × svc {round(svc_m, 2)} × Lagos {lm_pb:g} × "
-            f"surge {round(dynamic_multiplier, 2)} [{zone}]"
+            f"({round(d, 2)}km × ₦{round(rate, 2)}/km + {route_time_min}min × ₦{per_min_base:g}/min) "
+            f"× svc {round(svc_m, 2)} × Lagos {lm_pb:g} × surge {round(dynamic_multiplier, 2)} [{zone}] · {band_note}"
         )
     )
-    if time_fee > 0:
-        per_min = lagos_stop_time_per_min(service_key)
+    if has_intermediate_stop and time_line > 0:
         price_breakdown = append_stop_time_breakdown_suffix(
-            price_breakdown, route_time_min, time_fee, per_min
+            price_breakdown, route_time_min, time_line, per_min_base
         )
 
     return {
@@ -1074,9 +1123,10 @@ def build_lagos_lagride_fare_breakdown(
         "duration_min": duration_min,
         "pricing_route_minutes": route_time_min,
         "time_fee": float(time_fee),
-        "has_intermediate_stop": bool(has_intermediate_stop and time_fee > 0),
-        "stop_time_fee_applied": bool(has_intermediate_stop and time_fee > 0),
-        "stop_time_per_min": lagos_stop_time_per_min(service_key) if has_intermediate_stop else 0.0,
+        "has_intermediate_stop": bool(has_intermediate_stop),
+        "stop_time_fee_applied": False,
+        "stop_time_per_min": 0.0,
+        "route_time_per_min": per_min_base,
         "traffic_duration_min": traffic_duration_min,
         "traffic_fee": 0.0,
         "booking_fee": 0.0,

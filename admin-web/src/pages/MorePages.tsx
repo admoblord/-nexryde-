@@ -20,7 +20,7 @@ function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
 
 export function AnalyticsPage() {
   const [data, setData] = useState<Record<string, unknown> | null>(null);
-  useEffect(() => { api('/admin/analytics?period=30d').then(setData); }, []);
+  useEffect(() => { api<Record<string, unknown>>('/admin/analytics?period=30d').then(setData); }, []);
   if (!data) return <div className="card">Loading analytics…</div>;
   const trips = (data.trips_per_day as { date: string; total: number }[]) ?? [];
   const peaks = (data.peak_hours as { hour: number; trips: number }[]) ?? [];
@@ -192,7 +192,7 @@ export function DispatchPage() {
 
   useEffect(() => {
     if (!selectedTrip) { setEvents(null); return; }
-    api(`/admin/dispatch/events?trip_id=${selectedTrip}`).then(setEvents).catch(() => setEvents(null));
+    api<Record<string, unknown>>(`/admin/dispatch/events?trip_id=${selectedTrip}`).then(setEvents).catch(() => setEvents(null));
   }, [selectedTrip]);
 
   if (!d) return <div className="card">Loading dispatch…</div>;
@@ -270,7 +270,7 @@ export function DriversLivePage() {
 
 export function KpiPage() {
   const [d, setD] = useState<Record<string, unknown> | null>(null);
-  useEffect(() => { api('/admin/kpi-scoreboard').then(setD); }, []);
+  useEffect(() => { api<Record<string, unknown>>('/admin/kpi-scoreboard').then(setD); }, []);
   if (!d) return <div className="card">Loading KPIs…</div>;
   return (
     <div>
@@ -680,7 +680,7 @@ export function DeveloperPage() {
 
 export function MarketingPage() {
   const [stats, setStats] = useState<Record<string, unknown> | null>(null);
-  useEffect(() => { api('/admin/referral-stats').then(setStats); }, []);
+  useEffect(() => { api<Record<string, unknown>>('/admin/referral-stats').then(setStats); }, []);
   if (!stats) return <div className="card">Loading…</div>;
   return (
     <div>
@@ -829,7 +829,7 @@ export function ReleasesPage() {
 
 export function SystemAuditPage() {
   const [data, setData] = useState<Record<string, unknown> | null>(null);
-  useEffect(() => { api('/admin/system-audit').then(setData); }, []);
+  useEffect(() => { api<Record<string, unknown>>('/admin/system-audit').then(setData); }, []);
   if (!data) return <div className="card">Loading…</div>;
   return (
     <div>

@@ -2,7 +2,6 @@
  * Unified HTTP layer — mandatory timeout, exponential backoff retry, offline awareness.
  * Prefer this over bare fetch() for all new code; migrate hot paths incrementally.
  */
-import NetInfo from '@react-native-community/netinfo';
 import { getAuthHeaders } from '@/src/services/api';
 import { authedFetch } from '@/src/utils/sessionRefresh';
 import { fetchWithTimeout } from '@/src/utils/fetchWithTimeout';
@@ -30,10 +29,8 @@ function backoffMs(attempt: number): number {
 }
 
 export async function isNetworkReachable(): Promise<boolean> {
-  const platform = getPlatformConnectionSnapshot();
-  if (platform.state !== 'OFFLINE') return true;
-  const state = await NetInfo.fetch();
-  return Boolean(state.isConnected) && state.isInternetReachable !== false;
+  // Only hard OFFLINE blocks ride ops — DEGRADED / RECONNECTING stay operational.
+  return getPlatformConnectionSnapshot().state !== 'OFFLINE';
 }
 
 function shouldRetry(status: number, attempt: number, max: number): boolean {
@@ -63,6 +60,7 @@ export async function managedFetch(
   }
 
   let lastError: unknown;
+  // Retries of one logical request count as a single connectivity event (report once).
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const res = authed
@@ -74,10 +72,13 @@ export async function managedFetch(
           });
 
       if (!res.ok) {
-        reportPlatformConnectionSignal('backend', res.status < 500);
-        if (!retryOnClientError && res.status >= 400 && res.status < 500) {
-          if (!shouldRetry(res.status, attempt, retries)) return res;
-        } else if (!shouldRetry(res.status, attempt, retries)) {
+        const clientErr = res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429;
+        if (clientErr && !retryOnClientError) {
+          // Not a connectivity failure — do not feed NetworkStateManager.
+          return res;
+        }
+        if (!shouldRetry(res.status, attempt, retries)) {
+          reportPlatformConnectionSignal('backend', false);
           return res;
         }
         lastError = new Error(`HTTP ${res.status}`);
@@ -88,11 +89,11 @@ export async function managedFetch(
       return res;
     } catch (err) {
       lastError = err;
-      reportPlatformConnectionSignal('backend', false);
       if (attempt >= retries) break;
       await sleep(backoffMs(attempt));
     }
   }
+  reportPlatformConnectionSignal('backend', false);
   throw lastError instanceof Error ? lastError : new Error('Request failed');
 }
 

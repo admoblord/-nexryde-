@@ -14,7 +14,8 @@ import {
 import { queueDriverAccept, queueTripRequest } from '@/src/utils/offlineQueueActions';
 import {
   getPlatformConnectionSnapshot,
-  reportPlatformConnectionSignal,
+  startPlatformConnectionManager,
+  subscribePlatformConnection,
 } from '@/src/services/platformConnectionManager';
 
 let isOnline = true;
@@ -24,6 +25,7 @@ let legacyMigrated = false;
 
 /**
  * Initialize offline mode (singleton — safe to call multiple times).
+ * Internet signals are owned by NetworkStateManager; this only tracks ops-online.
  */
 export const initializeOfflineMode = (): (() => void) => {
   if (!legacyMigrated) {
@@ -33,13 +35,15 @@ export const initializeOfflineMode = (): (() => void) => {
 
   if (netInfoUnsubscribe) return netInfoUnsubscribe;
 
-  netInfoUnsubscribe = NetInfo.addEventListener((state) => {
-    const wasOffline = !isOnline;
-    const netReachable = Boolean(state.isConnected) && state.isInternetReachable !== false;
-    reportPlatformConnectionSignal('internet', netReachable);
-    isOnline = getPlatformConnectionSnapshot().state !== 'OFFLINE';
+  startPlatformConnectionManager();
+  // Single NetInfo publisher lives in platformConnectionManager — do not double-subscribe.
+  void NetInfo.fetch().then((state) => {
     networkType = state.type;
+  });
 
+  netInfoUnsubscribe = subscribePlatformConnection((snap) => {
+    const wasOffline = !isOnline;
+    isOnline = snap.state !== 'OFFLINE';
     if (wasOffline && isOnline) {
       void syncQueuedRequests();
     }
@@ -52,13 +56,9 @@ export const initializeOfflineMode = (): (() => void) => {
 };
 
 export const checkOnlineStatus = async (): Promise<boolean> => {
-  const platform = getPlatformConnectionSnapshot();
-  if (platform.state !== 'OFFLINE') {
-    isOnline = true;
-    return true;
-  }
-  const state = await NetInfo.fetch();
-  isOnline = Boolean(state.isConnected) && state.isInternetReachable !== false;
+  startPlatformConnectionManager();
+  // Temporary latency / DEGRADED / RECONNECTING must not cancel ride search.
+  isOnline = getPlatformConnectionSnapshot().state !== 'OFFLINE';
   return isOnline;
 };
 

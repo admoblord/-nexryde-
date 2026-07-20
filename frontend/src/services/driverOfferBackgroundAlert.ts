@@ -10,6 +10,7 @@ import {
 import { loadDriverOfferSoundPrefs } from '@/src/services/driverOfferSoundPrefs';
 import { configureDriverOfferAudioMode } from '@/src/services/driverOfferAudioSession';
 import {
+  isDriverNativeExperienceAvailable,
   showNativeRideOfferAlert,
   stopNativeRideAlert,
 } from '@/src/services/driverNativeExperience';
@@ -32,13 +33,21 @@ function clearStopTimer() {
 }
 
 export function isDriverOfferBackgroundAlertActive(): boolean {
-  return Boolean(activeKey && soundRef);
+  return Boolean(activeKey);
 }
 
-export async function stopDriverOfferBackgroundAlert(): Promise<void> {
+type StopDriverOfferBackgroundAlertOptions = {
+  stopNative?: boolean;
+};
+
+export async function stopDriverOfferBackgroundAlert(
+  options: StopDriverOfferBackgroundAlertOptions = {}
+): Promise<void> {
   clearStopTimer();
   activeKey = null;
-  stopNativeRideAlert();
+  if (options.stopNative !== false) {
+    stopNativeRideAlert();
+  }
   if (Platform.OS === 'android') {
     try {
       Vibration.cancel();
@@ -92,6 +101,7 @@ export type DriverOfferAlertParams = {
   body?: string;
   tripId?: string;
   offerId?: string;
+  driverId?: string | null;
   source: 'push' | 'socket' | 'poll';
 };
 
@@ -106,7 +116,7 @@ export async function triggerDriverOfferBackgroundAlert(
   if (!params.offerKey) return;
   if (AppState.currentState === 'active') return;
 
-  if (activeKey === params.offerKey && soundRef) return;
+  if (activeKey === params.offerKey) return;
 
   await stopDriverOfferBackgroundAlert();
   activeKey = params.offerKey;
@@ -118,7 +128,12 @@ export async function triggerDriverOfferBackgroundAlert(
     offer_id: params.offerId,
     rider_name: 'Rider',
     pickup_address: params.body || 'New ride request',
-  });
+  }, params.driverId);
+
+  if (Platform.OS === 'android' && isDriverNativeExperienceAvailable()) {
+    stopTimer = setTimeout(() => void stopDriverOfferBackgroundAlert(), ALERT_DURATION_MS);
+    return;
+  }
 
   if (Platform.OS === 'android') {
     Vibration.vibrate([0, 450, 200, 500, 200, 550, 200, 550], true);

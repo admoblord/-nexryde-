@@ -123,8 +123,31 @@ export async function flushOfflineQueue(): Promise<{
         retries: 0,
       });
 
-      if (res.ok || res.status === 409) {
-        // 409 Conflict = idempotency hit (already processed) → treat as success
+      if (res.ok) {
+        flushed++;
+        flushedLabels.push(entry.label);
+      } else if (entry.label === 'driver_accept_trip') {
+        const tripId = entry.url.match(/\/trips\/([^/]+)\/accept/)?.[1] || '';
+        const driverId = String(entry.body?.driver_id || '');
+        if (res.status === 409 && tripId && driverId) {
+          const { verifyDriverTripAssignment } = await import('@/src/utils/verifyDriverTripAssignment');
+          const verified = await verifyDriverTripAssignment(driverId, decodeURIComponent(tripId));
+          if (verified.assigned) {
+            flushed++;
+            flushedLabels.push(entry.label);
+          } else {
+            discarded++;
+          }
+        } else if ([400, 403, 404, 410].includes(res.status)) {
+          // Expired/unavailable offers are terminal. Retrying would spam the
+          // backend and could show a false "accepted" recovery alert later.
+          discarded++;
+        } else {
+          remaining.push({ ...entry, retries: entry.retries + 1 });
+          failed++;
+        }
+      } else if (res.status === 409) {
+        // Non-driver actions use 409 as an idempotency/active-state signal.
         flushed++;
         flushedLabels.push(entry.label);
       } else {

@@ -207,6 +207,38 @@ export function DistanceKmMarker({ lat, lng, km }: { lat: number; lng: number; k
   );
 }
 
+/** Amber intermediate stop pin between pickup and drop-off. */
+export function StopMarker({
+  lat,
+  lng,
+  index = 1,
+  label,
+  tracksViewChanges = false,
+}: {
+  lat: number;
+  lng: number;
+  index?: number;
+  label?: string;
+  tracksViewChanges?: boolean;
+}) {
+  if (!isValidMapCoord(lat, lng)) return null;
+  return (
+    <Marker
+      coordinate={{ latitude: lat, longitude: lng }}
+      anchor={{ x: 0.5, y: 0.5 }}
+      tracksViewChanges={tracksViewChanges}
+      zIndex={13}
+    >
+      <View style={styles.stopWrap}>
+        <View style={styles.stopDot}>
+          <Text style={styles.stopIdx}>{index}</Text>
+        </View>
+        <Text style={styles.stopLbl}>{label || 'STOP'}</Text>
+      </View>
+    </Marker>
+  );
+}
+
 const styles = StyleSheet.create({
   pickupWrap: { alignItems: 'center' },
   pickupDot: {
@@ -292,4 +324,23 @@ const styles = StyleSheet.create({
     borderColor: PERFECT_TRACKING.border,
   },
   kmTxt: { color: '#E2E8F0', fontSize: 9, fontWeight: '700' },
+  stopWrap: { alignItems: 'center' },
+  stopDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: PERFECT_TRACKING.orange,
+    borderWidth: 2,
+    borderColor: '#FFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stopIdx: { color: '#0F172A', fontSize: 11, fontWeight: '900' },
+  stopLbl: {
+    marginTop: 3,
+    fontSize: 9,
+    fontWeight: '800',
+    color: PERFECT_TRACKING.orange,
+    letterSpacing: 0.5,
+  },
 });

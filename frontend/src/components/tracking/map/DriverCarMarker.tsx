@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Platform, Animated, Easing } from 'react-native';
+import { View, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { MarkerAnimated, AnimatedRegion } from 'react-native-maps';
+import { Ionicons } from '@expo/vector-icons';
 import { PERFECT_TRACKING } from '@/src/components/tracking/trackingMapTokens';
 import { bearingDeg, isValidMapCoord } from '@/src/components/tracking/map/mapUtils';
 import {
@@ -157,15 +158,15 @@ export function DriverCarMarker({
   const rotatorInner = (
     <>
       <View style={styles.arrowSlot}>
-        <Text style={styles.arrow}>▲</Text>
+        <Ionicons name="navigate" size={18} color={PERFECT_TRACKING.green} />
       </View>
       {ANDROID ? (
         <View style={styles.taxiBox}>
-          <Text style={styles.taxiEmoji}>🚕</Text>
+          <Ionicons name="car-sport" size={21} color="#111827" />
         </View>
       ) : (
         <Animated.View style={[styles.taxiBox, { transform: [{ scale: carBright }] }]}>
-          <Text style={styles.taxiEmoji}>🚕</Text>
+          <Ionicons name="car-sport" size={21} color="#111827" />
         </Animated.View>
       )}
     </>
@@ -232,12 +233,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  arrow: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: PERFECT_TRACKING.green,
-    lineHeight: 20,
-  },
   taxiBox: {
     width: 30,
     height: 30,
@@ -248,10 +243,5 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#FFFFFF',
     elevation: 10,
-  },
-  taxiEmoji: {
-    fontSize: 20,
-    lineHeight: 24,
-    textAlign: 'center',
   },
 });

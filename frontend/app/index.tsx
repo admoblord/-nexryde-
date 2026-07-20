@@ -232,16 +232,16 @@ export default function SplashScreen() {
     } catch { setChecking(false); }
   };
 
-  // ── CTA splash entry (no session) ─────────────────────────────────
+  // ── CTA splash entry (no session only — never flash welcome while redirecting logged-in drivers) ──
+  const isAuthenticated = useAppStore((s) => s.isAuthenticated);
   useEffect(() => {
-    if (!checking) {
-      setShowSplash(true);
-      Animated.parallel([
-        Animated.timing(ctaFade, { toValue: 1, duration: 500, useNativeDriver: true }),
-        Animated.spring(ctaY, { toValue: 0, tension: 60, friction: 10, useNativeDriver: true }),
-      ]).start();
-    }
-  }, [checking]);
+    if (checking || isAuthenticated) return;
+    setShowSplash(true);
+    Animated.parallel([
+      Animated.timing(ctaFade, { toValue: 1, duration: 500, useNativeDriver: true }),
+      Animated.spring(ctaY, { toValue: 0, tension: 60, friction: 10, useNativeDriver: true }),
+    ]).start();
+  }, [checking, isAuthenticated, ctaFade, ctaY]);
 
   // ── Branded loading state (used for BOTH checking AND splash) ──────
   return (

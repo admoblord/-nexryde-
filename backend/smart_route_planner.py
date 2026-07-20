@@ -1,6 +1,6 @@
 """
 Smart Route Planner - Eliminate Empty Return Trips
-AI-powered matching system to find return passengers for drivers
+Rule-based matching system to find return passengers for drivers
 Maximizes driver earnings by ensuring they never travel empty
 """
 
@@ -80,7 +80,7 @@ active_connections: Dict[str, WebSocket] = {}
 
 class SmartRoutePlannerService:
     """
-    AI-powered service to match drivers with return passengers
+    Service to match drivers with return passengers
     """
     
     @staticmethod

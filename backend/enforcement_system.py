@@ -297,7 +297,7 @@ VIOLATION_COPY_VARIANTS: dict[str, dict[str, list[str]]] = {
 }
 
 
-def _parse_iso_dt(raw: str) -> datetime | None:
+def _parse_iso_dt(raw: str) -> Optional[datetime]:
     if not raw:
         return None
     try:
@@ -385,7 +385,7 @@ def _window_count_line(violation_type: str, count: int, window_hours: int) -> st
     return f"Incident count: {count}× {desc.lower()} in the last {window_label}."
 
 
-def _pick_variant_copy(violation_type: str, action_bucket: str, count: int) -> str | None:
+def _pick_variant_copy(violation_type: str, action_bucket: str, count: int) -> Optional[str]:
     pool = VIOLATION_COPY_VARIANTS.get(violation_type, {}).get(action_bucket, [])
     if not pool:
         return None
@@ -732,6 +732,8 @@ async def apply_cancellation_progressive_penalty(
                 },
             )
             await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
+            from driver_presence import clear_driver_presence_safe
+            await clear_driver_presence_safe(user_id)
             action = "timeout"
             deadline_key = "offline_until"
         hours = 1
@@ -751,6 +753,8 @@ async def apply_cancellation_progressive_penalty(
             },
         )
         await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
+        from driver_presence import clear_driver_presence_safe
+        await clear_driver_presence_safe(user_id)
         action = "suspended"
         deadline_key = "suspended_until"
         hours = 24
@@ -770,6 +774,8 @@ async def apply_cancellation_progressive_penalty(
             },
         )
         await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
+        from driver_presence import clear_driver_presence_safe
+        await clear_driver_presence_safe(user_id)
         action = "suspended"
         deadline_key = "suspended_until"
         hours = 24 * 7
@@ -814,35 +820,47 @@ async def apply_penalty(user_id: str, action: str, message: str, violation_type:
         until = now + timedelta(hours=1)
         await db.users.update_one({"id": user_id}, {"$set": {"forced_offline_until": until.isoformat(), "block_reason": violation_type}})
         await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
+        from driver_presence import clear_driver_presence_safe
+        await clear_driver_presence_safe(user_id)
         return {"action": "timeout", "message": message, "offline_until": until.isoformat()}
 
     elif action == "timeout_2h":
         until = now + timedelta(hours=2)
         await db.users.update_one({"id": user_id}, {"$set": {"forced_offline_until": until.isoformat(), "block_reason": violation_type}})
         await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
+        from driver_presence import clear_driver_presence_safe
+        await clear_driver_presence_safe(user_id)
         return {"action": "timeout", "message": message, "offline_until": until.isoformat()}
 
     elif action == "suspend_24h":
         until = now + timedelta(hours=24)
         await db.users.update_one({"id": user_id}, {"$set": {"suspended_until": until.isoformat(), "suspension_reason": violation_type}})
         await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
+        from driver_presence import clear_driver_presence_safe
+        await clear_driver_presence_safe(user_id)
         return {"action": "suspended", "message": message, "suspended_until": until.isoformat()}
 
     elif action == "suspend_3d":
         until = now + timedelta(days=3)
         await db.users.update_one({"id": user_id}, {"$set": {"suspended_until": until.isoformat(), "suspension_reason": violation_type}})
         await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
+        from driver_presence import clear_driver_presence_safe
+        await clear_driver_presence_safe(user_id)
         return {"action": "suspended", "message": message, "suspended_until": until.isoformat()}
 
     elif action == "suspend_7d":
         until = now + timedelta(days=7)
         await db.users.update_one({"id": user_id}, {"$set": {"suspended_until": until.isoformat(), "suspension_reason": violation_type}})
         await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
+        from driver_presence import clear_driver_presence_safe
+        await clear_driver_presence_safe(user_id)
         return {"action": "suspended", "message": message, "suspended_until": until.isoformat()}
 
     elif action == "deactivate":
         await db.users.update_one({"id": user_id}, {"$set": {"is_deactivated": True, "deactivated_at": now.isoformat(), "deactivation_reason": violation_type}})
         await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
+        from driver_presence import clear_driver_presence_safe
+        await clear_driver_presence_safe(user_id)
         return {"action": "deactivated", "message": message}
 
     return {"action": action, "message": message}

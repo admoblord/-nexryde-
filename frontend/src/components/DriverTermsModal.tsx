@@ -102,7 +102,7 @@ export default function DriverTermsModal({ visible, onAccept, onDecline }: Drive
               <Text style={styles.bold}>Road Warrior Plan:</Text>{'\n'}
               • Monthly subscription fee applies{'\n'}
               • Unlimited rides (city + intercity){'\n'}
-              • Access to premium features (AI Coach, Smart Mode, etc.){'\n'}
+              • Access to premium route, work-zone, and support features{'\n'}
               • Priority support{'\n\n'}
               
               Payment is due at the start of each subscription period. Late payments may result in temporary account suspension.

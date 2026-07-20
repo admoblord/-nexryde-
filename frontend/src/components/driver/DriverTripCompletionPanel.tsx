@@ -51,6 +51,8 @@ type Props = {
   onDismiss: () => void;
   onSubmitRating: (stars: number, comment: string) => Promise<void>;
   onViewDetails?: () => void;
+  /** Cash collected — confirm payment with backend. */
+  onConfirmCash?: () => Promise<void>;
 };
 
 function formatFare(n: number): string {
@@ -153,6 +155,7 @@ export default function DriverTripCompletionPanel({
   onDismiss,
   onSubmitRating,
   onViewDetails,
+  onConfirmCash,
 }: Props) {
   const insets = useSafeAreaInsets();
   const [stars, setStars] = useState(0);
@@ -160,6 +163,7 @@ export default function DriverTripCompletionPanel({
   const [comment, setComment] = useState('');
   const [thanks, setThanks] = useState(payload.alreadyRated);
   const [busy, setBusy] = useState(false);
+  const [cashBusy, setCashBusy] = useState(false);
   const fade = useRef(new Animated.Value(0)).current;
   const sheetY = useRef(new Animated.Value(56)).current;
   const checkScale = useRef(new Animated.Value(0)).current;
@@ -367,10 +371,42 @@ export default function DriverTripCompletionPanel({
                 />
                 <Text style={[styles.paymentMethodTxt, payload.paymentPending && styles.paymentMethodPendingTxt]}>
                   {payload.paymentPending
-                    ? `Cash payment pending — collect ₦${Math.round(payload.fare).toLocaleString()} from rider`
+                    ? `Cash pending — collect ₦${Math.round(payload.fare).toLocaleString()} from rider`
                     : `Payment via ${payload.paymentMethod === 'wallet' ? 'wallet' : 'cash'} — complete`}
                 </Text>
               </View>
+            ) : null}
+            {payload.paymentPending && onConfirmCash ? (
+              <TouchableOpacity
+                style={[styles.cashConfirmBtn, cashBusy && { opacity: 0.65 }]}
+                disabled={cashBusy}
+                onPress={() => {
+                  void (async () => {
+                    setCashBusy(true);
+                    try {
+                      await onConfirmCash();
+                      if (Platform.OS !== 'web') {
+                        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                      }
+                    } catch {
+                      /* parent toasts */
+                    } finally {
+                      setCashBusy(false);
+                    }
+                  })();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Confirm cash collected"
+              >
+                {cashBusy ? (
+                  <ActivityIndicator color="#022C22" />
+                ) : (
+                  <>
+                    <Ionicons name="cash" size={18} color="#022C22" />
+                    <Text style={styles.cashConfirmTxt}>Cash collected</Text>
+                  </>
+                )}
+              </TouchableOpacity>
             ) : null}
           </View>
 
@@ -755,6 +791,17 @@ const styles = StyleSheet.create({
   },
   paymentMethodTxt: { fontSize: 12, fontWeight: '700', color: NEON, flex: 1 },
   paymentMethodPendingTxt: { color: '#FBBF24' },
+  cashConfirmBtn: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#FBBF24',
+  },
+  cashConfirmTxt: { color: '#022C22', fontWeight: '900', fontSize: 14 },
   earnGrid: { flexDirection: 'row', flexWrap: 'wrap' },
   earnCol: { flex: 1, minWidth: 72, paddingHorizontal: 4, paddingVertical: 4 },
   earnColBorder: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: 'rgba(148,163,184,0.3)' },

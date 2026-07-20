@@ -1,5 +1,10 @@
 {
   "expo.jsEngine": "hermes",
   "EX_DEV_CLIENT_NETWORK_INSPECTOR": "true",
-  "newArchEnabled": "true"
+  "newArchEnabled": "true",
+  "ios.forceStaticLinking": "[]",
+  "apple.privacyManifestAggregationEnabled": "true",
+  "ios.buildReactNativeFromSource": "true",
+  "EXPO_USE_PRECOMPILED_MODULES": "true",
+  "ios.deploymentTarget": "16.4"
 }

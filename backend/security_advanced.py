@@ -8,7 +8,7 @@ Features:
 3. 2FA for Admin (Two-Factor Authentication)
 4. Request Signing (Anti-replay attacks)
 5. IP Whitelisting (Admin protection)
-6. Anomaly Detection (AI-powered threat detection)
+6. Anomaly Detection (heuristic threat detection)
 """
 
 from fastapi import HTTPException, Request, Depends
@@ -384,7 +384,7 @@ async def check_admin_ip(request: Request):
 
 class AnomalyDetector:
     """
-    AI-powered anomaly detection for threat prevention
+    Heuristic anomaly detection for threat prevention
     """
     
     # Suspicious patterns
@@ -518,7 +518,17 @@ SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     "X-XSS-Protection": "1; mode=block",
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';",
+    # img/frame blob+data: required for admin document preview (Blob URLs from fetched binaries).
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: blob:; "
+        "media-src 'self' blob:; "
+        "frame-src 'self' blob:; "
+        "connect-src 'self'"
+    ),
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "geolocation=(self), microphone=(), camera=()",
 }

@@ -32,6 +32,12 @@ def rider_trip_payload_from_doc(trip: Optional[dict]) -> dict[str, Any]:
     return {
         "id": trip.get("id"),
         "status": trip.get("status"),
+        "ride_version": int(trip.get("ride_version") or 0),
+        "state_sequence": int(trip.get("state_sequence") or trip.get("ride_version") or 0),
+        "state_updated_at": _iso(
+            trip.get("state_updated_at") or trip.get("updated_at") or trip.get("created_at")
+        ),
+        "updated_at": _iso(trip.get("updated_at") or trip.get("state_updated_at") or trip.get("created_at")),
         "driver_id": trip.get("driver_id"),
         "rider_id": trip.get("rider_id"),
         "pickup_location": trip.get("pickup_location"),
@@ -39,7 +45,13 @@ def rider_trip_payload_from_doc(trip: Optional[dict]) -> dict[str, Any]:
         "fare": trip.get("fare"),
         "offered_fare": trip.get("offered_fare"),
         "driver_name": trip.get("driver_name"),
+        "driver_profile_image": trip.get("driver_profile_image"),
+        "driver_face_image": trip.get("driver_face_image"),
+        "driver_rating": trip.get("driver_rating"),
+        "driver_total_trips": trip.get("driver_total_trips"),
+        "driver_verified": trip.get("driver_verified"),
         "vehicle_model": trip.get("vehicle_model"),
+        "vehicle_type": trip.get("vehicle_type"),
         "vehicle_plate": trip.get("vehicle_plate"),
         "vehicle_color": trip.get("vehicle_color"),
         "payment_status": trip.get("payment_status"),

@@ -54,3 +54,18 @@ def test_protected_driver_earnings_vault_routes():
     assert api_path_is_protected("/api/drivers/d1/earnings-vault/lock")
     assert api_path_is_protected("/api/drivers/d1/earnings-vault/request-unlock")
     assert api_path_is_protected("/api/drivers/d1/earnings-vault/confirm-release")
+
+
+def test_protected_sensitive_optional_and_gamification_routes():
+    assert api_path_is_protected("/api/voice/learning-event")
+    assert api_path_is_protected("/api/loyalty/user1")
+    assert api_path_is_protected("/api/matching/find-driver")
+    assert api_path_is_protected("/api/driver-of-the-month/vote")
+
+
+def test_formerly_optional_bearer_surfaces_now_protected():
+    assert api_path_is_protected("/api/enforcement/status")
+    assert api_path_is_protected("/api/work-zone/status")
+    assert api_path_is_protected("/api/notifications/inbox")
+    assert api_path_is_protected("/api/challenges/active")
+    assert api_path_is_protected("/api/support/tickets")

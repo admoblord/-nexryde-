@@ -23,17 +23,17 @@ import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { fetchWithTimeout } from '@/src/utils/fetchWithTimeout';
 import { chatSocket, type ChatWsMessage } from '@/src/services/chatSocket';
+import { useThemeColors } from '@/src/constants/theme';
+import { SURFACE } from '@/src/constants/designSystem';
 
 interface Message {
   id: string;
   text: string;
-  sender: 'user' | 'driver' | 'ai';
+  sender: 'user' | 'driver';
   senderName?: string;
   timestamp: Date;
   isRead: boolean;
 }
-
-type ChatTab = 'driver' | 'ai';
 
 function pickTripIdParam(v: string | string[] | undefined): string {
   if (typeof v === 'string' && v.trim()) return v.trim();
@@ -49,6 +49,16 @@ export default function ChatScreen() {
   const authed = useRequireUserOrLogin();
   const { canCallAuthedApi } = useAuthedApiReady();
   const { userId } = useAuthedUserId();
+  const { colors, isDark } = useThemeColors();
+  const screenBg = isDark ? colors.background : '#F9FAFB';
+  const cardBg = isDark ? SURFACE.cardDark : '#FFFFFF';
+  const border = isDark ? SURFACE.hairline : '#E5E7EB';
+  const textPrimary = colors.text;
+  const textMuted = colors.textMuted;
+  const inputBg = isDark ? SURFACE.glassSoft : '#F3F4F6';
+  const otherBubbleBg = isDark ? 'rgba(34,197,94,0.12)' : '#ECFDF5';
+  const otherBubbleBorder = isDark ? 'rgba(34,197,94,0.28)' : '#D1FAE5';
+  const userBubbleBg = isDark ? '#1E293B' : '#111827';
   const tripId =
     pickTripIdParam(params.tripId as string | string[] | undefined) ||
     pickTripIdParam(globalParams.tripId as string | string[] | undefined);
@@ -56,11 +66,8 @@ export default function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [activeTab, setActiveTab] = useState<ChatTab>('driver');
   const [message, setMessage] = useState('');
-  const [isAiTyping, setIsAiTyping] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [calling, setCalling] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [otherTyping, setOtherTyping] = useState(false);
@@ -70,25 +77,11 @@ export default function ChatScreen() {
   const [driverMessages, setDriverMessages] = useState<Message[]>([]);
   const [presetMessages, setPresetMessages] = useState<string[]>([]);
 
-  // AI messages
-  const [aiMessages, setAiMessages] = useState<Message[]>([
-    {
-      id: 'ai-welcome',
-      text: "👋 Hi! I'm your NEXRYDE AI Assistant.\n\nI can help you with:\n• Trip info & fare estimates\n• Safety tips & emergency help\n• Account & payment questions\n• Finding nearby places\n\nHow can I assist you?",
-      sender: 'ai',
-      timestamp: new Date(),
-      isRead: true,
-    },
-  ]);
+  const quickReplies = presetMessages.length > 0
+    ? presetMessages
+    : ["I'm here", "On my way", "Running late", "Can you wait?"];
 
-  const quickReplies =
-    activeTab === 'driver'
-      ? presetMessages.length > 0
-        ? presetMessages
-        : ["I'm here", "On my way", "Running late", "Can you wait?"]
-      : ["Estimate fare", "Safety tips", "Report issue", "Cancel trip"];
-
-  const messages = activeTab === 'driver' ? driverMessages : aiMessages;
+  const messages = driverMessages;
 
   // Map a backend message to our frontend Message type
   const mapBackendMsg = useCallback((msg: any): Message => {
@@ -138,7 +131,7 @@ export default function ChatScreen() {
   );
 
   useEffect(() => {
-    if (activeTab !== 'driver' || !effectiveTripId || !userId || !canCallAuthedApi) {
+    if (!effectiveTripId || !userId || !canCallAuthedApi) {
       setWsConnected(false);
       return;
     }
@@ -151,11 +144,10 @@ export default function ChatScreen() {
       chatSocket.release();
       setWsConnected(false);
     };
-  }, [activeTab, effectiveTripId, userId, canCallAuthedApi, handleChatWsMessage]);
+  }, [effectiveTripId, userId, canCallAuthedApi, handleChatWsMessage]);
 
   useEffect(() => {
     if (!canCallAuthedApi) return;
-    loadAIChatHistory();
     loadPresetMessages();
   }, [canCallAuthedApi, userId]);
 
@@ -165,29 +157,6 @@ export default function ChatScreen() {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
   }, []);
-
-  const loadAIChatHistory = async () => {
-    if (!userId || !canCallAuthedApi) return;
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/chat/ai/history/${userId}`, {
-        headers: getAuthHeaders(),
-      });
-      const data = await response.json();
-      if (data.messages && data.messages.length > 0) {
-        setSessionId(data.session_id);
-        const loaded: Message[] = data.messages.map((msg: any) => ({
-          id: msg.id,
-          text: msg.message,
-          sender: msg.role === 'user' ? 'user' : 'ai',
-          timestamp: new Date(msg.timestamp),
-          isRead: true,
-        }));
-        setAiMessages([aiMessages[0], ...loaded]);
-      }
-    } catch (error) {
-      console.error('Error loading AI chat:', error);
-    }
-  };
 
   const loadPresetMessages = async () => {
     try {
@@ -200,54 +169,6 @@ export default function ChatScreen() {
     } catch (error) {
       console.error('Error loading presets:', error);
     }
-  };
-
-  const sendAIMessage = async (messageText: string) => {
-    if (!messageText.trim() || !userId || !canCallAuthedApi || !user) return;
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      text: messageText.trim(),
-      sender: 'user',
-      timestamp: new Date(),
-      isRead: false,
-    };
-    setAiMessages((prev) => [...prev, userMsg]);
-    setIsAiTyping(true);
-    setMessage('');
-
-    try {
-      const response = await fetchWithTimeout(`${BACKEND_URL}/api/chat/ai`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          user_id: userId,
-          message: messageText.trim(),
-          user_role: user.role || 'rider',
-          session_id: sessionId,
-        }),
-        timeoutMs: 15_000,
-      });
-      const data = await response.json();
-      if (data.success && data.message) {
-        setSessionId(data.session_id);
-        setAiMessages((prev) => [
-          ...prev,
-          { id: `ai-${Date.now()}`, text: data.message, sender: 'ai', timestamp: new Date(), isRead: true },
-        ]);
-      } else {
-        setAiMessages((prev) => [
-          ...prev,
-          { id: `ai-err-${Date.now()}`, text: data.message || "Sorry, please try again.", sender: 'ai', timestamp: new Date(), isRead: true },
-        ]);
-      }
-    } catch (error) {
-      setAiMessages((prev) => [
-        ...prev,
-        { id: `ai-err-${Date.now()}`, text: "Connection error. Please try again.", sender: 'ai', timestamp: new Date(), isRead: true },
-      ]);
-    }
-    setIsAiTyping(false);
-    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
   const sendDriverMessage = async (messageText: string) => {
@@ -295,23 +216,16 @@ export default function ChatScreen() {
   // Send typing indicator via WebSocket
   const handleTypingChange = (text: string) => {
     setMessage(text);
-    if (activeTab === 'driver') {
-      chatSocket.send({ type: 'typing', is_typing: text.length > 0 });
-    }
+    chatSocket.send({ type: 'typing', is_typing: text.length > 0 });
   };
 
   const sendMessage = async () => {
     if (!message.trim()) return;
-    if (activeTab === 'ai') {
-      await sendAIMessage(message);
-    } else {
-      await sendDriverMessage(message);
-    }
+    await sendDriverMessage(message);
   };
 
   const sendQuickReply = (text: string) => {
-    if (activeTab === 'ai') sendAIMessage(text);
-    else sendDriverMessage(text);
+    sendDriverMessage(text);
   };
 
   const callDriver = async () => {
@@ -372,37 +286,38 @@ export default function ChatScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    if (activeTab === 'ai') {
-      await loadAIChatHistory();
-    } else {
-      chatSocket.nudgeReconnect();
-    }
+    chatSocket.nudgeReconnect();
     setRefreshing(false);
-  }, [activeTab]);
+  }, []);
 
   const formatTime = (date: Date) =>
     date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
   const renderMessage = ({ item }: { item: Message }) => {
     const isUser = item.sender === 'user';
-    const isAI = item.sender === 'ai';
     return (
       <View style={[styles.messageContainer, isUser ? styles.userMessageContainer : styles.otherMessageContainer]}>
         {!isUser && (
-          <View style={[styles.avatar, isAI ? styles.aiAvatar : styles.driverAvatar]}>
-            <Ionicons name={isAI ? 'sparkles' : 'car'} size={16} color="#FFFFFF" />
+          <View style={[styles.avatar, styles.driverAvatar]}>
+            <Ionicons name="car" size={16} color="#FFFFFF" />
           </View>
         )}
-        <View style={[styles.messageBubble, isUser ? styles.userBubble : isAI ? styles.aiBubble : styles.driverBubble]}>
-          {!isUser && !isAI && item.senderName && <Text style={styles.senderName}>{item.senderName}</Text>}
-          <Text style={[styles.messageText, isUser && styles.userMessageText]}>{item.text}</Text>
+        <View
+          style={[
+            styles.messageBubble,
+            isUser
+              ? [styles.userBubble, { backgroundColor: userBubbleBg }]
+              : [styles.driverBubble, { backgroundColor: otherBubbleBg, borderColor: otherBubbleBorder }],
+          ]}
+        >
+          {!isUser && item.senderName && (
+            <Text style={[styles.senderName, { color: isDark ? '#4ADE80' : '#059669' }]}>{item.senderName}</Text>
+          )}
+          <Text style={[styles.messageText, { color: isUser ? '#FFFFFF' : textPrimary }]}>{item.text}</Text>
           <View style={styles.messageFooter}>
-            <Text style={[styles.messageTime, isUser && styles.userMessageTime]}>{formatTime(item.timestamp)}</Text>
-            {isAI && (
-              <View style={styles.poweredBy}>
-                <Text style={styles.poweredByText}>GPT-4o</Text>
-              </View>
-            )}
+            <Text style={[styles.messageTime, isUser ? styles.userMessageTime : { color: textMuted }]}>
+              {formatTime(item.timestamp)}
+            </Text>
             {isUser && item.isRead && (
               <Ionicons name="checkmark-done" size={14} color="rgba(255,255,255,0.7)" style={{ marginLeft: 4 }} />
             )}
@@ -417,15 +332,18 @@ export default function ChatScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: screenBg }]}>
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#111827" />
+        <View style={[styles.header, { backgroundColor: cardBg, borderBottomColor: border }]}>
+          <TouchableOpacity
+            style={[styles.backButton, { backgroundColor: inputBg }]}
+            onPress={() => router.back()}
+          >
+            <Ionicons name="arrow-back" size={24} color={textPrimary} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Messages</Text>
-          {activeTab === 'driver' && effectiveTripId ? (
+          <Text style={[styles.headerTitle, { color: textPrimary }]}>Messages</Text>
+          {effectiveTripId ? (
             <TouchableOpacity style={styles.callButton} onPress={callDriver} disabled={calling}>
               {calling ? (
                 <ActivityIndicator size="small" color="#FFF" />
@@ -438,49 +356,42 @@ export default function ChatScreen() {
           )}
         </View>
 
-        {/* Tab Switcher */}
-        <View style={styles.tabContainer}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'ai' && styles.activeTab]}
-            onPress={() => setActiveTab('ai')}
-          >
-            <Ionicons name="sparkles" size={18} color={activeTab === 'ai' ? '#FFFFFF' : '#6B7280'} />
-            <Text style={[styles.tabText, activeTab === 'ai' && styles.activeTabText]}>AI Assistant</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'driver' && styles.activeTab]}
-            onPress={() => setActiveTab('driver')}
-          >
-            <Ionicons name="car" size={18} color={activeTab === 'driver' ? '#FFFFFF' : '#6B7280'} />
-            <Text style={[styles.tabText, activeTab === 'driver' && styles.activeTabText]}>
-              {user?.role === 'driver' ? 'Rider Chat' : 'Driver Chat'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
         {/* Chat Info Banners */}
-        {activeTab === 'ai' && (
-          <View style={styles.infoBanner}>
-            <Ionicons name="flash" size={16} color="#8B5CF6" />
-            <Text style={styles.infoBannerText}>Powered by GPT-4o • Available 24/7</Text>
-          </View>
-        )}
-        {activeTab === 'driver' && !effectiveTripId && (
-          <View style={[styles.infoBanner, styles.warningBanner]}>
+        {!effectiveTripId && (
+          <View
+            style={[
+              styles.infoBanner,
+              styles.warningBanner,
+              isDark && { backgroundColor: 'rgba(245,158,11,0.16)' },
+            ]}
+          >
             <Ionicons name="information-circle" size={16} color="#F59E0B" />
-            <Text style={[styles.infoBannerText, styles.warningText]}>
+            <Text style={[styles.infoBannerText, styles.warningText, isDark && { color: '#FCD34D' }]}>
               Start a trip to chat with your {user?.role === 'driver' ? 'rider' : 'driver'}
             </Text>
           </View>
         )}
-        {activeTab === 'driver' && effectiveTripId && (
-          <View style={[styles.infoBanner, wsConnected ? styles.connectedBanner : styles.disconnectedBanner]}>
+        {effectiveTripId && (
+          <View
+            style={[
+              styles.infoBanner,
+              wsConnected ? styles.connectedBanner : styles.disconnectedBanner,
+              isDark && {
+                backgroundColor: wsConnected ? 'rgba(34,197,94,0.14)' : 'rgba(239,68,68,0.14)',
+              },
+            ]}
+          >
             <Ionicons
               name={wsConnected ? 'wifi' : 'cloud-offline'}
               size={16}
               color={wsConnected ? '#22C55E' : '#EF4444'}
             />
-            <Text style={[styles.infoBannerText, { color: wsConnected ? '#166534' : '#991B1B' }]}>
+            <Text
+              style={[
+                styles.infoBannerText,
+                { color: wsConnected ? (isDark ? '#86EFAC' : '#166534') : isDark ? '#FCA5A5' : '#991B1B' },
+              ]}
+            >
               {wsConnected
                 ? `Live chat active • Tap call to reach ${user?.role === 'driver' ? 'rider' : 'driver'}`
                 : 'Reconnecting...'}
@@ -501,34 +412,24 @@ export default function ChatScreen() {
             contentContainerStyle={styles.messagesList}
             showsVerticalScrollIndicator={false}
             onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#22C55E" />}
             ListEmptyComponent={
-              activeTab === 'driver' ? (
-                <View style={styles.emptyState}>
-                  <Ionicons name="chatbubbles-outline" size={48} color="#CBD5E1" />
-                  <Text style={styles.emptyTitle}>No messages yet</Text>
-                  <Text style={styles.emptyText}>
-                    {effectiveTripId ? 'Send a message to start chatting' : 'Start a trip to begin chatting'}
-                  </Text>
-                </View>
-              ) : null
+              <View style={styles.emptyState}>
+                <Ionicons name="chatbubbles-outline" size={48} color={textMuted} />
+                <Text style={[styles.emptyTitle, { color: textMuted }]}>No messages yet</Text>
+                <Text style={[styles.emptyText, { color: textMuted }]}>
+                  {effectiveTripId ? 'Send a message to start chatting' : 'Start a trip to begin chatting'}
+                </Text>
+              </View>
             }
           />
 
           {/* Typing Indicators */}
-          {isAiTyping && (
+          {otherTyping && (
             <View style={styles.typingContainer}>
-              <View style={styles.typingBubble}>
-                <ActivityIndicator size="small" color="#8B5CF6" />
-                <Text style={styles.typingText}>AI is thinking...</Text>
-              </View>
-            </View>
-          )}
-          {otherTyping && activeTab === 'driver' && (
-            <View style={styles.typingContainer}>
-              <View style={[styles.typingBubble, { backgroundColor: '#DCFCE7' }]}>
+              <View style={[styles.typingBubble, { backgroundColor: otherBubbleBg }]}>
                 <ActivityIndicator size="small" color="#22C55E" />
-                <Text style={[styles.typingText, { color: '#166534' }]}>
+                <Text style={[styles.typingText, { color: isDark ? '#86EFAC' : '#166534' }]}>
                   {user?.role === 'driver' ? 'Rider' : 'Driver'} is typing...
                 </Text>
               </View>
@@ -536,16 +437,16 @@ export default function ChatScreen() {
           )}
 
           {/* Quick Replies */}
-          <View style={styles.quickRepliesContainer}>
+          <View style={[styles.quickRepliesContainer, { borderTopColor: border }]}>
             <FlatList
               horizontal
               data={quickReplies}
               renderItem={({ item }) => (
                 <TouchableOpacity
-                  style={[styles.quickReplyButton, activeTab === 'ai' && styles.quickReplyButtonAI]}
+                  style={[styles.quickReplyButton, { backgroundColor: cardBg, borderColor: border }]}
                   onPress={() => sendQuickReply(item)}
                 >
-                  <Text style={[styles.quickReplyText, activeTab === 'ai' && styles.quickReplyTextAI]}>{item}</Text>
+                  <Text style={[styles.quickReplyText, { color: colors.textSecondary }]}>{item}</Text>
                 </TouchableOpacity>
               )}
               keyExtractor={(item, index) => `${item}-${index}`}
@@ -555,28 +456,27 @@ export default function ChatScreen() {
           </View>
 
           {/* Input Area */}
-          <View style={styles.inputContainer}>
+          <View style={[styles.inputContainer, { backgroundColor: cardBg, borderTopColor: border }]}>
             <View style={styles.inputWrapper}>
               <TextInput
-                style={styles.textInput}
-                placeholder={activeTab === 'ai' ? 'Ask AI anything...' : 'Type a message...'}
-                placeholderTextColor="#9CA3AF"
+                style={[styles.textInput, { backgroundColor: inputBg, color: textPrimary }]}
+                placeholder="Type a message..."
+                placeholderTextColor={textMuted}
                 value={message}
-                onChangeText={activeTab === 'driver' ? handleTypingChange : setMessage}
+                onChangeText={handleTypingChange}
                 multiline
                 maxLength={500}
-                editable={activeTab === 'ai' || !!effectiveTripId}
+                editable={!!effectiveTripId}
               />
               <TouchableOpacity
                 style={[
                   styles.sendButton,
-                  message.trim() && styles.sendButtonActive,
-                  activeTab === 'ai' && message.trim() && styles.sendButtonAI,
+                  { backgroundColor: message.trim() ? userBubbleBg : inputBg },
                 ]}
                 onPress={sendMessage}
-                disabled={!message.trim() || isAiTyping || (activeTab === 'driver' && !effectiveTripId)}
+                disabled={!message.trim() || !effectiveTripId}
               >
-                <Ionicons name="send" size={20} color={message.trim() ? '#FFFFFF' : '#9CA3AF'} />
+                <Ionicons name="send" size={20} color={message.trim() ? '#FFFFFF' : textMuted} />
               </TouchableOpacity>
             </View>
           </View>
@@ -604,18 +504,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#22C55E', alignItems: 'center', justifyContent: 'center',
     shadowColor: '#22C55E', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 3,
   },
-  tabContainer: {
-    flexDirection: 'row', backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16, paddingVertical: 8,
-    borderBottomWidth: 1, borderBottomColor: '#E5E7EB', gap: 8,
-  },
-  tab: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 10, borderRadius: 12, backgroundColor: '#F3F4F6', gap: 6,
-  },
-  activeTab: { backgroundColor: '#111827' },
-  tabText: { fontSize: 14, fontWeight: '700', color: '#6B7280' },
-  activeTabText: { color: '#FFFFFF' },
   infoBanner: {
     flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8,
     backgroundColor: '#F3E8FF', gap: 8,
@@ -634,11 +522,9 @@ const styles = StyleSheet.create({
     width: 32, height: 32, borderRadius: 16,
     alignItems: 'center', justifyContent: 'center', marginRight: 8,
   },
-  aiAvatar: { backgroundColor: '#8B5CF6' },
   driverAvatar: { backgroundColor: '#22C55E' },
   messageBubble: { maxWidth: '75%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
   userBubble: { backgroundColor: '#111827', borderBottomRightRadius: 4 },
-  aiBubble: { backgroundColor: '#FFFFFF', borderBottomLeftRadius: 4, borderWidth: 1, borderColor: '#E5E7EB' },
   driverBubble: { backgroundColor: '#ECFDF5', borderBottomLeftRadius: 4, borderWidth: 1, borderColor: '#D1FAE5' },
   senderName: { fontSize: 12, fontWeight: '700', color: '#059669', marginBottom: 4 },
   messageText: { fontSize: 15, color: '#111827', lineHeight: 22 },
@@ -646,8 +532,6 @@ const styles = StyleSheet.create({
   messageFooter: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   messageTime: { fontSize: 11, color: '#9CA3AF' },
   userMessageTime: { color: 'rgba(255,255,255,0.6)' },
-  poweredBy: { marginLeft: 6, backgroundColor: '#F3E8FF', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 },
-  poweredByText: { fontSize: 9, fontWeight: '700', color: '#8B5CF6' },
   typingContainer: { paddingHorizontal: 16, paddingBottom: 4 },
   typingBubble: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -662,9 +546,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF', marginHorizontal: 4,
     borderWidth: 1, borderColor: '#E5E7EB',
   },
-  quickReplyButtonAI: { borderColor: '#DDD6FE', backgroundColor: '#FAF5FF' },
   quickReplyText: { fontSize: 13, color: '#4B5563', fontWeight: '600' },
-  quickReplyTextAI: { color: '#7C3AED' },
   inputContainer: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E5E7EB' },
   inputWrapper: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   textInput: {
@@ -677,7 +559,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#E5E7EB', alignItems: 'center', justifyContent: 'center',
   },
   sendButtonActive: { backgroundColor: '#111827' },
-  sendButtonAI: { backgroundColor: '#8B5CF6' },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
   emptyTitle: { fontSize: 18, fontWeight: '800', color: '#64748B', marginTop: 12 },
   emptyText: { fontSize: 14, color: '#94A3B8', marginTop: 4, textAlign: 'center' },

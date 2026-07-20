@@ -28,10 +28,10 @@ logger = logging.getLogger(__name__)
 SlotRow = tuple[str, int, int, str, str, Optional[str]]
 
 _DEFAULT_SLOTS: list[SlotRow] = [
-    ("morning", 7, 30, "🌅 Morning Commute?", "Get 20% off your ride", "open_booking"),
-    ("lunch", 12, 15, "Lunch break", "Need a lift? Book your NEXRYDE in seconds.", None),
-    ("evening", 17, 45, "Evening commute", "Heading home? Request your ride on NEXRYDE.", None),
-    ("night", 22, 30, "Night travel", "Travel safe tonight — NEXRYDE is here when you need us.", None),
+    ("morning", 7, 30, "Good morning", "Book your ride with NexRyde.", "open_booking"),
+    ("lunch", 12, 15, "Going out for lunch?", "Book a NexRyde in seconds.", "open_booking"),
+    ("evening", 17, 45, "Heading home?", "Book your ride now.", "open_booking"),
+    ("night", 20, 30, "Going out tonight?", "Book a safe ride now.", "open_booking"),
 ]
 
 
@@ -44,7 +44,12 @@ def _timezone_name() -> str:
 
 
 def _audience() -> str:
-    return (os.environ.get("DAILY_SLOT_AUDIENCE") or "all").strip() or "all"
+    # Rider-only by design. Never broaden to drivers via env.
+    raw = (os.environ.get("DAILY_SLOT_AUDIENCE") or "riders").strip().lower() or "riders"
+    if raw in {"all", "drivers", "verified_drivers", "online_drivers"}:
+        logger.warning("DAILY_SLOT_AUDIENCE=%s ignored; forcing riders-only", raw)
+        return "riders"
+    return "riders"
 
 
 def _load_slots() -> list[SlotRow]:
@@ -96,7 +101,7 @@ async def tick_daily_slot_notifications() -> int:
     slots = _load_slots()
     fired = 0
 
-    for slot_id, hour, minute, title, body in slots:
+    for slot_id, hour, minute, title, body, slot_action in slots:
         if now_local.hour != hour or now_local.minute != minute:
             continue
 
@@ -119,7 +124,14 @@ async def tick_daily_slot_notifications() -> int:
         except Exception:
             uids = []
 
-        data: dict[str, Any] = {"type": type_slug, "slot": slot_id}
+        data: dict[str, Any] = {
+            "type": type_slug,
+            "slot": slot_id,
+            "time_slot": slot_id,
+            "local_date": day_key,
+            "delivery_window": slot_id,
+            "role": "rider",
+        }
         if slot_action:
             data["action"] = slot_action
         sem = asyncio.Semaphore(40)

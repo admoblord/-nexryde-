@@ -265,7 +265,7 @@ async def test_squad_direct_verify(squad_secret: str, transaction_ref: str):
         return
 
     section("5. SQUAD DIRECT TRANSACTION VERIFY")
-    squad_base = os.environ.get("SQUAD_BASE_URL", "https://api.squadco.com")
+    squad_base = os.environ.get("SQUAD_BASE_URL", "https://api-d.squadco.com")
     url = f"{squad_base}/transaction/verify/{transaction_ref}"
     async with httpx.AsyncClient(base_url=squad_base, timeout=20.0) as sq:
         r = await sq.get(

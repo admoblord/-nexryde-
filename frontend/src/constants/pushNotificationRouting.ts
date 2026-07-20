@@ -35,6 +35,27 @@ const DRIVER_HOME = '/(driver-tabs)/driver-home';
 const RIDER_HOME = '/(rider-tabs)/rider-home';
 const DRIVER_EARNINGS = '/(driver-tabs)/driver-earnings';
 
+const DRIVER_ENGAGEMENT_TYPES = new Set([
+  'driver_morning_rush',
+  'driver_midday_reminder',
+  'driver_evening_rush',
+  'driver_weekend_demand',
+  'driver_offline_reminder',
+  'driver_nearby_ride_opportunity',
+  'driver_online_high_demand',
+  'driver_online_move_to_demand',
+]);
+
+const RIDER_ENGAGEMENT_TYPES = new Set([
+  'rider_morning_commute',
+  'rider_evening_ride',
+  'rider_weekend_travel',
+  'rider_weather_ready',
+  'rider_promo',
+  'rider_driver_availability',
+  'rider_book_before_demand_rises',
+]);
+
 /** Resolve Expo Router target from push data. Returns null when no specific screen. */
 export function resolvePushNotificationRoute(
   raw: Record<string, unknown> | undefined | null,
@@ -48,7 +69,7 @@ export function resolvePushNotificationRoute(
   const milestone = str(raw.milestone);
 
   // Deeplink actions (campaigns, daily slots, favourites)
-  if (action === 'open_booking') {
+  if (action === 'open_booking' || action === 'book_ride') {
     if (role === 'rider') return { pathname: '/rider/book' };
     return { pathname: DRIVER_HOME };
   }
@@ -56,8 +77,19 @@ export function resolvePushNotificationRoute(
     if (role === 'rider') return { pathname: '/rider/favorite-drivers' };
     return { pathname: DRIVER_HOME };
   }
-  if (action === 'open_driver_home') {
-    return { pathname: DRIVER_HOME };
+  if (action === 'open_driver_home' || action === 'go_online') {
+    return { pathname: DRIVER_HOME, params: action === 'go_online' ? { action: 'go_online' } : undefined };
+  }
+  if (action === 'view_heatmap') {
+    if (role === 'driver') return { pathname: '/driver/heatmap' };
+    return { pathname: RIDER_HOME };
+  }
+
+  if (DRIVER_ENGAGEMENT_TYPES.has(type)) {
+    return { pathname: DRIVER_HOME, params: { source: 'engagement', type } };
+  }
+  if (RIDER_ENGAGEMENT_TYPES.has(type)) {
+    return { pathname: '/rider/book', params: { source: 'engagement', type } };
   }
 
   if (type === 'favorite_driver_nudge') {

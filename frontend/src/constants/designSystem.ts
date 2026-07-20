@@ -84,6 +84,24 @@ export const SPACING = {
   pagePad: 20,
   /** Bottom safe-area buffer on most Android/iOS screens. */
   bottomGutter: 32,
+  /** Fine gap inside dense rows (icon + label). */
+  inline: 10,
+  /** Vertical gap between stacked cards in a section. */
+  stack: 12,
+} as const;
+
+/**
+ * Screen structure rhythm — use for tab bodies, auth, and stack screens.
+ * Keeps driver/rider/auth feeling like one product, not separate skins.
+ */
+export const SCREEN = {
+  headerPadH: SPACING.pagePad,
+  headerPadV: 12,
+  heroGap: 6,
+  sectionGap: 20,
+  cardPad: SPACING.md,
+  listRowMinH: 56,
+  iconBtn: 44,
 } as const;
 
 /** @deprecated Use SPACING */

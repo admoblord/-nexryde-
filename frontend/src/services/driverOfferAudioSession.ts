@@ -5,16 +5,18 @@ import {
 } from 'expo-av';
 
 /**
- * expo-av requires explicit interruption modes; omitting them can prevent audible playback on some builds.
+ * Configure foreground offer-alert audio.
+ * Do NOT use staysActiveInBackground — App Store guideline 2.5.4 rejects unused
+ * UIBackgroundModes "audio". Background ride alerts use push notification sounds.
  */
-export async function configureDriverOfferAudioMode(staysActiveInBackground: boolean): Promise<void> {
+export async function configureDriverOfferAudioMode(_staysActiveInBackground = false): Promise<void> {
   await Audio.setAudioModeAsync({
     allowsRecordingIOS: false,
     playsInSilentModeIOS: true,
-    staysActiveInBackground,
+    staysActiveInBackground: false,
     interruptionModeIOS: InterruptionModeIOS.DoNotMix,
     interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
-    shouldDuckAndroid: true,
+    shouldDuckAndroid: false,
     playThroughEarpieceAndroid: false,
   });
 }

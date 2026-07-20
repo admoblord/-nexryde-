@@ -271,7 +271,7 @@ def _normalize_category(cat: str) -> Optional[str]:
 def _fare_city_for_surge(
     lat: Optional[float], lng: Optional[float], fallback_city: Optional[str]
 ) -> str:
-    from routers.ai_features import detect_city
+    from city_detection import detect_city
 
     loc = detect_city(lat, lng, fallback_city)
     raw = (loc.get("city") or "lagos").lower().strip().replace(" ", "_")

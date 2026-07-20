@@ -1,6 +1,6 @@
 /**
  * Pick-up code verification — driver enters the 4-digit code from the rider's Nexryde app.
- * On success → trip is marked verified; driver returns to the live map to review route and tap **Start trip**.
+ * On success → trip is marked verified; driver returns to the live map Start dock (Navigate + Start).
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -317,7 +317,7 @@ export default function VerifyRiderCodeScreen() {
               </LinearGradient>
               <Text style={styles.successTitle}>Code verified</Text>
               <Text style={styles.successSub}>
-                Opening your live map — review the route, then tap Start trip when the rider is in the vehicle.
+                Opening your trip card — navigate to the destination, then tap Start trip when the rider is seated.
               </Text>
               <ActivityIndicator color="#22E5A0" style={{ marginTop: 22 }} size="small" />
             </Animated.View>

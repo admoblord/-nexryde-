@@ -32,6 +32,8 @@ export type DriverStartTripDockProps = {
   riderPhone: string | null;
   canMessage: boolean;
   onStartTrip: () => void;
+  /** Navigate to drop-off before / after start (Uber keeps directions visible). */
+  onNavigate?: () => void;
   onCall: () => void;
   onMessage: () => void;
   /** Destructive — parent should confirm then cancel */
@@ -59,6 +61,7 @@ export default function DriverStartTripDock({
   riderPhone,
   canMessage,
   onStartTrip,
+  onNavigate,
   onCall,
   onMessage,
   onCancelTrip,
@@ -196,6 +199,21 @@ export default function DriverStartTripDock({
         </View>
       ) : null}
 
+      {onNavigate ? (
+        <TouchableOpacity
+          style={[s.navBtn, tripActionBusy && { opacity: 0.65 }]}
+          onPress={onNavigate}
+          disabled={!!tripActionBusy}
+          activeOpacity={0.88}
+          accessibilityRole="button"
+          accessibilityLabel="Navigate to destination"
+        >
+          <Ionicons name="navigate" size={18} color="#7DD3FC" />
+          <Text style={s.navBtnTxt}>Navigate to destination</Text>
+          <Ionicons name="chevron-forward" size={16} color="#64748B" />
+        </TouchableOpacity>
+      ) : null}
+
       <TouchableOpacity
         style={[s.startOuter, tripActionBusy && { opacity: 0.65 }]}
         onPress={onStartTrip}
@@ -266,6 +284,19 @@ export default function DriverStartTripDock({
 }
 
 const s = StyleSheet.create({
+  navBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(56,189,248,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(56,189,248,0.28)',
+    marginBottom: 10,
+  },
+  navBtnTxt: { flex: 1, fontSize: 14, fontWeight: '800', color: '#E0F2FE' },
   shell: {
     borderTopLeftRadius: DOCK_TOP_RADIUS,
     borderTopRightRadius: DOCK_TOP_RADIUS,

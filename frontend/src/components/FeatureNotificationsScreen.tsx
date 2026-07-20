@@ -11,7 +11,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { useThemeColors } from '@/src/constants/theme';
+import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import {
   FeatureAnnouncement,
@@ -41,26 +42,26 @@ type BackendNotif = {
 };
 
 const NOTIF_ICON: Record<string, { icon: string; color: string }> = {
-  verification_approved: { icon: 'checkmark-circle', color: '#16A34A' },
-  verification_rejected: { icon: 'close-circle', color: '#EF4444' },
-  trip_completed:        { icon: 'checkmark-done-circle', color: '#2563EB' },
-  trip_cancelled:        { icon: 'close-circle-outline', color: '#F59E0B' },
-  subscription_activated:{ icon: 'star', color: '#7C3AED' },
-  guarantee_topup:       { icon: 'wallet', color: '#16A34A' },
-  shield_update:         { icon: 'shield-checkmark', color: '#0891B2' },
-  payment_received:      { icon: 'cash', color: '#16A34A' },
-  enforcement:           { icon: 'shield-half', color: '#D97706' },
-  enforcement_warning:   { icon: 'alert-circle-outline', color: '#F59E0B' },
-  enforcement_timeout:   { icon: 'time-outline', color: '#EA580C' },
-  enforcement_suspended: { icon: 'pause-circle', color: '#EF4444' },
+  verification_approved: { icon: 'checkmark-circle', color: BRAND.primaryDark },
+  verification_rejected: { icon: 'close-circle', color: BRAND.danger },
+  trip_completed:        { icon: 'checkmark-done-circle', color: BRAND.accentBlue },
+  trip_cancelled:        { icon: 'close-circle-outline', color: BRAND.warning },
+  subscription_activated:{ icon: 'star', color: BRAND.accentPurple },
+  guarantee_topup:       { icon: 'wallet', color: BRAND.primaryDark },
+  shield_update:         { icon: 'shield-checkmark', color: BRAND.info },
+  payment_received:      { icon: 'cash', color: BRAND.primaryDark },
+  enforcement:           { icon: 'shield-half', color: BRAND.accentOrange },
+  enforcement_warning:   { icon: 'alert-circle-outline', color: BRAND.warning },
+  enforcement_timeout:   { icon: 'time-outline', color: BRAND.accentOrange },
+  enforcement_suspended: { icon: 'pause-circle', color: BRAND.danger },
   enforcement_deactivated: { icon: 'ban', color: '#991B1B' },
-  enforcement_booking_blocked: { icon: 'calendar-outline', color: '#EA580C' },
+  enforcement_booking_blocked: { icon: 'calendar-outline', color: BRAND.accentOrange },
   enforcement_suspended_long: { icon: 'lock-closed', color: '#991B1B' },
-  surge_active:          { icon: 'flash-outline', color: '#F59E0B' },
-  surge_elevated:        { icon: 'flash', color: '#EA580C' },
-  surge_high:            { icon: 'thunderstorm', color: '#EF4444' },
-  surge_peak_guide:      { icon: 'time-outline', color: '#7C3AED' },
-  default:               { icon: 'notifications', color: '#6B7280' },
+  surge_active:          { icon: 'flash-outline', color: BRAND.warning },
+  surge_elevated:        { icon: 'flash', color: BRAND.accentOrange },
+  surge_high:            { icon: 'thunderstorm', color: BRAND.danger },
+  surge_peak_guide:      { icon: 'time-outline', color: BRAND.accentPurple },
+  default:               { icon: 'notifications', color: BRAND.textMuted },
 };
 
 function notifMeta(type: string) {
@@ -91,6 +92,7 @@ function relativeTime(raw: string): string {
 }
 
 export default function FeatureNotificationsScreen({ role }: Props) {
+  const { colors, isDark } = useThemeColors();
   const router = useRouter();
   const { userId, canCallAuthedApi } = useAuthedUserId();
   const flow = useFlowLayout();
@@ -200,16 +202,21 @@ export default function FeatureNotificationsScreen({ role }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: isDark ? BRAND.bgDeep : colors.background }]}
+      edges={['top']}
+    >
       <TabBrandStrip role={role} />
       {/* Header */}
       <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.title}>Notifications</Text>
-          <Text style={styles.subtitle}>Stay updated on your activity</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Notifications</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+            Stay updated on your activity
+          </Text>
         </View>
         {totalUnread > 0 && (
-          <View style={styles.unreadBubble}>
+          <View style={[styles.unreadBubble, { backgroundColor: BRAND.danger }]}>
             <Text style={styles.unreadBubbleText}>{totalUnread}</Text>
           </View>
         )}
@@ -218,30 +225,56 @@ export default function FeatureNotificationsScreen({ role }: Props) {
       {/* Tab pills */}
       <View style={[styles.tabRow, { paddingHorizontal: flow.padH }]}>
         <TouchableOpacity
-          style={[styles.tabPill, tab === 'activity' && styles.tabPillActive]}
+          style={[
+            styles.tabPill,
+            {
+              backgroundColor: isDark ? BRAND.bgElevated : colors.card,
+              borderColor: colors.border,
+            },
+            tab === 'activity' && styles.tabPillActive,
+          ]}
           onPress={() => setTab('activity')}
         >
           <Ionicons
             name="pulse"
             size={14}
-            color={tab === 'activity' ? COLORS.white : COLORS.lightTextSecondary}
+            color={tab === 'activity' ? '#FFF' : colors.textSecondary}
           />
-          <Text style={[styles.tabPillText, tab === 'activity' && styles.tabPillTextActive]}>
+          <Text
+            style={[
+              styles.tabPillText,
+              { color: colors.textSecondary },
+              tab === 'activity' && styles.tabPillTextActive,
+            ]}
+          >
             Activity
             {unreadBackend > 0 ? ` (${unreadBackend})` : ''}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.tabPill, tab === 'updates' && styles.tabPillActive]}
+          style={[
+            styles.tabPill,
+            {
+              backgroundColor: isDark ? BRAND.bgElevated : colors.card,
+              borderColor: colors.border,
+            },
+            tab === 'updates' && styles.tabPillActive,
+          ]}
           onPress={() => setTab('updates')}
         >
           <Ionicons
             name="megaphone"
             size={14}
-            color={tab === 'updates' ? COLORS.white : COLORS.lightTextSecondary}
+            color={tab === 'updates' ? '#FFF' : colors.textSecondary}
           />
-          <Text style={[styles.tabPillText, tab === 'updates' && styles.tabPillTextActive]}>
-            What&apos;s New
+          <Text
+            style={[
+              styles.tabPillText,
+              { color: colors.textSecondary },
+              tab === 'updates' && styles.tabPillTextActive,
+            ]}
+          >
+            Updates
             {unreadFeatures > 0 ? ` (${unreadFeatures})` : ''}
           </Text>
         </TouchableOpacity>
@@ -259,7 +292,7 @@ export default function FeatureNotificationsScreen({ role }: Props) {
             {
               paddingHorizontal: flow.padH,
               paddingTop: SPACING.sm,
-              gap: flow.sectionGap * 0.45,
+              gap: SPACING.stack,
               paddingBottom: 88,
             },
           ]}
@@ -270,16 +303,33 @@ export default function FeatureNotificationsScreen({ role }: Props) {
           {tab === 'activity' && (
             <>
               {unreadBackend > 0 && (
-                <TouchableOpacity style={styles.markAllBtn} onPress={markAllNotifRead}>
-                  <Ionicons name="checkmark-done-outline" size={15} color={COLORS.accentBlue} />
+                <TouchableOpacity
+                  style={[
+                    styles.markAllBtn,
+                    {
+                      backgroundColor: isDark ? SURFACE.tile : colors.card,
+                      borderColor: isDark ? SURFACE.hairline : colors.border,
+                    },
+                  ]}
+                  onPress={markAllNotifRead}
+                >
+                  <Ionicons name="checkmark-done-outline" size={15} color={BRAND.info} />
                   <Text style={styles.markAllText}>Mark all as read</Text>
                 </TouchableOpacity>
               )}
               {backendNotifs.length === 0 ? (
-                <View style={styles.emptyCard}>
-                  <Ionicons name="notifications-off-outline" size={32} color={COLORS.lightTextMuted} />
-                  <Text style={styles.emptyTitle}>No activity yet</Text>
-                  <Text style={styles.emptyText}>
+                <View
+                  style={[
+                    styles.emptyCard,
+                    {
+                      backgroundColor: isDark ? SURFACE.cardDark : colors.card,
+                      borderColor: isDark ? SURFACE.hairline : colors.border,
+                    },
+                  ]}
+                >
+                  <Ionicons name="notifications-off-outline" size={32} color={colors.textMuted} />
+                  <Text style={[styles.emptyTitle, { color: colors.text }]}>No activity yet</Text>
+                  <Text style={[styles.emptyText, { color: colors.textMuted }]}>
                     Trip updates, document status, payments and other alerts will appear here.
                   </Text>
                 </View>
@@ -290,7 +340,14 @@ export default function FeatureNotificationsScreen({ role }: Props) {
                   return (
                     <TouchableOpacity
                       key={notif.id}
-                      style={[styles.notifCard, !notif.read && styles.notifCardUnread]}
+                      style={[
+                        styles.notifCard,
+                        {
+                          backgroundColor: isDark ? SURFACE.cardDark : colors.card,
+                          borderColor: isDark ? SURFACE.hairline : colors.border,
+                        },
+                        !notif.read && styles.notifCardUnread,
+                      ]}
                       onPress={() => {
                         void markNotifRead(notif.id);
                         if (heatmapRoute) router.push(heatmapRoute as any);
@@ -302,17 +359,17 @@ export default function FeatureNotificationsScreen({ role }: Props) {
                       </View>
                       <View style={styles.notifBody}>
                         <View style={styles.notifTopRow}>
-                          <Text style={styles.notifTitle} numberOfLines={1}>{notif.title}</Text>
+                          <Text style={[styles.notifTitle, { color: colors.text }]} numberOfLines={1}>{notif.title}</Text>
                           {!notif.read && <View style={styles.unreadDot} />}
                         </View>
-                        <Text style={styles.notifMessage} numberOfLines={6}>{notif.message}</Text>
+                        <Text style={[styles.notifMessage, { color: colors.textSecondary }]} numberOfLines={6}>{notif.message}</Text>
                         {heatmapRoute ? (
                           <View style={styles.surgeCtaRow}>
-                            <Ionicons name="flame" size={13} color={COLORS.accentBlue} />
-                            <Text style={styles.surgeCtaText}>Open Demand Heatmap</Text>
+                            <Ionicons name="flame" size={13} color={BRAND.info} />
+                            <Text style={styles.surgeCtaText}>Open demand heatmap</Text>
                           </View>
                         ) : null}
-                        <Text style={styles.notifTime}>{relativeTime(notif.created_at)}</Text>
+                        <Text style={[styles.notifTime, { color: colors.textMuted }]}>{relativeTime(notif.created_at)}</Text>
                       </View>
                     </TouchableOpacity>
                   );
@@ -325,16 +382,35 @@ export default function FeatureNotificationsScreen({ role }: Props) {
           {tab === 'updates' && (
             <>
               {unreadFeatures > 0 && (
-                <TouchableOpacity style={styles.markAllBtn} onPress={markAllFeatRead}>
-                  <Ionicons name="checkmark-done-outline" size={15} color={COLORS.accentBlue} />
+                <TouchableOpacity
+                  style={[
+                    styles.markAllBtn,
+                    {
+                      backgroundColor: isDark ? SURFACE.tile : colors.card,
+                      borderColor: isDark ? SURFACE.hairline : colors.border,
+                    },
+                  ]}
+                  onPress={markAllFeatRead}
+                >
+                  <Ionicons name="checkmark-done-outline" size={15} color={BRAND.info} />
                   <Text style={styles.markAllText}>Mark all as read</Text>
                 </TouchableOpacity>
               )}
               {rows.length === 0 ? (
-                <View style={styles.emptyCard}>
-                  <Ionicons name="megaphone-outline" size={32} color={COLORS.lightTextMuted} />
-                  <Text style={styles.emptyTitle}>No updates yet</Text>
-                  <Text style={styles.emptyText}>New feature releases and app updates will show here.</Text>
+                <View
+                  style={[
+                    styles.emptyCard,
+                    {
+                      backgroundColor: isDark ? SURFACE.cardDark : colors.card,
+                      borderColor: isDark ? SURFACE.hairline : colors.border,
+                    },
+                  ]}
+                >
+                  <Ionicons name="megaphone-outline" size={32} color={colors.textMuted} />
+                  <Text style={[styles.emptyTitle, { color: colors.text }]}>No updates yet</Text>
+                  <Text style={[styles.emptyText, { color: colors.textMuted }]}>
+                    New feature releases and app updates will show here.
+                  </Text>
                 </View>
               ) : (
                 rows.map((row) => {
@@ -342,29 +418,36 @@ export default function FeatureNotificationsScreen({ role }: Props) {
                   return (
                     <TouchableOpacity
                       key={row.id}
-                      style={[styles.featCard, isSeen && styles.featCardSeen]}
+                      style={[
+                        styles.featCard,
+                        {
+                          backgroundColor: isDark ? SURFACE.cardDark : colors.card,
+                          borderColor: isDark ? SURFACE.hairline : colors.border,
+                        },
+                        isSeen && styles.featCardSeen,
+                      ]}
                       onPress={() => void openFeature(row)}
                       activeOpacity={0.82}
                     >
                       <View style={styles.featCardTop}>
-                        <View style={[styles.featIconWrap, { backgroundColor: COLORS.infoSoft }]}>
-                          <Ionicons name="sparkles" size={16} color={COLORS.accentBlue} />
+                        <View style={[styles.featIconWrap, { backgroundColor: 'rgba(56,189,248,0.12)' }]}>
+                          <Ionicons name="sparkles" size={16} color={BRAND.info} />
                         </View>
                         <View style={{ flex: 1 }}>
                           <View style={styles.featTitleRow}>
-                            <Text style={styles.featTitle} numberOfLines={1}>{row.title}</Text>
+                            <Text style={[styles.featTitle, { color: colors.text }]} numberOfLines={1}>{row.title}</Text>
                             {!isSeen && <View style={styles.unreadDot} />}
                           </View>
-                          <Text style={styles.featMessage} numberOfLines={2}>{row.message}</Text>
+                          <Text style={[styles.featMessage, { color: colors.textSecondary }]} numberOfLines={2}>{row.message}</Text>
                         </View>
                       </View>
                       <View style={styles.featFooter}>
-                        <Text style={styles.featMeta}>
+                        <Text style={[styles.featMeta, { color: colors.textMuted }]}>
                           {row.version ? `v${row.version} · ` : ''}{relativeTime(row.created_at)}
                         </Text>
                         <View style={styles.openPill}>
                           <Text style={styles.openPillText}>Open</Text>
-                          <Ionicons name="arrow-forward" size={11} color={COLORS.accentBlue} />
+                          <Ionicons name="arrow-forward" size={11} color={BRAND.info} />
                         </View>
                       </View>
                     </TouchableOpacity>
@@ -380,7 +463,7 @@ export default function FeatureNotificationsScreen({ role }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.gray50 },
+  container: { flex: 1, backgroundColor: BRAND.bgDeep },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -388,21 +471,21 @@ const styles = StyleSheet.create({
     paddingBottom: SPACING.md,
     gap: SPACING.md,
   },
-  title: { fontSize: FONT_SIZE.xxl, fontWeight: '900', color: COLORS.lightTextPrimary },
-  subtitle: { marginTop: 2, fontSize: FONT_SIZE.sm, color: COLORS.lightTextSecondary, fontWeight: '600' },
+  title: { fontSize: 22, fontWeight: '900', letterSpacing: -0.4 },
+  subtitle: { marginTop: 2, fontSize: 13, fontWeight: '600' },
   unreadBubble: {
     minWidth: 28,
     height: 28,
-    borderRadius: 14,
-    backgroundColor: COLORS.error,
+    borderRadius: RADIUS.full,
+    backgroundColor: BRAND.danger,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 6,
   },
-  unreadBubbleText: { color: '#FFF', fontSize: FONT_SIZE.xs, fontWeight: '900' },
+  unreadBubbleText: { color: '#FFF', fontSize: 11, fontWeight: '900' },
   tabRow: {
     flexDirection: 'row',
-    gap: SPACING.sm,
+    gap: SPACING.stack,
     paddingBottom: SPACING.md,
   },
   tabPill: {
@@ -412,17 +495,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: 10,
     minHeight: 44,
-    borderRadius: BORDER_RADIUS.full,
-    backgroundColor: COLORS.white,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderRadius: RADIUS.full,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   tabPillActive: {
-    backgroundColor: COLORS.accentBlue,
-    borderColor: COLORS.accentBlue,
+    backgroundColor: BRAND.accentBlue,
+    borderColor: BRAND.accentBlue,
   },
-  tabPillText: { fontSize: FONT_SIZE.sm, fontWeight: '800', color: COLORS.lightTextSecondary },
-  tabPillTextActive: { color: COLORS.white },
+  tabPillText: { fontSize: 13, fontWeight: '800' },
+  tabPillTextActive: { color: '#FFF' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { flexGrow: 1 },
   markAllBtn: {
@@ -432,39 +513,32 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 7,
-    borderRadius: BORDER_RADIUS.full,
-    backgroundColor: COLORS.white,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderRadius: RADIUS.full,
+    borderWidth: StyleSheet.hairlineWidth,
     marginBottom: SPACING.xs,
   },
-  markAllText: { fontSize: FONT_SIZE.xs, fontWeight: '800', color: COLORS.accentBlue },
+  markAllText: { fontSize: 11, fontWeight: '800', color: BRAND.info },
   emptyCard: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderRadius: RADIUS.xl,
+    borderWidth: StyleSheet.hairlineWidth,
     paddingVertical: 48,
     paddingHorizontal: SPACING.lg,
-    gap: SPACING.sm,
+    gap: SPACING.stack,
   },
-  emptyTitle: { fontSize: FONT_SIZE.md, fontWeight: '800', color: COLORS.lightTextPrimary },
-  emptyText: { fontSize: FONT_SIZE.sm, color: COLORS.lightTextMuted, fontWeight: '600', textAlign: 'center', lineHeight: 20 },
-  // Activity (backend) notification cards
+  emptyTitle: { fontSize: 15, fontWeight: '800' },
+  emptyText: { fontSize: 13, fontWeight: '600', textAlign: 'center', lineHeight: 20 },
   notifCard: {
     flexDirection: 'row',
     gap: SPACING.md,
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderRadius: RADIUS.xl,
+    padding: SPACING.md,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   notifCardUnread: {
-    backgroundColor: '#F0F9FF',
-    borderColor: '#BAE6FD',
+    backgroundColor: 'rgba(56,189,248,0.08)',
+    borderColor: 'rgba(56,189,248,0.28)',
   },
   notifIconWrap: {
     width: 40,
@@ -477,10 +551,10 @@ const styles = StyleSheet.create({
   },
   notifBody: { flex: 1, gap: 3 },
   notifTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  notifTitle: { flex: 1, fontSize: FONT_SIZE.md, fontWeight: '800', color: COLORS.lightTextPrimary },
-  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.accentBlue, flexShrink: 0 },
-  notifMessage: { fontSize: FONT_SIZE.sm, color: COLORS.lightTextSecondary, lineHeight: 19, fontWeight: '600' },
-  notifTime: { fontSize: FONT_SIZE.xs, color: COLORS.lightTextMuted, fontWeight: '700', marginTop: 2 },
+  notifTitle: { flex: 1, fontSize: 15, fontWeight: '800' },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: BRAND.info, flexShrink: 0 },
+  notifMessage: { fontSize: 13, lineHeight: 19, fontWeight: '600' },
+  notifTime: { fontSize: 11, fontWeight: '700', marginTop: 2 },
   surgeCtaRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -489,20 +563,17 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: BORDER_RADIUS.full,
-    backgroundColor: COLORS.infoSoft,
-    borderWidth: 1,
-    borderColor: COLORS.info,
+    borderRadius: RADIUS.full,
+    backgroundColor: 'rgba(56,189,248,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(56,189,248,0.3)',
   },
-  surgeCtaText: { fontSize: FONT_SIZE.xs, fontWeight: '800', color: COLORS.accentBlue },
-  // Feature update cards
+  surgeCtaText: { fontSize: 11, fontWeight: '800', color: BRAND.info },
   featCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-    gap: SPACING.sm,
+    borderRadius: RADIUS.xl,
+    padding: SPACING.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: SPACING.stack,
   },
   featCardSeen: { opacity: 0.72 },
   featCardTop: { flexDirection: 'row', gap: SPACING.md, alignItems: 'flex-start' },
@@ -516,20 +587,21 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   featTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
-  featTitle: { flex: 1, fontSize: FONT_SIZE.md, fontWeight: '900', color: COLORS.lightTextPrimary },
-  featMessage: { fontSize: FONT_SIZE.sm, color: COLORS.lightTextSecondary, lineHeight: 19, fontWeight: '600' },
+  featTitle: { flex: 1, fontSize: 15, fontWeight: '900' },
+  featMessage: { fontSize: 13, lineHeight: 19, fontWeight: '600' },
   featFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  featMeta: { fontSize: FONT_SIZE.xs, color: COLORS.lightTextMuted, fontWeight: '700' },
+  featMeta: { fontSize: 11, fontWeight: '700' },
   openPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    borderRadius: BORDER_RADIUS.full,
-    backgroundColor: COLORS.infoSoft,
-    borderWidth: 1,
-    borderColor: COLORS.info,
+    borderRadius: RADIUS.full,
+    backgroundColor: 'rgba(56,189,248,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(56,189,248,0.3)',
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  openPillText: { fontSize: 11, color: COLORS.info, fontWeight: '900' },
+  openPillText: { fontSize: 11, color: BRAND.info, fontWeight: '900' },
 });
+

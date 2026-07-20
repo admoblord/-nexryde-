@@ -13,6 +13,8 @@ import {
 } from '@/src/services/platformConnectionManager';
 import { useDriverSessionStore } from '@/src/store/driverSessionStore';
 
+import { BRAND } from '@/src/constants/designSystem';
+
 const BANNER_META: Record<
   Exclude<BannerExposure, 'hidden'>,
   { label: string; icon: keyof typeof Ionicons.glyphMap; bg: string; fg: string }
@@ -26,7 +28,7 @@ const BANNER_META: Record<
   reconnecting: {
     label: 'Reconnecting',
     icon: 'sync-outline',
-    bg: '#1D4ED8',
+    bg: BRAND.accentBlue,
     fg: '#DBEAFE',
   },
   offline: {
@@ -38,7 +40,7 @@ const BANNER_META: Record<
   connected: {
     label: 'Connected',
     icon: 'checkmark-circle-outline',
-    bg: '#064E3B',
+    bg: BRAND.primaryDark,
     fg: '#D1FAE5',
   },
 };
@@ -47,9 +49,12 @@ export const OfflineBanner: React.FC = () => {
   const insets = useSafeAreaInsets();
   const connection = usePlatformConnectionSnapshot();
   const driverPhase = useDriverSessionStore((s) => s.connectionPhase);
-  // Suppress network chrome while go-online CONNECTING — avoids Reconnecting banner racing the GO button.
+  // Suppress network chrome while go-online CONNECTING/session reconnect —
+  // map chip already shows session status; avoid dual "Reconnecting" surfaces.
   const exposure =
-    driverPhase === 'connecting' ? 'hidden' : connection.bannerExposure;
+    driverPhase === 'connecting' || driverPhase === 'reconnecting'
+      ? 'hidden'
+      : connection.bannerExposure;
   const slideY = useRef(new Animated.Value(-52)).current;
   const opacity = useRef(new Animated.Value(0)).current;
   const bannerH = 44 + Math.max(insets.top, 8);
@@ -118,5 +123,6 @@ const styles = StyleSheet.create({
   text: {
     fontSize: 13,
     fontWeight: '800',
+    letterSpacing: 0.2,
   },
 });

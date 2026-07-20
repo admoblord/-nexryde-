@@ -9,12 +9,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, useThemeColors } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function CarTypePreferenceScreen() {
   const router = useRouter();
   const [selectedType, setSelectedType] = useState('economy');
+  const { colors, isDark } = useThemeColors();
 
   const carTypes = [
     { id: 'economy', name: 'Standard', description: 'Affordable everyday rides', icon: 'car', price: 'Best value' },
@@ -30,18 +31,18 @@ export default function CarTypePreferenceScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.gray800} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Ride Preferences</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Ride Preferences</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.sectionTitle}>Select Default Ride Type</Text>
-        <Text style={styles.sectionSubtext}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Select Default Ride Type</Text>
+        <Text style={[styles.sectionSubtext, { color: colors.textMuted }]}>
           This will be your default selection when booking rides
         </Text>
 
@@ -50,7 +51,13 @@ export default function CarTypePreferenceScreen() {
             key={type.id}
             style={[
               styles.typeCard,
-              selectedType === type.id && styles.typeCardSelected
+              {
+                backgroundColor: selectedType === type.id
+                  ? (isDark ? 'rgba(34,225,128,0.12)' : COLORS.primarySoft)
+                  : colors.card,
+                borderColor: selectedType === type.id ? COLORS.primary : colors.border,
+                shadowColor: colors.shadow,
+              },
             ]}
             onPress={() => setSelectedType(type.id)}
           >
@@ -65,8 +72,8 @@ export default function CarTypePreferenceScreen() {
               />
             </View>
             <View style={styles.typeInfo}>
-              <Text style={styles.typeName}>{type.name}</Text>
-              <Text style={styles.typeDesc}>{type.description}</Text>
+              <Text style={[styles.typeName, { color: colors.text }]}>{type.name}</Text>
+              <Text style={[styles.typeDesc, { color: colors.textMuted }]}>{type.description}</Text>
               <Text style={styles.typePrice}>{type.price}</Text>
             </View>
             <View style={[

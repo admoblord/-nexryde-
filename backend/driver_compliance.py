@@ -371,20 +371,32 @@ async def get_monthly_verification_status(driver_id: str):
 
 async def run_monthly_verification_check():
     """Batch job: check all drivers for monthly verification. Remind or suspend."""
+    from notification_delivery_ledger import acquire_scheduler_lock
+
     now = datetime.now(timezone.utc)
     day_of_month = now.day
-    month_key = now.strftime("%Y-%m")
+    day_key = now.strftime("%Y-%m-%d")
+
+    # Multi-instance: only one compliance pass per UTC day bucket for monthly reminders.
+    if not await acquire_scheduler_lock(f"compliance_monthly:{day_key}", hold_seconds=5 * 60 * 60):
+        logger.info("Monthly verification check skipped — scheduler lock held by another instance")
+        return {"reminded": 0, "suspended": 0, "checked": 0, "skipped_reason": "scheduler_lock"}
 
     drivers = await db.driver_profiles.find(
         {"profile_completed": True},
         {"user_id": 1}
     ).to_list(5000)
 
-    results = {"reminded": 0, "suspended": 0, "checked": len(drivers)}
+    results = {"reminded": 0, "suspended": 0, "checked": len(drivers), "skipped_duplicates": 0}
 
     for profile in drivers:
         driver_id = profile.get("user_id")
         if not driver_id:
+            continue
+
+        # Confirm target is actually a driver account before push.
+        user = await db.users.find_one({"id": driver_id}, {"_id": 0, "role": 1, "notifications_enabled": 1})
+        if not user or str(user.get("role") or "").lower() != "driver":
             continue
 
         status = await check_monthly_uploads(driver_id)
@@ -399,22 +411,44 @@ async def run_monthly_verification_check():
 
             if day_of_month <= 7:
                 if day_of_month in [1, 3, 5, 7]:
-                    await send_push_notification(
+                    sent = await send_push_notification(
                         driver_id,
                         "Monthly Verification Required",
                         f"Upload your {missing_text} by the 7th to stay active on NEXRYDE.",
-                        {"type": "monthly_verification_reminder"},
+                        {
+                            "type": "monthly_verification_reminder",
+                            "slot": "compliance_daily",
+                            "time_slot": "compliance_daily",
+                            "local_date": day_key,
+                            "delivery_window": "compliance",
+                            "role": "driver",
+                        },
+                        source="compliance",
                     )
-                    results["reminded"] += 1
+                    if sent:
+                        results["reminded"] += 1
+                    else:
+                        results["skipped_duplicates"] += 1
             else:
                 # Soft reminder only — never suspend verified drivers over monthly photos
-                await send_push_notification(
+                sent = await send_push_notification(
                     driver_id,
                     "Monthly Verification Reminder",
                     f"Please upload your {missing_text} when convenient. This helps keep Nexryde safe.",
-                    {"type": "monthly_verification_reminder"},
+                    {
+                        "type": "monthly_verification_reminder",
+                        "slot": "compliance_daily",
+                        "time_slot": "compliance_daily",
+                        "local_date": day_key,
+                        "delivery_window": "compliance",
+                        "role": "driver",
+                    },
+                    source="compliance",
                 )
-                results["reminded"] += 1
+                if sent:
+                    results["reminded"] += 1
+                else:
+                    results["skipped_duplicates"] += 1
 
     logger.info(f"Monthly verification check: {results}")
     return results

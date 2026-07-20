@@ -36,12 +36,13 @@ import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { openSquadCheckoutUrl } from '@/src/services/squadCheckoutOpen';
 import axios from 'axios';
 import { useFlowLayout } from '@/src/constants/flowLayout';
+import { useThemeColors } from '@/src/constants/theme';
 
 const PENDING_SUB_REF_KEY = '@nexryde_pending_sub_checkout_ref';
 
-function SubscriptionSkeleton() {
+function SubscriptionSkeleton({ bg = '#050D1A' }: { bg?: string }) {
   return (
-    <View style={{ padding: 16, gap: 16, flex: 1, backgroundColor: '#050D1A' }}>
+    <View style={{ padding: 16, gap: 16, flex: 1, backgroundColor: bg }}>
       <Skeleton height={150} radius={16} style={{ backgroundColor: '#1C2430' }} />
       <Skeleton height={120} radius={16} style={{ backgroundColor: '#1C2430' }} />
       <Skeleton height={120} radius={16} style={{ backgroundColor: '#1C2430' }} />
@@ -53,6 +54,8 @@ export default function SubscriptionScreen() {
   const router = useRouter();
   const { user, userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const flow = useFlowLayout();
+  const { colors, isDark } = useThemeColors();
+  const screenBg = isDark ? '#050D1A' : colors.background;
   const resourceKey = `driver-subscription:${driverId ?? 'none'}`;
   const { data, loading, error, retry } = useResource(
     resourceKey,
@@ -385,8 +388,9 @@ export default function SubscriptionScreen() {
       title="Subscription Tiers"
       headerRight={helpHeader}
       scroll={false}
+      contentContainerStyle={{ flex: 1, backgroundColor: screenBg }}
     >
-      {!data && loading && <SubscriptionSkeleton />}
+      {!data && loading && <SubscriptionSkeleton bg={screenBg} />}
       {!data && error && (
         <InlineError message="Couldn't load plans. Check your connection." onRetry={retry} />
       )}
@@ -730,7 +734,7 @@ export default function SubscriptionScreen() {
                 <Text style={[styles.featuresTitle, { color: 'rgba(255,215,0,0.7)' }]}>EVERYTHING IN CITY RIDER, PLUS</Text>
                 {[
                   { icon: 'navigate-circle', text: 'Unlimited inter-city / interstate trips', color: '#FFD700' },
-                  { icon: 'map', text: 'Smart Route Planner (AI-powered)', color: '#00D084' },
+                  { icon: 'map', text: 'Smart Route Planner', color: '#00D084' },
                   { icon: 'repeat', text: 'Auto return trip matching', color: '#F87171' },
                   { icon: 'cash-outline', text: 'Route discovery bonuses (₦5,000)', color: '#38BDF8' },
                   { icon: 'flash', text: '3× API call limits', color: '#A78BFA' },
@@ -846,7 +850,7 @@ export default function SubscriptionScreen() {
                 <Ionicons name="rocket" size={64} color="#FFFFFF" />
                 <Text style={styles.upgradeModalTitle}>Upgrade to Road Warrior</Text>
                 <Text style={styles.upgradeModalSubtitle}>
-                  Unlock unlimited inter-city trips and advanced AI features!
+                  Unlock unlimited inter-city trips and advanced driver tools!
                 </Text>
 
                 {subscription?.upgrade_requirements && (
@@ -910,7 +914,7 @@ export default function SubscriptionScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: '#050D1A',
   },
   safeArea: {
     flex: 1,
@@ -919,7 +923,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: '#050D1A',
   },
   staleBanner: {
     flexDirection: 'row',
@@ -1458,7 +1462,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     right: 8,
-    backgroundColor: '#0F172A',
+    backgroundColor: '#050D1A',
     borderRadius: 16,
   },
   referenceInput: {

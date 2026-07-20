@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
-import { PredictiveMaintenanceAI, type MaintenanceAlert } from '@/src/services/predictiveMaintenance';
+import { PredictiveMaintenance, type MaintenanceAlert } from '@/src/services/predictiveMaintenance';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
 interface DrivingSession {
@@ -250,7 +250,7 @@ export default function DriverWellnessScreen() {
   const wellnessScore = calculateWellnessScore();
   const wellnessLevel = getWellnessLevel(wellnessScore);
   const maintenanceMileage = Math.max(0, trackedMileageKm - lastServiceMileageKm);
-  const maintenanceInsight = PredictiveMaintenanceAI.analyzeVehicle(
+  const maintenanceInsight = PredictiveMaintenance.analyzeVehicle(
     maintenanceMileage,
     lastServiceDate,
     Number(weeklyStats.averageSessionTime || 0) + breakHistory.length * 10

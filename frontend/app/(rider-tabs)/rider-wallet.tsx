@@ -45,8 +45,10 @@ import {
 import { openSquadCheckoutUrl } from '@/src/services/squadCheckoutOpen';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
-import { BRAND, SURFACE } from '@/src/constants/designSystem';
+import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
+import { useThemeColors } from '@/src/constants/theme';
+import { WalletScreenSkeleton } from '@/src/components/shared/SkeletonLoader';
 
 const C = {
   bg: BRAND.bgDeep,
@@ -88,6 +90,7 @@ export default function RiderWalletScreen() {
   const { userId: uid, canCallAuthedApi } = useAuthedUserId();
   const tabPad = useTabBottomPad(8);
   const flow = useFlowLayout();
+  const { colors, isDark } = useThemeColors();
 
   const [balance, setBalance] = useState(0);
   const [promoCreditBalance, setPromoCreditBalance] = useState(0);
@@ -405,12 +408,25 @@ export default function RiderWalletScreen() {
   // ── Derived ──────────────────────────────────────────────────────────────────
   const isSuccess = topupState.phase === 'success';
   const hasPromo = promoCreditBalance > 0;
-  const formattedBalance = loading ? '—' : `₦${balance.toLocaleString()}`;
+  const formattedBalance = `₦${balance.toLocaleString()}`;
+  const heroGradient = isDark
+    ? ([BRAND.bgDeep, BRAND.bgElevated, BRAND.bgDeep] as const)
+    : (['#14532D', '#166534', '#15803D'] as const);
 
   // ── Render ───────────────────────────────────────────────────────────────────
+  if (loading && !refreshing) {
+    return (
+      <SafeAreaView style={[s.root, { backgroundColor: colors.background }]} edges={['top']}>
+        <StatusBar barStyle={colors.statusBar} backgroundColor={colors.background} />
+        <TabBrandStrip role="rider" />
+        <WalletScreenSkeleton />
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <SafeAreaView style={s.root} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+    <SafeAreaView style={[s.root, { backgroundColor: colors.background }]} edges={['top']}>
+      <StatusBar barStyle={colors.statusBar} backgroundColor={colors.background} />
       <TabBrandStrip role="rider" />
       <ScrollView
         contentContainerStyle={[
@@ -418,7 +434,7 @@ export default function RiderWalletScreen() {
           {
             paddingHorizontal: flow.padH,
             paddingBottom: tabPad,
-            gap: Math.round(flow.sectionGap * 0.25),
+            gap: SPACING.stack,
             maxWidth: flow.maxContentWidth,
             alignSelf: 'center',
             width: '100%',
@@ -429,13 +445,13 @@ export default function RiderWalletScreen() {
       >
 
         {/* ── HERO BALANCE CARD ──────────────────────────────────────────── */}
-        <LinearGradient colors={['#0F172A', '#1E3A5F', '#0F172A']} style={[s.heroCard, { paddingHorizontal: flow.cardPad }]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+        <LinearGradient colors={[...heroGradient]} style={[s.heroCard, { paddingHorizontal: flow.cardPad }]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
           {/* Glow orb */}
           <View style={s.heroGlow} />
 
           <View style={s.heroTop}>
             <View>
-              <Text style={s.heroLabel}>NEXRYDE WALLET</Text>
+              <Text style={s.heroLabel}>NexRyde wallet</Text>
               <Text style={s.heroName}>{user?.name?.split(' ')[0] || 'Rider'}</Text>
             </View>
             <View style={s.heroBadge}>
@@ -445,7 +461,7 @@ export default function RiderWalletScreen() {
           </View>
 
           <Animated.View style={{ opacity: balanceFade, transform: [{ scale: balanceScale }] }}>
-            <Text style={s.heroBalanceLabel}>Available Balance</Text>
+            <Text style={s.heroBalanceLabel}>Available balance</Text>
             <Text style={s.heroBalance}>{formattedBalance}</Text>
           </Animated.View>
 
@@ -533,12 +549,12 @@ export default function RiderWalletScreen() {
         )}
 
         {/* ── TOP UP SECTION ─────────────────────────────────────────────── */}
-        <View style={s.section}>
+        <View style={[s.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={s.sectionHeader}>
             <View style={s.sectionIconWrap}>
               <Ionicons name="add-circle" size={20} color={C.green} />
             </View>
-            <Text style={s.sectionTitle}>Top Up Wallet</Text>
+            <Text style={[s.sectionTitle, { color: colors.text }]}>Top up</Text>
           </View>
 
           {/* Amount presets */}
@@ -546,8 +562,16 @@ export default function RiderWalletScreen() {
             {PRESETS.map((p) => {
               const selected = amountStr === String(p);
               return (
-                <TouchableOpacity key={p} style={[s.preset, selected && s.presetOn]} onPress={() => setAmountStr(String(p))}>
-                  <Text style={[s.presetText, selected && s.presetTextOn]}>
+                <TouchableOpacity
+                  key={p}
+                  style={[
+                    s.preset,
+                    { backgroundColor: colors.surfaceAlt, borderColor: colors.border },
+                    selected && s.presetOn,
+                  ]}
+                  onPress={() => setAmountStr(String(p))}
+                >
+                  <Text style={[s.presetText, { color: colors.textMuted }, selected && s.presetTextOn]}>
                     {p >= 1000 ? `₦${p / 1000}k` : `₦${p}`}
                   </Text>
                 </TouchableOpacity>
@@ -556,13 +580,13 @@ export default function RiderWalletScreen() {
           </ScrollView>
 
           {/* Custom amount */}
-          <View style={s.amountWrap}>
-            <Text style={s.amountPrefix}>₦</Text>
+          <View style={[s.amountWrap, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+            <Text style={[s.amountPrefix, { color: colors.text }]}>₦</Text>
             <TextInput
-              style={s.amountInput}
+              style={[s.amountInput, { color: colors.text }]}
               keyboardType="decimal-pad"
               placeholder="Enter amount"
-              placeholderTextColor={C.gray400}
+              placeholderTextColor={colors.textMuted}
               value={amountStr}
               onChangeText={setAmountStr}
               returnKeyType="done"
@@ -601,9 +625,9 @@ export default function RiderWalletScreen() {
 
           {/* Divider */}
           <View style={s.divider}>
-            <View style={s.dividerLine} />
-            <Text style={s.dividerText}>already paid?</Text>
-            <View style={s.dividerLine} />
+            <View style={[s.dividerLine, { backgroundColor: colors.border }]} />
+            <Text style={[s.dividerText, { color: colors.textMuted }]}>already paid?</Text>
+            <View style={[s.dividerLine, { backgroundColor: colors.border }]} />
           </View>
 
           {/* Verify button */}
@@ -627,26 +651,34 @@ export default function RiderWalletScreen() {
               </View>
             )}
           </TouchableOpacity>
-          <Text style={s.verifyHint}>Tap after completing payment in Squad to instantly credit your wallet.</Text>
+          <Text style={[s.verifyHint, { color: colors.textMuted }]}>Tap after completing payment in Squad to instantly credit your wallet.</Text>
         </View>
 
         {/* ── REWARDS ────────────────────────────────────────────────────── */}
-        <View style={s.section}>
+        <View style={[s.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={s.sectionHeader}>
             <View style={[s.sectionIconWrap, { backgroundColor: '#FEF3C7' }]}>
               <Ionicons name="gift" size={20} color={C.amber} />
             </View>
-            <Text style={s.sectionTitle}>Rewards & Bonuses</Text>
+            <Text style={[s.sectionTitle, { color: colors.text }]}>Rewards & bonuses</Text>
           </View>
 
           {/* First ride bonus */}
-          <View style={[s.rewardCard, { borderLeftColor: firstRideRewardGranted ? C.green : C.amber }]}>
+          <View
+            style={[
+              s.rewardCard,
+              {
+                backgroundColor: colors.surfaceAlt,
+                borderLeftColor: firstRideRewardGranted ? C.green : C.amber,
+              },
+            ]}
+          >
             <View style={[s.rewardIcon, { backgroundColor: firstRideRewardGranted ? '#DCFCE7' : '#FEF3C7' }]}>
               <Ionicons name={firstRideRewardGranted ? 'checkmark-circle' : 'flash'} size={22} color={firstRideRewardGranted ? C.greenDark : '#D97706'} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={s.rewardTitle}>{firstRideRewardGranted ? '🎉 First Ride Bonus Earned!' : 'First Ride Bonus'}</Text>
-              <Text style={s.rewardText}>
+              <Text style={[s.rewardTitle, { color: colors.text }]}>{firstRideRewardGranted ? '🎉 First Ride Bonus Earned!' : 'First Ride Bonus'}</Text>
+              <Text style={[s.rewardText, { color: colors.textMuted }]}>
                 {firstRideRewardGranted ? '₦500 bonus has been added to your wallet.' : 'Complete your first ride and get ₦500 instantly.'}
               </Text>
             </View>
@@ -655,14 +687,14 @@ export default function RiderWalletScreen() {
 
           {/* Promo balance */}
           {hasPromo && (
-            <View style={[s.rewardCard, { borderLeftColor: C.green }]}>
+            <View style={[s.rewardCard, { backgroundColor: colors.surfaceAlt, borderLeftColor: C.green }]}>
               <View style={[s.rewardIcon, { backgroundColor: '#DCFCE7' }]}>
                 <Ionicons name="wallet" size={22} color={C.greenDark} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={s.rewardTitle}>Promo Credit</Text>
+                <Text style={[s.rewardTitle, { color: colors.text }]}>Promo Credit</Text>
                 <Text style={[s.rewardText, { color: C.greenDark, fontWeight: '800', fontSize: 18 }]}>₦{promoCreditBalance.toLocaleString()}</Text>
-                <Text style={[s.rewardText, { fontSize: 11, marginTop: 2 }]}>Applied automatically — max ₦500 / 40% per fare</Text>
+                <Text style={[s.rewardText, { color: colors.textMuted, fontSize: 11, marginTop: 2 }]}>Applied automatically — max ₦500 / 40% per fare</Text>
               </View>
             </View>
           )}
@@ -797,19 +829,19 @@ export default function RiderWalletScreen() {
         </View>
 
         {/* ── TRANSACTION HISTORY ────────────────────────────────────────── */}
-        <View style={s.section}>
+        <View style={[s.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={s.sectionHeader}>
             <View style={[s.sectionIconWrap, { backgroundColor: '#EFF6FF' }]}>
               <Ionicons name="receipt" size={20} color={C.blue} />
             </View>
-            <Text style={s.sectionTitle}>Recent Activity</Text>
+            <Text style={[s.sectionTitle, { color: colors.text }]}>Recent activity</Text>
           </View>
 
           {txs.length === 0 ? (
             <View style={s.emptyTx}>
               <Ionicons name="receipt-outline" size={36} color={C.gray400} />
-              <Text style={s.emptyTxText}>No transactions yet</Text>
-              <Text style={s.emptyTxSub}>Top up to get started</Text>
+              <Text style={[s.emptyTxText, { color: colors.text }]}>No transactions yet</Text>
+              <Text style={[s.emptyTxSub, { color: colors.textMuted }]}>Top up to get started</Text>
             </View>
           ) : (
             txs.map((row, i) => {
@@ -824,13 +856,13 @@ export default function RiderWalletScreen() {
               const iconBg = isCreditTopUp ? '#DCFCE7' : '#FEE2E2';
               const iconColor = isCreditTopUp ? C.greenDark : C.red;
               return (
-                <View key={String(t.id || i)} style={s.txRow}>
+                <View key={String(t.id || i)} style={[s.txRow, { borderBottomColor: colors.border }]}>
                   <View style={[s.txIcon, { backgroundColor: iconBg }]}>
                     <Ionicons name={isCreditTopUp ? 'arrow-down-circle' : 'car'} size={20} color={iconColor} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={s.txLabel}>{label}</Text>
-                    <Text style={s.txMeta} numberOfLines={1}>
+                    <Text style={[s.txLabel, { color: colors.text }]}>{label}</Text>
+                    <Text style={[s.txMeta, { color: colors.textMuted }]} numberOfLines={1}>
                       {ts ? new Date(ts).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}
                       {t.reference ? ` · #${String(t.reference).slice(-6)}` : ''}
                     </Text>
@@ -845,20 +877,23 @@ export default function RiderWalletScreen() {
         </View>
 
         {/* ── COMING SOON ────────────────────────────────────────────────── */}
-        <LinearGradient colors={['#ECFEFF', '#F0FEFF']} style={s.futureCard}>
+        <LinearGradient
+          colors={isDark ? ['rgba(8,47,73,0.96)', 'rgba(15,23,42,0.96)'] : ['#ECFEFF', '#F0FEFF']}
+          style={[s.futureCard, { borderColor: isDark ? 'rgba(14,165,233,0.24)' : '#A5F3FC' }]}
+        >
           <View style={s.futureHeader}>
             <View style={[s.sectionIconWrap, { backgroundColor: '#CFFAFE' }]}>
               <Ionicons name="business-outline" size={20} color="#0891B2" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={s.futureTitle}>Nexryde Banking</Text>
-              <Text style={s.futureSub}>Earn interest, send money, pay bills — coming soon</Text>
+              <Text style={[s.futureTitle, { color: colors.text }]}>Nexryde Banking</Text>
+              <Text style={[s.futureSub, { color: colors.textMuted }]}>Earn interest, send money, pay bills — coming soon</Text>
             </View>
             <View style={s.futureBadge}><Text style={s.futureBadgeText}>SOON</Text></View>
           </View>
           <View style={s.futureChips}>
             {['Interest earnings', 'Send money', 'Buy airtime', 'Pay bills'].map((f) => (
-              <View key={f} style={s.futureChip}>
+              <View key={f} style={[s.futureChip, { backgroundColor: colors.surfaceAlt }]}>
                 <Text style={s.futureChipText}>{f}</Text>
               </View>
             ))}
@@ -894,20 +929,30 @@ const s = StyleSheet.create({
   scroll: { gap: 0 },
 
   // Hero
-  heroCard: { marginHorizontal: 0, paddingHorizontal: 24, paddingTop: 24, paddingBottom: 28, position: 'relative', overflow: 'hidden' },
-  heroGlow: { position: 'absolute', top: -60, right: -60, width: 200, height: 200, borderRadius: 100, backgroundColor: C.green, opacity: 0.07 },
-  heroTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 },
-  heroLabel: { color: 'rgba(255,255,255,0.45)', fontSize: 10, fontWeight: '800', letterSpacing: 2, marginBottom: 4 },
-  heroName: { color: C.white, fontSize: 18, fontWeight: '900' },
-  heroBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(34,197,94,0.15)', borderWidth: 1, borderColor: 'rgba(34,197,94,0.3)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  heroCard: {
+    marginHorizontal: 0,
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.lg,
+    paddingBottom: SPACING.xl - 4,
+    position: 'relative',
+    overflow: 'hidden',
+    borderRadius: RADIUS.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACE.glassBorder,
+  },
+  heroGlow: { position: 'absolute', top: -60, right: -60, width: 200, height: 200, borderRadius: 100, backgroundColor: C.green, opacity: 0.1 },
+  heroTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: SPACING.md },
+  heroLabel: { ...TYPOGRAPHY.label, color: BRAND.textMuted, textTransform: 'uppercase', marginBottom: 4 },
+  heroName: { color: C.white, fontSize: 18, fontWeight: '900', letterSpacing: -0.2 },
+  heroBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: BRAND.primaryMuted, borderWidth: StyleSheet.hairlineWidth, borderColor: `${BRAND.primary}44`, borderRadius: RADIUS.full, paddingHorizontal: 12, paddingVertical: 6 },
   heroBadgeText: { color: C.green, fontSize: 12, fontWeight: '800' },
-  heroBalanceLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: '700', marginBottom: 6 },
-  heroBalance: { color: C.white, fontSize: 44, fontWeight: '900', letterSpacing: -1 },
-  promoStrip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(245,158,11,0.15)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, marginTop: 16, alignSelf: 'flex-start' },
+  heroBalanceLabel: { color: BRAND.textSecondary, fontSize: 11, fontWeight: '700', marginBottom: 6 },
+  heroBalance: { color: C.white, fontSize: 40, fontWeight: '900', letterSpacing: -1 },
+  promoStrip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(245,158,11,0.15)', borderRadius: RADIUS.sm, paddingHorizontal: 12, paddingVertical: 8, marginTop: SPACING.md, alignSelf: 'flex-start' },
   promoStripText: { color: C.amberLight, fontSize: 12, fontWeight: '700' },
-  heroFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)' },
+  heroFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: SPACING.md, paddingTop: SPACING.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: SURFACE.hairline },
   heroFooterItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  heroFooterText: { color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: '600' },
+  heroFooterText: { color: BRAND.textMuted, fontSize: 11, fontWeight: '600' },
 
   // Success
   successBanner: { marginTop: 16, borderRadius: 16, overflow: 'hidden' },
@@ -930,10 +975,10 @@ const s = StyleSheet.create({
   pendingVerifyText: { color: C.white, fontSize: 13, fontWeight: '800' },
 
   // Section
-  section: { backgroundColor: C.card, marginTop: 16, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: C.border },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
-  sectionIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: BRAND.primaryMuted, alignItems: 'center', justifyContent: 'center' },
-  sectionTitle: { fontSize: 17, fontWeight: '900', color: C.white },
+  section: { backgroundColor: C.card, marginTop: 0, borderRadius: RADIUS.xl, padding: SPACING.md, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: SPACING.stack, marginBottom: SPACING.md },
+  sectionIconWrap: { width: 36, height: 36, borderRadius: RADIUS.md, backgroundColor: BRAND.primaryMuted, alignItems: 'center', justifyContent: 'center' },
+  sectionTitle: { fontSize: 15, fontWeight: '800', color: C.white, letterSpacing: -0.15 },
 
   // Presets
   presetsRow: { gap: 8, paddingBottom: 4, marginBottom: 12 },

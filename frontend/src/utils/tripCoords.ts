@@ -90,6 +90,12 @@ export function mergeTripFromStatusPayload(
     })(),
     pickup_location: tripLocationRecord(data.pickup_location, prev?.pickup_location, pickupFallback),
     dropoff_location: tripLocationRecord(data.dropoff_location, prev?.dropoff_location, dropFallback),
+    stop_location: (() => {
+      if (data.stop_location != null) {
+        return tripLocationRecord(data.stop_location, prev?.stop_location, prev?.stop_location?.address || 'Stop');
+      }
+      return prev?.stop_location ?? null;
+    })(),
     distance_km: Number(data.distance_km ?? prev?.distance_km ?? 0),
     duration_mins: Number(
       data.duration_mins ?? data.duration_minutes ?? prev?.duration_mins ?? 0,
@@ -100,7 +106,10 @@ export function mergeTripFromStatusPayload(
     payment_method: String(data.payment_method || prev?.payment_method || 'cash'),
     payment_status: String(data.payment_status || prev?.payment_status || 'pending'),
     rider_rating: prev?.rider_rating ?? null,
-    driver_rating: prev?.driver_rating ?? null,
+    driver_rating:
+      Number.isFinite(Number(data.driver_rating ?? data.rating))
+        ? Number(data.driver_rating ?? data.rating)
+        : prev?.driver_rating ?? null,
     created_at: prev?.created_at || new Date().toISOString(),
     accepted_at: (data.accepted_at as string | null | undefined) ?? prev?.accepted_at ?? null,
     arrived_at: (data.arrived_at as string | null | undefined) ?? prev?.arrived_at ?? null,
@@ -136,6 +145,64 @@ export function mergeTripFromStatusPayload(
       const raw = data.polyline ?? prev?.polyline;
       return typeof raw === 'string' && raw.trim() ? raw : prev?.polyline;
     })(),
+    ride_version: (() => {
+      const raw = data.ride_version;
+      const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : undefined;
+      return Number.isFinite(n) ? n : prev?.ride_version;
+    })(),
+    state_sequence: (() => {
+      const raw = data.state_sequence ?? data.ride_sequence;
+      const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : undefined;
+      return Number.isFinite(n) ? n : prev?.state_sequence;
+    })(),
+    state_updated_at:
+      (typeof data.state_updated_at === 'string' && data.state_updated_at.trim())
+        ? data.state_updated_at
+        : prev?.state_updated_at,
+    updated_at:
+      (typeof data.updated_at === 'string' && data.updated_at.trim())
+        ? data.updated_at
+        : prev?.updated_at,
+    driver_name:
+      (typeof data.driver_name === 'string' && data.driver_name.trim())
+        ? data.driver_name
+        : (prev as { driver_name?: string | null } | null)?.driver_name ?? null,
+    driver_profile_image:
+      (typeof data.driver_profile_image === 'string' && data.driver_profile_image.trim())
+        ? data.driver_profile_image
+        : (typeof data.profile_image === 'string' && data.profile_image.trim())
+          ? data.profile_image
+          : (prev as { driver_profile_image?: string | null } | null)?.driver_profile_image ?? null,
+    driver_face_image:
+      (typeof data.driver_face_image === 'string' && data.driver_face_image.trim())
+        ? data.driver_face_image
+        : (typeof data.face_image === 'string' && data.face_image.trim())
+          ? data.face_image
+          : (prev as { driver_face_image?: string | null } | null)?.driver_face_image ?? null,
+    driver_total_trips:
+      Number.isFinite(Number(data.driver_total_trips ?? data.driver_trips_completed ?? data.total_trips))
+        ? Number(data.driver_total_trips ?? data.driver_trips_completed ?? data.total_trips)
+        : (prev as { driver_total_trips?: number | null } | null)?.driver_total_trips ?? null,
+    driver_verified:
+      data.driver_verified !== undefined
+        ? Boolean(data.driver_verified)
+        : (prev as { driver_verified?: boolean } | null)?.driver_verified,
+    vehicle_type:
+      (typeof data.vehicle_type === 'string' && data.vehicle_type.trim())
+        ? data.vehicle_type
+        : (prev as { vehicle_type?: string | null } | null)?.vehicle_type ?? null,
+    vehicle_model:
+      (typeof data.vehicle_model === 'string' && data.vehicle_model.trim())
+        ? data.vehicle_model
+        : (prev as { vehicle_model?: string | null } | null)?.vehicle_model ?? null,
+    vehicle_plate:
+      (typeof data.vehicle_plate === 'string' && data.vehicle_plate.trim())
+        ? data.vehicle_plate
+        : (prev as { vehicle_plate?: string | null } | null)?.vehicle_plate ?? null,
+    vehicle_color:
+      (typeof data.vehicle_color === 'string' && data.vehicle_color.trim())
+        ? data.vehicle_color
+        : (prev as { vehicle_color?: string | null } | null)?.vehicle_color ?? null,
   };
 }
 

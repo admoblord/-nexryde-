@@ -103,63 +103,6 @@ type Props = {
   onTryAgain?: () => void;
 };
 
-// ─── Radar ring component ─────────────────────────────────────────────────────
-function RadarRing({ delay, size }: { delay: number; size: number }) {
-  const scale = useRef(new Animated.Value(0.15)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.delay(delay),
-        Animated.parallel([
-          Animated.timing(scale, {
-            toValue: 1,
-            duration: 2400,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-          Animated.sequence([
-            Animated.timing(opacity, {
-              toValue: 0.55,
-              duration: 300,
-              useNativeDriver: true,
-            }),
-            Animated.timing(opacity, {
-              toValue: 0,
-              duration: 2100,
-              easing: Easing.out(Easing.quad),
-              useNativeDriver: true,
-            }),
-          ]),
-        ]),
-        Animated.parallel([
-          Animated.timing(scale, { toValue: 0.15, duration: 0, useNativeDriver: true }),
-          Animated.timing(opacity, { toValue: 0, duration: 0, useNativeDriver: true }),
-        ]),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [scale, opacity, delay]);
-
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={{
-        position: 'absolute',
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        borderWidth: 1.5,
-        borderColor: FV2.green,
-        transform: [{ scale }],
-        opacity,
-      }}
-    />
-  );
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function FindingDriverScreenV2({
   pickupCoords,
@@ -323,12 +266,13 @@ export default function FindingDriverScreenV2({
     return nearbyDrivers.length;
   }, [nearbyDrivers.length]);
 
-  // ── only show real drivers on the map — no fake ambient placeholders ─────
-  const safePickup = pickupCoords ?? { lat: 6.5244, lng: 3.3792 };
-  const allDrivers = useMemo<NearbyDriver[]>(() => {
-    return nearbyDrivers; // real only; empty map is honest when no drivers are nearby
-  }, [nearbyDrivers]);
-
+  // Real drivers only — never invent ambient pins or a fake Lagos map.
+  const hasPickup = Boolean(
+    pickupCoords &&
+      Number.isFinite(Number(pickupCoords.lat)) &&
+      Number.isFinite(Number(pickupCoords.lng)),
+  );
+  const allDrivers = useMemo<NearbyDriver[]>(() => nearbyDrivers, [nearbyDrivers]);
   const driverCount = nearbyDrivers.length;
 
   // ── sheet height (fixed — inner content animates; map controls stay put) ──
@@ -357,38 +301,32 @@ export default function FindingDriverScreenV2({
     <View style={styles.root}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-      {/* ── Full-screen map ──────────────────────────────────────────────── */}
+      {/* ── Full-screen map (only with real pickup — no Lagos ghost pin) ─── */}
       <View style={StyleSheet.absoluteFillObject}>
-        <RiderBookingMapNative
-          pickupCoords={safePickup}
-          destinationCoords={destinationCoords}
-          routePolyline={routePolyline}
-          pickup={pickup}
-          destination={destinationAddress ?? ''}
-          routeLoading={false}
-          pulseDropoffHalo={false}
-          searchMode
-          matchLocked={isMatched}
-          nearbyDrivers={allDrivers}
-          controlsBottom={SHEET_H + 20}
-          debugOverlay={__DEV__}
-        />
+        {hasPickup && pickupCoords ? (
+          <RiderBookingMapNative
+            pickupCoords={pickupCoords}
+            destinationCoords={destinationCoords}
+            routePolyline={routePolyline}
+            pickup={pickup}
+            destination={destinationAddress ?? ''}
+            routeLoading={false}
+            pulseDropoffHalo={false}
+            searchMode
+            matchLocked={isMatched}
+            nearbyDrivers={allDrivers}
+            showDemandOverlay={false}
+            controlsBottom={SHEET_H + 20}
+            debugOverlay={__DEV__}
+          />
+        ) : (
+          <View style={styles.waitingLoc}>
+            <Ionicons name="locate-outline" size={36} color="#34D399" />
+            <Text style={styles.waitingLocTitle}>Getting your pickup location…</Text>
+            <Text style={styles.waitingLocSub}>Searching starts as soon as GPS locks in.</Text>
+          </View>
+        )}
       </View>
-
-      {/* ── Radar rings overlay (centred on screen horizontally, sits above map) */}
-      {isSearching ? (
-        <View
-          pointerEvents="none"
-          style={[
-            styles.radarWrap,
-            { top: SCREEN_H - SHEET_H - 90 },
-          ]}
-        >
-          <RadarRing delay={0} size={180} />
-          <RadarRing delay={800} size={180} />
-          <RadarRing delay={1600} size={180} />
-        </View>
-      ) : null}
 
       {/* ── Top scrim ────────────────────────────────────────────────────── */}
       <LinearGradient
@@ -692,15 +630,16 @@ const SHEET_RADIUS = 30;
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#030B1A' },
 
-  // ── radar ──────────────────────────────────────────────────────────────────
-  radarWrap: {
-    position: 'absolute',
-    alignSelf: 'center',
+  waitingLoc: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    width: 180,
-    height: 180,
+    gap: 10,
+    paddingHorizontal: 32,
+    backgroundColor: '#030B1A',
   },
+  waitingLocTitle: { fontSize: 17, fontWeight: '800', color: '#F1F5F9', textAlign: 'center' },
+  waitingLocSub: { fontSize: 13, fontWeight: '600', color: '#94A3B8', textAlign: 'center', lineHeight: 20 },
 
   // ── top ────────────────────────────────────────────────────────────────────
   topScrim: { position: 'absolute', top: 0, left: 0, right: 0 },

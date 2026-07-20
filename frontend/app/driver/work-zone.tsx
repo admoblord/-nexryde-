@@ -1,14 +1,13 @@
 /**
  * Work Zone — included with NexRyde driver plan (trial + subscription).
  */
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  TextInput,
   ActivityIndicator,
   Alert,
   StatusBar,
@@ -24,13 +23,19 @@ import { useWorkZoneScreen } from '@/src/hooks/useWorkZoneScreen';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { setWorkZoneFromApi } from '@/src/services/workZoneSession';
-import { useWorkZoneScreenStore, type WorkZoneArea } from '@/src/store/workZoneScreenStore';
+import LocationAutocomplete, { type LocationAutocompleteSelection } from '@/src/components/LocationAutocomplete';
+import { useWorkZoneScreenStore, type WorkZonePlace } from '@/src/store/workZoneScreenStore';
 import { workZoneScreenLog } from '@/src/utils/workZoneScreenLog';
 import { useFlowLayout } from '@/src/constants/flowLayout';
+import { useThemeColors } from '@/src/constants/theme';
 import { BORDER_RADIUS, SPACING } from '@/src/constants/theme';
 import { BRAND, SURFACE } from '@/src/constants/designSystem';
+import { WorkZoneMapPreview } from '@/src/components/map/WorkZoneMapPreview';
+import { TripMapErrorBoundary } from '@/src/components/TripMapErrorBoundary';
 
 const FOOTER_H = 88;
+const DEFAULT_RADIUS_M = 5000;
+const RADIUS_STEPS = [3000, 5000, 8000, 12000] as const;
 const SUBSCRIPTION_BENEFITS = [
   '100% of every fare',
   'Work Zone included',
@@ -40,9 +45,9 @@ const SUBSCRIPTION_BENEFITS = [
 
 type DemandTone = { label: string; color: string; bg: string };
 
-function demandTone(area: WorkZoneArea): DemandTone {
-  const n = area.trips_per_week ?? 0;
-  const dl = (area.demand_label || '').toLowerCase();
+function demandTone(zone?: Pick<WorkZonePlace, 'trips_per_week' | 'demand_label'> | null): DemandTone {
+  const n = zone?.trips_per_week ?? 0;
+  const dl = (zone?.demand_label || '').toLowerCase();
   if (dl === 'high' || n >= 40) {
     return { label: 'Busy', color: '#FCA5A5', bg: 'rgba(239,68,68,0.14)' };
   }
@@ -52,15 +57,20 @@ function demandTone(area: WorkZoneArea): DemandTone {
   return { label: 'Quiet', color: BRAND.textMuted, bg: 'rgba(148,163,184,0.12)' };
 }
 
-function demandHint(area: WorkZoneArea): string {
-  const n = area.trips_per_week ?? 0;
+function demandHint(zone?: Pick<WorkZonePlace, 'trips_per_week' | 'online_driver_count'> | null): string {
+  const n = zone?.trips_per_week ?? 0;
+  const online = zone?.online_driver_count ?? 0;
+  if (n > 0 && online > 0) return `~${n} trips this week · ${online} drivers online nearby`;
+  if (online > 0) return `${online} drivers online nearby`;
   if (n >= 40) return `~${n} trips this week`;
   if (n >= 15) return `~${n} trips this week`;
   if (n > 0) return `~${n} trips · longer waits possible`;
-  return 'Low recent volume';
+  return 'New or quiet area · activation still allowed';
 }
 
 export default function WorkZoneScreen() {
+  const { colors, isDark } = useThemeColors();
+  const screenBg = isDark ? BRAND.bgDeep : colors.background;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
@@ -70,18 +80,22 @@ export default function WorkZoneScreen() {
   workZoneScreenLog('WORKZONE_RENDER', { count: renderCount.current });
 
   const [benefitsOpen, setBenefitsOpen] = useState(false);
-  const [areaQuery, setAreaQuery] = useState('');
+  const [zoneQuery, setZoneQuery] = useState('');
+  const [resolvingPlace, setResolvingPlace] = useState(false);
+  const [focusedZoneId, setFocusedZoneId] = useState<string | null>(null);
 
-  const areas = useWorkZoneScreenStore((s) => s.areas);
   const driverState = useWorkZoneScreenStore((s) => s.driverState);
-  const selected = useWorkZoneScreenStore((s) => s.selected);
+  const selectedZones = useWorkZoneScreenStore((s) => s.selectedZones);
   const initialLoadDone = useWorkZoneScreenStore((s) => s.initialLoadDone);
   const fetchInFlight = useWorkZoneScreenStore((s) => s.fetchInFlight);
   const saving = useWorkZoneScreenStore((s) => s.saving);
-  const toggleSelected = useWorkZoneScreenStore((s) => s.toggleSelected);
+  const addSelectedZone = useWorkZoneScreenStore((s) => s.addSelectedZone);
+  const removeSelectedZone = useWorkZoneScreenStore((s) => s.removeSelectedZone);
+  const updateSelectedZoneRadius = useWorkZoneScreenStore((s) => s.updateSelectedZoneRadius);
   const setSaving = useWorkZoneScreenStore((s) => s.setSaving);
   const patchDriverState = useWorkZoneScreenStore((s) => s.patchDriverState);
   const setSelected = useWorkZoneScreenStore((s) => s.setSelected);
+  const setSelectedZones = useWorkZoneScreenStore((s) => s.setSelectedZones);
 
   useWorkZoneScreen(driverId);
 
@@ -104,58 +118,64 @@ export default function WorkZoneScreen() {
   );
 
   const selectedLabel = useMemo(() => {
-    if (!selected.length) return null;
-    const names = selected
-      .map((id) => areas.find((a) => a.id === id)?.name)
-      .filter(Boolean) as string[];
+    if (!selectedZones.length) return null;
+    const names = selectedZones.map((z) => z.label).filter(Boolean);
     if (names.length <= 2) return names.join(' · ');
     return `${names.slice(0, 2).join(' · ')} +${names.length - 2}`;
-  }, [areas, selected]);
-
-  const filteredAreas = useMemo(() => {
-    const q = areaQuery.trim().toLowerCase();
-    if (!q) return areas;
-    return areas.filter((area) => {
-      const haystack = `${area.name} ${area.id} ${area.demand_label || ''}`.toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [areaQuery, areas]);
-
-  const canSelect = useCallback(
-    (areaId: string) => {
-      if (selected.includes(areaId)) return true;
-      if (selected.length >= 4) return false;
-      if (selected.length === 0) return true;
-      return selected.some((id) => {
-        const a = areas.find((x) => x.id === id);
-        return a?.adjacent_ids?.includes(areaId);
-      });
-    },
-    [areas, selected],
-  );
+  }, [selectedZones]);
 
   const bumpHaptic = () => {
     if (Platform.OS !== 'web') void Haptics.selectionAsync();
   };
 
-  const toggleArea = (areaId: string) => {
-    if (selected.includes(areaId)) {
-      bumpHaptic();
-      toggleSelected(areaId);
-      return;
-    }
-    if (!canSelect(areaId)) {
+  const addPlaceZone = async (place: LocationAutocompleteSelection) => {
+    if (selectedZones.length >= 4) {
       if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      Alert.alert('Adjacent areas only', 'Pick areas next to your current selection (up to 4).');
+      Alert.alert('Maximum zones reached', 'You can select up to 4 work zones for today.');
       return;
     }
-    bumpHaptic();
-    toggleSelected(areaId);
+    if (!place.placeId) {
+      Alert.alert('Location unavailable', 'Please choose a real location from the search results.');
+      return;
+    }
+    setResolvingPlace(true);
+    try {
+      const session = place.sessionToken ? `?sessiontoken=${encodeURIComponent(place.sessionToken)}` : '';
+      const res = await fetch(`${BACKEND_URL}/api/places/details/${encodeURIComponent(place.placeId)}${session}`, {
+        headers: getAuthHeaders(),
+      });
+      const details = await res.json().catch(() => ({}));
+      if (!res.ok || details.status !== 'OK') {
+        Alert.alert('Could not add location', details.detail || 'Please try another result.');
+        return;
+      }
+      const lat = Number(details.latitude);
+      const lng = Number(details.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        Alert.alert('Could not add location', 'This result does not include usable coordinates.');
+        return;
+      }
+      addSelectedZone({
+        id: place.placeId || `${lat.toFixed(5)}:${lng.toFixed(5)}`,
+        place_id: place.placeId,
+        label: place.description.split(',')[0]?.trim() || place.description,
+        address: details.address || place.description,
+        lat,
+        lng,
+        radius_m: DEFAULT_RADIUS_M,
+        country: 'Nigeria',
+        source: 'places',
+      });
+      setZoneQuery('');
+      bumpHaptic();
+    } finally {
+      setResolvingPlace(false);
+    }
   };
 
   const activate = async () => {
-    if (!driverId || selected.length === 0) {
-      Alert.alert('Select your zone', 'Choose 1–4 adjacent areas you want to work today.');
+    if (!driverId || selectedZones.length === 0) {
+      Alert.alert('Select your zone', 'Search and add at least one neighborhood, town, estate, district, or landmark.');
       return;
     }
     setSaving(true);
@@ -163,7 +183,7 @@ export default function WorkZoneScreen() {
       const r = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/work-zone`, {
         method: 'POST',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ area_ids: selected }),
+        body: JSON.stringify({ zones: selectedZones }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -176,7 +196,8 @@ export default function WorkZoneScreen() {
       patchDriverState({
         active: true,
         label: data.label || driverState?.label || '',
-        area_ids: [...selected],
+        area_ids: data.area_ids || [],
+        zones: data.zones || [...selectedZones],
       });
     } finally {
       setSaving(false);
@@ -203,8 +224,9 @@ export default function WorkZoneScreen() {
               return;
             }
             setWorkZoneFromApi(false, '');
-            patchDriverState({ active: false, area_ids: [] });
+            patchDriverState({ active: false, area_ids: [], zones: [] });
             setSelected([]);
+            setSelectedZones([]);
           } finally {
             setSaving(false);
           }
@@ -223,18 +245,18 @@ export default function WorkZoneScreen() {
   const featureUnavailable =
     initialLoadDone && driverState != null && !driverState.feature_available;
 
-  const ctaDisabled = saving || !canActivateWorkZone || showFirstLoadPlaceholder || selected.length === 0;
+  const ctaDisabled = saving || resolvingPlace || !canActivateWorkZone || showFirstLoadPlaceholder || selectedZones.length === 0;
   const ctaLabel = driverState?.active ? 'Update zone' : 'Activate Work Zone';
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { backgroundColor: screenBg }]}>
       <LinearGradient
         colors={[BRAND.bgDeep, BRAND.bgCard, BRAND.bgDeep]}
         style={StyleSheet.absoluteFill}
       />
 
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <StatusBar barStyle="light-content" />
+        <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
         <TabBrandStrip role="driver" />
 
         <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
@@ -279,45 +301,23 @@ export default function WorkZoneScreen() {
               </View>
             ) : (
               <>
-                <View style={styles.heroWrap}>
-                  <LinearGradient
-                    colors={['#0F2844', '#081A2E', '#061222']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.hero}
-                  >
-                    <LinearGradient
-                      colors={['rgba(34,225,128,0.12)', 'transparent']}
-                      style={styles.heroSheen}
-                      pointerEvents="none"
-                    />
-                    <View style={styles.heroTop}>
-                      <View style={styles.heroIcon}>
-                        <Ionicons name="layers" size={20} color={BRAND.primary} />
-                      </View>
-                      <View style={styles.planChip}>
-                        <Text style={styles.planChipTxt}>{planChip}</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.eyebrow}>TERRITORY DISPATCH</Text>
-                    <Text style={styles.heroTitle}>Know your area.{'\n'}Know your money.</Text>
-                    {driverState?.active && driverState.label ? (
-                      <View style={styles.activeZoneBanner}>
-                        <Ionicons name="navigate" size={14} color={BRAND.primary} />
-                        <Text style={styles.activeZoneTxt} numberOfLines={1}>
-                          {driverState.label}
-                        </Text>
-                      </View>
-                    ) : (
-                      <Text style={styles.sub}>
-                        Pick 1–4 adjacent areas. Only trips inside your zone are offered.
-                      </Text>
-                    )}
-                    {showFirstLoadPlaceholder ? (
-                      <ActivityIndicator color={BRAND.primary} style={styles.inlineLoader} />
-                    ) : null}
-                  </LinearGradient>
+                <View style={styles.titleRow}>
+                  <Text style={styles.screenTitle}>Work Zone</Text>
+                  <View style={styles.planChip}>
+                    <Text style={styles.planChipTxt}>{planChip}</Text>
+                  </View>
                 </View>
+                {driverState?.active && driverState.label ? (
+                  <View style={styles.activeZoneBanner}>
+                    <Ionicons name="navigate" size={14} color={BRAND.primary} />
+                    <Text style={styles.activeZoneTxt} numberOfLines={1}>
+                      {driverState.label}
+                    </Text>
+                  </View>
+                ) : null}
+                {showFirstLoadPlaceholder ? (
+                  <ActivityIndicator color={BRAND.primary} style={styles.inlineLoader} />
+                ) : null}
 
                 <TouchableOpacity
                   style={styles.benefitsToggle}
@@ -362,90 +362,123 @@ export default function WorkZoneScreen() {
                 ) : null}
 
                 <View style={styles.sectionRow}>
-                  <Text style={styles.section}>Your corridor</Text>
+                  <Text style={styles.section}>Your work zones</Text>
                   <Text style={styles.sectionMeta}>
-                    {selected.length > 0 ? `${selected.length}/4` : 'Up to 4 areas'}
+                    {selectedZones.length > 0 ? `${selectedZones.length}/4` : 'Up to 4 places'}
                   </Text>
                 </View>
                 <Text style={styles.sectionHint}>
-                  Search and select 1–4 available areas. Adjacent areas can be combined into one corridor.
+                  Search Google Places and add any place you want to work. New areas can start with one driver.
                 </Text>
-                <View style={styles.searchBox}>
-                  <Ionicons name="search" size={17} color={BRAND.textMuted} />
-                  <TextInput
-                    value={areaQuery}
-                    onChangeText={setAreaQuery}
-                    placeholder="Search zones, corridors, landmarks"
-                    placeholderTextColor={BRAND.textMuted}
-                    style={styles.searchInput}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    editable={!showFirstLoadPlaceholder}
+                <TripMapErrorBoundary>
+                  <WorkZoneMapPreview
+                    zones={selectedZones}
+                    focusedZoneId={focusedZoneId}
+                    onZonePress={setFocusedZoneId}
                   />
-                  {areaQuery ? (
-                    <TouchableOpacity onPress={() => setAreaQuery('')} accessibilityRole="button" accessibilityLabel="Clear zone search">
-                      <Ionicons name="close-circle" size={18} color={BRAND.textMuted} />
-                    </TouchableOpacity>
+                </TripMapErrorBoundary>
+                <View style={styles.placesSearchWrap}>
+                  <LocationAutocomplete
+                    value={zoneQuery}
+                    onChangeText={setZoneQuery}
+                    onPlaceSelected={addPlaceZone}
+                    placeholder="Search state, city, LGA, estate, landmark"
+                    countryCode="ng"
+                    style={styles.placesAutocomplete}
+                    inputStyle={styles.placesInput}
+                    placeholderTextColor={BRAND.textMuted}
+                  />
+                  {resolvingPlace ? (
+                    <View style={styles.resolvingRow}>
+                      <ActivityIndicator size="small" color={BRAND.primary} />
+                      <Text style={styles.resolvingTxt}>Adding selected location...</Text>
+                    </View>
                   ) : null}
                 </View>
 
-                {showFirstLoadPlaceholder && areas.length === 0
-                  ? [0, 1, 2, 3].map((i) => (
+                {showFirstLoadPlaceholder && selectedZones.length === 0
+                  ? [0, 1].map((i) => (
                       <View
                         key={`sk-${i}`}
                         style={[styles.areaRow, styles.areaSkeleton, { minHeight: flow.rowMinHeight }]}
                       />
                     ))
-                  : filteredAreas.length > 0
-                    ? filteredAreas.map((a) => {
-                      const on = selected.includes(a.id);
-                      const disabled = !on && !canSelect(a.id);
-                      const tone = demandTone(a);
+                  : selectedZones.length > 0
+                    ? selectedZones.map((zone) => {
+                      const tone = demandTone(zone);
+                      const focused = focusedZoneId === zone.id;
                       return (
-                        <TouchableOpacity
-                          key={a.id}
+                        <View
+                          key={zone.id}
                           style={[
                             styles.areaRow,
+                            styles.areaOn,
+                            focused && styles.areaFocused,
                             { minHeight: flow.rowMinHeight },
-                            on && styles.areaOn,
-                            disabled && styles.areaDisabled,
                           ]}
-                          onPress={() => toggleArea(a.id)}
-                          disabled={disabled || showFirstLoadPlaceholder}
-                          activeOpacity={0.88}
                         >
-                          {on ? <View style={styles.areaAccent} /> : null}
-                          <View style={styles.areaTextCol}>
-                            <View style={styles.areaNameRow}>
-                              <Text style={[styles.areaName, on && styles.areaNameOn]}>{a.name}</Text>
-                              <View style={[styles.demandPill, { backgroundColor: tone.bg }]}>
-                                <Text style={[styles.demandPillTxt, { color: tone.color }]}>
-                                  {tone.label}
-                                </Text>
+                          <TouchableOpacity
+                            style={styles.areaFocusHit}
+                            onPress={() => setFocusedZoneId(zone.id)}
+                            activeOpacity={0.9}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Focus ${zone.label} on map`}
+                          >
+                            <View style={styles.areaAccent} />
+                            <View style={styles.areaTextCol}>
+                              <View style={styles.areaNameRow}>
+                                <Text style={[styles.areaName, styles.areaNameOn]}>{zone.label}</Text>
+                                <View style={[styles.demandPill, { backgroundColor: tone.bg }]}>
+                                  <Text style={[styles.demandPillTxt, { color: tone.color }]}>{tone.label}</Text>
+                                </View>
+                              </View>
+                              <Text style={styles.areaMeta} numberOfLines={2}>
+                                {zone.address || `${zone.lat.toFixed(4)}, ${zone.lng.toFixed(4)}`}
+                              </Text>
+                              <Text style={styles.areaMeta}>{demandHint(zone)}</Text>
+                              <View style={styles.radiusRow}>
+                                {RADIUS_STEPS.map((radius) => {
+                                  const on = zone.radius_m === radius;
+                                  return (
+                                    <TouchableOpacity
+                                      key={`${zone.id}-${radius}`}
+                                      style={[styles.radiusChip, on && styles.radiusChipOn]}
+                                      onPress={() => {
+                                        setFocusedZoneId(zone.id);
+                                        updateSelectedZoneRadius(zone.id, radius);
+                                      }}
+                                      activeOpacity={0.86}
+                                    >
+                                      <Text style={[styles.radiusChipTxt, on && styles.radiusChipTxtOn]}>
+                                        {radius / 1000} km
+                                      </Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
                               </View>
                             </View>
-                            <Text style={styles.areaMeta}>{demandHint(a)}</Text>
-                          </View>
-                          <View style={[styles.checkCircle, on && styles.checkCircleOn]}>
-                            <Ionicons
-                              name={on ? 'checkmark' : 'add'}
-                              size={on ? 16 : 18}
-                              color={on ? BRAND.textInverse : BRAND.textMuted}
-                            />
-                          </View>
-                        </TouchableOpacity>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.removeZoneBtn}
+                            onPress={() => {
+                              if (focusedZoneId === zone.id) setFocusedZoneId(null);
+                              removeSelectedZone(zone.id);
+                            }}
+                            activeOpacity={0.85}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Remove ${zone.label}`}
+                          >
+                            <Ionicons name="close" size={18} color="#FCA5A5" />
+                          </TouchableOpacity>
+                        </View>
                       );
                     })
                     : (
                       <View style={styles.emptyAreasBox}>
-                        <Ionicons name="map-outline" size={22} color={BRAND.textMuted} />
-                        <Text style={styles.emptyAreasTitle}>
-                          {areas.length === 0 ? 'Zone list unavailable' : 'No matching zones'}
-                        </Text>
+                        <Ionicons name="search" size={22} color={BRAND.textMuted} />
+                        <Text style={styles.emptyAreasTitle}>Search any Nigerian location</Text>
                         <Text style={styles.emptyAreasBody}>
-                          {areas.length === 0
-                            ? 'Your zone picker is visible, but the latest area list did not load. Pull back and reopen once connected.'
-                            : 'Try another Lagos area or corridor name.'}
+                          Add one or more places from Google Places. Activation is allowed even if no other drivers are online nearby.
                         </Text>
                       </View>
                     )}
@@ -554,32 +587,19 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.8,
   },
-  heroWrap: { marginBottom: SPACING.sm + 4 },
-  hero: {
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md + 2,
-    borderWidth: 1,
-    borderColor: SURFACE.hairline,
-    overflow: 'hidden',
-  },
-  heroSheen: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  heroTop: {
+  titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: SPACING.sm + 2,
+    marginBottom: SPACING.sm,
+    gap: 12,
   },
-  heroIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: BORDER_RADIUS.md,
-    backgroundColor: BRAND.primaryMuted,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: SURFACE.glassBorder,
+  screenTitle: {
+    color: BRAND.textPrimary,
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.4,
+    flex: 1,
   },
   planChip: {
     paddingHorizontal: 10,
@@ -594,31 +614,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
-  eyebrow: {
-    color: BRAND.primary,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.4,
-  },
-  heroTitle: {
-    color: BRAND.textPrimary,
-    fontSize: 24,
-    fontWeight: '800',
-    marginTop: 4,
-    lineHeight: 30,
-    letterSpacing: -0.5,
-  },
-  sub: {
-    color: BRAND.textSecondary,
-    fontSize: 13,
-    marginTop: SPACING.sm + 2,
-    lineHeight: 19,
-  },
   activeZoneBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: SPACING.sm + 2,
+    marginBottom: SPACING.sm,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: BORDER_RADIUS.md,
@@ -691,6 +691,34 @@ const styles = StyleSheet.create({
     fontSize: 14,
     paddingVertical: 0,
   },
+  placesSearchWrap: {
+    zIndex: 20,
+    marginBottom: SPACING.sm,
+  },
+  placesAutocomplete: {
+    zIndex: 30,
+  },
+  placesInput: {
+    minHeight: 50,
+    backgroundColor: SURFACE.glassSoft,
+    borderColor: SURFACE.hairline,
+    color: BRAND.textPrimary,
+    borderRadius: BORDER_RADIUS.md,
+    fontSize: 14,
+    paddingHorizontal: SPACING.md,
+  },
+  resolvingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginTop: SPACING.sm,
+    paddingHorizontal: SPACING.sm,
+  },
+  resolvingTxt: {
+    color: BRAND.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
   areaRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -707,6 +735,16 @@ const styles = StyleSheet.create({
   areaOn: {
     borderColor: SURFACE.glassBorder,
     backgroundColor: 'rgba(34,225,128,0.08)',
+  },
+  areaFocused: {
+    borderColor: 'rgba(34,229,160,0.55)',
+    backgroundColor: 'rgba(34,225,128,0.14)',
+  },
+  areaFocusHit: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 0,
   },
   areaDisabled: { opacity: 0.4 },
   emptyAreasBox: {
@@ -756,6 +794,42 @@ const styles = StyleSheet.create({
   },
   demandPillTxt: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
   areaMeta: { color: BRAND.textMuted, fontSize: 11, marginTop: 4, lineHeight: 15 },
+  radiusRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: SPACING.sm,
+  },
+  radiusChip: {
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: SURFACE.tile,
+    borderWidth: 1,
+    borderColor: SURFACE.hairline,
+  },
+  radiusChipOn: {
+    backgroundColor: BRAND.primaryMuted,
+    borderColor: SURFACE.glassBorder,
+  },
+  radiusChipTxt: {
+    color: BRAND.textMuted,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  radiusChipTxtOn: {
+    color: BRAND.primary,
+  },
+  removeZoneBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(127,29,29,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(252,165,165,0.18)',
+  },
   checkCircle: {
     width: 32,
     height: 32,

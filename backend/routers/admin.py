@@ -9,6 +9,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import asyncio
 import hashlib
+import hmac
 import logging
 import os
 import re
@@ -29,12 +30,14 @@ from pii_encryption import (
     driver_nin_public_fields,
     public_license_fields,
     public_nin_fields,
+    resolve_driver_nin_plaintext,
     resolve_license_plaintext,
     resolve_nin_plaintext,
     pii_search_hash,
     strip_sensitive_pii,
 )
 from pii_audit import log_pii_access
+from security_advanced import auth_limiter
 
 logger = logging.getLogger('server')
 admin_router = APIRouter(prefix="/api", tags=["Admin"])
@@ -57,6 +60,11 @@ if not _admin_password:
         logger.warning("ADMIN_PASSWORD not set; using a generated fallback for this %s run (set the env var)", _nexryde_env)
 ADMIN_CREDENTIALS = {_admin_email: _admin_password}
 ADMIN_SESSION_TTL_HOURS = int(os.environ.get("ADMIN_SESSION_TTL_HOURS", "72"))
+ADMIN_REVOKE_OLD_SESSIONS = os.environ.get("ADMIN_REVOKE_OLD_SESSIONS", "true").lower() == "true"
+
+
+def _is_production() -> bool:
+    return os.environ.get("NEXRYDE_ENV", os.environ.get("ENVIRONMENT", "production")).strip().lower() == "production"
 
 
 def _extract_admin_token(request: Request) -> str:
@@ -79,12 +87,13 @@ async def _validate_admin_session(request: Request):
             "revoked": {"$ne": True},
             "expires_at": {"$gt": now},
         },
-        {"_id": 0, "email": 1},
+        {"_id": 0, "email": 1, "role": 1},
     )
     if not session:
         raise HTTPException(status_code=401, detail="Invalid or expired admin session")
 
     request.state.admin_email = session.get("email")
+    request.state.admin_role = session.get("role") or "super_admin"
     await db.admin_sessions.update_one(
         {"token_hash": token_hash},
         {"$set": {"last_seen_at": now}},
@@ -108,6 +117,35 @@ async def require_admin_access(request: Request):
 
 admin_router.dependencies.append(Depends(require_admin_access))
 
+
+async def _log_admin_action(
+    request: Request,
+    action: str,
+    target_type: str = "",
+    target_id: str = "",
+    details: Optional[dict] = None,
+) -> None:
+    try:
+        ip = request.client.host if request.client else ""
+        await db.admin_audit_log.insert_one({
+            "admin_email": getattr(request.state, "admin_email", None) or "admin",
+            "admin_role": getattr(request.state, "admin_role", None) or "super_admin",
+            "action": action,
+            "target_type": target_type,
+            "target_id": target_id,
+            "details": details or {},
+            "ip_address": ip,
+            "user_agent": request.headers.get("user-agent", ""),
+            "created_at": datetime.now(timezone.utc),
+        })
+    except Exception as exc:
+        logger.warning("admin audit log failed: %s", exc)
+
+
+def _require_admin_test_tools_enabled() -> None:
+    if _is_production() and os.environ.get("ALLOW_ADMIN_TEST_UTILS", "false").lower() != "true":
+        raise HTTPException(status_code=403, detail="Admin test utilities are disabled in production")
+
 class AdminLoginRequest(BaseModel):
     email: str
     password: str
@@ -125,6 +163,24 @@ def _normalize_reveal_reason(reason: str) -> str:
             detail="A reason is required (minimum 8 characters), e.g. security incident #123",
         )
     return cleaned
+
+
+def _sniff_document_content_type(raw: bytes, declared: str | None) -> str:
+    """Prefer magic-byte sniff so admin <img> gets a browser-safe MIME."""
+    declared_norm = (declared or "").split(";")[0].strip().lower()
+    if declared_norm == "image/jpg":
+        declared_norm = "image/jpeg"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw.startswith(b"RIFF") and raw[8:12] == b"WEBP":
+        return "image/webp"
+    if raw.startswith(b"%PDF"):
+        return "application/pdf"
+    if declared_norm in ("image/jpeg", "image/png", "image/webp", "application/pdf"):
+        return declared_norm
+    return declared_norm or "application/octet-stream"
 
 
 def _sanitize_rider_for_admin(rider: dict) -> dict:
@@ -151,32 +207,67 @@ def _build_rider_search_filter(search: str) -> list[dict]:
     return clauses
 
 @admin_router.post("/admin/login")
-async def admin_login(request: AdminLoginRequest):
+async def admin_login(request: AdminLoginRequest, http_request: Request):
     """Admin login endpoint"""
-    if request.email in ADMIN_CREDENTIALS and ADMIN_CREDENTIALS[request.email] == request.password:
+    client_ip = http_request.client.host if http_request.client else "unknown"
+    email_key = request.email.strip().lower() or "unknown"
+    await auth_limiter.check_rate_limit(http_request, f"admin_login_ip:{client_ip}")
+    await auth_limiter.check_rate_limit(http_request, f"admin_login_email:{email_key}")
+    expected_password = ADMIN_CREDENTIALS.get(email_key) or ADMIN_CREDENTIALS.get(request.email)
+    if expected_password and hmac.compare_digest(expected_password, request.password):
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(hours=ADMIN_SESSION_TTL_HOURS)
         token = secrets.token_urlsafe(48)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
+        if ADMIN_REVOKE_OLD_SESSIONS:
+            await db.admin_sessions.update_many(
+                {"email": email_key, "revoked": {"$ne": True}},
+                {"$set": {"revoked": True, "revoked_at": now, "revocation_reason": "new_login"}},
+            )
         await db.admin_sessions.insert_one(
             {
                 "id": str(uuid.uuid4()),
-                "email": request.email,
+                "email": email_key,
+                "role": "super_admin",
                 "token_hash": token_hash,
+                "ip_address": client_ip,
+                "user_agent": http_request.headers.get("user-agent", ""),
                 "created_at": now,
                 "last_seen_at": now,
                 "expires_at": expires_at,
                 "revoked": False,
             }
         )
+        await db.admin_audit_log.insert_one({
+            "admin_email": email_key,
+            "admin_role": "super_admin",
+            "action": "admin_login_success",
+            "target_type": "admin_session",
+            "target_id": token_hash[:12],
+            "details": {"revoked_old_sessions": ADMIN_REVOKE_OLD_SESSIONS},
+            "ip_address": client_ip,
+            "user_agent": http_request.headers.get("user-agent", ""),
+            "created_at": now,
+        })
         return {
             "success": True,
             "token": token,
-            "email": request.email,
+            "email": email_key,
             "role": "super_admin",
             "expires_at": expires_at.isoformat(),
         }
-    return {"success": False, "detail": "Invalid credentials"}
+    await db.admin_audit_log.insert_one({
+        "admin_email": email_key,
+        "admin_role": "unknown",
+        "action": "admin_login_failed",
+        "target_type": "admin_login",
+        "target_id": email_key,
+        "details": {},
+        "ip_address": client_ip,
+        "user_agent": http_request.headers.get("user-agent", ""),
+        "created_at": datetime.now(timezone.utc),
+    })
+    raise HTTPException(status_code=401, detail="Invalid credentials")
 
 
 @admin_router.post("/admin/logout")
@@ -189,6 +280,7 @@ async def admin_logout(request: Request):
         {"token_hash": token_hash},
         {"$set": {"revoked": True, "revoked_at": datetime.now(timezone.utc)}},
     )
+    await _log_admin_action(request, "admin_logout", "admin_session", token_hash[:12])
     return {"success": True, "message": "Admin session revoked"}
 
 @admin_router.get("/admin/overview")
@@ -449,11 +541,18 @@ async def admin_reveal_driver_nin(
     if not user:
         raise HTTPException(status_code=404, detail="Driver not found")
 
+    # Include nested documents.nin — modern uploads store nin_cipher there AND top-level.
     docs = await db.driver_documents.find_one(
         {"driver_id": driver_id},
-        {"_id": 0, "nin_cipher": 1, "nin_number": 1, "nin_last4": 1},
+        {
+            "_id": 0,
+            "nin_cipher": 1,
+            "nin_number": 1,
+            "nin_last4": 1,
+            "documents.nin": 1,
+        },
     ) or {}
-    plaintext = resolve_nin_plaintext(docs) or resolve_nin_plaintext(user)
+    plaintext = resolve_driver_nin_plaintext(docs, user)
     if not plaintext:
         raise HTTPException(status_code=404, detail="No NIN on file for this driver")
 
@@ -711,18 +810,35 @@ async def admin_get_driver_document(driver_id: str, doc_type: str):
     if not doc_data:
         raise HTTPException(status_code=404, detail=f"Document '{doc_type}' not found")
 
+    # NIN number-only has no image — admin should use Reveal NIN.
+    if doc_type == "nin" and doc_data.get("capture_mode") == "number_only":
+        raise HTTPException(
+            status_code=400,
+            detail="NIN is number-only on file. Use Reveal NIN (not View) on the Verification tab.",
+        )
+
     # Binary now lives in private GCS; resolve bytes by key (legacy inline fallback).
     import base64 as _b64
     from driver_doc_storage import fetch_document_binary
     raw = await fetch_document_binary(driver_id, doc_type, doc_data)
-    data_b64 = _b64.b64encode(raw).decode("utf-8") if raw is not None else None
+    if raw is None:
+        storage = doc_data.get("storage") or ("gcs" if doc_data.get("gcs_key") or doc_data.get("file_key") else "unknown")
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Document '{doc_type}' metadata exists but binary is unavailable "
+                f"(storage={storage}). Check GCS_MEDIA_BUCKET / object access, or ask the driver to re-upload."
+            ),
+        )
+    content_type = _sniff_document_content_type(raw, doc_data.get("content_type"))
+    data_b64 = _b64.b64encode(raw).decode("ascii")
 
     return {
         "driver_id": driver_id,
         "document_type": doc_type,
         "filename": doc_data.get("filename"),
-        "content_type": doc_data.get("content_type"),
-        "size_bytes": doc_data.get("size_bytes"),
+        "content_type": content_type,
+        "size_bytes": doc_data.get("size_bytes") or len(raw),
         "uploaded_at": doc_data.get("uploaded_at"),
         "expiry_date": doc_data.get("expiry_date"),
         "data": data_b64,
@@ -858,7 +974,7 @@ async def admin_get_payments(limit: int = 100, skip: int = 0):
     }
 
 @admin_router.post("/admin/subscriptions/{subscription_id}/approve")
-async def admin_approve_subscription(subscription_id: str):
+async def admin_approve_subscription(subscription_id: str, request: Request):
     """Manually approve a subscription payment"""
     result = await db.subscriptions.update_one(
         {"id": subscription_id},
@@ -870,11 +986,12 @@ async def admin_approve_subscription(subscription_id: str):
     )
     
     if result.modified_count > 0:
+        await _log_admin_action(request, "subscription_approved", "subscription", subscription_id)
         return {"success": True, "message": "Subscription approved"}
     return {"success": False, "message": "Subscription not found"}
 
 @admin_router.post("/admin/subscriptions/{subscription_id}/reject")
-async def admin_reject_subscription(subscription_id: str, reason: str = "Payment verification failed"):
+async def admin_reject_subscription(subscription_id: str, request: Request, reason: str = "Payment verification failed"):
     """Reject a subscription payment"""
     result = await db.subscriptions.update_one(
         {"id": subscription_id},
@@ -886,11 +1003,12 @@ async def admin_reject_subscription(subscription_id: str, reason: str = "Payment
     )
     
     if result.modified_count > 0:
+        await _log_admin_action(request, "subscription_rejected", "subscription", subscription_id, {"reason": reason})
         return {"success": True, "message": "Subscription rejected"}
     return {"success": False, "message": "Subscription not found"}
 
 @admin_router.post("/admin/users/{user_id}/block")
-async def admin_block_user(user_id: str, block: bool = True):
+async def admin_block_user(user_id: str, request: Request, block: bool = True):
     """Block or unblock a user"""
     result = await db.users.update_one(
         {"id": user_id},
@@ -898,6 +1016,7 @@ async def admin_block_user(user_id: str, block: bool = True):
     )
     
     if result.modified_count > 0:
+        await _log_admin_action(request, "user_blocked" if block else "user_unblocked", "user", user_id)
         return {"success": True, "message": f"User {'blocked' if block else 'unblocked'}"}
     return {"success": False, "message": "User not found"}
 
@@ -1668,7 +1787,12 @@ async def get_pending_vehicle_registrations(status: str = None):
     }
 
 @admin_router.put("/admin/vehicle-registrations/{registration_id}/verify")
-async def verify_vehicle_registration(registration_id: str, approved: bool = True, rejection_reason: str = None):
+async def verify_vehicle_registration(
+    registration_id: str,
+    request: Request,
+    approved: bool = True,
+    rejection_reason: str = None,
+):
     """Admin: Verify or reject a vehicle registration"""
     registration = await db.vehicle_registrations.find_one({"id": registration_id})
     
@@ -1732,6 +1856,13 @@ async def verify_vehicle_registration(registration_id: str, approved: bool = Tru
             )
     
     logger.info(f"Vehicle registration {registration_id} {'approved' if approved else 'rejected'}")
+    await _log_admin_action(
+        request,
+        "vehicle_registration_approved" if approved else "vehicle_registration_rejected",
+        "vehicle_registration",
+        registration_id,
+        {"driver_id": driver_id, "reason": rejection_reason},
+    )
     
     return {
         "success": True,
@@ -1843,8 +1974,9 @@ async def seed_promo_codes():
 
 
 @admin_router.delete("/admin/cleanup-test-data")
-async def cleanup_test_data():
+async def cleanup_test_data(request: Request):
     """Remove ALL test/dummy data from the database — thorough sweep."""
+    _require_admin_test_tools_enabled()
     test_rider_patterns = {"$regex": "^(TEST_|fav_|test-|pin-|e2e-|SMOKE|smoke|demo-|sample-)", "$options": "i"}
     test_driver_patterns = {"$regex": "^(TEST_|fav_|test-|pin-|e2e-|SMOKE|smoke|demo-|sample-)", "$options": "i"}
     test_address = {"$regex": "test|dummy|sample|placeholder|fake", "$options": "i"}
@@ -1870,14 +2002,17 @@ async def cleanup_test_data():
 
     remaining_pending = await db.trips.count_documents({"status": {"$in": ["pending", "pending_driver_offers"]}})
 
+    deleted = {
+        "trips": t1.deleted_count,
+        "users": t2.deleted_count,
+        "driver_profiles": t3.deleted_count,
+        "subscriptions": t4.deleted_count,
+        "wallets": t5.deleted_count,
+    }
+    await _log_admin_action(request, "cleanup_test_data", "test_data", "", deleted)
+
     return {
-        "deleted": {
-            "trips": t1.deleted_count,
-            "users": t2.deleted_count,
-            "driver_profiles": t3.deleted_count,
-            "subscriptions": t4.deleted_count,
-            "wallets": t5.deleted_count,
-        },
+        "deleted": deleted,
         "remaining_pending_trips": remaining_pending,
     }
 
@@ -1957,7 +2092,9 @@ async def admin_unsuspend_user(user_id: str, request: Request):
     booking blocks, forced-offline, and all active violations."""
     from admin_guard import require_admin_request
     await require_admin_request(request)
-    return await _perform_admin_unsuspend(user_id, pardoned_by="admin")
+    out = await _perform_admin_unsuspend(user_id, pardoned_by="admin")
+    await _log_admin_action(request, "user_unsuspended", "user", user_id)
+    return out
 
 
 @admin_router.post("/admin/users/unsuspend-by-email")
@@ -1975,6 +2112,7 @@ async def admin_unsuspend_by_email(request: Request, body: UnsuspendByEmailBody)
     uid = user["id"]
     out = await _perform_admin_unsuspend(uid, pardoned_by="admin")
     out["email"] = user.get("email")
+    await _log_admin_action(request, "user_unsuspended_by_email", "user", uid, {"email": user.get("email")})
     return out
 
 
@@ -1985,6 +2123,7 @@ async def admin_create_test_driver(request: Request):
     Returns email and user_id so you can log in immediately via email OTP."""
     from admin_guard import require_admin_request
     await require_admin_request(request)
+    _require_admin_test_tools_enabled()
 
     import uuid as _uuid
     now_iso = datetime.utcnow().isoformat()
@@ -2021,6 +2160,7 @@ async def admin_create_test_driver(request: Request):
             {"user_id": existing["id"]},
             {"$set": {"verification_status": "approved", "documents_verified": True}},
         )
+        await _log_admin_action(request, "test_driver_updated", "driver", existing["id"], {"email": test_email})
         return {
             "success": True,
             "message": "Test driver account updated",
@@ -2084,6 +2224,7 @@ async def admin_create_test_driver(request: Request):
         "approved_by": "admin_test_account",
         "created_at": now_iso,
     })
+    await _log_admin_action(request, "test_driver_created", "driver", user_id, {"email": test_email})
 
     return {
         "success": True,
@@ -2169,6 +2310,7 @@ async def admin_force_approve_driver(driver_id: str, request: Request):
             {"id": driver_id},
             {"$set": {"subscription_active": True}},
         )
+    await _log_admin_action(request, "driver_force_approved", "driver", driver_id, {"created_trial": not bool(existing_sub)})
 
     return {
         "success": True,
@@ -2195,6 +2337,13 @@ async def clear_monthly_verification_suspensions(http_request: Request):
     u_result = await db.users.update_many(
         {"suspension_reason": "monthly_verification_overdue"},
         {"$unset": {"suspension_reason": "", "suspended_until": ""}}
+    )
+    await _log_admin_action(
+        http_request,
+        "monthly_verification_suspensions_cleared",
+        "driver",
+        "",
+        {"driver_profiles": dp_result.modified_count, "users": u_result.modified_count},
     )
     return {
         "success": True,

@@ -15,11 +15,11 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>$(PRODUCT_NAME)</string>
+    <string>Nexryde</string>
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.3.32</string>
+    <string>1.3.33</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleURLTypes</key>
@@ -33,9 +33,9 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>52</string>
+    <string>64</string>
     <key>GMSApiKey</key>
-    <string>AIzaSyCg8_VB5ikbOzQHTJ1wVg1zGMdjTwCBSYs</string>
+    <string>AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <key>LSApplicationQueriesSchemes</key>
@@ -71,15 +71,13 @@
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>NEXRYDE uses your location to show nearby drivers, estimate pickup times, and track your trip in real time.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Allow NEXRYDE to use microphone for voice booking.</string>
+    <string>NEXRYDE uses the microphone only when you choose to record trip evidence for safety review.</string>
     <key>NSMotionUsageDescription</key>
     <string>NEXRYDE uses device motion sensors for the emergency shake-to-alert safety feature.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>NEXRYDE may save trip receipts or screenshots to your photo library.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>NEXRYDE needs access to your photos to let you upload a profile picture or driver documents.</string>
-    <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Allow NEXRYDE to recognize speech for voice booking.</string>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>
@@ -101,17 +99,22 @@
       <string>arm64</string>
     </array>
     <key>UIRequiresFullScreen</key>
-    <false/>
+    <true/>
     <key>UIStatusBarStyle</key>
-    <string>UIStatusBarStyleLightContent</string>
+    <string>UIStatusBarStyleDefault</string>
     <key>UISupportedInterfaceOrientations</key>
     <array>
       <string>UIInterfaceOrientationPortrait</string>
       <string>UIInterfaceOrientationPortraitUpsideDown</string>
     </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+      <string>UIInterfaceOrientationPortrait</string>
+      <string>UIInterfaceOrientationPortraitUpsideDown</string>
+    </array>
     <key>UIUserInterfaceStyle</key>
-    <string>Dark</string>
+    <string>Automatic</string>
     <key>UIViewControllerBasedStatusBarAppearance</key>
-    <false/>
+    <true/>
   </dict>
 </plist>

@@ -2,6 +2,7 @@ import { confirmTripPayment, getActiveTrip } from '@/src/services/api';
 import { useAppStore, type Trip } from '@/src/store/appStore';
 import { isActiveTripStatus, normalizeTripStatus } from '@/src/utils/tripStatus';
 import { isCashPaymentMethod } from '@/src/utils/tripPaymentMethod';
+import { reportNetworkOpsSignal } from '@/src/services/platformConnectionManager';
 
 export type ActiveTripPullResult = {
   found: boolean;
@@ -33,15 +34,20 @@ export async function pullAndApplyActiveTrip(userId: string): Promise<ActiveTrip
       if (isActiveTripStatus(normalizedStatus, trip.payment_status)) {
         const normalizedTrip = { ...trip, status: normalizedStatus } as Trip;
         useAppStore.getState().setCurrentTrip(normalizedTrip);
+        reportNetworkOpsSignal('trip_sync', true);
+        reportNetworkOpsSignal('active_trip', true);
         return { found: true, trip: normalizedTrip };
       }
       if (String(trip.status || '').toLowerCase() === 'completed') {
         useAppStore.getState().setCurrentTrip(null);
+        reportNetworkOpsSignal('active_trip', false);
       }
     }
 
+    reportNetworkOpsSignal('trip_sync', true);
     return { found: false, trip: null };
   } catch {
+    reportNetworkOpsSignal('trip_sync', false);
     return { found: false, trip: null };
   }
 }

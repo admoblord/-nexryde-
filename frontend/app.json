@@ -69,7 +69,7 @@
       }
     },
     "android": {
-      "versionCode": 196,
+      "versionCode": 200,
       "config": {
         "googleMaps": {
           "apiKey": "GOOGLE_MAPS_KEY_REDACTED"
@@ -139,10 +139,24 @@
         "expo-build-properties",
         {
           "ios": {
-            "buildReactNativeFromSource": true
+            "buildReactNativeFromSource": true,
+            "deploymentTarget": "16.4"
+          },
+          "android": {
+            "minSdkVersion": 24,
+            "enablePngCrunchInReleaseBuilds": true,
+            "extraProguardRules": "",
+            "packagingOptions": {
+              "pickFirst": [
+                "**/libc++_shared.so",
+                "**/libjsc.so"
+              ]
+            },
+            "usesCleartextTraffic": false
           }
         }
       ],
+      "@maplibre/maplibre-react-native",
       "expo-router",
       [
         "expo-location",

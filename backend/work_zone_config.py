@@ -14,9 +14,11 @@ WORK_ZONE_ROLLOUT_MODE = os.getenv(
 # End-of-day expiry in West Africa Time (hour 0–23). Default 23:59 WAT ≈ hour 23.
 WORK_ZONE_EXPIRY_HOUR_WAT = int(os.getenv("WORK_ZONE_EXPIRY_HOUR_WAT", "23"))
 
-# Marketplace guardrails
+# Marketplace telemetry. These values are no longer activation blockers; they
+# remain public so the client can explain density/demand without preventing a
+# new area from growing organically.
 WORK_ZONE_MAX_ZONED_SHARE = float(os.getenv("WORK_ZONE_MAX_ZONED_SHARE", "0.3"))
-WORK_ZONE_MIN_ONLINE_DRIVERS = int(os.getenv("WORK_ZONE_MIN_ONLINE_DRIVERS", "5"))
+WORK_ZONE_MIN_ONLINE_DRIVERS = int(os.getenv("WORK_ZONE_MIN_ONLINE_DRIVERS", "1"))
 
 # Comma-separated emails with rollout early access (global flag OFF still allows these).
 _raw_early = os.getenv(
@@ -28,6 +30,10 @@ WORK_ZONE_EARLY_ACCESS_EMAILS = {
 }
 
 WORK_ZONE_MAX_AREAS = int(os.getenv("WORK_ZONE_MAX_AREAS", "4"))
+WORK_ZONE_MAX_ZONES = int(os.getenv("WORK_ZONE_MAX_ZONES", str(WORK_ZONE_MAX_AREAS)))
+WORK_ZONE_DEFAULT_RADIUS_M = int(os.getenv("WORK_ZONE_DEFAULT_RADIUS_M", "5000"))
+WORK_ZONE_MIN_RADIUS_M = int(os.getenv("WORK_ZONE_MIN_RADIUS_M", "1000"))
+WORK_ZONE_MAX_RADIUS_M = int(os.getenv("WORK_ZONE_MAX_RADIUS_M", "25000"))
 
 
 def work_zone_public_config() -> dict[str, Any]:
@@ -39,8 +45,24 @@ def work_zone_public_config() -> dict[str, Any]:
         "no_additional_fee": True,
         "expiry_hour_wat": WORK_ZONE_EXPIRY_HOUR_WAT,
         "max_areas": WORK_ZONE_MAX_AREAS,
+        "max_zones": WORK_ZONE_MAX_ZONES,
+        "default_radius_m": WORK_ZONE_DEFAULT_RADIUS_M,
+        "min_radius_m": WORK_ZONE_MIN_RADIUS_M,
+        "max_radius_m": WORK_ZONE_MAX_RADIUS_M,
         "max_zoned_share": WORK_ZONE_MAX_ZONED_SHARE,
         "min_online_drivers": WORK_ZONE_MIN_ONLINE_DRIVERS,
+        "activation_requires_online_driver_count": False,
+        "matching_mode": "radius_geofence",
+        "supported_location_types": [
+            "state",
+            "city",
+            "lga",
+            "town",
+            "district",
+            "estate",
+            "neighborhood",
+            "landmark",
+        ],
         "idle_suggestion_minutes": 30,
         "copy": {
             "title": "Work Zone",

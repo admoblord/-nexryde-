@@ -23,6 +23,7 @@ import * as Haptics from 'expo-haptics';
 import { RiderBrandHeaderRow } from '@/src/components/rider/RiderBrandChrome';
 import { RiderFavoriteIcon } from '@/src/components/rider/RiderFavoriteIcon';
 import { AddFavoriteDriverModal } from '@/src/components/rider/AddFavoriteDriverModal';
+import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import {
   getTrip,
@@ -36,8 +37,11 @@ import {
 } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
-import { CURRENCY, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { CURRENCY, SPACING, FONT_SIZE, BORDER_RADIUS, useThemeColors } from '@/src/constants/theme';
+import { SURFACE } from '@/src/constants/designSystem';
 import { summarizeTripReceiptFare } from '@/src/utils/tripReceiptFare';
+import { isCashPaymentMethod, isWalletPaymentMethod } from '@/src/utils/tripPaymentMethod';
+import { TripRouteMiniMap } from '@/src/components/map/TripRouteMiniMap';
 
 const TIP_PRESETS = [0, 50, 100, 200] as const;
 
@@ -64,25 +68,66 @@ function formatReceiptElapsed(started?: string, completed?: string, durationMins
   return '—';
 }
 
-// ── Colour palette ─────────────────────────────────────────────────────────
-const C = {
-  bg:         '#020617',
-  bgElevated: '#0A0F1A',
-  bgMid:      '#0B1223',
-  card:       '#0F172A',
-  cardLight:  '#1E293B',
-  border:     '#1E293B',
-  green:      '#22C55E',
-  greenBright: '#32D74B',
-  greenDim:   '#15803D',
-  amber:      '#F59E0B',
-  amberDim:   '#78350F',
-  red:        '#EF4444',
-  blue:       '#3B82F6',
-  white:      '#FFFFFF',
-  muted:      '#94A3B8',
-  dim:        '#334155',
+// ── Colour palette (theme-aware surfaces; accents stay brand-stable) ───────
+type ReceiptPalette = {
+  bg: string;
+  bgElevated: string;
+  bgMid: string;
+  card: string;
+  cardLight: string;
+  border: string;
+  green: string;
+  greenBright: string;
+  greenDim: string;
+  amber: string;
+  amberDim: string;
+  red: string;
+  blue: string;
+  white: string;
+  muted: string;
+  dim: string;
 };
+
+function buildReceiptPalette(isDark: boolean, text: string, muted: string, border: string, card: string, background: string, surfaceAlt: string): ReceiptPalette {
+  if (isDark) {
+    return {
+      bg: '#020617',
+      bgElevated: '#0A0F1A',
+      bgMid: '#0B1223',
+      card: '#0F172A',
+      cardLight: '#1E293B',
+      border: '#1E293B',
+      green: '#22C55E',
+      greenBright: '#32D74B',
+      greenDim: '#15803D',
+      amber: '#F59E0B',
+      amberDim: '#78350F',
+      red: '#EF4444',
+      blue: '#3B82F6',
+      white: '#FFFFFF',
+      muted: '#94A3B8',
+      dim: '#334155',
+    };
+  }
+  return {
+    bg: background,
+    bgElevated: background,
+    bgMid: surfaceAlt,
+    card: card,
+    cardLight: SURFACE.glassSoft,
+    border: border,
+    green: '#22C55E',
+    greenBright: '#16A34A',
+    greenDim: '#15803D',
+    amber: '#F59E0B',
+    amberDim: '#78350F',
+    red: '#EF4444',
+    blue: '#3B82F6',
+    white: text,
+    muted: muted,
+    dim: border,
+  };
+}
 
 // ── Quick reaction options ─────────────────────────────────────────────────
 const QUICK_REACTIONS = [
@@ -99,6 +144,8 @@ interface TripData {
   rider_id: string;
   driver_id?: string;
   driver_name?: string;
+  driver_profile_image?: string | null;
+  driver_face_image?: string | null;
   pickup_location: string | { lat: number; lng: number; address: string };
   dropoff_location: string | { lat: number; lng: number; address: string };
   distance_km?: number;
@@ -114,6 +161,7 @@ interface TripData {
   vehicle_plate?: string;
   payment_method?: string;
   payment_status?: string;
+  status?: string;
   driver_bank_name?: string;
   driver_account_number?: string;
   driver_account_name?: string;
@@ -128,6 +176,15 @@ interface TripData {
   first_ride_discount_ngn?: number;
   first_ride_discount_pct?: number;
   started_at?: string;
+  stop_location?: { lat: number; lng: number; address?: string } | null;
+  route_preview_coordinates?: Array<{ lat: number; lng: number }> | null;
+}
+
+function isPendingReceiptPayment(trip?: TripData | null): boolean {
+  if (!trip) return false;
+  const status = String(trip.status || '').toLowerCase();
+  const paymentStatus = String(trip.payment_status || '').toLowerCase();
+  return status === 'pending_payment' || (status === 'completed' && paymentStatus === 'pending');
 }
 
 export default function TripReceiptScreen() {
@@ -137,6 +194,21 @@ export default function TripReceiptScreen() {
   const params  = useLocalSearchParams<{ tripId?: string }>();
   const { user } = useAppStore();
   const { userId, canCallAuthedApi } = useAuthedUserId();
+  const { colors, isDark } = useThemeColors();
+  const C = useMemo(
+    () =>
+      buildReceiptPalette(
+        isDark,
+        colors.text,
+        colors.textMuted,
+        colors.border,
+        colors.card,
+        colors.background,
+        colors.surfaceAlt,
+      ),
+    [isDark, colors.text, colors.textMuted, colors.border, colors.card, colors.background, colors.surfaceAlt],
+  );
+  const s = useMemo(() => createReceiptStyles(C), [C]);
 
   // ── Data state ──────────────────────────────────────────────────────────
   // Seed instantly from the in-memory trip so the summary renders immediately
@@ -150,12 +222,20 @@ export default function TripReceiptScreen() {
   const [blackBox, setBlackBox]             = useState<any>(null);
   const [loadingBlackBox, setLoadingBlackBox] = useState(false);
 
-  // The trip is terminally completed once we reach the receipt — release the
-  // rider's active-trip lock immediately so the home screen unlocks and the
-  // booking flow is available again (no "New bookings are paused" / no loop).
+  // Paid receipts are terminal. Pending wallet/transfer receipts must keep the
+  // active-trip lock so riders cannot book another trip before settling.
   useEffect(() => {
-    useAppStore.getState().setCurrentTrip(null);
-  }, []);
+    if (!params.tripId || !trip) return;
+    const store = useAppStore.getState();
+    if (isPendingReceiptPayment(trip)) {
+      store.setCurrentTrip(trip as any);
+      return;
+    }
+    const current = store.currentTrip;
+    if (!current || current.id === params.tripId) {
+      store.setCurrentTrip(null);
+    }
+  }, [params.tripId, trip?.id, trip?.status, trip?.payment_status]);
 
   // ── Interaction state ────────────────────────────────────────────────────
   const [isFavorite,      setIsFavorite]      = useState(false);
@@ -278,7 +358,7 @@ export default function TripReceiptScreen() {
       fareSummary,
       discountLabel,
       driverName:    trip.driver_name || trip.driver_id || 'Driver',
-      driverInitial: (trip.driver_name || 'D')[0].toUpperCase(),
+      driverPhoto:   trip.driver_profile_image || trip.driver_face_image || null,
       driverRating:  Number(trip.driver_rating || 0),
       vehicle:       trip.vehicle_type || trip.service_type || 'Vehicle',
       plate:         trip.vehicle_plate || '',
@@ -463,6 +543,7 @@ export default function TripReceiptScreen() {
       const res = await confirmTripPayment(trip.id);
       if (res?.data?.success) {
         setTrip((prev) => (prev ? { ...prev, payment_status: 'completed' } : prev));
+        useAppStore.getState().setCurrentTrip(null);
         Alert.alert('Payment Confirmed', 'Thanks. Your payment has been confirmed.');
       }
     } catch (e: any) {
@@ -522,7 +603,7 @@ export default function TripReceiptScreen() {
   // ── Main receipt ──────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={s.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bgElevated} />
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={C.bgElevated} />
 
       <Modal
         transparent
@@ -655,6 +736,59 @@ export default function TripReceiptScreen() {
         </Animated.View>
 
         <Animated.View style={{ opacity: headerFade, transform: [{ translateY: contentSlide }] }}>
+          <View style={s.routeMapCard}>
+            <TripRouteMiniMap
+              pickup={trip?.pickup_location}
+              dropoff={trip?.dropoff_location}
+              stop={(trip as { stop_location?: unknown } | null)?.stop_location}
+              routePreview={trip?.route_preview_coordinates}
+              height={148}
+            />
+          </View>
+
+          {/* Tip-first hero — Uber-style primary post-trip action */}
+          {trip?.driver_id && !ratingSubmitted ? (
+            <View style={s.tipHeroCard}>
+              <Text style={s.tipHeroTitle}>Say thanks with a tip</Text>
+              <Text style={s.tipHeroSub}>Optional · recorded with your rating</Text>
+              <View style={s.tipChipWrap}>
+                {TIP_PRESETS.map((n) => (
+                  <TouchableOpacity
+                    key={`hero-tip-${n}`}
+                    style={[s.tipChip, tipNgn === n && s.tipChipOn]}
+                    onPress={() => {
+                      void Haptics.selectionAsync();
+                      setTipNgn(n);
+                    }}
+                  >
+                    <Text style={[s.tipChipTxt, tipNgn === n && s.tipChipTxtOn]}>
+                      {n === 0 ? `${CURRENCY}0` : `${CURRENCY}${n}`}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  style={[
+                    s.tipChip,
+                    tipNgn > 0 && !(TIP_PRESETS as readonly number[]).includes(tipNgn) ? s.tipChipOn : null,
+                  ]}
+                  onPress={() => {
+                    setCustomTipDraft(tipNgn > 0 ? String(tipNgn) : '');
+                    setCustomTipOpen(true);
+                  }}
+                >
+                  <Text
+                    style={[
+                      s.tipChipTxt,
+                      tipNgn > 0 && !(TIP_PRESETS as readonly number[]).includes(tipNgn) ? s.tipChipTxtOn : null,
+                    ]}
+                  >
+                    Custom
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
+
           {/* ── Trip summary (fare) ───────────────────────────────────── */}
           <View style={s.summaryCard}>
             <Text style={s.summaryCardTitle}>Trip Summary</Text>
@@ -717,25 +851,54 @@ export default function TripReceiptScreen() {
             </View>
           </View>
 
-          {view.paymentStatus === 'pending' && view.accountNumber ? (
+          {view.paymentStatus === 'pending' && userId === trip?.rider_id ? (
             <View style={s.payInstructCard}>
-              <Text style={s.payInstructTitle}>Pay Driver Directly</Text>
-              <Text style={s.payInstructSub}>Transfer to the account below:</Text>
-              <Text style={s.payInstructBank}>{view.bankName}</Text>
-              <Text style={s.payInstructAcct}>{view.accountNumber}</Text>
-              <Text style={s.payInstructName}>{view.accountName}</Text>
-              {userId === trip?.rider_id && (
-                <TouchableOpacity style={s.confirmPayBtn} onPress={handleConfirmPayment} disabled={confirmingPayment}>
-                  <Ionicons name="checkmark-circle-outline" size={16} color={C.white} />
-                  <Text style={s.confirmPayBtnText}>{confirmingPayment ? 'Confirming...' : 'I Have Paid'}</Text>
-                </TouchableOpacity>
-              )}
+              <Text style={s.payInstructTitle}>
+                {isWalletPaymentMethod(trip?.payment_method)
+                  ? 'Pay from NEXRYDE Wallet'
+                  : view.accountNumber
+                    ? 'Pay Driver Directly'
+                    : 'Confirm Payment'}
+              </Text>
+              <Text style={s.payInstructSub}>
+                {isWalletPaymentMethod(trip?.payment_method)
+                  ? 'Tap below to settle this fare from your reserved wallet balance.'
+                  : view.accountNumber
+                    ? 'Transfer to the account below:'
+                    : 'Tap below once this non-cash fare has been settled.'}
+              </Text>
+              {view.accountNumber ? (
+                <>
+                  <Text style={s.payInstructBank}>{view.bankName}</Text>
+                  <Text style={s.payInstructAcct}>{view.accountNumber}</Text>
+                  <Text style={s.payInstructName}>{view.accountName}</Text>
+                </>
+              ) : null}
+              <TouchableOpacity
+                style={s.confirmPayBtn}
+                onPress={handleConfirmPayment}
+                disabled={confirmingPayment || isCashPaymentMethod(trip?.payment_method)}
+              >
+                <Ionicons name="checkmark-circle-outline" size={16} color={C.white} />
+                <Text style={s.confirmPayBtnText}>
+                  {confirmingPayment
+                    ? 'Confirming...'
+                    : isWalletPaymentMethod(trip?.payment_method)
+                      ? 'Pay From Wallet'
+                      : 'I Have Paid'}
+                </Text>
+              </TouchableOpacity>
             </View>
           ) : null}
           <View style={s.driverCard}>
-            <LinearGradient colors={['#1D4ED8', '#2563EB']} style={s.driverAvatar}>
-              <Text style={s.driverInitial}>{view.driverInitial}</Text>
-            </LinearGradient>
+            <TripProfileAvatar
+              size={52}
+              uri={view.driverPhoto}
+              person={trip as unknown as Record<string, unknown>}
+              role="driver"
+              borderColor="rgba(59,130,246,0.65)"
+              accessibilityLabel={`Photo of ${view.driverName}`}
+            />
             <View style={s.driverMeta}>
               <Text style={s.driverName}>{view.driverName}</Text>
               <View style={s.driverSub}>
@@ -1135,7 +1298,8 @@ export default function TripReceiptScreen() {
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────
-const s = StyleSheet.create({
+function createReceiptStyles(C: ReceiptPalette) {
+  return StyleSheet.create({
   container:    { flex: 1, backgroundColor: C.bgElevated },
   centered:     { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 16 },
   loadingText:  { color: C.muted, fontWeight: '600', fontSize: FONT_SIZE.sm },
@@ -1176,6 +1340,32 @@ const s = StyleSheet.create({
   completeHeroTitle: { fontSize: 22, fontWeight: '900', color: C.greenBright, marginTop: 2 },
   completeHeroSub: { fontSize: 16, fontWeight: '700', color: '#4ADE80', marginTop: 4 },
 
+  routeMapCard: {
+    marginTop: 10,
+    marginBottom: 4,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  tipHeroCard: {
+    backgroundColor: 'rgba(34,197,94,0.10)',
+    borderRadius: 18,
+    padding: 16,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.28)',
+  },
+  tipHeroTitle: {
+    color: '#F8FAFC',
+    fontSize: 17,
+    fontWeight: '900',
+    marginBottom: 4,
+  },
+  tipHeroSub: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
   summaryCard: {
     backgroundColor: '#141C2B',
     borderRadius: 18,
@@ -1422,8 +1612,6 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(148,163,184,0.1)',
   },
-  driverAvatar: { width: 50, height: 50, borderRadius: 25, alignItems: 'center', justifyContent: 'center' },
-  driverInitial:{ fontSize: 22, fontWeight: '900', color: C.white },
   driverMeta:   { flex: 1 },
   driverName:   { fontSize: FONT_SIZE.md, fontWeight: '800', color: C.white },
   driverSub:    { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
@@ -1605,3 +1793,4 @@ const s = StyleSheet.create({
   submitRatingBtnOff: { opacity: 0.42 },
   submitRatingBtnText: { fontSize: FONT_SIZE.md, fontWeight: '900', color: '#022C22' },
 });
+}

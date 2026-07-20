@@ -79,14 +79,49 @@ def mask_last4(last4: str | None) -> str:
 
 
 def resolve_nin_plaintext(doc: dict[str, Any] | None) -> str | None:
-    """Decrypt nin_cipher or read legacy plaintext nin (migration window)."""
+    """Decrypt nin_cipher or read legacy plaintext nin / nin_number (migration window)."""
     if not doc:
         return None
     decrypted = decrypt_pii_cipher(doc.get("nin_cipher"))
     if decrypted:
         return decrypted
-    legacy = (doc.get("nin") or "").strip()
-    return legacy or None
+    for key in ("nin", "nin_number"):
+        legacy = (doc.get(key) or "").strip()
+        if legacy:
+            return legacy
+    return None
+
+
+def resolve_driver_nin_plaintext(
+    docs_row: dict[str, Any] | None,
+    user: dict[str, Any] | None = None,
+) -> str | None:
+    """Resolve driver NIN from archive top-level, nested documents.nin, then user."""
+    import base64
+    import re
+
+    docs_row = docs_row or {}
+    plaintext = resolve_nin_plaintext(docs_row)
+    if plaintext:
+        return plaintext
+
+    nin_doc = (docs_row.get("documents") or {}).get("nin")
+    if isinstance(nin_doc, dict):
+        plaintext = resolve_nin_plaintext(nin_doc)
+        if plaintext:
+            return plaintext
+        # Legacy number-only payloads sometimes stored tiny inline base64 text.
+        inline = nin_doc.get("data")
+        if inline and nin_doc.get("capture_mode") == "number_only":
+            try:
+                raw = base64.b64decode(inline).decode("utf-8", errors="ignore").strip()
+                digits = re.sub(r"\D", "", raw)
+                if len(digits) == 11:
+                    return digits
+            except Exception:
+                pass
+
+    return resolve_nin_plaintext(user)
 
 
 def resolve_license_plaintext(doc: dict[str, Any] | None) -> str | None:

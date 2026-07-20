@@ -57,7 +57,6 @@ import {
   DIRECTIONS_ROUTE_MIN_POINTS,
 } from '@/src/navigation/navUtils';
 import { decodePolyline } from '@/src/utils/polylineDecoder';
-import { resolvePublicMediaUri } from '@/src/utils/resolvePublicMediaUri';
 import {
   beginRouteRecalc,
   commitFare,
@@ -69,23 +68,19 @@ import {
   type TripDraft,
   type TripDraftLocation,
 } from '@/src/utils/bookingTripDraft';
-import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRiderTripRealtime';
-import { isRiderMapLiveTripStatus } from '@/src/constants/tripRealtimeRhythm';
 import { tripLocationRecord } from '@/src/utils/tripCoords';
-import { TrafficAI, type TrafficRoute } from '@/src/services/trafficAI';
+import { TrafficIntelligence, type TrafficRoute } from '@/src/services/trafficAI';
 import MapComponent from '@/src/components/MapComponent';
+import { RiderBookingMapNative } from '@/src/components/map/RiderBookingMapNative';
+import { getNexrydeMapStyle } from '@/src/constants/nexrydeMapBehavior';
 import { ErrorBoundary } from '@/src/components/ErrorBoundary';
-import { RiderPostRequestOverlay, type RiderMatchedDriver } from '@/src/components/rider/RiderPostRequestOverlay';
 import { getRecentLocations, cacheRecentLocation, createOfflineBooking, checkOnlineStatus } from '@/src/services/offlineMode';
 import { authedFetch } from '@/src/utils/sessionRefresh';
 import * as Haptics from 'expo-haptics';
 import { geocodeAddressForRider } from '@/src/services/riderSavedPlaces';
 import { useFlowLayout } from '@/src/constants/flowLayout';
+import { useThemeColors } from '@/src/constants/theme';
 import { RIDER_PRIMARY_CTA_GRADIENT } from '@/src/constants/riderRideChrome';
-import {
-  RIDER_DRIVER_FOUND_HANDOFF_MS,
-  riderHandoffCountdownSec,
-} from '@/src/constants/riderTripHandoff';
 
 /** Set `EXPO_PUBLIC_BOOKING_PROMO=false` to hide the booking promo strip entirely. */
 const BOOKING_PROMO_ENABLED = String(process.env.EXPO_PUBLIC_BOOKING_PROMO ?? 'true').toLowerCase() !== 'false';
@@ -243,541 +238,6 @@ const RIDE_PREFERENCE_OPTIONS = [
   { id: 'cold_ac', label: 'AC Must Be Cold', icon: 'snow' as const },
 ];
 
-/** Premium dark map — Nexryde night (depth + readable roads, minimal POI noise). */
-const BOOKING_MAP_DARK_STYLE = [
-  { elementType: 'geometry', stylers: [{ color: '#0c1220' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#8eaad4' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#0c1220' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#162536' }] },
-  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#0f172a' }] },
-  { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#1e2d42' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2a3d55' }] },
-  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#1b2738' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#060b14' }] },
-  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
-];
-
-const bookingMapStyles = StyleSheet.create({
-  pickupHalo: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(34,229,160,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.35)',
-    shadowColor: '#22E5A0',
-    shadowOpacity: 0.45,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 6,
-  },
-  pickupCore: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#22E5A0',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  dropHalo: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: 'rgba(239,68,68,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.4)',
-    shadowColor: '#EF4444',
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 6,
-  },
-  dropCore: {
-    width: 11,
-    height: 11,
-    borderRadius: 5.5,
-    backgroundColor: '#EF4444',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  stopHalo: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: 'rgba(245,158,11,0.22)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
-  },
-  stopCore: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#F59E0B',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  driverCar: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: 'rgba(15,23,42,0.92)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(0,212,106,0.65)',
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 4,
-  },
-  driverCarSearch: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#0B0F14',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.14)',
-    shadowColor: '#000',
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 8,
-  },
-  pickupHaloSearch: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(52,245,184,0.32)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2.5,
-    borderColor: 'rgba(255,255,255,0.5)',
-    shadowColor: '#34F5B8',
-    shadowOpacity: 0.6,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 12,
-  },
-  pickupCoreSearch: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#34F5B8',
-    borderWidth: 2.5,
-    borderColor: '#fff',
-  },
-  pickupHaloLocked: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(34,229,160,0.38)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.5)',
-    shadowColor: '#22E5A0',
-    shadowOpacity: 0.65,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 12,
-  },
-  pickupCoreLocked: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#34F5B8',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-});
-
-/** Native map — Google Directions polyline, premium blue route + dark cartography. */
-function BookingRideMapNative(props: {
-  pickupCoords: { lat: number; lng: number };
-  destinationCoords: { lat: number; lng: number } | null;
-  stopCoords?: { lat: number; lng: number } | null;
-  routePolyline: { latitude: number; longitude: number }[];
-  pickup: string;
-  destination: string;
-  stop?: string;
-  /** True while fetching road-snapped path (optional subtle indicator). */
-  routeLoading?: boolean;
-  /** Subtle breathing scale on dropoff halo until rider dismisses (e.g. scrolls sheet). */
-  pulseDropoffHalo?: boolean;
-  /** Full-screen “finding driver” — stronger pickup pulse, LIVE-style chrome, driver tags. */
-  searchMode?: boolean;
-  /** Driver accepted — mint “locked route” + celebration markers (pairs with RiderPostRequestOverlay matched). */
-  matchLocked?: boolean;
-  nearbyDrivers: Array<{
-    driver_id: string;
-    name?: string;
-    lat: number;
-    lng: number;
-    status?: string;
-    vehicle?: string;
-  }>;
-}) {
-  const mapRef = React.useRef<any>(null);
-  const dropPulseScale = React.useRef(new Animated.Value(1)).current;
-  const routeLen = props.routePolyline.length;
-  const routeHead = props.routePolyline[0];
-  const routeTail = routeLen > 0 ? props.routePolyline[routeLen - 1] : null;
-
-  React.useEffect(() => {
-    const pulseOn = Boolean(props.pulseDropoffHalo && props.destinationCoords);
-    if (!pulseOn) {
-      dropPulseScale.stopAnimation();
-      dropPulseScale.setValue(1);
-      return;
-    }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(dropPulseScale, {
-          toValue: 1.12,
-          duration: 1000,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(dropPulseScale, {
-          toValue: 1,
-          duration: 1000,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    loop.start();
-    return () => {
-      loop.stop();
-      dropPulseScale.setValue(1);
-    };
-  }, [props.pulseDropoffHalo, props.destinationCoords?.lat, props.destinationCoords?.lng]);
-
-  React.useEffect(() => {
-    const m = mapRef.current;
-    if (!m) return;
-    const t = setTimeout(() => {
-      try {
-        const sm = Boolean(props.searchMode);
-        const locked = Boolean(sm && props.matchLocked);
-        const pad = sm
-          ? { top: 110, right: 18, bottom: locked ? 260 : 240, left: 18 }
-          : { top: 88, right: 20, bottom: 132, left: 20 };
-        if (props.destinationCoords && props.routePolyline.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
-          const fit = sampleCoordsForFit(props.routePolyline);
-          m.fitToCoordinates(fit, {
-            edgePadding: pad,
-            animated: true,
-          });
-        } else if (props.destinationCoords) {
-          const coordsFit = [
-            { latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng },
-            ...(props.stopCoords
-              ? [{ latitude: props.stopCoords.lat, longitude: props.stopCoords.lng }]
-              : []),
-            { latitude: props.destinationCoords.lat, longitude: props.destinationCoords.lng },
-          ];
-          m.fitToCoordinates(coordsFit, { edgePadding: pad, animated: true });
-        } else {
-          m.animateToRegion(
-            {
-              latitude: props.pickupCoords.lat,
-              longitude: props.pickupCoords.lng,
-              latitudeDelta: 0.04,
-              longitudeDelta: 0.04,
-            },
-            400,
-          );
-        }
-      } catch {
-        /* silent */
-      }
-    }, 350);
-    return () => clearTimeout(t);
-  }, [
-    props.pickupCoords.lat,
-    props.pickupCoords.lng,
-    props.destinationCoords?.lat,
-    props.destinationCoords?.lng,
-    routeLen,
-    routeHead?.latitude,
-    routeHead?.longitude,
-    routeTail?.latitude,
-    routeTail?.longitude,
-    props.searchMode,
-    props.matchLocked,
-  ]);
-
-  try {
-    const { default: MapView, Marker, Polyline, Circle, PROVIDER_GOOGLE } = require('react-native-maps');
-    const safeDrivers = (props.nearbyDrivers || []).filter(
-      (d) => d && Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lng)),
-    );
-    const sm = Boolean(props.searchMode);
-    const locked = Boolean(sm && props.matchLocked);
-    return (
-      <View style={StyleSheet.absoluteFillObject}>
-      <MapView
-        ref={mapRef}
-        style={StyleSheet.absoluteFillObject}
-        provider={PROVIDER_GOOGLE}
-        initialRegion={{
-          latitude: props.pickupCoords.lat,
-          longitude: props.pickupCoords.lng,
-          latitudeDelta: 0.04,
-          longitudeDelta: 0.04,
-        }}
-        showsUserLocation
-        showsMyLocationButton={false}
-        loadingEnabled={false}
-        showsBuildings={false}
-        showsPointsOfInterest={false}
-        showsCompass={false}
-        showsIndoors={false}
-        toolbarEnabled={false}
-        customMapStyle={BOOKING_MAP_DARK_STYLE}
-      >
-        {sm && !locked && (
-          <>
-            <Circle
-              center={{ latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng }}
-              radius={95}
-              fillColor="rgba(52,245,184,0.06)"
-              strokeColor="rgba(52,245,184,0.38)"
-              strokeWidth={1}
-            />
-            <Circle
-              center={{ latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng }}
-              radius={190}
-              fillColor="rgba(52,245,184,0.03)"
-              strokeColor="rgba(52,245,184,0.22)"
-              strokeWidth={1}
-            />
-            <Circle
-              center={{ latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng }}
-              radius={320}
-              fillColor="transparent"
-              strokeColor="rgba(52,245,184,0.12)"
-              strokeWidth={1}
-            />
-          </>
-        )}
-        {props.routePolyline.length >= DIRECTIONS_ROUTE_MIN_POINTS && (
-          <>
-            {locked ? (
-              <>
-                <Polyline
-                  coordinates={props.routePolyline}
-                  strokeColor="rgba(34,229,160,0.14)"
-                  strokeWidth={24}
-                  geodesic={false}
-                  lineCap="round"
-                  lineJoin="round"
-                />
-                <Polyline
-                  coordinates={props.routePolyline}
-                  strokeColor="rgba(16,185,129,0.52)"
-                  strokeWidth={12}
-                  geodesic={false}
-                  lineCap="round"
-                  lineJoin="round"
-                />
-                <Polyline
-                  coordinates={props.routePolyline}
-                  strokeColor="#ECFDF5"
-                  strokeWidth={4}
-                  geodesic={false}
-                  lineCap="round"
-                  lineJoin="round"
-                />
-              </>
-            ) : sm ? (
-              <>
-                <Polyline
-                  coordinates={props.routePolyline}
-                  strokeColor="rgba(56,189,248,0.1)"
-                  strokeWidth={20}
-                  geodesic={false}
-                  lineCap="round"
-                  lineJoin="round"
-                />
-                <Polyline
-                  coordinates={props.routePolyline}
-                  strokeColor="rgba(14,165,233,0.48)"
-                  strokeWidth={10}
-                  geodesic={false}
-                  lineCap="round"
-                  lineJoin="round"
-                />
-                <Polyline
-                  coordinates={props.routePolyline}
-                  strokeColor="#BAE6FD"
-                  strokeWidth={3}
-                  geodesic={false}
-                  lineCap="round"
-                  lineJoin="round"
-                />
-              </>
-            ) : (
-              <>
-                <Polyline
-                  coordinates={props.routePolyline}
-                  strokeColor="rgba(56,189,248,0.12)"
-                  strokeWidth={20}
-                  geodesic={false}
-                  lineCap="round"
-                  lineJoin="round"
-                />
-                <Polyline
-                  coordinates={props.routePolyline}
-                  strokeColor="rgba(14,165,233,0.45)"
-                  strokeWidth={10}
-                  geodesic={false}
-                  lineCap="round"
-                  lineJoin="round"
-                />
-                <Polyline
-                  coordinates={props.routePolyline}
-                  strokeColor={COLORS.routeHighlight}
-                  strokeWidth={3}
-                  geodesic={false}
-                  lineCap="round"
-                  lineJoin="round"
-                />
-              </>
-            )}
-          </>
-        )}
-        <Marker
-          coordinate={{ latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng }}
-          title="Pickup"
-          description={props.pickup}
-          anchor={{ x: 0.5, y: sm ? 0.72 : 0.5 }}
-          tracksViewChanges={false}
-        >
-          <View style={{ alignItems: 'center' }}>
-            <View
-              style={
-                locked
-                  ? bookingMapStyles.pickupHaloLocked
-                  : sm
-                    ? bookingMapStyles.pickupHaloSearch
-                    : bookingMapStyles.pickupHalo
-              }
-            >
-              <View
-                style={
-                  locked
-                    ? bookingMapStyles.pickupCoreLocked
-                    : sm
-                      ? bookingMapStyles.pickupCoreSearch
-                      : bookingMapStyles.pickupCore
-                }
-              />
-            </View>
-          </View>
-        </Marker>
-        {props.stopCoords ? (
-          <Marker
-            coordinate={{ latitude: props.stopCoords.lat, longitude: props.stopCoords.lng }}
-            title="Stop"
-            description={props.stop || 'Stop'}
-            anchor={{ x: 0.5, y: 0.5 }}
-            tracksViewChanges={false}
-          >
-            <View style={bookingMapStyles.stopHalo}>
-              <View style={bookingMapStyles.stopCore} />
-            </View>
-          </Marker>
-        ) : null}
-        {props.destinationCoords && (
-          <Marker
-            coordinate={{ latitude: props.destinationCoords.lat, longitude: props.destinationCoords.lng }}
-            title="Destination"
-            description={props.destination}
-            anchor={{ x: 0.5, y: 0.5 }}
-            tracksViewChanges={Boolean(props.pulseDropoffHalo)}
-          >
-            <Animated.View style={[bookingMapStyles.dropHalo, { transform: [{ scale: dropPulseScale }] }]}>
-              <View style={bookingMapStyles.dropCore} />
-            </Animated.View>
-          </Marker>
-        )}
-        {safeDrivers.map((d) => (
-          <Marker
-            key={d.driver_id}
-            coordinate={{ latitude: Number(d.lat), longitude: Number(d.lng) }}
-            tracksViewChanges={false}
-            anchor={{ x: 0.5, y: 0.5 }}
-          >
-            <View style={{ alignItems: 'center' }}>
-              <View style={sm ? bookingMapStyles.driverCarSearch : bookingMapStyles.driverCar}>
-                <Ionicons name="car-sport" size={sm ? 14 : 11} color={sm ? '#FFFFFF' : '#4ADE80'} />
-              </View>
-            </View>
-          </Marker>
-        ))}
-      </MapView>
-        {sm ? (
-          <>
-            <LinearGradient
-              pointerEvents="none"
-              colors={['rgba(2,6,23,0.5)', 'rgba(2,6,23,0.12)', 'transparent']}
-              locations={[0, 0.45, 1]}
-              style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '32%' }}
-            />
-            <LinearGradient
-              pointerEvents="none"
-              colors={['transparent', 'rgba(2,6,23,0.22)', 'rgba(2,6,23,0.45)']}
-              locations={[0, 0.55, 1]}
-              style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '38%' }}
-            />
-          </>
-        ) : null}
-        {props.routeLoading ? (
-          <View
-            pointerEvents="none"
-            style={{
-              position: 'absolute',
-              top: 56,
-              right: 14,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              paddingVertical: 6,
-              paddingHorizontal: 11,
-              borderRadius: 999,
-              backgroundColor: 'rgba(15,23,42,0.9)',
-              borderWidth: 1,
-              borderColor: 'rgba(34,229,160,0.28)',
-            }}
-          >
-            <ActivityIndicator size="small" color="#22E5A0" />
-            <Text style={{ color: '#E2E8F0', fontSize: 11, fontWeight: '700', letterSpacing: 0.3 }}>
-              Routing…
-            </Text>
-          </View>
-        ) : null}
-      </View>
-    );
-  } catch {
-    return (
-      <View style={[StyleSheet.absoluteFillObject, { backgroundColor: COLORS.card, alignItems: 'center', justifyContent: 'center', padding: 24 }]}>
-        <Text style={{ color: COLORS.muted, textAlign: 'center' }}>Map could not load. Enter pickup and destination below.</Text>
-      </View>
-    );
-  }
-}
 
 function BookInDriveStyle() {
   const toast = useErrorToast();
@@ -803,6 +263,22 @@ function BookInDriveStyle() {
   const requestedDriverName = params.driverName || null;
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
+  const { colors, isDark } = useThemeColors();
+  const bookingTheme = useMemo(
+    () => ({
+      bg: colors.background,
+      sheet: colors.background,
+      mapBg: isDark ? '#0D1420' : '#EAF4EF',
+      statusBar: colors.statusBar,
+      text: colors.text,
+      muted: colors.textMuted,
+      card: isDark ? COLORS.card : colors.card,
+      cardLight: isDark ? COLORS.cardLight : colors.surfaceAlt,
+      border: isDark ? 'rgba(148,163,184,0.2)' : colors.border,
+      mapStyle: getNexrydeMapStyle(isDark),
+    }),
+    [colors, isDark],
+  );
 
   const [pickup, setPickup] = useState('');
   const [destination, setDestination] = useState('');
@@ -835,12 +311,6 @@ function BookInDriveStyle() {
   const [editingField, setEditingField] = useState<'pickup' | 'destination' | 'stop'>('pickup');
   const [showVehicleModal, setShowVehicleModal] = useState(false);
 
-  const [searchingForDriver, setSearchingForDriver] = useState(false);
-  const [searchCountdown, setSearchCountdown] = useState(0);
-  const searchCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [tripId, setTripId] = useState<string | null>(null);
-  const [driverFound, setDriverFound] = useState<any>(null);
-
   /** Active trip lives on tracking — block overlapping book UI. */
   useFocusEffect(
     useCallback(() => {
@@ -848,7 +318,6 @@ function BookInDriveStyle() {
       router.replace({ pathname: '/rider/tracking', params: { tripId: currentTrip.id } } as any);
     }, [hasActiveTrip, currentTrip?.id, router]),
   );
-  const driverPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const calculateInFlightRef = useRef(false);
   const offerInFlightRef = useRef(false);
   const navigationInFlightRef = useRef(false);
@@ -1090,76 +559,23 @@ function BookInDriveStyle() {
     }
   }, []);
 
-  const clearDriverPoll = useCallback(() => {
-    if (driverPollRef.current) {
-      clearInterval(driverPollRef.current);
-      driverPollRef.current = null;
-    }
-  }, []);
-
-  const [handoffCountdown, setHandoffCountdown] = useState<number | null>(null);
-  const handoffTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  /** After driver accepts — show "Driver found" briefly, then map-first tracking. */
+  /** Hand off to tracking — FindingDriverScreenV2 owns search UX. */
   const navigateToLiveTracking = useCallback(
-    (id: string, opts?: { immediate?: boolean }) => {
-      if (!id) return;
-      clearDriverPoll();
-      if (handoffTickRef.current) {
-        clearInterval(handoffTickRef.current);
-        handoffTickRef.current = null;
-      }
-      setHandoffCountdown(null);
-      const go = () => {
-        if (trackingHandoffRef.current) return;
-        trackingHandoffRef.current = true;
-        setHandoffCountdown(null);
-        router.replace({
-          pathname: '/rider/tracking',
-          params: {
-            tripId: id,
-            ...(pickup?.trim() ? { pickup } : {}),
-            ...(destination?.trim() ? { destination } : {}),
-            fromBook: 'true',
-          },
-        } as any);
-        setSearchingForDriver(false);
-      };
-      if (opts?.immediate) {
-        go();
-        return;
-      }
-      if (trackingHandoffRef.current) return;
-      setTimeout(go, RIDER_DRIVER_FOUND_HANDOFF_MS);
+    (id: string, _opts?: { immediate?: boolean }) => {
+      if (!id || trackingHandoffRef.current) return;
+      trackingHandoffRef.current = true;
+      router.replace({
+        pathname: '/rider/tracking',
+        params: {
+          tripId: id,
+          ...(pickup?.trim() ? { pickup } : {}),
+          ...(destination?.trim() ? { destination } : {}),
+          fromBook: 'true',
+        },
+      } as any);
     },
-    [router, pickup, destination, clearDriverPoll],
+    [router, pickup, destination],
   );
-
-  useEffect(() => {
-    if (!driverFound || !tripId || trackingHandoffRef.current) {
-      setHandoffCountdown(null);
-      if (handoffTickRef.current) {
-        clearInterval(handoffTickRef.current);
-        handoffTickRef.current = null;
-      }
-      return;
-    }
-    const total = riderHandoffCountdownSec(RIDER_DRIVER_FOUND_HANDOFF_MS);
-    setHandoffCountdown(total);
-    if (handoffTickRef.current) clearInterval(handoffTickRef.current);
-    handoffTickRef.current = setInterval(() => {
-      setHandoffCountdown((c) => {
-        if (c == null || c <= 1) return null;
-        return c - 1;
-      });
-    }, 1000);
-    return () => {
-      if (handoffTickRef.current) {
-        clearInterval(handoffTickRef.current);
-        handoffTickRef.current = null;
-      }
-    };
-  }, [driverFound, tripId]);
 
   /** Schedule screen with route context (“Later”) — lightweight, non-blocking. */
   const openScheduleRide = () => {
@@ -1448,69 +864,6 @@ function BookInDriveStyle() {
     };
   }, [pickupCoords?.lat, pickupCoords?.lng, currentLocation?.lat, currentLocation?.lng, selectedVehicle, tripDraftRouteKey]);
 
-  /** Instant path when backend pushes trip_update over WebSocket (replaces slow polling). */
-  const applyAcceptedFromRealtime = useCallback(
-    (id: string, t: Record<string, any>, statusStr: string) => {
-      clearDriverPoll();
-      const norm =
-        statusStr === 'arrived' ? 'arrived' : statusStr === 'ongoing' ? 'ongoing' : 'accepted';
-      const pl = t?.pickup_location;
-      const dl = t?.dropoff_location;
-      setCurrentTrip({
-        id,
-        rider_id: riderId || '',
-        driver_id: t?.driver_id || null,
-        pickup_location: tripLocationRecord(
-          pl,
-          pickupCoords ?? currentLocation,
-          pickup,
-        ),
-        dropoff_location: tripLocationRecord(dl, destinationCoords, destination),
-        distance_km: Number(t?.distance_km ?? fareDetails?.distance_km ?? 0),
-        duration_mins: Number(
-          t?.duration_mins ??
-            fareDetails?.duration_mins ??
-            fareDetails?.duration_min ??
-            fareDetails?.estimated_time_minutes ??
-            0,
-        ),
-        fare: Number(t?.fare ?? t?.offered_fare ?? currentFare ?? 0),
-        surge_multiplier: Number(fareDetails?.surge_multiplier || 1),
-        status: norm as 'accepted' | 'arrived' | 'ongoing',
-        payment_method: (t?.payment_method as string) || tripPaymentMethod(),
-        payment_status: 'pending',
-        rider_rating: null,
-        driver_rating: null,
-        created_at: new Date().toISOString(),
-        accepted_at: new Date().toISOString(),
-        started_at: null,
-        completed_at: null,
-      });
-      setDriverFound({
-        driver_id: t?.driver_id,
-        name: t?.driver_name || 'Driver',
-        rating: 4.5,
-        vehicle: t?.vehicle_model || 'Vehicle',
-        plate: t?.vehicle_plate || '',
-        color: t?.vehicle_color || '',
-      });
-      navigateToLiveTracking(id);
-    },
-    [
-      riderId,
-      pickupCoords,
-      destinationCoords,
-      currentLocation,
-      pickup,
-      destination,
-      fareDetails,
-      currentFare,
-      setCurrentTrip,
-      clearDriverPoll,
-      tripPaymentMethod,
-      navigateToLiveTracking,
-    ]
-  );
 
   const inferCityFromCoords = (lat?: number, lng?: number) => {
     const la = Number(lat);
@@ -2319,7 +1672,7 @@ function BookInDriveStyle() {
         );
         let routes: TrafficRoute[] = [];
         try {
-          routes = await TrafficAI.getOptimizedRoutes(
+          routes = await TrafficIntelligence.getOptimizedRoutes(
             { latitude: pLat, longitude: pLng },
             { latitude: dLat, longitude: dLng },
             { prioritizeTime: true, avoidTolls: false }
@@ -2328,7 +1681,7 @@ function BookInDriveStyle() {
           routes = [];
         }
         const first = routes[0];
-        setOptimizedRoute(first ? TrafficAI.normalizeTrafficRoute(first) : null);
+        setOptimizedRoute(first ? TrafficIntelligence.normalizeTrafficRoute(first) : null);
       } else {
         toast.show(toStr(
           (data as { detail?: unknown; message?: unknown })?.detail ||
@@ -2637,7 +1990,6 @@ function BookInDriveStyle() {
       if (res.ok && (result.trip || result.success)) {
         const tid = result.trip?.id || result.trip_id || null;
         const tripFromApi = result.trip as Record<string, unknown> | undefined;
-        setTripId(tid);
         if (tid && riderId) {
           const pendingStatus =
             tripFromApi?.status === 'pending_driver_offers' ? 'pending_driver_offers' : 'pending';
@@ -2676,20 +2028,12 @@ function BookInDriveStyle() {
             completed_at: null,
           });
         }
-        setSearchingForDriver(true);
-        // Start cancellation countdown (90 s matches server offer expiry)
-        setSearchCountdown(90);
-        if (searchCountdownRef.current) clearInterval(searchCountdownRef.current);
-        searchCountdownRef.current = setInterval(() => {
-          setSearchCountdown((prev) => {
-            if (prev <= 1) {
-              if (searchCountdownRef.current) clearInterval(searchCountdownRef.current);
-              return 0;
-            }
-            return prev - 1;
-          });
-        }, 1000);
-        pollForDriver(tid);
+        // One finding path: tracking screen owns search UX (FindingDriverScreenV2).
+        if (tid) {
+          navigateToLiveTracking(tid, { immediate: true });
+        } else {
+          toast.show('Ride created but tracking could not open. Check My Trips.', 'error');
+        }
       } else {
         toast.show(toStr(result?.detail || result?.message, 'Could not request ride. Please try again in a moment.'), 'error');
       }
@@ -2706,15 +2050,6 @@ function BookInDriveStyle() {
     }
   };
 
-  const cancelPendingTrip = async (id: string | null) => {
-    if (!id || !riderId || !canCallAuthedApi) return;
-    try {
-      await authedFetch(`${BACKEND_URL}/api/trips/${id}/cancel`, {
-        method: 'PUT',
-        body: JSON.stringify({ cancelled_by: riderId }),
-      });
-    } catch {}
-  };
 
   const handleSaveGateCode = async () => {
     if (!riderId || !canCallAuthedApi) return;
@@ -2750,163 +2085,6 @@ function BookInDriveStyle() {
     } catch {}
   };
 
-  const pollForDriver = (id: string | null) => {
-    if (!id) return;
-    clearDriverPoll();
-    let attempts = 0;
-    driverPollRef.current = setInterval(async () => {
-      attempts++;
-      try {
-        const res = await authedFetch(`${BACKEND_URL}/api/trips/${id}/status`, {
-          method: 'GET',
-        });
-        const data = await res.json();
-        if (data.success && isRiderMapLiveTripStatus(String(data.status || '')) && data.driver_info) {
-          clearDriverPoll();
-          setCurrentTrip({
-            id,
-            rider_id: riderId || '',
-            driver_id: data.driver_info.driver_id || null,
-            pickup_location: tripLocationRecord(
-              data.pickup_location,
-              pickupCoords ?? currentLocation,
-              pickup,
-            ),
-            dropoff_location: tripLocationRecord(data.dropoff_location, destinationCoords, destination),
-            distance_km: Number(fareDetails?.distance_km || 0),
-            duration_mins: Number(
-              fareDetails?.duration_mins ||
-                fareDetails?.duration_min ||
-                fareDetails?.estimated_time_minutes ||
-                0,
-            ),
-            fare: Number(currentFare || 0),
-            surge_multiplier: Number(fareDetails?.surge_multiplier || 1),
-            status: data.status === 'arrived' ? 'arrived' : data.status === 'ongoing' ? 'ongoing' : 'accepted',
-            payment_method: (data.payment_method as string) || tripPaymentMethod(),
-            payment_status: 'pending',
-            rider_rating: null,
-            driver_rating: null,
-            created_at: new Date().toISOString(),
-            accepted_at: new Date().toISOString(),
-            started_at: null,
-            completed_at: null,
-          });
-          setDriverFound(data.driver_info);
-          navigateToLiveTracking(id);
-        }
-      } catch {}
-      if (attempts >= 30) {
-        clearDriverPoll();
-        try {
-          const finalRes = await fetch(`${BACKEND_URL}/api/trips/${id}/status`, {
-            headers: getAuthHeaders(),
-          });
-          const finalData = await finalRes.json();
-          if (finalData?.success && isRiderMapLiveTripStatus(String(finalData.status || '')) && finalData.driver_info) {
-            setCurrentTrip({
-              id,
-              rider_id: riderId || '',
-              driver_id: finalData.driver_info.driver_id || null,
-              pickup_location: tripLocationRecord(
-                finalData.pickup_location,
-                pickupCoords ?? currentLocation,
-                pickup,
-              ),
-              dropoff_location: tripLocationRecord(
-                finalData.dropoff_location,
-                destinationCoords,
-                destination,
-              ),
-              distance_km: Number(fareDetails?.distance_km || 0),
-              duration_mins: Number(
-              fareDetails?.duration_mins ||
-                fareDetails?.duration_min ||
-                fareDetails?.estimated_time_minutes ||
-                0,
-            ),
-              fare: Number(currentFare || 0),
-              surge_multiplier: Number(fareDetails?.surge_multiplier || 1),
-              status: finalData.status === 'arrived' ? 'arrived' : finalData.status === 'ongoing' ? 'ongoing' : 'accepted',
-              payment_method: (finalData.payment_method as string) || tripPaymentMethod(),
-              payment_status: 'pending',
-              rider_rating: null,
-              driver_rating: null,
-              created_at: new Date().toISOString(),
-              accepted_at: new Date().toISOString(),
-              started_at: null,
-              completed_at: null,
-            });
-            setDriverFound(finalData.driver_info);
-            navigateToLiveTracking(id);
-            return;
-          }
-        } catch {}
-        await cancelPendingTrip(id);
-        setSearchingForDriver(false);
-        setTripId(null);
-        Alert.alert('No Drivers', 'Try increasing your fare or try again later.');
-      }
-    }, 6000);
-  };
-
-  useEffect(() => () => clearDriverPoll(), [clearDriverPoll]);
-
-  const handleRiderTripWs = useCallback(
-    (msg: RiderTripWsMessage) => {
-      const id = String(msg.trip_id || '');
-      if (!id || !tripId || id !== tripId) return;
-      const st = String(msg.status || '');
-      const t = (msg.trip || {}) as Record<string, any>;
-      if (st === 'cancelled') {
-        clearDriverPoll();
-        setSearchingForDriver(false);
-        setTripId(null);
-        setDriverFound(null);
-        setCurrentTrip(null);
-        Alert.alert('Trip cancelled', 'This ride request was cancelled.');
-        return;
-      }
-      if (st === 'pending_payment') {
-        // Trip done but payment not yet settled — send to tracking payment screen
-        clearDriverPoll();
-        setSearchingForDriver(false);
-        setDriverFound(null);
-        router.replace({ pathname: '/rider/tracking', params: { tripId: id } } as any);
-        return;
-      }
-      if (st === 'completed') {
-        clearDriverPoll();
-        setSearchingForDriver(false);
-        setDriverFound(null);
-        setTripId(null);
-        router.replace({ pathname: '/rider/trip-receipt', params: { tripId: id } } as any);
-        return;
-      }
-      if (isRiderMapLiveTripStatus(String(st || '')) && t.driver_id) {
-        applyAcceptedFromRealtime(id, t, st);
-      }
-    },
-    [tripId, clearDriverPoll, setCurrentTrip, applyAcceptedFromRealtime, router]
-  );
-
-  useRiderTripRealtime({
-    riderId,
-    enabled: Boolean(searchingForDriver && tripId && canCallAuthedApi && riderId),
-    watchTripId: tripId,
-    onTripUpdate: handleRiderTripWs,
-  });
-
-  const cancelSearch = async () => {
-    clearDriverPoll();
-    trackingHandoffRef.current = false;
-    if (searchCountdownRef.current) clearInterval(searchCountdownRef.current);
-    setSearchCountdown(0);
-    await cancelPendingTrip(tripId);
-    setSearchingForDriver(false);
-    setDriverFound(null);
-    setTripId(null);
-  };
   const veh = selectedVehicle ? availableVehicles.find(v => v.id === selectedVehicle) : null;
 
   const smartMinUi = fareDetails?.min_price != null ? Math.round(Number(fareDetails.min_price)) : null;
@@ -2961,66 +2139,6 @@ function BookInDriveStyle() {
   }, [fareDetails]);
 
   const winH = flow.height;
-  const searchRouteKmLabel = useMemo(() => {
-    const km = fareDetails?.distance_km;
-    if (km == null || !Number.isFinite(Number(km))) return null;
-    return `${Number(km).toFixed(1)} km`;
-  }, [fareDetails?.distance_km]);
-  const searchRouteMinLabel = useMemo(() => {
-    if (bookingRouteEtaMin != null && Number.isFinite(bookingRouteEtaMin)) {
-      return `~${Math.round(bookingRouteEtaMin)} min trip`;
-    }
-    const fd = fareDetails;
-    if (!fd) return null;
-    const raw =
-      fd.duration_min ??
-      (fd as { duration_mins?: number }).duration_mins ??
-      (fd as { estimated_time_minutes?: number }).estimated_time_minutes ??
-      (fd as { estimated_time_mins?: number }).estimated_time_mins;
-    if (raw != null && Number.isFinite(Number(raw))) return `~${Math.round(Number(raw))} min trip`;
-    return null;
-  }, [bookingRouteEtaMin, fareDetails]);
-  const matchedDriverForOverlay = useMemo((): RiderMatchedDriver | null => {
-    if (!driverFound) return null;
-    const df = driverFound as Record<string, unknown>;
-    const trips = df.total_trips ?? df.completed_trips;
-    const face =
-      typeof df.face_image === 'string' && df.face_image.length > 0
-        ? df.face_image
-        : null;
-    const profileRaw =
-      typeof df.profile_image === 'string' && df.profile_image.length > 0
-        ? df.profile_image
-        : typeof df.photo === 'string' && df.photo.length > 0
-          ? df.photo
-          : typeof (df as Record<string, unknown>).avatar_url === 'string' &&
-              String((df as Record<string, unknown>).avatar_url).trim().length > 0
-            ? String((df as Record<string, unknown>).avatar_url).trim()
-            : null;
-    const profile = profileRaw;
-    const phoneRaw =
-      typeof df.phone === 'string' && df.phone.length > 0
-        ? df.phone
-        : typeof df.phone_number === 'string' && df.phone_number.length > 0
-          ? (df.phone_number as string)
-          : null;
-    return {
-      name: String(df.name || 'Driver'),
-      vehicle: typeof df.vehicle === 'string' ? df.vehicle : undefined,
-      plate: typeof df.plate === 'string' ? df.plate : undefined,
-      color: typeof df.color === 'string' ? df.color : undefined,
-      rating:
-        typeof df.rating === 'number'
-          ? df.rating
-          : typeof df.avg_rating === 'number'
-            ? (df.avg_rating as number)
-            : undefined,
-      trip_count: typeof trips === 'number' && trips > 0 ? trips : undefined,
-      face_image: resolvePublicMediaUri(face) ?? resolvePublicMediaUri(profile),
-      profile_image: resolvePublicMediaUri(profile) ?? resolvePublicMediaUri(face),
-      phone: phoneRaw,
-    };
-  }, [driverFound]);
 
   const formatScheduledTime = (iso: string) => {
     const dt = new Date(iso);
@@ -3043,8 +2161,8 @@ function BookInDriveStyle() {
     const circumference = 2 * Math.PI * 54;
     const strokeDashoffset = circumference * (1 - progress);
     return (
-      <View style={{ flex: 1, backgroundColor: '#0D1420' }}>
-        <StatusBar barStyle="light-content" backgroundColor="#0D1420" />
+      <View style={{ flex: 1, backgroundColor: bookingTheme.bg }}>
+        <StatusBar barStyle={bookingTheme.statusBar} backgroundColor={bookingTheme.bg} />
         <LinearGradient colors={['#0D1420', '#1A0A0A']} style={StyleSheet.absoluteFill} />
         <SafeAreaView
           style={{
@@ -3120,11 +2238,11 @@ function BookInDriveStyle() {
   }
 
   return (
-    <SafeAreaView style={s.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor="#0D1420" />
+    <SafeAreaView style={[s.container, { backgroundColor: bookingTheme.bg }]} edges={['top']}>
+      <StatusBar barStyle={bookingTheme.statusBar} backgroundColor={bookingTheme.bg} />
       {/* MAP SECTION */}
       <View
-        style={s.mapArea}
+        style={[s.mapArea, { backgroundColor: bookingTheme.mapBg }]}
       >
         {pickupCoords ? (
           !useNativeBookingMap ? (
@@ -3151,7 +2269,7 @@ function BookInDriveStyle() {
               }
             />
           ) : (
-            <BookingRideMapNative
+            <RiderBookingMapNative
               pickupCoords={pickupCoords}
               destinationCoords={destinationCoords}
               stopCoords={stopCoords}
@@ -3161,9 +2279,21 @@ function BookInDriveStyle() {
               stop={stop}
               routeLoading={bookingRouteLoading}
               pulseDropoffHalo={Boolean(destinationCoords && !bookingSheetScrolled)}
-              searchMode={searchingForDriver}
-              matchLocked={Boolean(searchingForDriver && driverFound)}
+              searchMode={false}
+              matchLocked={false}
               nearbyDrivers={nearbyDrivers}
+              demandRatio={
+                fareDetails?.demand_ratio != null && Number.isFinite(Number(fareDetails.demand_ratio))
+                  ? Number(fareDetails.demand_ratio)
+                  : null
+              }
+              surgeMultiplier={
+                fareDetails?.surge_multiplier != null &&
+                Number.isFinite(Number(fareDetails.surge_multiplier))
+                  ? Number(fareDetails.surge_multiplier)
+                  : null
+              }
+              showDemandOverlay
             />
           )
         ) : (
@@ -3176,8 +2306,7 @@ function BookInDriveStyle() {
         {destinationCoords &&
         routeForMapDisplay.length >= DIRECTIONS_ROUTE_MIN_POINTS &&
         bookingRouteEtaMin != null &&
-        arriveByClockLabel &&
-        !searchingForDriver ? (
+        arriveByClockLabel ? (
           <View pointerEvents="none" style={[s.routeSummaryBarOuter, { left: flow.padH, right: flow.padH }]}>
             <BlurView
               intensity={Platform.OS === 'ios' ? 52 : 40}
@@ -3245,7 +2374,6 @@ function BookInDriveStyle() {
           </TouchableOpacity>
         ) : null}
 
-        {!searchingForDriver ? (
         <View style={[s.mapTopBar, { left: flow.padH, right: flow.padH }]}>
           <TouchableOpacity style={s.backBtnCircle} onPress={() => router.back()} accessibilityLabel="Go back" accessibilityRole="button">
             <Ionicons name="arrow-back" size={22} color={COLORS.white} />
@@ -3274,9 +2402,8 @@ function BookInDriveStyle() {
             </View>
           </TouchableOpacity>
         </View>
-        ) : null}
 
-        {pickupCoords && destinationCoords && !searchingForDriver ? (
+        {pickupCoords && destinationCoords ? (
           <View style={[s.mapBidRouteCard, { left: flow.padH, right: flow.padH }]} pointerEvents="none">
             <LinearGradient
               colors={['rgba(11,18,32,0.97)', 'rgba(11,18,32,0.9)']}
@@ -3313,7 +2440,7 @@ function BookInDriveStyle() {
         ) : null}
 
         {/* Preferred driver banner */}
-        {requestedDriverId && !searchingForDriver ? (
+        {requestedDriverId ? (
           <View style={[s.preferredBanner, { left: flow.padH, right: flow.padH, bottom: flow.sectionGap }]}>
             <Ionicons name="heart" size={16} color="#EF4444" />
             <View style={{ flex: 1 }}>
@@ -3336,10 +2463,9 @@ function BookInDriveStyle() {
       <Animated.View
         style={[
           s.sheet,
-          searchingForDriver && s.sheetHidden,
+          { backgroundColor: bookingTheme.sheet },
           { transform: [{ translateY: sheetSlide }] },
         ]}
-        pointerEvents={searchingForDriver ? 'none' : 'auto'}
       >
         <ScrollView
           contentContainerStyle={[
@@ -3721,18 +2847,18 @@ function BookInDriveStyle() {
                 <View style={s.aiRouteCard}>
                   <View style={s.aiRouteHeader}>
                     <Ionicons name="navigate-circle" size={20} color={COLORS.blue} />
-                    <Text style={s.aiRouteTitle}>AI Route Optimisation</Text>
+                    <Text style={s.aiRouteTitle}>Route Optimisation</Text>
                   </View>
                   <Text style={s.aiRouteText}>
                     Fastest route selected for current Lagos/Nigerian traffic conditions:{' '}
-                    {TrafficAI.formatDelay(Number(optimizedRoute.trafficDelay))}
+                    {TrafficIntelligence.formatDelay(Number(optimizedRoute.trafficDelay))}
                     {optimizedRoute.timeSavedVsAlternative
                       ? ` saved versus a slower alternative.`
                       : '.'}
                   </Text>
                   <Text style={s.aiRouteMeta}>
                     Traffic level:{' '}
-                    {String(optimizedRoute.trafficLevel || 'light').toUpperCase()} • AI score{' '}
+                    {String(optimizedRoute.trafficLevel || 'light').toUpperCase()} • Route score{' '}
                     {Number.isFinite(Number(optimizedRoute.aiScore)) ? Math.round(Number(optimizedRoute.aiScore)) : 0}/100
                   </Text>
                 </View>
@@ -4394,47 +3520,6 @@ function BookInDriveStyle() {
         </View>
       </Modal>
 
-      <RiderPostRequestOverlay
-        visible={searchingForDriver}
-        phase={driverFound ? 'matched' : 'searching'}
-        topInset={insets.top}
-        bottomInset={insets.bottom}
-        requestedDriverId={requestedDriverId}
-        requestedDriverName={requestedDriverName}
-        bidNgn={currentFare}
-        routeKmLabel={searchRouteKmLabel}
-        routeMinLabel={searchRouteMinLabel}
-        searchCountdown={searchCountdown}
-        driverMatched={matchedDriverForOverlay}
-        handoffCountdownSec={handoffCountdown}
-        onMenuPress={() => {
-          if (Platform.OS !== 'web') void Haptics.selectionAsync();
-          router.back();
-        }}
-        onCancelSearch={() => void cancelSearch()}
-        onTrackDriver={() => {
-          if (!tripId) return;
-          navigateToLiveTracking(tripId, { immediate: true });
-        }}
-        onCallDriver={() => {
-          const raw = matchedDriverForOverlay?.phone?.trim();
-          if (!raw) {
-            Alert.alert('Call unavailable', 'Driver phone will appear here once the line is connected.');
-            return;
-          }
-          const digits = raw.replace(/[^\d+]/g, '');
-          const href = digits.startsWith('+') ? `tel:${digits}` : `tel:${raw.replace(/\s/g, '')}`;
-          void Linking.openURL(href);
-        }}
-        onChatDriver={() => {
-          if (!tripId) {
-            Alert.alert('Chat unavailable', 'Trip is still being set up. Try again in a moment.');
-            return;
-          }
-          if (Platform.OS !== 'web') void Haptics.selectionAsync();
-          router.push({ pathname: '/chat', params: { tripId } } as any);
-        }}
-      />
     </SafeAreaView>
   );
 }

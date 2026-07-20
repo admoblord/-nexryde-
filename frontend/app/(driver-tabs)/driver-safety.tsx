@@ -18,8 +18,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
-import { BRAND, LAYOUT } from '@/src/constants/designSystem';
+import { useThemeColors } from '@/src/constants/theme';
+import { BRAND, LAYOUT, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
 import { DRIVER_ACTIVE_TRIP_HREF, DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useFlowLayout } from '@/src/constants/flowLayout';
@@ -85,18 +85,19 @@ const SECTIONS: { title: string; rows: SafeRow[] }[] = [
 ];
 
 function toneBg(tone: SafeRow['tone']) {
-  if (tone === 'danger') return COLORS.errorSoft;
-  if (tone === 'safe') return COLORS.successSoft;
-  return COLORS.infoSoft;
+  if (tone === 'danger') return 'rgba(239,68,68,0.14)';
+  if (tone === 'safe') return BRAND.primaryMuted;
+  return 'rgba(56,189,248,0.14)';
 }
 function toneColor(tone: SafeRow['tone']) {
-  if (tone === 'danger') return COLORS.error;
-  if (tone === 'safe') return COLORS.success;
-  return COLORS.info;
+  if (tone === 'danger') return BRAND.danger;
+  if (tone === 'safe') return BRAND.primary;
+  return BRAND.info;
 }
 
 export default function DriverSafetyHubScreen() {
   const router = useRouter();
+  const { colors, isDark } = useThemeColors();
   const tabPad = useTabBottomPad(8);
   const flow = useFlowLayout();
 
@@ -167,23 +168,23 @@ export default function DriverSafetyHubScreen() {
       'Choose an emergency action:',
       [
         { text: 'State Police →', onPress: handlePoliceQuickAction },
-        { text: 'Nexryde Support', onPress: () => router.push('/support') },
+        { text: 'NexRyde support', onPress: () => router.push('/support') },
         { text: 'Cancel', style: 'cancel' },
       ]
     );
   }, [handlePoliceQuickAction, router]);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: isDark ? BRAND.bgDeep : colors.background }]} edges={['top']}>
       <TabBrandStrip role="driver" />
       {/* Hero */}
       <LinearGradient
-        colors={[BRAND.navyDeep, '#0F172A']}
+        colors={[BRAND.bgDeep, BRAND.bgElevated, BRAND.bgDeep]}
         style={[styles.hero, { paddingHorizontal: flow.padH }]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
       >
-        <Text style={styles.heroTitle}>Safety & Security</Text>
+        <Text style={styles.heroTitle}>Safety & security</Text>
         <Text style={styles.heroSub}>
           Emergency tools, verification, and account protection in one place.
         </Text>
@@ -198,7 +199,7 @@ export default function DriverSafetyHubScreen() {
             maxWidth: flow.maxContentWidth,
             alignSelf: 'center',
             width: '100%',
-            gap: Math.round(flow.sectionGap * 0.35),
+            gap: SPACING.stack,
           },
         ]}
         showsVerticalScrollIndicator={false}
@@ -206,7 +207,7 @@ export default function DriverSafetyHubScreen() {
 
         {/* Emergency Quick Actions */}
         <View style={styles.quickSection}>
-          <Text style={styles.quickLabel}>QUICK EMERGENCY ACCESS</Text>
+          <Text style={[styles.quickLabel, { color: colors.textMuted }]}>Quick emergency access</Text>
 
           {/* SOS — Emergency */}
           <TouchableOpacity
@@ -214,14 +215,14 @@ export default function DriverSafetyHubScreen() {
             onPress={handleEmergencyAction}
             activeOpacity={0.85}
           >
-            <LinearGradient colors={['#DC2626', '#B91C1C']} style={styles.sosGrad}>
+            <LinearGradient colors={[BRAND.danger, '#B91C1C']} style={styles.sosGrad}>
               <View style={styles.sosLeft}>
                 <View style={styles.sosIconWrap}>
                   <Ionicons name="warning" size={26} color="#FFF" />
                 </View>
                 <View>
                   <Text style={styles.sosTitle}>SOS Emergency</Text>
-                  <Text style={styles.sosSub}>Nexryde Support · State Police</Text>
+                  <Text style={styles.sosSub}>NexRyde support · State Police</Text>
                 </View>
               </View>
               <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
@@ -234,13 +235,13 @@ export default function DriverSafetyHubScreen() {
             onPress={handlePoliceQuickAction}
             activeOpacity={0.85}
           >
-            <LinearGradient colors={[BRAND.navyDeep, '#1E3A5F']} style={styles.policeGrad}>
+            <LinearGradient colors={[BRAND.bgElevated, BRAND.accentBlue]} style={styles.policeGrad}>
               <View style={styles.sosLeft}>
                 <View style={[styles.sosIconWrap, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
                   <Ionicons name="shield" size={24} color="#FFF" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.sosTitle}>Call Police</Text>
+                  <Text style={styles.sosTitle}>Call police</Text>
                   {detectingLocation ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <ActivityIndicator size="small" color="rgba(255,255,255,0.7)" />
@@ -268,30 +269,30 @@ export default function DriverSafetyHubScreen() {
           {/* Witness / Evidence */}
           <View style={styles.quickRow}>
             <TouchableOpacity
-              style={[styles.quickCard, { backgroundColor: '#FEF3C7' }]}
+              style={[styles.quickCard, { backgroundColor: 'rgba(245,158,11,0.14)', borderColor: 'rgba(245,158,11,0.28)' }]}
               onPress={() => router.push(DRIVER_TRIPS_TAB_HREF as any)}
               activeOpacity={0.85}
             >
-              <Ionicons name="eye" size={22} color="#D97706" />
-              <Text style={[styles.quickCardText, { color: '#D97706' }]}>Witness</Text>
+              <Ionicons name="eye" size={22} color={BRAND.warning} />
+              <Text style={[styles.quickCardText, { color: BRAND.warning }]}>Witness</Text>
               <Text style={styles.quickCardSub}>During active trip</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.quickCard, { backgroundColor: '#ECFDF5' }]}
+              style={[styles.quickCard, { backgroundColor: BRAND.primaryMuted, borderColor: `${BRAND.primary}44` }]}
               onPress={() => router.push('/support' as any)}
               activeOpacity={0.85}
             >
-              <Ionicons name="headset" size={22} color="#16A34A" />
-              <Text style={[styles.quickCardText, { color: '#16A34A' }]}>Support</Text>
+              <Ionicons name="headset" size={22} color={BRAND.primary} />
+              <Text style={[styles.quickCardText, { color: BRAND.primary }]}>Support</Text>
               <Text style={styles.quickCardSub}>24/7 help line</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.quickCard, { backgroundColor: '#EFF6FF' }]}
+              style={[styles.quickCard, { backgroundColor: 'rgba(56,189,248,0.12)', borderColor: 'rgba(56,189,248,0.28)' }]}
               onPress={() => router.push('/settings' as any)}
               activeOpacity={0.85}
             >
-              <Ionicons name="settings" size={22} color="#2563EB" />
-              <Text style={[styles.quickCardText, { color: '#2563EB' }]}>Settings</Text>
+              <Ionicons name="settings" size={22} color={BRAND.accentBlue} />
+              <Text style={[styles.quickCardText, { color: BRAND.accentBlue }]}>Settings</Text>
               <Text style={styles.quickCardSub}>Privacy & device</Text>
             </TouchableOpacity>
           </View>
@@ -300,11 +301,17 @@ export default function DriverSafetyHubScreen() {
         {/* Sections */}
         {SECTIONS.map((section) => (
           <View key={section.title} style={styles.section}>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
+            <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{section.title}</Text>
             {section.rows.map((row) => (
               <TouchableOpacity
                 key={row.route + row.label}
-                style={styles.row}
+                style={[
+                  styles.row,
+                  {
+                    backgroundColor: isDark ? SURFACE.cardDark : colors.card,
+                    borderColor: isDark ? SURFACE.hairline : colors.border,
+                  },
+                ]}
                 onPress={() => router.push(row.route as any)}
                 activeOpacity={0.9}
                 accessibilityRole="button"
@@ -313,10 +320,10 @@ export default function DriverSafetyHubScreen() {
                   <Ionicons name={row.icon} size={20} color={toneColor(row.tone)} />
                 </View>
                 <View style={styles.rowBody}>
-                  <Text style={styles.rowTitle}>{row.label}</Text>
-                  <Text style={styles.rowDesc}>{row.desc}</Text>
+                  <Text style={[styles.rowTitle, { color: colors.text }]}>{row.label}</Text>
+                  <Text style={[styles.rowDesc, { color: colors.textSecondary }]}>{row.desc}</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color={COLORS.lightTextMuted} />
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </TouchableOpacity>
             ))}
           </View>
@@ -326,27 +333,27 @@ export default function DriverSafetyHubScreen() {
 
       {/* State Police Picker Modal */}
       <Modal visible={showPolicePicker} animationType="slide" presentationStyle="pageSheet">
-        <SafeAreaView style={styles.pickerContainer}>
-          <View style={styles.pickerHeader}>
-            <Text style={styles.pickerTitle}>Select Your State</Text>
+        <SafeAreaView style={[styles.pickerContainer, { backgroundColor: isDark ? BRAND.bgDeep : colors.background }]}>
+          <View style={[styles.pickerHeader, { borderBottomColor: isDark ? SURFACE.hairline : colors.border }]}>
+            <Text style={[styles.pickerTitle, { color: colors.text }]}>Select your state</Text>
             <TouchableOpacity onPress={() => setShowPolicePicker(false)} style={styles.pickerClose}>
-              <Ionicons name="close" size={24} color={COLORS.lightTextPrimary} />
+              <Ionicons name="close" size={24} color={colors.text} />
             </TouchableOpacity>
           </View>
-          <View style={styles.pickerSearchRow}>
-            <Ionicons name="search" size={18} color={COLORS.lightTextMuted} style={{ marginLeft: 12 }} />
+          <View style={[styles.pickerSearchRow, { backgroundColor: isDark ? SURFACE.tile : colors.surface, borderColor: isDark ? SURFACE.hairline : colors.border }]}>
+            <Ionicons name="search" size={18} color={colors.textMuted} style={{ marginLeft: 12 }} />
             <TextInput
-              style={styles.pickerSearch}
+              style={[styles.pickerSearch, { color: colors.text }]}
               value={policeQuery}
               onChangeText={setPoliceQuery}
               placeholder="Search state (e.g. Lagos, Kano, Abuja...)"
-              placeholderTextColor={COLORS.lightTextMuted}
+              placeholderTextColor={colors.textMuted}
               autoFocus
               autoCapitalize="words"
             />
             {policeQuery.length > 0 && (
               <TouchableOpacity onPress={() => setPoliceQuery('')} style={{ padding: 10 }}>
-                <Ionicons name="close-circle" size={18} color={COLORS.lightTextMuted} />
+                <Ionicons name="close-circle" size={18} color={colors.textMuted} />
               </TouchableOpacity>
             )}
           </View>
@@ -367,11 +374,11 @@ export default function DriverSafetyHubScreen() {
               >
                 <View style={styles.pickerRowLeft}>
                   <View style={styles.pickerStateIcon}>
-                    <Ionicons name="shield" size={18} color={BRAND.navyDeep} />
+                    <Ionicons name="shield" size={18} color={BRAND.info} />
                   </View>
                   <View>
-                    <Text style={styles.pickerStateName}>{item.state}</Text>
-                    <Text style={styles.pickerStatePhone}>{item.phone}</Text>
+                    <Text style={[styles.pickerStateName, { color: colors.text }]}>{item.state}</Text>
+                    <Text style={[styles.pickerStatePhone, { color: colors.textSecondary }]}>{item.phone}</Text>
                   </View>
                 </View>
                 <TouchableOpacity
@@ -392,29 +399,26 @@ export default function DriverSafetyHubScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.gray50 },
+  container: { flex: 1, backgroundColor: BRAND.bgDeep },
   hero: {
     paddingTop: SPACING.md,
-    paddingBottom: SPACING.xl,
-    borderBottomLeftRadius: BORDER_RADIUS.xxl,
-    borderBottomRightRadius: BORDER_RADIUS.xxl,
+    paddingBottom: SPACING.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: SURFACE.glassBorder,
   },
-  heroTitle: { fontSize: FONT_SIZE.xxl, fontWeight: '900', color: COLORS.white, letterSpacing: 0.3 },
-  heroSub: { marginTop: SPACING.xs, fontSize: FONT_SIZE.sm, fontWeight: '600', color: 'rgba(255,255,255,0.8)', lineHeight: 20 },
+  heroTitle: { fontSize: 24, fontWeight: '900', color: BRAND.textPrimary, letterSpacing: -0.4 },
+  heroSub: { marginTop: SPACING.xs, fontSize: 13, fontWeight: '600', color: BRAND.textSecondary, lineHeight: 19 },
 
   scroll: { paddingTop: SPACING.md },
 
-  quickSection: { marginBottom: SPACING.lg },
+  quickSection: { marginBottom: SPACING.md },
   quickLabel: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: COLORS.lightTextMuted,
-    letterSpacing: 1,
+    ...TYPOGRAPHY.label,
     textTransform: 'uppercase',
     marginBottom: SPACING.sm,
   },
 
-  sosButton: { borderRadius: BORDER_RADIUS.xl, overflow: 'hidden', marginBottom: SPACING.sm },
+  sosButton: { borderRadius: RADIUS.xl, overflow: 'hidden', marginBottom: SPACING.stack },
   sosGrad: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -422,104 +426,92 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
   },
-  policeButton: { borderRadius: BORDER_RADIUS.xl, overflow: 'hidden', marginBottom: SPACING.sm },
+  policeButton: { borderRadius: RADIUS.xl, overflow: 'hidden', marginBottom: SPACING.stack },
   policeGrad: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
-    gap: SPACING.sm,
+    gap: SPACING.stack,
   },
   sosLeft: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md, flex: 1 },
   sosIconWrap: {
     width: 44,
     height: 44,
-    borderRadius: 12,
+    borderRadius: RADIUS.md,
     backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sosTitle: { fontSize: FONT_SIZE.md, fontWeight: '900', color: COLORS.white },
-  sosSub: { fontSize: FONT_SIZE.xs, fontWeight: '600', color: 'rgba(255,255,255,0.75)', marginTop: 2 },
+  sosTitle: { fontSize: 15, fontWeight: '900', color: '#FFF' },
+  sosSub: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.75)', marginTop: 2 },
   changeStateBtn: {
     backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 8,
+    borderRadius: RADIUS.sm,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
   changeStateText: { fontSize: 11, fontWeight: '800', color: '#FFF' },
 
-  quickRow: { flexDirection: 'row', gap: SPACING.sm, marginTop: SPACING.sm },
+  quickRow: { flexDirection: 'row', gap: SPACING.stack, marginTop: SPACING.stack },
   quickCard: {
     flex: 1,
-    borderRadius: BORDER_RADIUS.lg,
+    borderRadius: RADIUS.lg,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: SPACING.md,
     gap: 4,
     minHeight: LAYOUT.touchMin + 8,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  quickCardText: { fontSize: FONT_SIZE.xs, fontWeight: '900' },
-  quickCardSub: { fontSize: 10, fontWeight: '600', color: COLORS.lightTextMuted, textAlign: 'center' },
+  quickCardText: { fontSize: 11, fontWeight: '900' },
+  quickCardSub: { fontSize: 10, fontWeight: '600', color: BRAND.textMuted, textAlign: 'center' },
 
-  section: { marginBottom: SPACING.lg },
+  section: { marginBottom: SPACING.md },
   sectionTitle: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '900',
-    color: COLORS.lightTextMuted,
+    ...TYPOGRAPHY.label,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
     marginBottom: SPACING.sm,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
+    borderRadius: RADIUS.xl,
     padding: SPACING.md,
-    marginBottom: SPACING.xs,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
+    marginBottom: SPACING.stack,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  rowIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: SPACING.md },
+  rowIcon: { width: 40, height: 40, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', marginRight: SPACING.md },
   rowBody: { flex: 1 },
-  rowTitle: { fontSize: FONT_SIZE.md, fontWeight: '800', color: COLORS.lightTextPrimary },
-  rowDesc: { fontSize: FONT_SIZE.xs, fontWeight: '600', color: COLORS.lightTextSecondary, marginTop: 2 },
+  rowTitle: { fontSize: 14, fontWeight: '800' },
+  rowDesc: { fontSize: 12, fontWeight: '600', marginTop: 2 },
 
-  // Police picker modal
-  pickerContainer: { flex: 1, backgroundColor: COLORS.white },
+  pickerContainer: { flex: 1, backgroundColor: BRAND.bgDeep },
   pickerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.lightBorder,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  pickerTitle: { fontSize: FONT_SIZE.lg, fontWeight: '900', color: COLORS.lightTextPrimary },
+  pickerTitle: { fontSize: 17, fontWeight: '900' },
   pickerClose: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   pickerSearchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     margin: SPACING.md,
-    backgroundColor: COLORS.gray50,
-    borderRadius: BORDER_RADIUS.lg,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderRadius: RADIUS.lg,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   pickerSearch: {
     flex: 1,
     paddingHorizontal: SPACING.sm,
     paddingVertical: SPACING.md,
-    fontSize: FONT_SIZE.md,
+    fontSize: 15,
     fontWeight: '600',
-    color: COLORS.lightTextPrimary,
   },
-  pickerSep: { height: 1, backgroundColor: COLORS.gray50 },
+  pickerSep: { height: StyleSheet.hairlineWidth, backgroundColor: SURFACE.hairline },
   pickerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -531,21 +523,21 @@ const styles = StyleSheet.create({
   pickerStateIcon: {
     width: 36,
     height: 36,
-    borderRadius: 10,
-    backgroundColor: '#EFF6FF',
+    borderRadius: RADIUS.md,
+    backgroundColor: 'rgba(56,189,248,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pickerStateName: { fontSize: FONT_SIZE.md, fontWeight: '800', color: COLORS.lightTextPrimary },
-  pickerStatePhone: { fontSize: FONT_SIZE.xs, fontWeight: '600', color: COLORS.lightTextSecondary, marginTop: 2 },
+  pickerStateName: { fontSize: 15, fontWeight: '800' },
+  pickerStatePhone: { fontSize: 12, fontWeight: '600', marginTop: 2 },
   pickerCallBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: BRAND.navyDeep,
-    borderRadius: 10,
+    backgroundColor: BRAND.accentBlue,
+    borderRadius: RADIUS.md,
     paddingVertical: 7,
     paddingHorizontal: 14,
   },
-  pickerCallText: { fontSize: FONT_SIZE.xs, fontWeight: '800', color: '#FFF' },
+  pickerCallText: { fontSize: 11, fontWeight: '800', color: '#FFF' },
 });

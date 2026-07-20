@@ -110,8 +110,10 @@ function main() {
   results.push(
     printRow(
       '8',
-      'Network Reconnecting banner suppressed during driver CONNECTING',
-      banner.includes("driverPhase === 'connecting' ? 'hidden'"),
+      'Network Reconnecting banner suppressed during driver CONNECTING/session reconnect',
+      banner.includes("driverPhase === 'connecting'") &&
+        banner.includes("driverPhase === 'reconnecting'") &&
+        banner.includes("'hidden'"),
       null,
     ),
   );

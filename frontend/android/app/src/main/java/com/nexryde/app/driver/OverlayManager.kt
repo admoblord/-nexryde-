@@ -88,7 +88,10 @@ class OverlayManager(
         collapsedY = y
       }
     ).also { it.attachTo(r.circle) }
-    windowManager.addView(r.root, params)
+    // Permission can be revoked mid-session; never let addView kill the process.
+    runCatching { windowManager.addView(r.root, params) }.onFailure {
+      hide()
+    }
   }
 
   private fun expand() {
@@ -102,9 +105,12 @@ class OverlayManager(
     p.height = dp(OverlayRenderer.CARD_H_DP)
     p.x = p.x.coerceIn(dp(8), metrics.widthPixels - p.width - dp(8))
     p.y = p.y.coerceIn(dp(24), metrics.heightPixels - p.height - dp(24))
-    windowManager.updateViewLayout(root, p)
-    renderer?.expand()
-    expanded = true
+    runCatching { windowManager.updateViewLayout(root, p) }
+      .onSuccess {
+        renderer?.expand()
+        expanded = true
+      }
+      .onFailure { hide() }
   }
 
   private fun collapse() {
@@ -117,17 +123,22 @@ class OverlayManager(
     collapsedX?.let { p.x = it }
     collapsedY?.let { p.y = it }
     savePosition(p.x, p.y)
-    windowManager.updateViewLayout(root, p)
-    collapsedX = null
-    collapsedY = null
-    expanded = false
+    runCatching { windowManager.updateViewLayout(root, p) }
+      .onSuccess {
+        collapsedX = null
+        collapsedY = null
+        expanded = false
+      }
+      .onFailure { hide() }
   }
 
   private fun openApp() {
-    val intent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)
-      ?: Intent(Intent.ACTION_VIEW, Uri.parse("nexryde://action/open_app"))
-    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-    appContext.startActivity(intent)
+    runCatching {
+      val intent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)
+        ?: Intent(Intent.ACTION_VIEW, Uri.parse("nexryde://action/open_app"))
+      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+      appContext.startActivity(intent)
+    }
   }
 
   private fun loadPosition(): Pair<Int, Int> {

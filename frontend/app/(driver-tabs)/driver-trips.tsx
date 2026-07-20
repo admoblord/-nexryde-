@@ -17,8 +17,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useAppStore } from '@/src/store/appStore';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
-import { BRAND, SURFACE } from '@/src/constants/designSystem';
+import { CURRENCY, useThemeColors } from '@/src/constants/theme';
+import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useFlowLayout } from '@/src/constants/flowLayout';
@@ -46,22 +46,22 @@ function TripCardSkeleton() {
   return (
     <Animated.View style={[skStyles.skCard, { opacity: anim }]}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
-        <View style={[skStyles.skBox, { width: 80, height: 22, borderRadius: 999 }]} />
+        <View style={[skStyles.skBox, { width: 80, height: 22, borderRadius: RADIUS.full }]} />
         <View style={[skStyles.skBox, { width: 64, height: 22 }]} />
       </View>
       <View style={[skStyles.skBox, { width: '60%', height: 14, marginBottom: 6 }]} />
       <View style={[skStyles.skBox, { width: '45%', height: 14, marginBottom: 10 }]} />
-      <View style={[skStyles.skBox, { width: '100%', height: 40, borderRadius: 8 }]} />
+      <View style={[skStyles.skBox, { width: '100%', height: 40, borderRadius: RADIUS.sm }]} />
     </Animated.View>
   );
 }
 const skStyles = StyleSheet.create({
   skCard: {
     backgroundColor: SURFACE.cardDark,
-    borderRadius: 16,
+    borderRadius: RADIUS.xl,
     padding: 14,
     marginBottom: 10,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: SURFACE.hairline,
   },
   skBox: { backgroundColor: SURFACE.cardElevated, borderRadius: 6, height: 16 },
@@ -96,8 +96,8 @@ function statusBg(status: string): string {
   return SURFACE.tile;
 }
 function statusLabel(status: string): string {
-  if (status === 'pending_payment') return 'Awaiting Payment';
-  if (status === 'arrived') return 'At Pickup';
+  if (status === 'pending_payment') return 'Awaiting payment';
+  if (status === 'arrived') return 'At pickup';
   return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
 }
 
@@ -146,6 +146,12 @@ export default function DriverTripsTab() {
   const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const tabPad = useTabBottomPad(8);
   const flow = useFlowLayout();
+  const { colors, isDark } = useThemeColors();
+  const screenBg = isDark ? BRAND.bgDeep : colors.background;
+  const cardBg = isDark ? SURFACE.cardDark : colors.card;
+  const textPrimary = colors.text;
+  const textMuted = colors.textMuted;
+  const border = isDark ? SURFACE.hairline : colors.border;
 
   const resourceKey = `driver-trips:${driverId ?? 'none'}`;
   const { data, loading, error, retry } = useResource(
@@ -271,32 +277,32 @@ export default function DriverTripsTab() {
         <View style={styles.metaRow}>
           {distKm > 0 && (
             <View style={styles.metaChip}>
-              <Ionicons name="navigate" size={12} color="#6B7280" />
+              <Ionicons name="navigate" size={12} color={BRAND.textMuted} />
               <Text style={styles.metaChipText}>{distKm.toFixed(1)} km</Text>
             </View>
           )}
           {item.duration_mins ? (
             <View style={styles.metaChip}>
-              <Ionicons name="time-outline" size={12} color="#6B7280" />
+              <Ionicons name="time-outline" size={12} color={BRAND.textMuted} />
               <Text style={styles.metaChipText}>{Math.round(Number(item.duration_mins))} min</Text>
             </View>
           ) : null}
           {item.category && (
             <View style={styles.metaChip}>
-              <Ionicons name="car-sport" size={12} color="#6B7280" />
+              <Ionicons name="car-sport" size={12} color={BRAND.textMuted} />
               <Text style={styles.metaChipText}>{item.category}</Text>
             </View>
           )}
           {item.payment_method && (
             <View style={styles.metaChip}>
-              <Ionicons name={item.payment_method?.toLowerCase()?.includes('cash') ? 'cash-outline' : 'card'} size={12} color="#6B7280" />
+              <Ionicons name={item.payment_method?.toLowerCase()?.includes('cash') ? 'cash-outline' : 'card'} size={12} color={BRAND.textMuted} />
               <Text style={styles.metaChipText}>{item.payment_method}</Text>
             </View>
           )}
           {item.rider_rating != null && Number(item.rider_rating) > 0 && (
-            <View style={[styles.metaChip, { backgroundColor: '#FEF9C3' }]}>
-              <Ionicons name="star" size={12} color="#CA8A04" />
-              <Text style={[styles.metaChipText, { color: '#854D0E' }]}>{Number(item.rider_rating).toFixed(1)}</Text>
+            <View style={[styles.metaChip, { backgroundColor: 'rgba(245,158,11,0.14)' }]}>
+              <Ionicons name="star" size={12} color={BRAND.warning} />
+              <Text style={[styles.metaChipText, { color: BRAND.warning }]}>{Number(item.rider_rating).toFixed(1)}</Text>
             </View>
           )}
         </View>
@@ -311,8 +317,8 @@ export default function DriverTripsTab() {
             }}
             activeOpacity={0.88}
           >
-            <Ionicons name="navigate" size={15} color={COLORS.white} />
-            <Text style={styles.manageTripBtnText}>Manage Trip</Text>
+            <Ionicons name="navigate" size={15} color="#FFF" />
+            <Text style={styles.manageTripBtnText}>Manage trip</Text>
           </TouchableOpacity>
         )}
 
@@ -329,8 +335,8 @@ export default function DriverTripsTab() {
                 }}
                 activeOpacity={0.85}
               >
-                <Ionicons name="receipt-outline" size={14} color="#2563EB" />
-                <Text style={[styles.completedActionTxt, { color: '#2563EB' }]}>Earnings</Text>
+                <Ionicons name="receipt-outline" size={14} color={BRAND.accentBlue} />
+                <Text style={[styles.completedActionTxt, { color: BRAND.accentBlue }]}>Earnings</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.completedActionBtn}
@@ -345,8 +351,8 @@ export default function DriverTripsTab() {
                 }}
                 activeOpacity={0.85}
               >
-                <Ionicons name="navigate-outline" size={14} color="#16A34A" />
-                <Text style={[styles.completedActionTxt, { color: '#16A34A' }]}>Navigate</Text>
+                <Ionicons name="navigate-outline" size={14} color={BRAND.primary} />
+                <Text style={[styles.completedActionTxt, { color: BRAND.primary }]}>Navigate</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.completedActionBtn}
@@ -357,8 +363,8 @@ export default function DriverTripsTab() {
                 }}
                 activeOpacity={0.85}
               >
-                <Ionicons name="shield-outline" size={14} color="#EF4444" />
-                <Text style={[styles.completedActionTxt, { color: '#EF4444' }]}>Report</Text>
+                <Ionicons name="shield-outline" size={14} color={BRAND.danger} />
+                <Text style={[styles.completedActionTxt, { color: BRAND.danger }]}>Report</Text>
               </TouchableOpacity>
             </View>
           </>
@@ -390,7 +396,7 @@ export default function DriverTripsTab() {
               </Text>
             </View>
             <View style={styles.activeTripArrow}>
-              <Ionicons name="arrow-forward" size={18} color={COLORS.white} />
+              <Ionicons name="arrow-forward" size={18} color="#FFF" />
             </View>
           </LinearGradient>
         </TouchableOpacity>
@@ -457,7 +463,7 @@ export default function DriverTripsTab() {
     return (
       <View style={styles.emptyState}>
         <LinearGradient colors={['#EFF6FF', '#DBEAFE']} style={styles.emptyIconWrap}>
-          <Ionicons name="car-outline" size={44} color="#2563EB" />
+          <Ionicons name="car-outline" size={44} color={BRAND.accentBlue} />
         </LinearGradient>
         <Text style={styles.emptyTitle}>
           {filter === 'active' ? 'No Active Trips' : filter === 'completed' ? 'No Completed Trips Yet' : filter === 'cancelled' ? 'No Cancelled Trips' : 'No Trips Yet'}
@@ -471,7 +477,7 @@ export default function DriverTripsTab() {
             onPress={() => router.push('/(driver-tabs)/driver-home' as any)}
             activeOpacity={0.88}
           >
-            <Ionicons name="power" size={18} color={COLORS.white} />
+            <Ionicons name="power" size={18} color="#FFF" />
             <Text style={styles.goOnlineBtnText}>Go to Driver Home</Text>
           </TouchableOpacity>
         )}
@@ -480,13 +486,13 @@ export default function DriverTripsTab() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: screenBg }]} edges={['top']}>
       <TabBrandStrip role="driver" />
       {/* Header */}
-      <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
+      <View style={[styles.header, { paddingHorizontal: flow.padH, backgroundColor: cardBg, borderBottomColor: border }]}>
         <View>
-          <Text style={styles.headerTitle}>My Trips</Text>
-          <Text style={styles.headerSubtitle}>
+          <Text style={[styles.headerTitle, { color: textPrimary }]}>My trips</Text>
+          <Text style={[styles.headerSubtitle, { color: textMuted }]}>
             {trips.length > 0 ? `${stats.completed} completed · ${stats.total} total` : 'Your trip history'}
           </Text>
         </View>
@@ -500,7 +506,7 @@ export default function DriverTripsTab() {
           }
           activeOpacity={0.88}
         >
-          <Ionicons name="radio" size={16} color="#2563EB" />
+          <Ionicons name="radio" size={16} color={BRAND.accentBlue} />
           <Text style={styles.operationsBtnText}>Operations</Text>
         </TouchableOpacity>
       </View>
@@ -513,7 +519,7 @@ export default function DriverTripsTab() {
 
       {error && !!data?.length ? (
         <View style={[styles.errorBanner, { paddingHorizontal: flow.padH }]}>
-          <Ionicons name="alert-circle-outline" size={16} color="#EF4444" />
+          <Ionicons name="alert-circle-outline" size={16} color={BRAND.danger} />
           <Text style={styles.errorText}>Could not refresh — showing last saved trips.</Text>
           <TouchableOpacity onPress={() => void retry()}>
             <Text style={styles.retryText}>Retry</Text>
@@ -529,7 +535,7 @@ export default function DriverTripsTab() {
         <FlatList
           data={filteredTrips}
           renderItem={renderTripCard}
-          keyExtractor={item => String(item.id || item._id || item.created_at || '')}
+          keyExtractor={(item, index) => String(item.id || item._id || item.created_at || `trip-${index}`)}
           ListHeaderComponent={renderHeader}
           ListEmptyComponent={renderEmpty}
           contentContainerStyle={[
@@ -563,8 +569,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: SURFACE.hairline,
   },
-  headerTitle: { fontSize: FONT_SIZE.xl, fontWeight: '900', color: BRAND.textPrimary },
-  headerSubtitle: { fontSize: FONT_SIZE.xs, color: BRAND.textSecondary, fontWeight: '500', marginTop: 2 },
+  headerTitle: { fontSize: 20, fontWeight: '900', color: BRAND.textPrimary },
+  headerSubtitle: { fontSize: 11, color: BRAND.textSecondary, fontWeight: '500', marginTop: 2 },
   operationsBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -572,11 +578,11 @@ const styles = StyleSheet.create({
     backgroundColor: BRAND.primaryMuted,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.full,
+    borderRadius: RADIUS.full,
     borderWidth: 1,
     borderColor: SURFACE.glassBorder,
   },
-  operationsBtnText: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: BRAND.primary },
+  operationsBtnText: { fontSize: 13, fontWeight: '700', color: BRAND.primary },
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -586,16 +592,15 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(239,68,68,0.25)',
   },
-  errorText: { flex: 1, fontSize: FONT_SIZE.sm, color: BRAND.danger, fontWeight: '600' },
-  retryText: { fontSize: FONT_SIZE.sm, color: BRAND.primary, fontWeight: '700' },
+  errorText: { flex: 1, fontSize: 13, color: BRAND.danger, fontWeight: '600' },
+  retryText: { fontSize: 13, color: BRAND.primary, fontWeight: '700' },
   loadingCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: SPACING.md },
-  loadingText: { fontSize: FONT_SIZE.sm, color: BRAND.textSecondary },
+  loadingText: { fontSize: 13, color: BRAND.textSecondary },
   listContent: { flexGrow: 1 },
   activeTripBanner: {
     marginBottom: SPACING.md,
-    borderRadius: BORDER_RADIUS.xl,
+    borderRadius: RADIUS.xl,
     overflow: 'hidden',
-    ...SHADOWS.md,
   },
   activeTripGrad: {
     flexDirection: 'row',
@@ -603,8 +608,8 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     gap: SPACING.sm,
   },
-  activeTripTitle: { fontSize: FONT_SIZE.md, fontWeight: '800', color: BRAND.textPrimary },
-  activeTripSub: { fontSize: FONT_SIZE.xs, color: BRAND.textSecondary, marginTop: 2 },
+  activeTripTitle: { fontSize: 15, fontWeight: '800', color: BRAND.textPrimary },
+  activeTripSub: { fontSize: 11, color: BRAND.textSecondary, marginTop: 2 },
   activeTripArrow: {
     width: 36,
     height: 36,
@@ -616,15 +621,14 @@ const styles = StyleSheet.create({
   statsStrip: {
     flexDirection: 'row',
     backgroundColor: SURFACE.cardDark,
-    borderRadius: BORDER_RADIUS.xl,
+    borderRadius: RADIUS.xl,
     padding: SPACING.md,
     marginBottom: SPACING.md,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: SURFACE.hairline,
-    ...SHADOWS.sm,
   },
   statItem: { flex: 1, alignItems: 'center' },
-  statValue: { fontSize: FONT_SIZE.lg, fontWeight: '900', color: BRAND.textPrimary },
+  statValue: { fontSize: 17, fontWeight: '900', color: BRAND.textPrimary },
   statLabel: { fontSize: 10, color: BRAND.textSecondary, fontWeight: '600', marginTop: 2, textAlign: 'center' },
   statDivider: { width: 1, backgroundColor: SURFACE.hairline, marginVertical: 4 },
   filterRow: {
@@ -638,9 +642,9 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingHorizontal: SPACING.sm,
     paddingVertical: 6,
-    borderRadius: BORDER_RADIUS.full,
+    borderRadius: RADIUS.full,
     backgroundColor: SURFACE.cardDark,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: SURFACE.hairline,
   },
   filterTabActive: {
@@ -651,7 +655,7 @@ const styles = StyleSheet.create({
   filterTabTextActive: { color: BRAND.textInverse },
   filterCount: {
     backgroundColor: SURFACE.tile,
-    borderRadius: BORDER_RADIUS.full,
+    borderRadius: RADIUS.full,
     minWidth: 18,
     height: 18,
     alignItems: 'center',
@@ -663,11 +667,10 @@ const styles = StyleSheet.create({
   filterCountTextActive: { color: BRAND.textInverse },
   tripCard: {
     backgroundColor: SURFACE.cardDark,
-    borderRadius: BORDER_RADIUS.xl,
+    borderRadius: RADIUS.xl,
     padding: SPACING.md,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: SURFACE.hairline,
-    ...SHADOWS.sm,
     marginTop: SPACING.sm,
   },
   tripCardActive: {
@@ -688,17 +691,17 @@ const styles = StyleSheet.create({
     gap: 5,
     paddingHorizontal: SPACING.sm,
     paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.full,
+    borderRadius: RADIUS.full,
   },
   statusText: { fontSize: 12, fontWeight: '700' },
   liveLabel: {
     backgroundColor: BRAND.danger,
     paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: BORDER_RADIUS.full,
+    borderRadius: RADIUS.full,
   },
   liveLabelText: { fontSize: 9, fontWeight: '900', color: BRAND.textPrimary, letterSpacing: 0.5 },
-  fareText: { fontSize: FONT_SIZE.lg, fontWeight: '900', color: BRAND.primary },
+  fareText: { fontSize: 17, fontWeight: '900', color: BRAND.primary },
   riderRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -713,8 +716,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  riderName: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '700', color: BRAND.textPrimary },
-  dateText: { fontSize: FONT_SIZE.xs, color: BRAND.textSecondary, fontWeight: '500' },
+  riderName: { flex: 1, fontSize: 13, fontWeight: '700', color: BRAND.textPrimary },
+  dateText: { fontSize: 11, color: BRAND.textSecondary, fontWeight: '500' },
   routeWrap: {
     flexDirection: 'row',
     gap: SPACING.sm,
@@ -733,7 +736,7 @@ const styles = StyleSheet.create({
     minHeight: 16,
   },
   routeLabel: { fontSize: 10, fontWeight: '700', color: BRAND.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 },
-  routeAddress: { fontSize: FONT_SIZE.sm, fontWeight: '600', color: BRAND.textPrimary, marginTop: 1 },
+  routeAddress: { fontSize: 13, fontWeight: '600', color: BRAND.textPrimary, marginTop: 1 },
   metaRow: {
     flexDirection: 'row',
     gap: SPACING.xs,
@@ -749,7 +752,7 @@ const styles = StyleSheet.create({
     backgroundColor: SURFACE.tile,
     paddingHorizontal: SPACING.sm,
     paddingVertical: 3,
-    borderRadius: BORDER_RADIUS.full,
+    borderRadius: RADIUS.full,
   },
   metaChipText: { fontSize: 11, fontWeight: '600', color: BRAND.textSecondary },
   manageTripBtn: {
@@ -759,17 +762,17 @@ const styles = StyleSheet.create({
     gap: SPACING.xs,
     backgroundColor: BRAND.primary,
     padding: SPACING.sm,
-    borderRadius: BORDER_RADIUS.lg,
+    borderRadius: RADIUS.lg,
     marginTop: SPACING.sm,
   },
-  manageTripBtnText: { fontSize: FONT_SIZE.sm, fontWeight: '800', color: BRAND.textInverse },
+  manageTripBtnText: { fontSize: 13, fontWeight: '800', color: BRAND.textInverse },
   completedActions: {
     flexDirection: 'row', gap: SPACING.xs, marginTop: SPACING.xs,
     paddingTop: SPACING.xs, borderTopWidth: 1, borderTopColor: SURFACE.hairline,
   },
   completedActionBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
-    paddingVertical: 8, borderRadius: BORDER_RADIUS.lg,
+    paddingVertical: 8, borderRadius: RADIUS.lg,
     backgroundColor: SURFACE.tile, borderWidth: 1, borderColor: SURFACE.hairline,
   },
   completedActionTxt: { fontSize: 12, fontWeight: '800' },
@@ -778,9 +781,9 @@ const styles = StyleSheet.create({
     width: 96, height: 96, borderRadius: 48,
     alignItems: 'center', justifyContent: 'center',
   },
-  emptyTitle: { fontSize: FONT_SIZE.xl, fontWeight: '800', color: BRAND.textPrimary, textAlign: 'center' },
+  emptyTitle: { fontSize: 20, fontWeight: '800', color: BRAND.textPrimary, textAlign: 'center' },
   emptySubtitle: {
-    fontSize: FONT_SIZE.sm, color: BRAND.textSecondary,
+    fontSize: 13, color: BRAND.textSecondary,
     textAlign: 'center', lineHeight: 22,
   },
   goOnlineBtn: {
@@ -790,9 +793,8 @@ const styles = StyleSheet.create({
     backgroundColor: BRAND.primary,
     paddingHorizontal: SPACING.xl,
     paddingVertical: SPACING.md,
-    borderRadius: BORDER_RADIUS.xl,
+    borderRadius: RADIUS.xl,
     marginTop: SPACING.sm,
-    ...SHADOWS.md,
   },
-  goOnlineBtnText: { fontSize: FONT_SIZE.md, fontWeight: '700', color: BRAND.textInverse },
+  goOnlineBtnText: { fontSize: 15, fontWeight: '700', color: BRAND.textInverse },
 });
