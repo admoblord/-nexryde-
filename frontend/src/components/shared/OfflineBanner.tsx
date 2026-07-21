@@ -1,11 +1,10 @@
 /**
- * Offline / poor connection banner — quiet production policy.
- * Shows only Low Connection / Reconnecting / Offline (Connected only after long OFFLINE).
- * Driven by NetworkStateManager.bannerExposure — not every FSM transition.
+ * Connection status indicator — Uber-model quiet chrome.
+ * A 2px strip + small tappable dot; NEVER a full-width banner, never blocks controls.
+ * Exposure is policy-gated by NetworkStateManager (hysteresis lives there).
  */
-import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useRef, useState } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   type BannerExposure,
@@ -13,37 +12,17 @@ import {
 } from '@/src/services/platformConnectionManager';
 import { useDriverSessionStore } from '@/src/store/driverSessionStore';
 
-import { BRAND } from '@/src/constants/designSystem';
-
-const BANNER_META: Record<
+const STATUS_META: Record<
   Exclude<BannerExposure, 'hidden'>,
-  { label: string; icon: keyof typeof Ionicons.glyphMap; bg: string; fg: string }
+  { label: string; color: string }
 > = {
-  degraded: {
-    label: 'Low Connection',
-    icon: 'warning-outline',
-    bg: '#713F12',
-    fg: '#FEF3C7',
-  },
-  reconnecting: {
-    label: 'Reconnecting',
-    icon: 'sync-outline',
-    bg: BRAND.accentBlue,
-    fg: '#DBEAFE',
-  },
-  offline: {
-    label: 'Offline',
-    icon: 'cloud-offline-outline',
-    bg: '#7F1D1D',
-    fg: '#FEE2E2',
-  },
-  connected: {
-    label: 'Connected',
-    icon: 'checkmark-circle-outline',
-    bg: BRAND.primaryDark,
-    fg: '#D1FAE5',
-  },
+  degraded: { label: 'Low Connection', color: '#D97706' },
+  reconnecting: { label: 'Reconnecting…', color: '#94A3B8' },
+  offline: { label: 'Offline', color: '#EF4444' },
+  connected: { label: 'Connected', color: '#22C55E' },
 };
+
+const DETAIL_AUTO_HIDE_MS = 4000;
 
 export const OfflineBanner: React.FC = () => {
   const insets = useSafeAreaInsets();
@@ -55,74 +34,91 @@ export const OfflineBanner: React.FC = () => {
     driverPhase === 'connecting' || driverPhase === 'reconnecting'
       ? 'hidden'
       : connection.bannerExposure;
-  const slideY = useRef(new Animated.Value(-52)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
-  const bannerH = 44 + Math.max(insets.top, 8);
 
-  const visible = exposure !== 'hidden';
-  const meta = exposure === 'hidden' ? BANNER_META.degraded : BANNER_META[exposure];
+  const [detailOpen, setDetailOpen] = useState(false);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.spring(slideY, {
-        toValue: visible ? 0 : -bannerH,
-        useNativeDriver: true,
-        damping: 20,
-        stiffness: 200,
-      }),
-      Animated.timing(opacity, {
-        toValue: visible ? 1 : 0,
-        duration: 220,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [visible, slideY, opacity, bannerH, exposure]);
+    // Collapse detail whenever status changes or clears.
+    setDetailOpen(false);
+    if (hideTimer.current) {
+      clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+  }, [exposure]);
+
+  useEffect(
+    () => () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    },
+    [],
+  );
+
+  if (exposure === 'hidden') return null;
+  const meta = STATUS_META[exposure];
+
+  const toggleDetail = () => {
+    setDetailOpen((open) => {
+      const next = !open;
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+      if (next) {
+        hideTimer.current = setTimeout(() => setDetailOpen(false), DETAIL_AUTO_HIDE_MS);
+      }
+      return next;
+    });
+  };
 
   return (
-    <Animated.View
-      style={[
-        styles.banner,
-        {
-          backgroundColor: meta.bg,
-          height: bannerH,
-          paddingTop: Math.max(insets.top, 8),
-          transform: [{ translateY: slideY }],
-          opacity,
-        },
-      ]}
-      pointerEvents="none"
-      accessibilityLiveRegion="polite"
-      accessibilityLabel={visible ? meta.label : undefined}
-    >
-      {visible ? (
-        <View style={styles.row}>
-          <Ionicons name={meta.icon} size={16} color={meta.fg} />
-          <Text style={[styles.text, { color: meta.fg }]}>{meta.label}</Text>
-        </View>
-      ) : null}
-    </Animated.View>
+    <View style={[styles.wrap, { top: insets.top }]} pointerEvents="box-none">
+      <View style={[styles.strip, { backgroundColor: meta.color }]} pointerEvents="none" />
+      <TouchableOpacity
+        style={styles.pill}
+        onPress={toggleDetail}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel={`Connection status: ${meta.label}`}
+        accessibilityLiveRegion="polite"
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <View style={[styles.dot, { backgroundColor: meta.color }]} />
+        {detailOpen ? <Text style={styles.pillText}>{meta.label}</Text> : null}
+      </TouchableOpacity>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  banner: {
+  wrap: {
     position: 'absolute',
-    top: 0,
     left: 0,
     right: 0,
     zIndex: 9999,
-    overflow: 'hidden',
   },
-  row: {
-    flex: 1,
+  strip: {
+    height: 2,
+    width: '100%',
+    opacity: 0.9,
+  },
+  pill: {
+    position: 'absolute',
+    top: 6,
+    right: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+    gap: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15,23,42,0.72)',
   },
-  text: {
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0.2,
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  pillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#E2E8F0',
   },
 });

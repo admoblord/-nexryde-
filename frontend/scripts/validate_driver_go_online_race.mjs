@@ -87,8 +87,8 @@ function main() {
     printRow(
       '6',
       'Earnings/stats defaults (not blank em-dash while offline)',
-      offlineHome.includes("ratingLabel =") &&
-        offlineHome.includes("'5.0'") &&
+      offlineHome.includes('today: 0,') &&
+        offlineHome.includes('never leave EARNINGS/TRIPS blank forever') &&
         !offlineHome.includes("earningsLoading ? '—'"),
       null,
     ),
@@ -156,7 +156,8 @@ function main() {
       'RECONNECTING does not lock Go Offline; map stays engaged online',
       home.includes("const toggling = statusToggleBusy || operationalState === 'CONNECTING'") &&
         home.includes('isOnline={sessionEngaged}') &&
-        home.includes('isReconnecting={connectionPhase === \'reconnecting\'}') &&
+        // Hysteresis: reconnecting chrome only after ~5s sustained (Law 4).
+        home.includes('isReconnecting={showReconnectingChrome}') &&
         map.includes('isReconnecting') &&
         !home.includes("operationalState === 'RECONNECTING'"),
       null,

@@ -42,13 +42,13 @@ function checkFrontendInvariants() {
   console.log('\n[1] Frontend connection + ride-state invariants');
   expectIncludes(
     'frontend/src/services/platformConnectionManager.ts',
-    "OFFLINE_FAILURE_THRESHOLD = 3",
+    "FAILURES_TO_DEGRADED = 3",
     'Connection manager requires 3 all-signal failures'
   );
   expectIncludes(
     'frontend/src/components/shared/OfflineBanner.tsx',
-    'Weak Connection',
-    'Persistent four-state connection banner exists'
+    'Low Connection',
+    'Four-state connection indicator (dot + strip) exists'
   );
   expectIncludes(
     'frontend/src/services/driverHeartbeat.ts',

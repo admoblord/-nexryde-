@@ -63,6 +63,11 @@ import {
   type DriverPermissionItem,
   type DriverPermissionPreflight,
 } from '@/src/services/driverPermissionPreflight';
+import {
+  peekPermissionsCompleted,
+  readPermissionsCompleted,
+  writePermissionsCompleted,
+} from '@/src/services/driverPermissionsCompleted';
 import { DriverGoOnlinePermissionGate } from '@/src/components/driver/DriverGoOnlinePermissionGate';
 import { apiFetch } from '@/src/utils/sessionRefresh';
 import { verifyDriverTripAssignment } from '@/src/utils/verifyDriverTripAssignment';
@@ -516,6 +521,21 @@ export default function ModernDriverHome() {
   const nativeOfferAlertKeyRef = useRef<string | null>(null);
   const [permissionPreflight, setPermissionPreflight] = useState<DriverPermissionPreflight | null>(null);
   const [permissionRefreshing, setPermissionRefreshing] = useState(false);
+  /**
+   * Law 5 — preflight checklist shows before FIRST go-online only.
+   * Once all granted we persist completed=true; only a revocation detected at
+   * GO-tap (or FGS start) clears it and brings the checklist back.
+   */
+  const [permissionsCompletedOnce, setPermissionsCompletedOnce] = useState(
+    peekPermissionsCompleted(),
+  );
+  useEffect(() => {
+    void readPermissionsCompleted().then(setPermissionsCompletedOnce);
+  }, []);
+  const markPermissionsCompleted = useCallback((completed: boolean) => {
+    setPermissionsCompletedOnce(completed);
+    void writePermissionsCompleted(completed);
+  }, []);
 
   const refreshPermissionPreflight = useCallback(async () => {
     if (Platform.OS === 'web') {
@@ -526,12 +546,13 @@ export default function ModernDriverHome() {
     try {
       const next = await evaluateDriverPermissionPreflight();
       setPermissionPreflight(next);
+      if (next.ready) markPermissionsCompleted(true);
     } catch {
       /* keep last known */
     } finally {
       setPermissionRefreshing(false);
     }
-  }, []);
+  }, [markPermissionsCompleted]);
 
   useEffect(() => {
     void refreshPermissionPreflight();
@@ -714,6 +735,8 @@ export default function ModernDriverHome() {
           stopNativeDriverExperience();
           confirmOffline();
           setPermissionPreflight(preflight);
+          // Revocation detected while going online — allow checklist again (Law 5).
+          markPermissionsCompleted(false);
           return;
         }
         void startNativeDriverExperience(driverId);
@@ -730,7 +753,7 @@ export default function ModernDriverHome() {
       stopNativeDriverExperience();
     }
     return undefined;
-  }, [confirmOffline, connectionPhase, driverId]);
+  }, [confirmOffline, connectionPhase, driverId, markPermissionsCompleted]);
 
   // Overlay is required in pre-flight BEFORE GO. Soft safety net only if somehow online without it.
   useEffect(() => {
@@ -2636,6 +2659,8 @@ export default function ModernDriverHome() {
         const preflight = await evaluateDriverPermissionPreflight();
         setPermissionPreflight(preflight);
         if (!preflight.ready) {
+          // Actual revocation detected at GO-tap — checklist may reappear (Law 5).
+          markPermissionsCompleted(false);
           releaseGoOnlineLock();
           const code = preflight.firstBlockingCode || 'ERR_UNKNOWN';
           const names = preflight.missing.map((m) => m.label).join(', ');
@@ -2643,6 +2668,7 @@ export default function ModernDriverHome() {
           Alert.alert(code, `Grant these to go online: ${names}`);
           return;
         }
+        markPermissionsCompleted(true);
 
         desiredOfflineUntilSyncedRef.current = false;
         beginConnecting();
@@ -2833,7 +2859,7 @@ export default function ModernDriverHome() {
     verificationStatus={verificationStatus}
     toggling={toggling}
     featureHubOpen={featureHubOpen}
-    permissionPreflight={permissionPreflight}
+    permissionPreflight={permissionsCompletedOnce ? null : permissionPreflight}
     permissionRefreshing={permissionRefreshing}
     onRefreshPermissions={() => void refreshPermissionPreflight()}
     onRequestPermission={(item: DriverPermissionItem) => {

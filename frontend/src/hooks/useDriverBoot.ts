@@ -394,14 +394,14 @@ export function useDriverBoot({
       } else if (!gateOpenRef.current) {
         // No cache: leave verificationStatus null → brief "Checking your account…"
         openGateWithDefaults();
-        // Cap Checking UI — never spin for minutes on weak Nigerian networks.
+        // Cap Checking UI at 5s — never spin for minutes on weak Nigerian networks.
         setTimeout(() => {
           if (runId !== runIdRef.current) return;
           if (verificationStatusRef.current == null) {
-            startupLog('CHECKING_TIMEOUT', { afterMs: 8000 });
+            startupLog('CHECKING_TIMEOUT', { afterMs: 5000 });
             setError('Still confirming your account. Pull to retry, or check your connection.');
           }
-        }, 8000);
+        }, 5000);
       }
 
       setIsRefreshing(false);
