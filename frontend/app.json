@@ -69,7 +69,7 @@
       }
     },
     "android": {
-      "versionCode": 212,
+      "versionCode": 213,
       "config": {
         "googleMaps": {
           "apiKey": "GOOGLE_MAPS_KEY_REDACTED"

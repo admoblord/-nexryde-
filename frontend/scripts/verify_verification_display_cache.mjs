@@ -129,6 +129,21 @@ has(
   'logout clears ephemeral boot cache (approved fact retained in clearDriverBootCache)',
 );
 has(
+  'src/utils/sessionRouting.ts',
+  /persistDriverVerificationFromRouting|writeDriverVerificationFact/,
+  'login routing persists verification_status — no second fetch before first GO paint',
+);
+has(
+  'src/utils/sessionRouting.ts',
+  /persistDriverVerificationFromRouting\(id, status\?\.verification_status\)/,
+  'blocking login status check writes the fact before navigating home',
+);
+has(
+  'src/utils/sessionRouting.ts',
+  /persistDriverVerificationFromRouting\(id, data\?\.verification_status\)/,
+  'background resume sync also persists verification fact',
+);
+has(
   'src/services/platformConnectionManager.ts',
   /FAILURES_TO_DEGRADED\s*=\s*3/,
   'network banner requires 3 failures before degraded',

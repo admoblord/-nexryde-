@@ -14,6 +14,19 @@ import {
 import { legalTermsRouteForRole } from '@/src/constants/legal';
 import { replaceLegalTermsIfNeeded } from '@/src/utils/navigationRouteGuard';
 import { logLegalGateCheck, syncUserLegalStatus } from '@/src/services/legalStatusSync';
+import { writeDriverVerificationFact } from '@/src/services/driverVerificationFact';
+
+/**
+ * Verification learned during routing is persisted IMMEDIATELY (Uber model).
+ * Seeds the in-memory fact synchronously, so when driver-home mounts moments
+ * later its first frame paints Verified/GO from local state — no second
+ * onboarding-status round-trip, no "Checking your account…".
+ */
+function persistDriverVerificationFromRouting(driverId: string, status: unknown): void {
+  const vs = typeof status === 'string' ? status.trim() : '';
+  if (!driverId || !vs) return;
+  void writeDriverVerificationFact(driverId, vs);
+}
 
 const ONBOARDING_SEEN_KEY = 'onboarding_complete';
 const riderVerifiedKey = (userId: string) => `@nexryde_rider_verified_${userId}`;
@@ -152,6 +165,7 @@ export function syncAuthStatusInBackground(
         if (res.ok) {
           const data = await res.json();
           if (data?.completed) await markDriverOnboardingCached(id);
+          persistDriverVerificationFromRouting(id, data?.verification_status);
         }
       } catch {
         /* stay on home */
@@ -185,6 +199,9 @@ export async function routeAuthedUserFirstLogin(
         { headers, timeoutMs: 10000 },
       );
       const status = await st.json();
+      // Login already carries the verification answer — persist it NOW so the
+      // dashboard's first frame is Verified/GO, never "Checking your account…".
+      if (st.ok) persistDriverVerificationFromRouting(id, status?.verification_status);
       if (st.ok && status?.completed) {
         await markDriverOnboardingCached(id);
         router.replace(homeRouteForRole('driver') as any);
