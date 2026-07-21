@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NexRyde E2E Ride Flow Test
+NEXRYDE E2E Ride Flow Test
 ==========================
 Tests the full ride lifecycle:
   request → match → accept → arrive → start → complete
@@ -138,7 +138,7 @@ async def register_and_login(client: httpx.AsyncClient, role: str, suffix: str) 
 async def run() -> None:
     suffix = tag()
     print(f"\n{BOLD}{'=' * 60}{RESET}")
-    print(f"{BOLD}  NexRyde E2E Ride Flow Test  [{suffix}]{RESET}")
+    print(f"{BOLD}  NEXRYDE E2E Ride Flow Test  [{suffix}]{RESET}")
     print(f"  Base URL : {BASE_URL}")
     print(f"  Started  : {datetime.now().isoformat()}")
     print(f"{BOLD}{'=' * 60}{RESET}")

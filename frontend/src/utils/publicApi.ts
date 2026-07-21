@@ -28,7 +28,7 @@ export function publicFetchErrorMessage(e: unknown): string {
     return 'Connection timed out. Check your network and try again.';
   }
   if (e instanceof TypeError) {
-    return 'Unable to reach NexRyde servers. Check your connection.';
+    return 'Unable to reach NEXRYDE servers. Check your connection.';
   }
   return 'Unable to sign you in right now. Please try again.';
 }

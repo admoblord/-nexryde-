@@ -251,7 +251,7 @@ export default function DriverRideRecordingScreen() {
             <Text style={s.infoTitle}>Privacy & Security</Text>
             <Text style={s.infoText}>
               {'• Recordings are stored securely and never shared automatically\n'}
-              {'• Only accessible by you or admin during a Nexryde Shield review\n'}
+              {'• Only accessible by you or admin during a NEXRYDE Shield review\n'}
               {'• Auto-deleted after 30 days if no dispute is filed\n'}
               {'• Can be submitted directly as evidence in a Shield case'}
             </Text>

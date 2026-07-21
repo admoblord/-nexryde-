@@ -43,8 +43,8 @@ interface Poll {
 const SEED_GROUPS: CGroup[] = [
   // ── Official Channels ───────────────────────────────────────────────────────
   {
-    group_id: 'nx_announcements', name: 'Nexryde Announcements', category: 'official',
-    description: 'Official updates, new features, policy changes & promotions from the Nexryde team',
+    group_id: 'nx_announcements', name: 'NEXRYDE Announcements', category: 'official',
+    description: 'Official updates, new features, policy changes & promotions from the NEXRYDE team',
     icon: 'megaphone', color: '#7C3AED', members: 4280, recent_messages: 12, is_official: true,
     latest_msg: 'New feature: Floating driver bubble is live 🎉', latest_msg_time: new Date().toISOString(),
   },
@@ -185,7 +185,7 @@ const SEED_GROUPS: CGroup[] = [
   },
   {
     group_id: 'topic_appfeatures', name: '📱 App Features & Updates', category: 'topic',
-    description: 'Discuss new Nexryde features, report bugs, suggest improvements, share tips',
+    description: 'Discuss new NEXRYDE features, report bugs, suggest improvements, share tips',
     icon: 'phone-portrait', color: '#8B5CF6', members: 1870, recent_messages: 38,
     latest_msg: 'The floating bubble feature is amazing! 🎉', latest_msg_time: new Date(Date.now() - 600000).toISOString(),
   },
@@ -197,7 +197,7 @@ const SEED_GROUPS: CGroup[] = [
   },
   {
     group_id: 'topic_safety', name: '🛡️ Safety First', category: 'topic',
-    description: 'Emergency protocols, dangerous zones, self-defence tips, Nexryde Shield feature guide',
+    description: 'Emergency protocols, dangerous zones, self-defence tips, NEXRYDE Shield feature guide',
     icon: 'shield', color: '#10B981', members: 3470, recent_messages: 76,
     latest_msg: 'Always verify pickup code before starting 🔐', latest_msg_time: new Date(Date.now() - 2400000).toISOString(),
   },
@@ -207,36 +207,36 @@ const SEED_GROUPS: CGroup[] = [
 const SEED_ANNOUNCEMENTS: Msg[] = [
   {
     _id: 'ann_001', group_id: 'nx_announcements', user_id: 'nexryde_admin',
-    user_name: 'Nexryde Team', user_role: 'admin',
-    text: '🎉 We just launched the Floating Driver Bubble! When you minimise the app while online, a Nexryde icon floats on your screen — tap it anytime to jump back in. Update your app to get it.',
+    user_name: 'NEXRYDE Team', user_role: 'admin',
+    text: '🎉 We just launched the Floating Driver Bubble! When you minimise the app while online, a NEXRYDE icon floats on your screen — tap it anytime to jump back in. Update your app to get it.',
     likes: 312, replies: 28, is_pinned: true, is_announcement: true,
     created_at: new Date(Date.now() - 7200000).toISOString(),
   },
   {
     _id: 'ann_002', group_id: 'nx_announcements', user_id: 'nexryde_admin',
-    user_name: 'Nexryde Team', user_role: 'admin',
-    text: '💰 EARNINGS GUARANTEE UPDATE: As a Nexryde driver you benefit from our anti-surge protection — your base fare is never reduced by algorithm tricks. You always earn at least the suggested fare, no exceptions. This is our commitment to you.',
+    user_name: 'NEXRYDE Team', user_role: 'admin',
+    text: '💰 EARNINGS GUARANTEE UPDATE: As a NEXRYDE driver you benefit from our anti-surge protection — your base fare is never reduced by algorithm tricks. You always earn at least the suggested fare, no exceptions. This is our commitment to you.',
     likes: 487, replies: 54, is_announcement: true,
     created_at: new Date(Date.now() - 86400000).toISOString(),
   },
   {
     _id: 'ann_003', group_id: 'nx_announcements', user_id: 'nexryde_admin',
-    user_name: 'Nexryde Team', user_role: 'admin',
+    user_name: 'NEXRYDE Team', user_role: 'admin',
     text: '🛡️ NEW: Pick-Up Code Security — every trip now generates a unique 4-digit code shown to your rider. Verify it before starting — this protects both of you and keeps ghost trips at zero. No code = no start.',
     likes: 394, replies: 41, is_announcement: true,
     created_at: new Date(Date.now() - 172800000).toISOString(),
   },
   {
     _id: 'ann_004', group_id: 'nx_announcements', user_id: 'nexryde_admin',
-    user_name: 'Nexryde Team', user_role: 'admin',
-    text: '📍 TURN-BY-TURN NAVIGATION is now LIVE — Nexryde gives you Google Directions voice guidance tuned for Nigerian roads (example: “In 200m, turn left onto Adeola Odeku Street.”). Enable it from the trip screen.',
+    user_name: 'NEXRYDE Team', user_role: 'admin',
+    text: '📍 TURN-BY-TURN NAVIGATION is now LIVE — NEXRYDE gives you Google Directions voice guidance tuned for Nigerian roads (example: “In 200m, turn left onto Adeola Odeku Street.”). Enable it from the trip screen.',
     likes: 621, replies: 87, is_announcement: true,
     created_at: new Date(Date.now() - 259200000).toISOString(),
   },
   {
     _id: 'ann_005', group_id: 'nx_announcements', user_id: 'nexryde_admin',
-    user_name: 'Nexryde Team', user_role: 'admin',
-    text: '✅ VERIFIED DRIVER PERKS: All verified drivers now get priority placement in rider searches, a "Verified" badge on their profile, and access to Nexryde Shield emergency features. Complete your verification today.',
+    user_name: 'NEXRYDE Team', user_role: 'admin',
+    text: '✅ VERIFIED DRIVER PERKS: All verified drivers now get priority placement in rider searches, a "Verified" badge on their profile, and access to NEXRYDE Shield emergency features. Complete your verification today.',
     likes: 278, replies: 33, is_announcement: true,
     created_at: new Date(Date.now() - 345600000).toISOString(),
   },
@@ -246,21 +246,21 @@ const SEED_ANNOUNCEMENTS: Msg[] = [
 const SEED_TIPS: Msg[] = [
   {
     _id: 'tip_001', group_id: 'nx_tips', user_id: 'nexryde_admin',
-    user_name: 'Nexryde Team', user_role: 'admin',
-    text: '🌙 NIGHT SHIFT TIPS: (1) Always confirm the pickup code before unlocking doors. (2) Keep your doors locked until the code is verified. (3) Share your trip with a trusted contact using Nexryde Shield. (4) Trust your instincts — you can cancel if something feels wrong.',
+    user_name: 'NEXRYDE Team', user_role: 'admin',
+    text: '🌙 NIGHT SHIFT TIPS: (1) Always confirm the pickup code before unlocking doors. (2) Keep your doors locked until the code is verified. (3) Share your trip with a trusted contact using NEXRYDE Shield. (4) Trust your instincts — you can cancel if something feels wrong.',
     likes: 445, replies: 62, is_pinned: true,
     created_at: new Date(Date.now() - 3600000).toISOString(),
   },
   {
     _id: 'tip_002', group_id: 'nx_tips', user_id: 'nexryde_admin',
-    user_name: 'Nexryde Team', user_role: 'admin',
+    user_name: 'NEXRYDE Team', user_role: 'admin',
     text: '💡 5-STAR RATING SECRETS: (1) Greet riders by first name. (2) Ask if they want music or AC preference. (3) Drive smoothly — no sudden braking. (4) Confirm destination before leaving. (5) Offer to help with luggage. Small gestures = consistent 5 stars.',
     likes: 389, replies: 47,
     created_at: new Date(Date.now() - 7200000).toISOString(),
   },
   {
     _id: 'tip_003', group_id: 'nx_tips', user_id: 'nexryde_admin',
-    user_name: 'Nexryde Team', user_role: 'admin',
+    user_name: 'NEXRYDE Team', user_role: 'admin',
     text: '⛽ FUEL EFFICIENCY HACK: Drive at 80–90km/h on highways (not 120+). Avoid rapid acceleration. Check tyre pressure weekly — under-inflated tyres increase fuel use by up to 15%. Switch off AC on short trips under 3km. These habits save ₦15,000+ per month.',
     likes: 523, replies: 71,
     created_at: new Date(Date.now() - 10800000).toISOString(),
@@ -279,7 +279,7 @@ const SEED_EARNINGS_MSGS: Msg[] = [
   {
     _id: 'earn_002', group_id: 'topic_earnings', user_id: 'seed_driver_2',
     user_name: 'Adaeze N.', user_role: 'driver',
-    text: 'Airport strategy: Park at the free waiting area (not the meter zone). Join Nexryde queue. Airport runs pay ₦8,000–₦15,000 depending on destination. One airport run beats 4 city trips. Worth the wait.',
+    text: 'Airport strategy: Park at the free waiting area (not the meter zone). Join NEXRYDE queue. Airport runs pay ₦8,000–₦15,000 depending on destination. One airport run beats 4 city trips. Worth the wait.',
     likes: 312, replies: 27,
     created_at: new Date(Date.now() - 21600000).toISOString(),
   },
@@ -828,7 +828,7 @@ export default function DriverCommunityScreen() {
                 <Ionicons name="megaphone" size={22} color="#fff" />
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 15, fontWeight: '900', color: '#fff' }}>Official Announcements</Text>
-                  <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', marginTop: 1 }}>From the Nexryde Team</Text>
+                  <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', marginTop: 1 }}>From the NEXRYDE Team</Text>
                 </View>
               </LinearGradient>
             </View>

@@ -196,14 +196,28 @@ export default function DriverNavigatePickupDock({
       {arrivalEligible && expanded ? (
         <View style={s.arrivalAlert}>
           <View style={s.arrivalAlertDot} />
-          <Text style={s.arrivalAlertTxt}>You're at the pickup point — tap "I've Arrived"</Text>
+          <Text style={s.arrivalAlertTxt}>You’re at pickup — tap I’ve arrived</Text>
         </View>
       ) : null}
 
       {!expanded ? (
-        <Text style={s.collapsedPeek} numberOfLines={1}>
-          {pickupDisplay}{dropDisplay ? ` → ${dropDisplay}` : ''}
-        </Text>
+        <View style={s.collapsedIdentity}>
+          <TripProfileAvatar
+            size={48}
+            uri={riderPhoto}
+            borderColor="#FFFFFF"
+            borderWidth={2}
+            accessibilityLabel={`Photo of ${driverFirstName(riderName)}`}
+          />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={s.collapsedName} numberOfLines={1}>
+              {driverFirstName(riderName)}
+            </Text>
+            <Text style={s.collapsedPeek} numberOfLines={1}>
+              {pickupDisplay}{dropDisplay ? ` → ${dropDisplay}` : ''}
+            </Text>
+          </View>
+        </View>
       ) : null}
 
       <Animated.View style={{ maxHeight: bodyHeight, opacity: bodyOpacity, overflow: 'hidden' }}>
@@ -226,9 +240,10 @@ export default function DriverNavigatePickupDock({
         {/* ── Rider card ─────────────────────────────────────────── */}
         <View style={s.riderCard}>
           <TripProfileAvatar
-            size={52}
+            size={60}
             uri={riderPhoto}
-            borderColor="rgba(37,99,235,0.3)"
+            borderColor="#FFFFFF"
+            borderWidth={2.5}
             accessibilityLabel={`Photo of ${driverFirstName(riderName)}`}
           />
           <View style={s.riderMeta}>
@@ -243,7 +258,7 @@ export default function DriverNavigatePickupDock({
                 </Text>
               </View>
             ) : (
-              <Text style={s.riderHint}>{isNewRider ? 'New to NexRyde' : 'Your rider'}</Text>
+              <Text style={s.riderHint}>{isNewRider ? 'New rider' : 'Your rider'}</Text>
             )}
           </View>
           {/* Comms buttons */}
@@ -300,12 +315,12 @@ export default function DriverNavigatePickupDock({
             ) : arrivalEligible ? (
               <LinearGradient colors={['#22C55E', GREEN, '#15803D']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.arrivedGrad}>
                 <Ionicons name="checkmark-circle" size={20} color={WHITE} />
-                <Text style={[s.arrivedTxt, { color: WHITE }]}>I've Arrived</Text>
+                <Text style={[s.arrivedTxt, { color: WHITE }]}>I’ve arrived</Text>
               </LinearGradient>
             ) : (
               <View style={s.arrivedGrad}>
                 <Ionicons name="location-outline" size={18} color={INK} />
-                <Text style={s.arrivedTxt}>I've Arrived</Text>
+                <Text style={s.arrivedTxt}>I’ve arrived</Text>
               </View>
             )}
           </TouchableOpacity>
@@ -356,8 +371,20 @@ const s = StyleSheet.create({
     marginBottom: 10,
   },
   statusKicker: { fontSize: 16, fontWeight: '800', color: NAVY, letterSpacing: -0.2 },
+  collapsedIdentity: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 10,
+  },
+  collapsedName: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: NAVY,
+    letterSpacing: -0.2,
+  },
   collapsedPeek: {
-    marginBottom: 8,
+    marginTop: 2,
     fontSize: 13,
     fontWeight: '600',
     color: DIM,

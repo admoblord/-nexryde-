@@ -1,5 +1,5 @@
 ##############################################################################
-# NexRyde Backend — Cloud Run Service Definition
+# NEXRYDE Backend — Cloud Run Service Definition
 #
 # Deploy with:
 #   gcloud run services replace backend/cloudrun.service.yaml \
@@ -103,7 +103,7 @@ spec:
             # Trusted hosts — Host-header spoofing guard (comma-separated, no scheme)
             - name: TRUSTED_HOSTS
               value: "nexryde-backend-993913300770.us-central1.run.app,nexryde.app,admin.nexryde.app"
-            # NIN: NexRyde-only verification (no government registry delay). Set NIN_REGISTRY_ENABLED=true to opt in later.
+            # NIN: NEXRYDE-only verification (no government registry delay). Set NIN_REGISTRY_ENABLED=true to opt in later.
             - name: NIN_REGISTRY_ENABLED
               value: "false"
             - name: WORK_ZONE_ENABLED

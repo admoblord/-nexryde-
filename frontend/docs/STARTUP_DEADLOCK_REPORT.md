@@ -1,4 +1,4 @@
-# NexRyde Driver Startup Deadlock Audit & Refactor Report
+# NEXRYDE Driver Startup Deadlock Audit & Refactor Report
 
 **Date:** 2026-06-20  
 **Goal:** No screen loading >8 seconds. Dashboard renders even when backend calls fail.

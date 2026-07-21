@@ -89,7 +89,7 @@
         android:resource="@xml/shortcuts"/>
     </activity>
 
-    <!-- ── Nexryde Driver Status home-screen widget ─────────────────────── -->
+    <!-- ── NEXRYDE Driver Status home-screen widget ─────────────────────── -->
     <receiver
       android:name=".widget.DriverStatusWidgetProvider"
       android:exported="true">

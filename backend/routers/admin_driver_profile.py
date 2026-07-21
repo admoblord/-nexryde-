@@ -255,7 +255,7 @@ async def driver_operations_profile(driver_id: str):
 
     timeline = []
     if user.get("created_at"):
-        timeline.append({"type": "registered", "label": "Registered on NexRyde", "timestamp": user.get("created_at")})
+        timeline.append({"type": "registered", "label": "Registered on NEXRYDE", "timestamp": user.get("created_at")})
     if docs_row.get("submitted_at"):
         timeline.append({"type": "documents_submitted", "label": "Documents submitted", "timestamp": docs_row.get("submitted_at")})
     for ev in audit_history:

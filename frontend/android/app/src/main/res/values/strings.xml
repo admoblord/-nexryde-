@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <string name="app_name">Nexryde</string>
+  <string name="app_name">NEXRYDE</string>
 
   <!-- App Shortcuts (long-press app icon) -->
   <string name="shortcut_go_online_short">Go Online</string>
@@ -11,5 +11,5 @@
   <string name="shortcut_wallet_long">Open My Wallet</string>
 
   <!-- Home Screen Widget -->
-  <string name="widget_driver_status_description">Nexryde Driver Status – go online instantly</string>
+  <string name="widget_driver_status_description">NEXRYDE Driver Status – go online instantly</string>
 </resources>

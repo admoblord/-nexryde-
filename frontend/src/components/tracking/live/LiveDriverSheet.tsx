@@ -105,7 +105,7 @@ function PhaseBadge({ phase }: { phase: TripPhase }) {
     return (
       <View style={badgeStyles.arrived}>
         <View style={badgeStyles.arrivedDot} />
-        <Text style={badgeStyles.arrivedTxt}>ARRIVED</Text>
+        <Text style={badgeStyles.arrivedTxt}>Here</Text>
       </View>
     );
   }
@@ -113,14 +113,14 @@ function PhaseBadge({ phase }: { phase: TripPhase }) {
     return (
       <View style={badgeStyles.ongoing}>
         <View style={badgeStyles.ongoingDot} />
-        <Text style={badgeStyles.ongoingTxt}>ON TRIP</Text>
+        <Text style={badgeStyles.ongoingTxt}>On trip</Text>
       </View>
     );
   }
   return (
     <View style={badgeStyles.accepted}>
       <View style={badgeStyles.acceptedDot} />
-      <Text style={badgeStyles.acceptedTxt}>EN ROUTE</Text>
+      <Text style={badgeStyles.acceptedTxt}>Arriving</Text>
     </View>
   );
 }
@@ -132,21 +132,21 @@ const badgeStyles = StyleSheet.create({
     backgroundColor: 'rgba(245,158,11,0.18)', borderWidth: 1, borderColor: 'rgba(245,158,11,0.5)',
   },
   arrivedDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#F59E0B' },
-  arrivedTxt: { fontSize: 10, fontWeight: '900', color: '#FBBF24', letterSpacing: 0.5 },
+  arrivedTxt: { fontSize: 11, fontWeight: '900', color: '#FBBF24', letterSpacing: 0.2 },
   ongoing: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999,
     backgroundColor: 'rgba(56,189,248,0.14)', borderWidth: 1, borderColor: 'rgba(56,189,248,0.4)',
   },
   ongoingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#38BDF8' },
-  ongoingTxt: { fontSize: 10, fontWeight: '900', color: '#7DD3FC', letterSpacing: 0.5 },
+  ongoingTxt: { fontSize: 11, fontWeight: '900', color: '#7DD3FC', letterSpacing: 0.2 },
   accepted: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999,
-    backgroundColor: LIVE.greenSoft, borderWidth: 1, borderColor: 'rgba(0,208,132,0.4)',
+    backgroundColor: LIVE.greenSoft, borderWidth: 1, borderColor: 'rgba(34,225,128,0.4)',
   },
   acceptedDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: LIVE.green },
-  acceptedTxt: { fontSize: 10, fontWeight: '900', color: LIVE.green, letterSpacing: 0.5 },
+  acceptedTxt: { fontSize: 11, fontWeight: '900', color: LIVE.green, letterSpacing: 0.2 },
 });
 
 function LiveDriverSheetInner({
@@ -275,7 +275,14 @@ function LiveDriverSheetInner({
         accessibilityLabel="Expand driver details"
       >
         <View style={styles.collapsedAvatar}>
-          <TripProfileAvatar size={38} uri={photoUri} accessibilityLabel={`Photo of ${displayName}`} />
+          <TripProfileAvatar
+            size={LIVE_LAYOUT.collapsedPhoto}
+            uri={photoUri}
+            borderColor="#FFFFFF"
+            borderWidth={2.5}
+            showOnlineDot={tripPhase !== 'ongoing'}
+            accessibilityLabel={`Photo of ${displayName}`}
+          />
         </View>
         <View style={styles.collapsedLeft}>
           <Text style={styles.collapsedName} numberOfLines={1}>{displayName}</Text>
@@ -311,6 +318,9 @@ function LiveDriverSheetInner({
           <TripProfileAvatar
             size={LIVE_LAYOUT.expandedPhoto}
             uri={photoUri}
+            borderColor="#FFFFFF"
+            borderWidth={3}
+            showOnlineDot={tripPhase !== 'ongoing'}
             accessibilityLabel={`Photo of ${displayName}`}
           />
           <View style={styles.profileMeta}>
@@ -342,33 +352,76 @@ function LiveDriverSheetInner({
             {/* Phase status line */}
             <Text style={[styles.phaseLine, tripPhase === 'arrived' && { color: '#F59E0B' }, tripPhase === 'ongoing' && { color: LIVE.blue }]} numberOfLines={1}>
               {tripPhase === 'arrived'
-                ? 'Driver has arrived at your pickup'
+                ? 'Meet them at your pickup point'
                 : tripPhase === 'ongoing'
-                  ? destAddress ? `To: ${destAddress}` : 'Trip in progress'
+                  ? destAddress ? `To ${destAddress}` : 'Heading to drop-off'
                   : etaMinutes != null && etaMinutes > 0
-                    ? `Arriving in ${etaMinutes} min · ${fmtKm(distanceKm)}`
-                    : 'On the way to pickup'}
+                    ? `${etaMinutes} min away · ${fmtKm(distanceKm)}`
+                    : 'On the way to you'}
             </Text>
           </View>
         </View>
 
-        {/* Vehicle identification — larger and more prominent to help rider spot the car */}
+        {/* Arrived / accepted: pickup code first (Uber priority) */}
+        {showPickupCode && pickupCode ? (
+          <TouchableOpacity
+            style={styles.pickupCodeCard}
+            onPress={onPickupCode}
+            activeOpacity={0.88}
+            accessibilityRole="button"
+            accessibilityLabel={`Pickup code ${pickupCode}`}
+          >
+            <LinearGradient
+              colors={['rgba(34,225,128,0.16)', 'rgba(34,225,128,0.06)']}
+              style={styles.pickupCodeGrad}
+            >
+              <View style={styles.pickupCodeLeft}>
+                <Ionicons name="shield-checkmark" size={22} color={LIVE.green} />
+                <View>
+                  <Text style={styles.pickupCodeLabel}>Show this code to your driver</Text>
+                  <Text style={styles.pickupCodeValue}>{pickupCode}</Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={LIVE.green} />
+            </LinearGradient>
+          </TouchableOpacity>
+        ) : null}
+
+        {waitCard}
+
+        {/* Destination card when ongoing — above vehicle grid */}
+        {tripPhase === 'ongoing' && destAddress ? (
+          <View style={styles.destCard}>
+            <Ionicons name="flag" size={18} color={LIVE.blue} />
+            <View style={styles.destTextCol}>
+              <Text style={styles.destLabel}>Destination</Text>
+              <Text style={styles.destValue} numberOfLines={2}>{destAddress}</Text>
+              {destEtaMinutes != null && destEtaMinutes > 0 ? (
+                <Text style={styles.destEta}>{destEtaMinutes} min away</Text>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
+        {/* Vehicle identification */}
         <View style={styles.vehicleSection}>
-          <Text style={styles.vehicleSectionLabel}>Identify your vehicle</Text>
+          <Text style={styles.vehicleSectionLabel}>
+            {tripPhase === 'arrived' ? 'Look for this car' : 'Your vehicle'}
+          </Text>
           <View style={styles.vehicleGrid}>
             <View style={styles.vehicleCell}>
-              <Text style={styles.cellLabel}>CAR</Text>
+              <Text style={styles.cellLabel}>Car</Text>
               <Text style={styles.cellValue} numberOfLines={2}>{displayVehicle}</Text>
             </View>
             <View style={styles.vehicleCell}>
-              <Text style={styles.cellLabel}>COLOR</Text>
+              <Text style={styles.cellLabel}>Color</Text>
               <View style={styles.colorRow}>
                 <View style={[styles.colorDot, { backgroundColor: swatch(vehicleColor) }]} />
                 <Text style={styles.cellValue} numberOfLines={1}>{vehicleColor || '—'}</Text>
               </View>
             </View>
             <View style={styles.vehicleCell}>
-              <Text style={styles.cellLabel}>PLATE</Text>
+              <Text style={styles.cellLabel}>Plate</Text>
               <Text style={[styles.cellValue, styles.plateValue]} numberOfLines={1}>{displayPlate}</Text>
             </View>
           </View>
@@ -395,47 +448,6 @@ function LiveDriverSheetInner({
             <Text style={styles.actionTxt}>Share</Text>
           </TouchableOpacity>
         </View>
-
-        {waitCard}
-
-        {/* Pickup code — very prominent when visible */}
-        {showPickupCode && pickupCode ? (
-          <TouchableOpacity
-            style={styles.pickupCodeCard}
-            onPress={onPickupCode}
-            activeOpacity={0.88}
-            accessibilityRole="button"
-            accessibilityLabel={`Pickup code ${pickupCode}`}
-          >
-            <LinearGradient
-              colors={['rgba(0,208,132,0.12)', 'rgba(0,208,132,0.06)']}
-              style={styles.pickupCodeGrad}
-            >
-              <View style={styles.pickupCodeLeft}>
-                <Ionicons name="shield-checkmark" size={22} color={LIVE.green} />
-                <View>
-                  <Text style={styles.pickupCodeLabel}>Share this code with your driver</Text>
-                  <Text style={styles.pickupCodeValue}>{pickupCode}</Text>
-                </View>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={LIVE.green} />
-            </LinearGradient>
-          </TouchableOpacity>
-        ) : null}
-
-        {/* Destination card when ongoing */}
-        {tripPhase === 'ongoing' && destAddress ? (
-          <View style={styles.destCard}>
-            <Ionicons name="flag" size={18} color={LIVE.blue} />
-            <View style={styles.destTextCol}>
-              <Text style={styles.destLabel}>DESTINATION</Text>
-              <Text style={styles.destValue} numberOfLines={2}>{destAddress}</Text>
-              {destEtaMinutes != null && destEtaMinutes > 0 ? (
-                <Text style={styles.destEta}>{destEtaMinutes} min estimated</Text>
-              ) : null}
-            </View>
-          </View>
-        ) : null}
 
         {canEditRoute && tripPhase === 'ongoing' ? (
           <View style={styles.routeEditRow}>
@@ -513,9 +525,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: LIVE.hairline,
   },
-  collapsedAvatar: { width: 38, height: 38 },
+  collapsedAvatar: {
+    width: LIVE_LAYOUT.collapsedPhoto + 5,
+    height: LIVE_LAYOUT.collapsedPhoto + 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   collapsedLeft: { flex: 1, minWidth: 0, gap: 4 },
-  collapsedName: { fontSize: 15, fontWeight: '900', color: LIVE.text },
+  collapsedName: { fontSize: 16, fontWeight: '900', color: LIVE.text },
   collapsedBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   collapsedPlateChip: {
     paddingHorizontal: 7,

@@ -7,6 +7,7 @@ import { useAppStore } from '@/src/store/appStore';
 import { useRiderActiveTripPhase } from '@/src/hooks/useRiderHasActiveTrip';
 import {
   RIDER_TRIP_STEPS,
+  riderTripHasDriver,
   riderTripIsSearching,
   riderTripStatusHeadline,
   riderTripStatusIcon,
@@ -16,6 +17,8 @@ import {
 import type { RiderTripDisplayOpts } from '@/src/utils/tripPaymentMethod';
 import { RIDER_MAP_PRIMARY_CTA_GRADIENT } from '@/src/constants/riderRideChrome';
 import { COLORS, useThemeColors } from '@/src/constants/theme';
+import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
+import { resolveDriverPhotoUri } from '@/src/utils/tripProfilePhotos';
 
 function LivePulse() {
   const pulse = useRef(new Animated.Value(1)).current;
@@ -138,9 +141,23 @@ export function RiderActiveTripHomeCard() {
   const icon = riderTripStatusIcon(phase, displayOpts);
   const stepIndex = riderTripStepIndex(phase);
   const searching = riderTripIsSearching(phase);
+  const hasDriver = riderTripHasDriver(phase);
   const pickup = currentTrip.pickup_location?.address?.trim();
   const dropoff = currentTrip.dropoff_location?.address?.trim();
   const tripRef = currentTrip.id.slice(-6).toUpperCase();
+  const driverName =
+    (typeof currentTrip.driver_name === 'string' && currentTrip.driver_name.trim()) ||
+    (typeof (currentTrip as { driver_info?: { name?: string } }).driver_info?.name === 'string'
+      ? (currentTrip as { driver_info?: { name?: string } }).driver_info?.name
+      : '') ||
+    'Driver';
+  const driverPhoto = resolveDriverPhotoUri(currentTrip as unknown as Record<string, unknown>);
+  const driverPlate =
+    (typeof currentTrip.vehicle_plate === 'string' && currentTrip.vehicle_plate.trim()) ||
+    (typeof (currentTrip as { driver_info?: { plate?: string } }).driver_info?.plate === 'string'
+      ? (currentTrip as { driver_info?: { plate?: string } }).driver_info?.plate
+      : '') ||
+    '';
 
   const openTracking = () => {
     router.push({ pathname: '/rider/tracking', params: { tripId: currentTrip.id } } as any);
@@ -168,9 +185,23 @@ export function RiderActiveTripHomeCard() {
         style={styles.hero}
       >
         <View style={styles.heroTop}>
-          {searching ? <LivePulse /> : <View style={styles.statusIconWrap}>
+          {searching ? (
+            <LivePulse />
+          ) : hasDriver ? (
+            <TripProfileAvatar
+              size={52}
+              uri={driverPhoto}
+              person={currentTrip as unknown as Record<string, unknown>}
+              role="driver"
+              borderColor="#FFFFFF"
+              borderWidth={2.5}
+              accessibilityLabel={`Photo of ${driverName}`}
+            />
+          ) : (
+            <View style={styles.statusIconWrap}>
               <Ionicons name={icon} size={22} color="#022C22" />
-            </View>}
+            </View>
+          )}
           <View style={{ flex: 1 }}>
             <View style={styles.kickerRow}>
               <Text style={styles.kicker}>Live trip</Text>
@@ -179,7 +210,13 @@ export function RiderActiveTripHomeCard() {
               </View>
             </View>
             <Text style={styles.title}>{headline}</Text>
-            <Text style={styles.subtitle}>{subtitle}</Text>
+            <Text style={styles.subtitle}>
+              {hasDriver
+                ? [driverName.split(' ')[0], driverPlate ? `· ${driverPlate}` : null, subtitle]
+                    .filter(Boolean)
+                    .join(' ')
+                : subtitle}
+            </Text>
           </View>
           <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.9)" />
         </View>

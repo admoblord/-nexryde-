@@ -36,6 +36,7 @@ import { LiveMapFabs } from '@/src/components/tracking/live/LiveMapFabs';
 import { LiveTrackingSkeleton } from '@/src/components/tracking/live/LiveTrackingSkeleton';
 import { LIVE } from '@/src/components/tracking/live/liveTrackingTheme';
 import { LIVE_LAYOUT } from '@/src/components/tracking/live/liveTrackingLayout';
+import { resolveDriverPhotoUri } from '@/src/utils/tripProfilePhotos';
 import FindingDriverScreenV2 from '@/src/components/finding/FindingDriverScreenV2';
 import { TrackingPaymentView } from '@/src/components/tracking/TrackingPaymentView';
 import { TripMapErrorBoundary } from '@/src/components/TripMapErrorBoundary';
@@ -59,77 +60,6 @@ import { CURRENCY } from '@/src/constants/theme';
 // After this many seconds searching with no driver matched, the finding screen
 // shows a clear "no drivers available" message instead of spinning forever.
 const NO_DRIVERS_TIMEOUT_SEC = 120;
-
-// ─── DriverArrivedBanner ─────────────────────────────────────────────────────
-// A persistent amber pulsing alert shown when tripStatus === 'arrived'.
-// Dismissed once the rider has seen it (after first haptic pulse cycle).
-function DriverArrivedBanner({ visible, vehicle, plate }: {
-  visible: boolean;
-  vehicle: string;
-  plate: string | null;
-}) {
-  const scale  = useRef(new Animated.Value(0.88)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
-  const borderGlow = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (!visible) {
-      Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
-      return;
-    }
-    Animated.parallel([
-      Animated.spring(scale,   { toValue: 1,    useNativeDriver: true, tension: 80, friction: 8 }),
-      Animated.timing(opacity, { toValue: 1, duration: 260, useNativeDriver: true }),
-    ]).start();
-    const borderLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(borderGlow, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
-        Animated.timing(borderGlow, { toValue: 0, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
-      ]),
-    );
-    borderLoop.start();
-    return () => borderLoop.stop();
-  }, [visible, scale, opacity, borderGlow]);
-
-  if (!visible) return null;
-
-  const vehicleLabel = vehicle && vehicle !== 'Vehicle' ? vehicle : null;
-  const plateLabel = plate ? ` · ${plate.toUpperCase()}` : '';
-  const identifyLine = vehicleLabel ? `${vehicleLabel}${plateLabel}` : null;
-
-  return (
-    <Animated.View style={[bannerStyles.wrap, { opacity, transform: [{ scale }] }]} pointerEvents="none">
-      <Animated.View
-        style={[
-          bannerStyles.card,
-          {
-            borderColor: borderGlow.interpolate({
-              inputRange: [0, 1],
-              outputRange: ['rgba(245,158,11,0.45)', 'rgba(245,158,11,0.9)'],
-            }),
-          },
-        ]}
-      >
-        <LinearGradient
-          colors={['rgba(30,18,0,0.98)', 'rgba(20,12,0,0.98)']}
-          style={bannerStyles.grad}
-        >
-          <View style={bannerStyles.iconWrap}>
-            <Ionicons name="location" size={22} color="#F59E0B" />
-          </View>
-          <View style={bannerStyles.textCol}>
-            <Text style={bannerStyles.headline}>Your driver is here</Text>
-            {identifyLine ? (
-              <Text style={bannerStyles.sub} numberOfLines={1}>{identifyLine}</Text>
-            ) : (
-              <Text style={bannerStyles.sub}>Walk out to meet your driver</Text>
-            )}
-          </View>
-        </LinearGradient>
-      </Animated.View>
-    </Animated.View>
-  );
-}
 
 // ─── Post-trip rating modal ───────────────────────────────────────────────────
 // Shows immediately when the trip completes — Uber-style emotional closure.
@@ -168,9 +98,9 @@ function TripRatingModal({
             <Ionicons name="checkmark" size={28} color="#FFF" />
           </View>
         </View>
-        <Text style={ratingStyles.headline}>You arrived safely</Text>
-        <Text style={ratingStyles.sub}>Fare: {fare}</Text>
-        <Text style={ratingStyles.prompt}>Rate your ride with {driverName}</Text>
+        <Text style={ratingStyles.headline}>You arrived</Text>
+        <Text style={ratingStyles.sub}>Fare {fare}</Text>
+        <Text style={ratingStyles.prompt}>How was your ride with {driverName}?</Text>
         <View style={ratingStyles.starsRow}>
           {[1, 2, 3, 4, 5].map((n) => (
             <TouchableOpacity
@@ -237,41 +167,6 @@ const ratingStyles = StyleSheet.create({
   submitTxt: { fontSize: 16, fontWeight: '900', color: '#FFF' },
   skipBtn: { paddingVertical: 12, paddingHorizontal: 20, marginTop: 4 },
   skipTxt: { fontSize: 14, fontWeight: '600', color: '#64748B' },
-});
-
-const bannerStyles = StyleSheet.create({
-  wrap: {
-    position: 'absolute',
-    left: LIVE.edge,
-    right: LIVE.edge,
-    zIndex: 57,
-    alignItems: 'stretch',
-  },
-  card: {
-    borderRadius: 18,
-    borderWidth: 1.5,
-    overflow: 'hidden',
-    shadowColor: '#F59E0B',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 10,
-  },
-  grad: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  iconWrap: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(245,158,11,0.2)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  textCol: { flex: 1 },
-  headline: { fontSize: 16, fontWeight: '900', color: '#FFF', letterSpacing: -0.2 },
-  sub: { fontSize: 12.5, fontWeight: '600', color: '#CBD5E1', marginTop: 2 },
 });
 
 // ─── TripAcceptBanner ────────────────────────────────────────────────────────
@@ -529,6 +424,9 @@ export default function LiveTrackingScreen() {
   // ── Finding phase elapsed timer ───────────────────────────────────────────
   const findingStartRef = useRef<number | null>(null);
   const [searchElapsedSec, setSearchElapsedSec] = useState(0);
+  /** Brief Uber-style "matched" beat between finding → live tracking. */
+  const [matchedBeat, setMatchedBeat] = useState<{ name: string } | null>(null);
+  const wasFindingRef = useRef(false);
   useEffect(() => {
     if (!isFindingPhase) {
       findingStartRef.current = null;
@@ -614,9 +512,29 @@ export default function LiveTrackingScreen() {
 
   // Driver info derivations
   const driverName = String(driverInfo?.name || 'Driver');
-  const driverPhoto = (typeof driverInfo?.profile_image === 'string' && driverInfo.profile_image)
-    || (typeof driverInfo?.face_image === 'string' && driverInfo.face_image)
-    || null;
+
+  // Matched beat: hold finding UI ~1.5s with celebration before live map.
+  useEffect(() => {
+    if (isFindingPhase) {
+      wasFindingRef.current = true;
+      return;
+    }
+    if (!wasFindingRef.current || !isDriverAssigned) return;
+    wasFindingRef.current = false;
+    const name = driverName && driverName !== 'Driver' ? driverName : 'Your driver';
+    setMatchedBeat({ name });
+    if (Platform.OS !== 'web') {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+    const t = setTimeout(() => setMatchedBeat(null), 1500);
+    return () => clearTimeout(t);
+  }, [isFindingPhase, isDriverAssigned, driverName]);
+
+  // Resolve across profile / face / face URL on both driverInfo and trip payload (Uber-visible).
+  const driverPhoto = resolveDriverPhotoUri({
+    ...(currentTrip as Record<string, unknown> | null),
+    ...(driverInfo as Record<string, unknown> | null),
+  });
   const driverRating = (() => {
     const r = Number(driverInfo?.rating);
     return Number.isFinite(r) && r > 0 ? r : null;
@@ -650,12 +568,12 @@ export default function LiveTrackingScreen() {
       : 'accepted';
 
   const etaCardTitle = !isDriverAssigned
-    ? 'Confirming assignment'
+    ? 'Connecting'
     : tripStatus === 'arrived'
-      ? 'Driver Arrived'
+      ? 'Driver is here'
       : tripStatus === 'ongoing'
-        ? 'On Trip'
-        : 'Driver Arriving';
+        ? 'On trip'
+        : 'Driver arriving';
 
   // Trip timer — anchored on server started_at for accuracy across re-renders
   const tripTimer = useTripTimer(tripStatus === 'ongoing', startedAtIso ?? null);
@@ -727,8 +645,8 @@ export default function LiveTrackingScreen() {
     );
   }
 
-  // ── Finding phase ───────────────────────────────────────────────────────────
-  if (isFindingPhase) {
+  // ── Finding phase (+ brief matched celebration) ─────────────────────────────
+  if (isFindingPhase || matchedBeat) {
     const raw = currentTrip as {
       fare?: number; offered_fare?: number;
       distance_km?: number; duration_mins?: number;
@@ -739,14 +657,20 @@ export default function LiveTrackingScreen() {
     // seconds with no driver matched, surface a clear "no drivers available"
     // state so the rider can keep waiting, raise their offer, or cancel.
     const connLost = syncError && !wsConnected;
-    const noDriversTimedOut = !connLost && searchElapsedSec >= NO_DRIVERS_TIMEOUT_SEC;
-    const findingPhase  = (connLost || noDriversTimedOut) ? 'error' : 'searching';
-    const findingErrMsg = connLost
+    const noDriversTimedOut = !connLost && !matchedBeat && searchElapsedSec >= NO_DRIVERS_TIMEOUT_SEC;
+    const findingPhase = matchedBeat
+      ? 'matched'
+      : (connLost || noDriversTimedOut) ? 'error' : 'searching';
+    const findingErrMsg = matchedBeat
+      ? null
+      : connLost
       ? 'Connection lost. Check your network and try again.'
       : noDriversTimedOut
       ? "No drivers are available right now. You can keep waiting, raise your offer, or cancel and try again shortly."
       : null;
-    const onFindingTryAgain = connLost
+    const onFindingTryAgain = matchedBeat
+      ? undefined
+      : connLost
       ? actions.retrySync
       : noDriversTimedOut
       ? () => {
@@ -769,14 +693,15 @@ export default function LiveTrackingScreen() {
           routeKmLabel={raw?.distance_km != null ? `${Number(raw.distance_km).toFixed(1)} km` : null}
           routeMinLabel={raw?.duration_mins != null ? `~${Math.round(Number(raw.duration_mins))} min` : null}
           phase={findingPhase}
+          matchedDriverName={matchedBeat?.name ?? null}
           errorMessage={findingErrMsg}
           timeElapsedSec={searchElapsedSec}
-          onCancel={actions.promptCancelRide}
+          onCancel={matchedBeat ? () => undefined : actions.promptCancelRide}
           onTryAgain={onFindingTryAgain}
-          onUpdateBid={handleUpdateBid}
+          onUpdateBid={matchedBeat ? undefined : handleUpdateBid}
           nearbyDrivers={nearbyDrivers}
         />
-        {cancelSheet}
+        {matchedBeat ? null : cancelSheet}
         {routeEditSheet}
       </View>
     );
@@ -892,16 +817,7 @@ export default function LiveTrackingScreen() {
         destEtaMinutes={showConnecting ? null : tripStatus === 'ongoing' ? displayEtaMinutes : null}
       />
 
-      {/* Driver Arrived alert banner */}
-      <View style={{ position: 'absolute', left: 0, right: 0, top: arrivedBannerTop, zIndex: 57 }}>
-        <DriverArrivedBanner
-          visible={tripStatus === 'arrived'}
-          vehicle={vehicle}
-          plate={plate}
-        />
-      </View>
-
-      {/* Driver accepted banner (auto-dismiss) */}
+      {/* Accept banner only — arrived is already clear on the ETA card */}
       <View style={{ position: 'absolute', left: 0, right: 0, top: acceptBannerTop, zIndex: 56 }}>
         <TripAcceptBanner
           visible={acceptedBanner && tripStatus !== 'arrived' && tripStatus !== 'ongoing'}
@@ -918,7 +834,7 @@ export default function LiveTrackingScreen() {
         >
           <Ionicons name="time-outline" size={14} color={LIVE.blue} />
           <Text style={styles.tripTimerTxt}>{tripTimer}</Text>
-          <Text style={styles.tripTimerLabel}>TRIP TIME</Text>
+          <Text style={styles.tripTimerLabel}>Trip time</Text>
         </View>
       ) : null}
 
@@ -989,13 +905,18 @@ export default function LiveTrackingScreen() {
         }}
         waitCard={
           tripStatus === 'arrived' ? (
-            <PickupWaitTimerCard wait={pickupWait} variant="rider" compact />
+            <PickupWaitTimerCard
+              wait={pickupWait}
+              variant="rider"
+              compact
+              pickupCodeRequired={showPickupCode}
+            />
           ) : null
         }
       />
 
-      {/* Status subline pill */}
-      {statusSubline ? (
+      {/* Status subline — skip when ETA card already owns the message */}
+      {statusSubline && tripStatus !== 'arrived' && tripStatus !== 'ongoing' ? (
         <View
           style={[styles.statusPill, { bottom: LIVE_LAYOUT.sheetCollapsedH + insets.bottom + 6 }]}
           pointerEvents="none"

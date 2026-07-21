@@ -31,14 +31,24 @@ export function useResource<T>(
   const load = useCallback(async () => {
     if (!enabled) return;
     setState((s) => ({ ...s, loading: true, error: null }));
+    const LOAD_TIMEOUT_MS = 12000;
     try {
-      const data = await fetcherRef.current();
+      const data = await Promise.race([
+        fetcherRef.current(),
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error('resource_timeout')), LOAD_TIMEOUT_MS),
+        ),
+      ]);
       if (!mounted.current) return;
       setState({ data, loading: false, error: null });
       if (cache) AsyncStorage.setItem(`res:${key}`, JSON.stringify(data)).catch(() => {});
     } catch (e) {
       if (!mounted.current) return;
-      setState((s) => ({ data: s.data, loading: false, error: e instanceof Error ? e : new Error(String(e)) }));
+      setState((s) => ({
+        data: s.data,
+        loading: false,
+        error: e instanceof Error ? e : new Error(String(e)),
+      }));
     }
   }, [cache, enabled, key]);
 

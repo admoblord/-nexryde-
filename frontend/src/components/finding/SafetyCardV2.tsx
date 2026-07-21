@@ -16,7 +16,7 @@ export function SafetyCardV2() {
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={styles.title}>Safe. Verified. Reliable.</Text>
         <Text style={styles.sub} numberOfLines={2}>
-          All Nexryde drivers are verified and background checked.
+          All NEXRYDE drivers are verified and background checked.
         </Text>
       </View>
       <View style={styles.art}>

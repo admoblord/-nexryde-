@@ -21,14 +21,14 @@ SHORT_TRIP_KM_THRESHOLD = 5.0
 #   - Per-minute applies only when the rider adds an intermediate stop (traffic / detour fairness).
 #   - Premium tier multipliers + 0% driver commission target sustainable driver income without 10×+ sticker shock.
 NEXRYDE_NATIONWIDE_POSITIONING_SUMMARY = (
-    "Nexryde nationwide (outside Lagos) is premium but bookable: headline direct trips land about 5.5–6.6× above "
+    "NEXRYDE nationwide (outside Lagos) is premium but bookable: headline direct trips land about 5.5–6.6× above "
     "Bolt reference cards on base+distance examples. Per-minute charges apply when a stop is added. Zero platform "
     "commission on driver payouts is the target model—built to attract top drivers and keep incomes sustainable."
 )
 
 # Rider/driver education (non-Lagos estimates).
 NEXRYDE_NATIONWIDE_POSITIONING_BULLETS: tuple[str, ...] = (
-    "Nexryde is about 5.5–6.6× above Bolt on headline base+distance (direct trips, reference card).",
+    "NEXRYDE is about 5.5–6.6× above Bolt on headline base+distance (direct trips, reference card).",
     "Drivers earn materially more with 0% commission on driver payouts.",
     "Premium positioning attracts quality drivers.",
     "Per-minute rates apply when you add a stop — not on every direct trip.",

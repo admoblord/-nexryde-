@@ -731,8 +731,8 @@ export default function TripReceiptScreen() {
               <Ionicons name="checkmark" size={34} color="#022C22" />
             </LinearGradient>
           </Animated.View>
-          <Text style={s.completeHeroTitle}>Trip Completed!</Text>
-          <Text style={s.completeHeroSub}>Safe travels!</Text>
+          <Text style={s.completeHeroTitle}>Trip completed</Text>
+          <Text style={s.completeHeroSub}>Thanks for riding with NEXRYDE</Text>
         </Animated.View>
 
         <Animated.View style={{ opacity: headerFade, transform: [{ translateY: contentSlide }] }}>
@@ -934,7 +934,7 @@ export default function TripReceiptScreen() {
                   {Math.round(view.mysteryBonusNgn).toLocaleString()} promo credit
                 </Text>
                 <Text style={s.mysterySub}>
-                  A little surprise from Nexryde — auto-applied toward eligible rides from your promo balance.
+                  A little surprise from NEXRYDE — auto-applied toward eligible rides from your promo balance.
                   {view.mysteryBonusExpiryLabel ? ` ${view.mysteryBonusExpiryLabel}.` : ''}
                 </Text>
               </View>
@@ -1210,7 +1210,7 @@ export default function TripReceiptScreen() {
                     <Ionicons name="shield-checkmark" size={20} color="#60A5FA" />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={s.blackCardTitle}>Nexryde Black Shield</Text>
+                    <Text style={s.blackCardTitle}>NEXRYDE Black Shield</Text>
                     <Text style={s.blackCardSub}>
                       Tamper-evident forensics: GPS every 30 s, speed trail, driver identity.
                     </Text>

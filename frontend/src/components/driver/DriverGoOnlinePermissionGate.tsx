@@ -87,8 +87,8 @@ export function DriverGoOnlinePermissionGate({
             <Ionicons name="layers-outline" size={36} color="#00D47E" />
             <Text style={styles.modalTitle}>Enable Driver Bubble</Text>
             <Text style={styles.modalBody}>
-              Turn on “Display over other apps” for NexRyde so ride requests appear over WhatsApp,
-              Maps, and the home screen. You will open NexRyde’s overlay page — not the full app list.
+              Turn on “Display over other apps” for NEXRYDE so ride requests appear over WhatsApp,
+              Maps, and the home screen. You will open NEXRYDE’s overlay page — not the full app list.
             </Text>
             {overlayMissing ? (
               <Text style={styles.modalHint}>Status now: Not allowed — tap Enable below.</Text>
@@ -101,7 +101,7 @@ export function DriverGoOnlinePermissionGate({
                 requestNativeOverlayPermission();
               }}
             >
-              <Text style={styles.modalPrimaryText}>Open NexRyde overlay settings</Text>
+              <Text style={styles.modalPrimaryText}>Open NEXRYDE overlay settings</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.modalSecondary}

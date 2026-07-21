@@ -1,5 +1,5 @@
 /**
- * Canonical NexRyde brand — re-exports designSystem tokens (single source of truth).
+ * Canonical NEXRYDE brand — re-exports designSystem tokens (single source of truth).
  */
 import { APP_DISPLAY_NAME, BRAND } from '@/src/constants/designSystem';
 

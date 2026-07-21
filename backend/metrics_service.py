@@ -93,7 +93,7 @@ def track_push_sent(channel: str = "fcm") -> None:
 def _prometheus_text() -> str:
     lines = []
 
-    lines.append("# HELP nexryde_counters NexRyde accumulated counters")
+    lines.append("# HELP nexryde_counters NEXRYDE accumulated counters")
     lines.append("# TYPE nexryde_counters counter")
     for k, v in sorted(_counters.items()):
         # Reconstruct metric name and labels
@@ -104,7 +104,7 @@ def _prometheus_text() -> str:
         else:
             lines.append(f"{k} {v}")
 
-    lines.append("# HELP nexryde_gauges NexRyde gauges")
+    lines.append("# HELP nexryde_gauges NEXRYDE gauges")
     lines.append("# TYPE nexryde_gauges gauge")
     for k, v in sorted(_gauges.items()):
         lines.append(f"{k} {v}")

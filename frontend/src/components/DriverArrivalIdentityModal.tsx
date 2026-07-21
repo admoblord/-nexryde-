@@ -1,5 +1,5 @@
 /**
- * DriverArrivalIdentityModal — Nexryde Safety Identity System
+ * DriverArrivalIdentityModal — NEXRYDE Safety Identity System
  *
  * Shown when driver arrives at pickup. Presents:
  *  – Full driver photo / avatar
@@ -453,7 +453,7 @@ export function DriverMismatchModal({
             {[
               'Move away from the vehicle',
               'Call someone you trust',
-              'Contact Nexryde support',
+              'Contact NEXRYDE support',
             ].map((t, i) => (
               <View key={i} style={mm.bulletRow}>
                 <Ionicons name="chevron-forward" size={14} color="#ef4444" />
@@ -468,7 +468,7 @@ export function DriverMismatchModal({
               style={mm.reportGrad}
             >
               <Ionicons name="flag" size={18} color="#FFF" />
-              <Text style={mm.reportText}>Report Mismatch to Nexryde</Text>
+              <Text style={mm.reportText}>Report Mismatch to NEXRYDE</Text>
             </LinearGradient>
           </TouchableOpacity>
           <TouchableOpacity style={mm.cancelBtn} onPress={onCancelRide} activeOpacity={0.88}>

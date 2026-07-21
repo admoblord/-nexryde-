@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NexRyde E2E Wallet Test
+NEXRYDE E2E Wallet Test
 =======================
 Tests:
   1. Wallet balance read
@@ -115,7 +115,7 @@ async def admin_login(c):
 async def run():
     suffix = tag()
     print(f"\n{BOLD}{'=' * 60}{RESET}")
-    print(f"{BOLD}  NexRyde Wallet Top-Up & Withdrawal Test  [{suffix}]{RESET}")
+    print(f"{BOLD}  NEXRYDE Wallet Top-Up & Withdrawal Test  [{suffix}]{RESET}")
     print(f"  Base URL : {BASE_URL}")
     print(f"  Started  : {datetime.now().isoformat()}")
     print(f"{BOLD}{'=' * 60}{RESET}")

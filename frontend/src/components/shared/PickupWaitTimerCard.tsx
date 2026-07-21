@@ -8,9 +8,16 @@ type Props = {
   wait: PickupWaitTimerState;
   variant?: 'rider' | 'driver';
   compact?: boolean;
+  /** Only mention pickup codes when the rider enabled them for this trip. */
+  pickupCodeRequired?: boolean;
 };
 
-export function PickupWaitTimerCard({ wait, variant = 'rider', compact = false }: Props) {
+export function PickupWaitTimerCard({
+  wait,
+  variant = 'rider',
+  compact = false,
+  pickupCodeRequired = false,
+}: Props) {
   const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -73,12 +80,12 @@ export function PickupWaitTimerCard({ wait, variant = 'rider', compact = false }
           </View>
           <Text style={styles.headline}>{wait.headline}</Text>
           <Text style={styles.subline}>{wait.subline}</Text>
-          {variant === 'rider' && isFree ? (
+          {variant === 'rider' && isFree && pickupCodeRequired ? (
             <Text style={styles.hint}>
-              Your driver will start the trip after you share your pickup code
+              Share your pickup code so your driver can start the trip
             </Text>
           ) : null}
-          {variant === 'driver' && !isFree ? (
+          {variant === 'driver' && !isFree && pickupCodeRequired ? (
             <Text style={styles.hint}>
               Verify pickup code, then tap Start trip when the rider is in your car
             </Text>

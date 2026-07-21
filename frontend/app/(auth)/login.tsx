@@ -18,10 +18,9 @@ import {
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import axios from 'axios';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
 import * as ImagePicker from 'expo-image-picker';
@@ -34,8 +33,11 @@ import { routeAuthedUser } from '@/src/utils/routeAuthedUser';
 import { useRedirectIfAuthed } from '@/src/hooks/useRedirectIfAuthed';
 import { initiateEmailLogin, publicFetchErrorMessage } from '@/src/utils/publicApi';
 import { warmBackendConnection, warmBackendWhileWaiting } from '@/src/utils/warmBackend';
+import { OnboardingPhotoHero } from '@/src/components/onboarding/OnboardingPhotoHero';
 
 import { BRAND } from '@/src/constants/designSystem';
+
+const LOGIN_HERO = require('../../assets/images/onboarding/login-hero.png');
 
 // Login chrome — aligned with designSystem.BRAND
 const COLORS = {
@@ -64,6 +66,7 @@ const COLORS = {
 export default function LoginScreen() {
   const toast = useErrorToast();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ flow?: string; role?: string }>();
   const requestedFlow = params.flow === 'register' ? 'register' : 'login';
   const requestedRole = params.role === 'driver' || params.role === 'rider' ? params.role : null;
@@ -199,7 +202,7 @@ export default function LoginScreen() {
   const continueToOnboarding = (verifiedEmail: string, suggestedName?: string) => {
     const newName = suggestedName || verifiedEmail.split('@')[0];
     if (requestedRole === 'driver') {
-      // Collect Nigerian phone on register before terms — stored for rider contact and NexRyde records.
+      // Collect Nigerian phone on register before terms — stored for rider contact and NEXRYDE records.
       router.push({
         pathname: '/(auth)/register',
         params: {
@@ -277,79 +280,62 @@ export default function LoginScreen() {
     );
   }
 
+  const heroTitle =
+    requestedFlow === 'register'
+      ? requestedRole === 'driver'
+        ? 'Drive with NEXRYDE'
+        : 'Ride with NEXRYDE'
+      : 'What’s your email?';
+
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={[COLORS.background, COLORS.primary, COLORS.background]}
-        style={StyleSheet.absoluteFillObject}
-      />
-      
-      {/* Decorative Glows */}
-      <View style={[styles.glow, { top: 80, left: 30, backgroundColor: COLORS.green }]} />
-      <View style={[styles.glow, { top: 200, right: 40, backgroundColor: COLORS.blue, width: 60, height: 60 }]} />
-      
-      <SafeAreaView style={styles.safeArea}>
-        <KeyboardAvoidingView 
+      <OnboardingPhotoHero source={LOGIN_HERO} />
+
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+        <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.keyboardView}
         >
-          <ScrollView 
-            contentContainerStyle={styles.scrollContent}
+          <ScrollView
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: Math.max(insets.bottom, 28) },
+            ]}
+            keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
+            bounces={false}
           >
-            {/* Header Section */}
-            <View style={styles.header}>
-              {/* Logo */}
-              <View style={styles.logoContainer}>
-                <LinearGradient
-                  colors={[COLORS.greenLight, COLORS.green]}
-                  style={styles.logoLeft}
-                />
-                <LinearGradient
-                  colors={[COLORS.blue, COLORS.blueDark]}
-                  style={styles.logoRight}
-                />
-                <View style={styles.roadLine}>
-                  <View style={styles.roadDash} />
-                  <View style={styles.roadDash} />
-                </View>
-              </View>
-              
-              <Text style={styles.welcomeText}>Welcome to</Text>
-              <View style={styles.brandRow}>
+            <View style={[styles.heroBrand, { paddingTop: 12 }]}>
+              <Text style={styles.brandMark}>
                 <Text style={styles.brandNex}>NEX</Text>
                 <Text style={styles.brandRyde}>RYDE</Text>
-              </View>
-              <Text style={styles.subtitleText}>Nigeria's Premium Ride Experience</Text>
+              </Text>
+              <Text style={styles.heroSupport}>Your city. Your ride. Across Nigeria.</Text>
             </View>
 
-            {/* Login Form */}
+            <View style={styles.spacer} />
+
             <View style={styles.formSection}>
-              <Text style={styles.formTitle}>
+              <Text style={styles.formTitle}>{heroTitle}</Text>
+              <Text style={styles.formLead}>
                 {requestedFlow === 'register'
-                  ? `Continue as ${requestedRole === 'driver' ? 'Driver' : 'Rider'}`
-                  : 'Sign in to continue'}
+                  ? 'Use your email to get set up — it only takes a moment.'
+                  : 'We’ll sign you in if you already ride with us, or create your account if you’re new.'}
               </Text>
 
-              {/* ── Login Error Banner ────────────────────────────────── */}
               {!!loginError && (
                 <View style={styles.errorBanner}>
                   <Ionicons name="alert-circle" size={18} color="#EF4444" />
-                  <Text style={styles.errorBannerText} numberOfLines={3}>{loginError}</Text>
+                  <Text style={styles.errorBannerText} numberOfLines={3}>
+                    {loginError}
+                  </Text>
                   <TouchableOpacity onPress={() => setLoginError('')}>
                     <Ionicons name="close" size={16} color="#94A3B8" />
                   </TouchableOpacity>
                 </View>
               )}
 
-              {/* Email / code — glass card */}
-              {Platform.OS === 'web' ? (
-                <View style={[styles.authGlass, styles.authGlassWeb]}>{emailAuthCard}</View>
-              ) : (
-                <BlurView intensity={48} tint="dark" style={styles.authGlass}>
-                  {emailAuthCard}
-                </BlurView>
-              )}
+              <View style={styles.authPanel}>{emailAuthCard}</View>
 
               {biometricReady && (
                 <TouchableOpacity
@@ -362,8 +348,13 @@ export default function LoginScreen() {
                     <ActivityIndicator color={COLORS.green} />
                   ) : (
                     <>
-                      <Ionicons name="finger-print" size={20} color={COLORS.green} style={{ marginRight: 8 }} />
-                      <Text style={styles.biometricButtonText}>Use Biometrics</Text>
+                      <Ionicons
+                        name="finger-print"
+                        size={20}
+                        color={COLORS.green}
+                        style={{ marginRight: 8 }}
+                      />
+                      <Text style={styles.biometricButtonText}>Use Face ID / fingerprint</Text>
                     </>
                   )}
                 </TouchableOpacity>
@@ -371,27 +362,15 @@ export default function LoginScreen() {
 
               <Text style={styles.termsText}>
                 By continuing, you agree to our{' '}
-                <Text style={styles.linkText} onPress={() => openLegal('/terms-of-service')}>Terms of Service</Text> and{' '}
-                <Text style={styles.linkText} onPress={() => openLegal('/privacy-policy')}>Privacy Policy</Text>
+                <Text style={styles.linkText} onPress={() => openLegal('/terms-of-service')}>
+                  Terms
+                </Text>{' '}
+                and{' '}
+                <Text style={styles.linkText} onPress={() => openLegal('/privacy-policy')}>
+                  Privacy Policy
+                </Text>
+                .
               </Text>
-            </View>
-
-            {/* Features */}
-            <View style={styles.features}>
-              <FeatureCard
-                icon="shield-checkmark"
-                title="Zero Commission"
-                subtitle="Drivers keep 100% of earnings"
-                color={COLORS.green}
-                bgColor={COLORS.greenSoft}
-              />
-              <FeatureCard
-                icon="location"
-                title="Premium Safety"
-                subtitle="Driver checks, support tools & live tracking"
-                color="#5EEAD4"
-                bgColor="rgba(94,234,212,0.12)"
-              />
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -412,21 +391,17 @@ function AuthEmailCardBody({ email, setEmail, emailLoading, onContinue }: AuthEm
 
   return (
     <>
-      <Text style={styles.authStepCaption}>Sign in or sign up</Text>
-      <Text style={styles.authHeadline}>Continue with email</Text>
-      <Text style={styles.authSubcopy}>
-        Enter your email — we’ll sign you straight in if you already have an account, or set you up
-        in seconds if you’re new.
-      </Text>
       <View style={styles.emailFieldWrap}>
         <Ionicons name="mail-outline" size={20} color={COLORS.textMuted} style={styles.emailFieldIcon} />
         <TextInput
           style={styles.emailInputInner}
-          placeholder="you@example.com"
+          placeholder="name@email.com"
           placeholderTextColor={COLORS.textMuted}
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
+          autoComplete="email"
+          textContentType="emailAddress"
           value={email}
           onChangeText={setEmail}
           returnKeyType="go"
@@ -440,12 +415,14 @@ function AuthEmailCardBody({ email, setEmail, emailLoading, onContinue }: AuthEm
         onPress={() => void onContinue()}
         disabled={emailLoading || !normalizedReady}
         activeOpacity={0.92}
+        accessibilityRole="button"
+        accessibilityLabel="Continue"
       >
         <LinearGradient
           colors={
             normalizedReady && !emailLoading
               ? [COLORS.greenLight, COLORS.green, COLORS.blue]
-              : [COLORS.gray700, COLORS.gray700]
+              : ['#2A3548', '#2A3548']
           }
           style={styles.primaryCtaGradient}
           start={{ x: 0, y: 0 }}
@@ -455,15 +432,15 @@ function AuthEmailCardBody({ email, setEmail, emailLoading, onContinue }: AuthEm
             <ActivityIndicator color={COLORS.primary} />
           ) : (
             <>
-              <Ionicons
-                name="arrow-forward"
-                size={20}
-                color={normalizedReady ? COLORS.primary : COLORS.textMuted}
-                style={{ marginRight: 10 }}
-              />
               <Text style={[styles.primaryCtaText, normalizedReady && styles.primaryCtaTextOn]}>
                 Continue
               </Text>
+              <Ionicons
+                name="arrow-forward"
+                size={18}
+                color={normalizedReady ? COLORS.primary : COLORS.textMuted}
+                style={{ marginLeft: 8 }}
+              />
             </>
           )}
         </LinearGradient>
@@ -472,41 +449,10 @@ function AuthEmailCardBody({ email, setEmail, emailLoading, onContinue }: AuthEm
   );
 }
 
-const FeatureCard = ({ 
-  icon, 
-  title, 
-  subtitle, 
-  color,
-  bgColor,
-}: { 
-  icon: string; 
-  title: string; 
-  subtitle: string;
-  color: string;
-  bgColor: string;
-}) => (
-  <View style={styles.featureCard}>
-    <View style={[styles.featureIconContainer, { backgroundColor: bgColor }]}>
-      <Ionicons name={icon as any} size={24} color={color} />
-    </View>
-    <View style={styles.featureContent}>
-      <Text style={styles.featureTitle}>{title}</Text>
-      <Text style={styles.featureSubtitle}>{subtitle}</Text>
-    </View>
-  </View>
-);
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
-  },
-  glow: {
-    position: 'absolute',
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    opacity: 0.15,
   },
   safeArea: {
     flex: 1,
@@ -522,180 +468,72 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 24,
-    paddingBottom: 48,
   },
-  header: {
-    alignItems: 'center',
-    paddingTop: 32,
-    marginBottom: 24,
+  heroBrand: {
+    zIndex: 2,
   },
-  logoContainer: {
-    width: 60,
-    height: 60,
-    position: 'relative',
-    marginBottom: 16,
-  },
-  logoLeft: {
-    position: 'absolute',
-    left: 3,
-    top: 0,
-    width: 24,
-    height: 60,
-    borderTopLeftRadius: 6,
-    borderBottomLeftRadius: 6,
-    transform: [{ skewX: '-8deg' }],
-  },
-  logoRight: {
-    position: 'absolute',
-    right: 3,
-    top: 0,
-    width: 24,
-    height: 60,
-    borderTopRightRadius: 6,
-    borderBottomRightRadius: 6,
-    transform: [{ skewX: '8deg' }],
-  },
-  roadLine: {
-    position: 'absolute',
-    left: '50%',
-    marginLeft: -2,
-    top: 10,
-    bottom: 10,
-    width: 3,
-    alignItems: 'center',
-    justifyContent: 'space-around',
-  },
-  roadDash: {
-    width: 3,
-    height: 8,
-    backgroundColor: COLORS.white,
-    borderRadius: 1,
-  },
-  welcomeText: {
-    fontSize: 15,
-    color: '#94A3B8',
-    marginBottom: 4,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  brandMark: {
+    letterSpacing: 1,
   },
   brandNex: {
-    fontSize: 32,
+    fontSize: 34,
     fontWeight: '900',
     color: COLORS.white,
-    letterSpacing: -0.5,
+    letterSpacing: 1.5,
+    textShadowColor: 'rgba(0,0,0,0.45)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 8,
   },
   brandRyde: {
-    fontSize: 32,
+    fontSize: 34,
     fontWeight: '900',
     color: COLORS.green,
-    letterSpacing: -0.5,
+    letterSpacing: 1.5,
+    textShadowColor: 'rgba(0,0,0,0.35)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 8,
   },
-  subtitleText: {
-    fontSize: 13,
-    color: '#94A3B8',
-    marginTop: 4,
-    fontWeight: '700',
+  heroSupport: {
+    marginTop: 8,
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(248,250,252,0.78)',
+    letterSpacing: 0.1,
+  },
+  spacer: {
+    flexGrow: 1,
+    minHeight: 160,
   },
   formSection: {
-    marginBottom: 24,
+    zIndex: 2,
+    marginBottom: 8,
   },
   formTitle: {
-    fontSize: 17,
-    fontWeight: '900',
-    color: '#F0F4F8',
-    marginBottom: 16,
-    letterSpacing: -0.5,
-  },
-  authGlass: {
-    borderRadius: 26,
-    overflow: 'hidden',
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    padding: 22,
-    backgroundColor: 'rgba(13,20,32,0.55)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 24 },
-    shadowOpacity: 0.45,
-    shadowRadius: 32,
-    elevation: 16,
-  },
-  authGlassWeb: {
-    backgroundColor: 'rgba(25,37,63,0.88)',
-  },
-  stepRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  stepDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  stepDotActive: {
-    backgroundColor: COLORS.green,
-    borderColor: 'rgba(128,238,80,0.9)',
-    shadowColor: COLORS.green,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  stepLine: {
-    flex: 1,
-    height: 3,
-    marginHorizontal: 8,
-    borderRadius: 2,
-    opacity: 0.95,
-  },
-  authStepCaption: {
-    fontSize: 11,
+    fontSize: 30,
     fontWeight: '800',
-    letterSpacing: 1.2,
-    color: 'rgba(148,163,184,0.95)',
-    textTransform: 'uppercase',
-    marginBottom: 14,
-  },
-  authHeadline: {
-    fontSize: 20,
-    fontWeight: '900',
     color: '#F8FAFC',
-    letterSpacing: -0.6,
     marginBottom: 8,
+    letterSpacing: -0.7,
+    textShadowColor: 'rgba(0,0,0,0.4)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 10,
   },
-  authSubcopy: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-    lineHeight: 20,
-    marginBottom: 16,
+  formLead: {
+    fontSize: 15,
+    fontWeight: '400',
+    color: 'rgba(226,232,240,0.88)',
+    lineHeight: 22,
+    marginBottom: 20,
+    maxWidth: 360,
   },
-  emailHighlight: {
-    color: COLORS.greenLight,
-    fontWeight: '800',
-  },
-  changeEmailLink: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: COLORS.blue,
-    marginTop: -10,
+  authPanel: {
     marginBottom: 14,
-    textDecorationLine: 'underline',
   },
   emailFieldWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(13,20,32,0.65)',
-    borderRadius: 18,
+    backgroundColor: 'rgba(8,12,20,0.72)',
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
     paddingHorizontal: 14,
@@ -825,17 +663,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.surface,
+    backgroundColor: 'rgba(8,12,20,0.55)',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: COLORS.greenSoft,
+    borderColor: 'rgba(34,225,128,0.35)',
     paddingVertical: 14,
-    marginBottom: 8,
+    marginBottom: 10,
   },
   biometricButtonText: {
     color: COLORS.white,
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   orDivider: {
     flexDirection: 'row',
@@ -993,13 +831,14 @@ const styles = StyleSheet.create({
   },
   termsText: {
     textAlign: 'center',
-    fontSize: 13,
-    color: '#94A3B8',
-    lineHeight: 20,
-    fontWeight: '700',
+    fontSize: 12,
+    color: 'rgba(203,213,225,0.78)',
+    lineHeight: 18,
+    fontWeight: '500',
+    marginTop: 4,
   },
   linkText: {
-    color: COLORS.green,
+    color: COLORS.greenLight,
     fontWeight: '700',
   },
   features: {

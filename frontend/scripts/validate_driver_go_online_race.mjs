@@ -214,7 +214,7 @@ function main() {
     printRow(
       '15',
       'FGS Listening for rides + battery optimization exempt bridge',
-      notifyMgr.includes('NexRyde • Listening for rides') &&
+      notifyMgr.includes('NEXRYDE • Listening for rides') &&
         fgs.includes('Listening for rides') &&
         expMod.includes('requestBatteryOptimizationExempt') &&
         expMod.includes('hasBatteryOptimizationExempt'),

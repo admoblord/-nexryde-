@@ -1,29 +1,29 @@
 /**
- * Uber/Bolt-class 3D camera + day/night helpers for NexRyde maps.
+ * Uber/Bolt-class 3D camera + day/night helpers for NEXRYDE maps.
  */
 import { getNexrydeMapStyle } from '@/src/constants/nexrydeMapBehavior';
 
-/** Camera feel — tilted city + buildings (Google Maps 3D). */
+/** Camera feel — tilted city + buildings (Google Maps 3D / Uber-class). */
 export const MAP_3D = {
   /** Active trip follow pitch (degrees). */
-  tripPitch: 48,
+  tripPitch: 52,
   /** Online idle follow pitch. */
-  idlePitch: 32,
-  /** Rider live-tracking pitch. */
-  riderPitch: 42,
-  /** Booking / finding mild tilt. */
-  bookingPitch: 28,
+  idlePitch: 36,
+  /** Rider live-tracking pitch — Uber-class city tilt. */
+  riderPitch: 54,
+  /** Booking / finding — stronger city tilt + buildings. */
+  bookingPitch: 46,
   /** Rider home interactive map. */
-  homePitch: 36,
+  homePitch: 44,
   /** Active-trip peek on rider home. */
-  peekPitch: 34,
-  tripZoom: 17.2,
-  idleZoom: 15.6,
-  riderZoom: 16.4,
-  homeZoom: 15.2,
-  peekZoom: 14.4,
-  tripAltitude: 420,
-  idleAltitude: 900,
+  peekPitch: 40,
+  tripZoom: 17.4,
+  idleZoom: 15.8,
+  riderZoom: 16.9,
+  homeZoom: 15.6,
+  peekZoom: 14.6,
+  tripAltitude: 380,
+  idleAltitude: 820,
 } as const;
 
 /** Rough tropical day/night (Nigeria) — night before 06:30 or after 18:45 local. */

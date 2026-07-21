@@ -5,16 +5,57 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { HEADER_BLUR_DEFAULT, HEADER_BLUR_INCOMING } from '@/src/components/driver/driverDockTheme';
 import { BRAND } from '@/src/constants/designSystem';
+import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 
 export type DriverBrandHeaderVariant = 'default' | 'incoming' | 'trip-light';
 
-/** Matches rider booking chrome — NX badge, NEXRYDE wordmark, DRIVER pill (blue driver accent). */
+function DriverHeaderAvatar({
+  uri,
+  onPress,
+  size = 40,
+  onlineDot,
+}: {
+  uri?: string | null;
+  onPress?: () => void;
+  size?: number;
+  onlineDot?: boolean;
+}) {
+  if (!onPress && !uri) return null;
+  const body = (
+    <TripProfileAvatar
+      size={size}
+      uri={uri}
+      borderColor="#FFFFFF"
+      borderWidth={2}
+      showOnlineDot={onlineDot}
+      onlineDotColor="#22C55E"
+      accessibilityLabel="Your driver profile photo"
+    />
+  );
+  if (!onPress) return body;
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.82}
+      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+      accessibilityRole="button"
+      accessibilityLabel="Open driver profile"
+    >
+      {body}
+    </TouchableOpacity>
+  );
+}
+
+/** Matches rider booking chrome — NX badge, NEXRYDE wordmark, driver photo (Uber-style). */
 export function DriverBrandHeaderRow({
   topInset,
   variant = 'default',
   onMenuPress,
   onInboxPress,
   inboxUnread = 0,
+  profileImageUri,
+  onProfilePress,
+  showOnlineDot,
 }: {
   topInset: number;
   variant?: DriverBrandHeaderVariant;
@@ -23,6 +64,10 @@ export function DriverBrandHeaderRow({
   /** Incoming ride: opens notifications / inbox */
   onInboxPress?: () => void;
   inboxUnread?: number;
+  /** Driver's own portrait — always visible like Uber home. */
+  profileImageUri?: string | null;
+  onProfilePress?: () => void;
+  showOnlineDot?: boolean;
 }) {
   if (variant === 'incoming' && onMenuPress && onInboxPress) {
     return (
@@ -62,30 +107,38 @@ export function DriverBrandHeaderRow({
             <Text style={incomingStyles.brandR}>R</Text>
             <Text style={incomingStyles.brandYde}>YDE</Text>
           </View>
-          <TouchableOpacity
-            style={incomingStyles.iconBtnOuter}
-            onPress={onInboxPress}
-            activeOpacity={0.78}
-            hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
-            accessibilityRole="button"
-            accessibilityLabel="Messages and notifications"
-          >
-            <LinearGradient
-              colors={['rgba(30,64,175,0.45)', 'rgba(15,23,42,0.95)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={incomingStyles.iconBtnGrad}
+          <View style={incomingStyles.rightCluster}>
+            <DriverHeaderAvatar
+              uri={profileImageUri}
+              onPress={onProfilePress}
+              size={40}
+              onlineDot={showOnlineDot}
+            />
+            <TouchableOpacity
+              style={incomingStyles.iconBtnOuter}
+              onPress={onInboxPress}
+              activeOpacity={0.78}
+              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+              accessibilityRole="button"
+              accessibilityLabel="Messages and notifications"
             >
-              <Ionicons name="chatbubble-ellipses-outline" size={19} color="#BFDBFE" />
-            </LinearGradient>
-            {inboxUnread > 0 ? (
-              <View style={incomingStyles.inboxBadge}>
-                <Text style={incomingStyles.inboxBadgeTxt}>
-                  {inboxUnread > 99 ? '99+' : inboxUnread}
-                </Text>
-              </View>
-            ) : null}
-          </TouchableOpacity>
+              <LinearGradient
+                colors={['rgba(30,64,175,0.45)', 'rgba(15,23,42,0.95)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={incomingStyles.iconBtnGrad}
+              >
+                <Ionicons name="chatbubble-ellipses-outline" size={19} color="#BFDBFE" />
+              </LinearGradient>
+              {inboxUnread > 0 ? (
+                <View style={incomingStyles.inboxBadge}>
+                  <Text style={incomingStyles.inboxBadgeTxt}>
+                    {inboxUnread > 99 ? '99+' : inboxUnread}
+                  </Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
+          </View>
         </View>
         <View style={incomingStyles.hairline} pointerEvents="none" />
       </View>
@@ -119,10 +172,12 @@ export function DriverBrandHeaderRow({
             </LinearGradient>
             <Text style={lightStyles.brand}>NEXRYDE</Text>
           </View>
-          <View style={lightStyles.pill}>
-            <Ionicons name="car-sport" size={14} color="#2563EB" style={{ marginRight: 5 }} />
-            <Text style={lightStyles.pillTxt}>DRIVER</Text>
-          </View>
+          <DriverHeaderAvatar
+            uri={profileImageUri}
+            onPress={onProfilePress}
+            size={42}
+            onlineDot={showOnlineDot}
+          />
         </View>
         <View style={lightStyles.hairline} pointerEvents="none" />
       </View>
@@ -155,15 +210,12 @@ export function DriverBrandHeaderRow({
           </LinearGradient>
           <Text style={styles.brand}>NEXRYDE</Text>
         </View>
-        <LinearGradient
-          colors={['rgba(59,130,246,0.35)', 'rgba(30,58,138,0.5)']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.pill}
-        >
-          <Ionicons name="speedometer-outline" size={13} color="#BFDBFE" style={{ marginRight: 5 }} />
-          <Text style={styles.pillTxt}>DRIVER</Text>
-        </LinearGradient>
+        <DriverHeaderAvatar
+          uri={profileImageUri}
+          onPress={onProfilePress}
+          size={42}
+          onlineDot={showOnlineDot}
+        />
       </View>
       <View style={styles.hairlineDefault} pointerEvents="none" />
     </View>
@@ -212,31 +264,33 @@ const incomingStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  rightCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   wordmark: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
   },
   brandNex: {
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: 17,
+    fontWeight: '800',
     color: '#F8FAFC',
-    letterSpacing: 2,
+    letterSpacing: 0.8,
   },
   brandR: {
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: 17,
+    fontWeight: '800',
     color: '#4ADE80',
-    letterSpacing: 2,
-    textShadowColor: 'rgba(52,245,184,0.45)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 8,
+    letterSpacing: 0.8,
   },
   brandYde: {
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: 17,
+    fontWeight: '800',
     color: '#F8FAFC',
-    letterSpacing: 2,
+    letterSpacing: 0.8,
   },
   hairline: {
     height: StyleSheet.hairlineWidth,

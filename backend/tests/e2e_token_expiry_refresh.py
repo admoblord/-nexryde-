@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NexRyde Token Expiry + Refresh Test
+NEXRYDE Token Expiry + Refresh Test
 =====================================
 Tests:
   1. Login returns valid JWT
@@ -78,7 +78,7 @@ def _decode_jwt_payload(token: str) -> dict:
 async def run():
     suffix = tag()
     print(f"\n{BOLD}{'=' * 60}{RESET}")
-    print(f"{BOLD}  NexRyde Token Expiry + Refresh Test  [{suffix}]{RESET}")
+    print(f"{BOLD}  NEXRYDE Token Expiry + Refresh Test  [{suffix}]{RESET}")
     print(f"  Base URL : {BASE_URL}")
     print(f"  Started  : {datetime.now().isoformat()}")
     print(f"{BOLD}{'=' * 60}{RESET}")

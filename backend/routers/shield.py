@@ -184,7 +184,7 @@ async def shield_create_dispute(body: CreateDisputeRequest, request: Request):
         other_role = "driver" if role == "rider" else "rider"
         await send_push_notification(
             other,
-            "Nexryde Shield — Response Required",
+            "NEXRYDE Shield — Response Required",
             f"A report was filed for your recent trip. Please respond within 24 hours.",
             {"type": "shield_case_created", "dispute_id": doc["id"], "trip_id": body.trip_id},
         )
@@ -229,7 +229,7 @@ async def shield_respond_dispute(dispute_id: str, body: RespondDisputeRequest, r
     if opener:
         await send_push_notification(
             opener,
-            "Nexryde Shield — Response Received",
+            "NEXRYDE Shield — Response Received",
             "The other party has responded to your report. Our team will now review the case.",
             {"type": "shield_case_responded", "dispute_id": dispute_id},
         )
@@ -319,7 +319,7 @@ async def admin_resolve_shield_dispute(
     for party_id in filter(None, {d.get("rider_id"), d.get("driver_id")}):
         await send_push_notification(
             party_id,
-            "Nexryde Shield — Case Resolved",
+            "NEXRYDE Shield — Case Resolved",
             f"Your Shield case has been reviewed and resolved: {decision_label}.",
             {"type": "shield_case_resolved", "dispute_id": dispute_id, "decision": body.decision},
         )
@@ -432,7 +432,7 @@ async def activate_invisible_shield_mode(trip_id: str, body: InvisibleShieldActi
         await send_push_notification(
             trip["driver_id"],
             "Trip Protection Enabled",
-            "Nexryde late-night trip protection is active for this ride.",
+            "NEXRYDE late-night trip protection is active for this ride.",
             {"type": "invisible_shield_mode", "trip_id": trip_id},
         )
     updated = await db.trips.find_one({"id": trip_id}, {"_id": 0, "invisible_shield_mode": 1})

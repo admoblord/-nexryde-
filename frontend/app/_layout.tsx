@@ -55,7 +55,7 @@ const ACTION_ROUTES: Record<string, string> = {
 };
 
 /**
- * Extract a referral identifier from any Nexryde invite URL.
+ * Extract a referral identifier from any NEXRYDE invite URL.
  *
  * Returns:
  *   - username  (lowercase slug, e.g. "funnybony")  for path-based links

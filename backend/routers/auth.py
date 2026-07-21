@@ -1050,7 +1050,7 @@ async def email_sign_in(request_obj: Request, request: EmailSignInRequest):
     if user:
         return await _complete_existing_user_email_login(user, request.device_id)
 
-    suggested_name = (request.name or email.split("@")[0].replace(".", " ").title()).strip() or "Nexryde User"
+    suggested_name = (request.name or email.split("@")[0].replace(".", " ").title()).strip() or "NEXRYDE User"
     return {
         "message": "Email sign-in accepted. Continue registration.",
         "is_new_user": True,
@@ -1135,7 +1135,7 @@ async def verify_email_otp(request: EmailOTPVerifyRequest):
         upsert=True,
     )
 
-    suggested_name = email.split("@")[0].replace(".", " ").title() or "Nexryde User"
+    suggested_name = email.split("@")[0].replace(".", " ").title() or "NEXRYDE User"
     return {
         "verified": True,
         "is_new_user": True,
@@ -1390,7 +1390,7 @@ async def register(request: RegisterRequest, http_request: Request):
         existing = await db.users.find_one({"phone": normalized_phone})
         if existing:
             if request.role == "driver" and existing.get("role") == "driver":
-                # Phone is contact-only (rider calling / NexRyde records) — no SMS OTP gate.
+                # Phone is contact-only (rider calling / NEXRYDE records) — no SMS OTP gate.
                 # Same number on an unfinished driver signup always resumes that account.
                 now_iso = datetime.now(timezone.utc).isoformat()
                 from legal_constants import CURRENT_TERMS_VERSION, CURRENT_PRIVACY_VERSION
@@ -1644,7 +1644,7 @@ async def _brevo_unified_issue_otp(body: "UnifiedEmailOtpRequestBody", http_requ
         )
     return {
         "success": True,
-        "message": "If this mailbox can receive Nexryde mail, a verification code will arrive shortly.",
+        "message": "If this mailbox can receive NEXRYDE mail, a verification code will arrive shortly.",
         "expires_in_minutes": 10,
     }
 

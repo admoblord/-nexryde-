@@ -57,8 +57,9 @@ export function TripProfileAvatar({
 }: TripProfileAvatarProps) {
   const resolvedUri = useMemo(() => {
     if (uri) return resolvePublicMediaUri(uri);
+    // Uber-style display: framed profile first, face/URL as fallback.
     if (faceUri || profileUri) {
-      return resolvePublicMediaUri(faceUri) || resolvePublicMediaUri(profileUri);
+      return resolvePublicMediaUri(profileUri) || resolvePublicMediaUri(faceUri);
     }
     if (person && role === 'driver') return resolveDriverPhotoUri(person);
     if (person && role === 'rider') return resolveRiderPhotoUri(person);
@@ -66,8 +67,8 @@ export function TripProfileAvatar({
       const d = pickDriverPhotoRaw(person);
       const r = pickRiderPhotoRaw(person);
       return (
-        resolvePublicMediaUri(d.face) ||
         resolvePublicMediaUri(d.profile) ||
+        resolvePublicMediaUri(d.face) ||
         resolvePublicMediaUri(r)
       );
     }
@@ -78,21 +79,28 @@ export function TripProfileAvatar({
   useEffect(() => setFailed(false), [resolvedUri]);
 
   const r = size / 2;
+  const outer = size + borderWidth * 2;
   const iconSize = placeholderIconSize ?? Math.round(size * 0.44);
 
   return (
     <View
       style={[
         {
-          width: size + borderWidth * 2,
-          height: size + borderWidth * 2,
-          borderRadius: r + borderWidth,
+          width: outer,
+          height: outer,
+          borderRadius: outer / 2,
           borderWidth,
           borderColor,
           overflow: 'hidden',
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: 'rgba(15,23,42,0.6)',
+          // Soft lift so the circle reads clearly on map chrome (Uber-like).
+          shadowColor: '#0F172A',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.18,
+          shadowRadius: 4,
+          elevation: 3,
         },
         style,
       ]}
@@ -100,7 +108,15 @@ export function TripProfileAvatar({
       {resolvedUri && !failed ? (
         <Image
           source={{ uri: resolvedUri }}
-          style={[{ width: size, height: size, borderRadius: r }, imageStyle]}
+          style={[
+            {
+              width: size,
+              height: size,
+              borderRadius: r,
+              backgroundColor: '#1E293B',
+            },
+            imageStyle,
+          ]}
           resizeMode="cover"
           accessibilityLabel={accessibilityLabel}
           onError={() => setFailed(true)}
@@ -123,8 +139,8 @@ export function TripProfileAvatar({
               width: Math.max(10, size * 0.18),
               height: Math.max(10, size * 0.18),
               borderRadius: Math.max(5, size * 0.09),
-              right: borderWidth + 1,
-              bottom: borderWidth + 1,
+              right: Math.max(0, borderWidth - 1),
+              bottom: Math.max(0, borderWidth - 1),
             },
           ]}
         />

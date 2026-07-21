@@ -180,7 +180,7 @@ async def retry_async(
     raise last_exc  # type: ignore[misc]
 
 
-# ── Singleton circuit breakers for NexRyde services ───────────────────────────
+# ── Singleton circuit breakers for NEXRYDE services ───────────────────────────
 
 google_maps_cb = CircuitBreaker(
     "google_maps",

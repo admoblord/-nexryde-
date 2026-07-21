@@ -20,7 +20,7 @@ const OPTIONS: {
   preview: 'light' | 'dark' | 'system';
 }[] = [
   { key: 'light', title: 'Light', subtitle: 'Bright surfaces for daytime', icon: 'sunny-outline', preview: 'light' },
-  { key: 'dark', title: 'Dark', subtitle: 'NexRyde navy night mode', icon: 'moon-outline', preview: 'dark' },
+  { key: 'dark', title: 'Dark', subtitle: 'NEXRYDE navy night mode', icon: 'moon-outline', preview: 'dark' },
   { key: 'auto', title: 'System', subtitle: 'Match Android / iOS theme', icon: 'phone-portrait-outline', preview: 'system' },
 ];
 

@@ -522,11 +522,11 @@ export default function RiderProfileScreen() {
               ) : null}
             </View>
 
-            <Text style={s.heroPhone}>{user?.phone || user?.email || 'NexRyde Rider'}</Text>
+            <Text style={s.heroPhone}>{user?.phone || user?.email || 'NEXRYDE Rider'}</Text>
 
             <View style={s.roleBadge}>
               <Ionicons name="bicycle-outline" size={12} color={BRAND.info} />
-              <Text style={s.roleBadgeText}>Rider</Text>
+              <Text style={s.roleBadgeText}>NEXRYDE rider</Text>
             </View>
 
             <View style={s.statsGlass}>
@@ -568,7 +568,7 @@ export default function RiderProfileScreen() {
                   {String(memberYear)}
                 </Text>
                 <Text style={s.statLabel} numberOfLines={1}>
-                  Member
+                  Since
                 </Text>
               </View>
             </View>
@@ -580,7 +580,10 @@ export default function RiderProfileScreen() {
                 <View style={s.achievementsIconWrap}>
                   <Ionicons name="ribbon" size={16} color={PROFILE_GREEN} />
                 </View>
-                <Text style={s.achievementsTitle}>Achievements</Text>
+                <View>
+                  <Text style={s.achievementsTitle}>Achievements</Text>
+                  <Text style={s.achievementsSub}>Ride more · unlock more</Text>
+                </View>
               </View>
               <View style={s.achievementsCountPill}>
                 <Text style={s.achievementsCountText}>
@@ -629,13 +632,13 @@ export default function RiderProfileScreen() {
               </View>
             ) : (
               <Text style={s.achievementsEmpty}>
-                Complete your first trip to earn the First Ride badge and share it with friends.
+                Take your first trip to unlock First Ride — then share the win.
               </Text>
             )}
 
             {lockedBadges.length > 0 ? (
               <>
-                <Text style={s.lockedSectionLabel}>Up next</Text>
+                <Text style={s.lockedSectionLabel}>Coming up</Text>
                 <View style={s.lockedRow}>
                   {lockedBadges.map((b) => (
                     <LockedBadgeChip key={b.id} badge={b} />
@@ -661,7 +664,7 @@ export default function RiderProfileScreen() {
                   <Ionicons name="logo-whatsapp" size={22} color="#25D366" />
                   <View style={s.referralWaCopy}>
                     <Text style={s.referralWaTitle}>Invite friends</Text>
-                    <Text style={s.referralWaSub}>Share your link — earn ₦500 each</Text>
+                    <Text style={s.referralWaSub}>Share your link · earn ₦500 each</Text>
                   </View>
                   <Ionicons name="chevron-forward" size={18} color="#64748B" />
                 </LinearGradient>
@@ -673,27 +676,27 @@ export default function RiderProfileScreen() {
         <View style={[s.body, { paddingHorizontal: flow.padH }]}>
         {/* ── QUICK ACTIONS GRID ── */}
         <View style={s.gridSection}>
-          <Text style={[s.gridTitle, { color: colors.textMuted }]}>Quick access</Text>
+          <Text style={[s.gridTitle, { color: colors.textMuted }]}>Shortcuts</Text>
           <View style={[s.grid, { gap: flow.isTablet ? 14 : 12 }]}>
-            <ActionTile icon="create" label="Edit Profile" gradColors={['#1D4ED8', '#2563EB']} tileWidth={actionTileW} onPress={() => router.push('/edit-profile')} />
-            <ActionTile icon="time" label="Ride History" gradColors={['#5B21B6', '#7C3AED']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-trips' as any)} />
-            <ActionTile icon="location" label="Saved Places" gradColors={['#065F46', '#059669']} tileWidth={actionTileW} onPress={() => router.push('/rider/saved-places' as any)} />
+            <ActionTile icon="create" label="Edit profile" gradColors={['#1D4ED8', '#2563EB']} tileWidth={actionTileW} onPress={() => router.push('/edit-profile')} />
+            <ActionTile icon="time" label="My trips" gradColors={['#5B21B6', '#7C3AED']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-trips' as any)} />
+            <ActionTile icon="location" label="Saved places" gradColors={['#065F46', '#059669']} tileWidth={actionTileW} onPress={() => router.push('/rider/saved-places' as any)} />
             <ActionTile icon="heart-circle" label="Favourites" gradColors={['#9D174D', '#EC4899']} tileWidth={actionTileW} onPress={() => router.push('/rider/favorite-drivers')} />
             <ActionTile icon="wallet" label="Wallet" gradColors={['#0369A1', '#0EA5E9']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-wallet' as any)} />
-            <ActionTile icon="notifications" label="Alerts" gradColors={['#7C2D12', '#EA580C']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-notifications' as any)} />
+            <ActionTile icon="notifications" label="Updates" gradColors={['#7C2D12', '#EA580C']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-notifications' as any)} />
           </View>
         </View>
 
         {/* ── TRUST SCORE ── */}
         {loadingTrust ? (
-          <Section title="NexRyde score">
+          <Section title="NEXRYDE score">
             <View style={s.loadingRow}>
               <Ionicons name="reload" size={16} color={colors.textMuted} />
               <Text style={[s.loadingText, { color: colors.textMuted }]}>Loading your score…</Text>
             </View>
           </Section>
         ) : trustSummary ? (
-          <Section title="NexRyde score">
+          <Section title="NEXRYDE score">
             <LinearGradient colors={[PROFILE_GREEN_SOFT, 'rgba(56,189,248,0.06)']} style={s.scoreHero}>
               <View style={s.scoreHeroLeft}>
                 <Text style={[s.scoreMainValue, { color: colors.text }]}>
@@ -774,13 +777,13 @@ export default function RiderProfileScreen() {
             </LinearGradient>
           </TouchableOpacity>
           <MenuRow icon="shield-checkmark" gradColors={['#78350F', '#D97706']} title="Safety Center" subtitle="Emergency contacts & trip protection" onPress={() => router.push('/(rider-tabs)/rider-safety' as any)} />
-          <MenuRow icon="ribbon" gradColors={['#134E4A', '#0D9488']} title="NexRyde Shield" subtitle="Disputes and ride protection" onPress={() => router.push('/shield-disputes')} />
+          <MenuRow icon="ribbon" gradColors={['#134E4A', '#0D9488']} title="NEXRYDE Shield" subtitle="Disputes and ride protection" onPress={() => router.push('/shield-disputes')} />
         </Section>
 
         {/* ── ACCOUNT & PREFERENCES ── */}
         <Section title="Preferences">
           <MenuRow icon="settings" gradColors={['#166534', PROFILE_GREEN]} title="Settings" subtitle="App preferences & defaults" onPress={() => router.push('/settings')} />
-          <MenuRow icon="car-sport" gradColors={['#3730A3', '#4F46E5']} title="Switch to Driver Mode" subtitle="Drive and earn on NexRyde" onPress={() => setShowDriverModal(true)} />
+          <MenuRow icon="car-sport" gradColors={['#3730A3', '#4F46E5']} title="Switch to Driver Mode" subtitle="Drive and earn on NEXRYDE" onPress={() => setShowDriverModal(true)} />
         </Section>
 
         {/* ── SUPPORT & LEGAL ── */}
@@ -804,7 +807,7 @@ export default function RiderProfileScreen() {
           }}
         >
           <Text style={[s.version, { color: colors.textMuted }]}>
-            NexRyde v{Constants.expoConfig?.version ?? '1.0.0'}
+            NEXRYDE v{Constants.expoConfig?.version ?? '1.0.0'}
           </Text>
         </TouchableOpacity>
 
@@ -975,12 +978,17 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'stretch',
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    borderRadius: RADIUS.lg,
-    backgroundColor: SURFACE.tile,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: SURFACE.hairline,
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    borderRadius: RADIUS.xl,
+    backgroundColor: 'rgba(18,28,46,0.72)',
+    borderWidth: 1,
+    borderColor: SURFACE.glassBorder,
+    shadowColor: BRAND.primary,
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
   },
   statChip: {
     flex: 1,
@@ -1016,8 +1024,8 @@ const s = StyleSheet.create({
     paddingTop: SPACING.md,
     paddingBottom: SPACING.md,
     borderRadius: RADIUS.xl,
-    backgroundColor: PROFILE_GREEN_SOFT,
-    borderWidth: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(34,225,128,0.10)',
+    borderWidth: 1,
     borderColor: SURFACE.glassBorder,
   },
   achievementsHeader: {
@@ -1026,12 +1034,12 @@ const s = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: SPACING.md,
   },
-  achievementsHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  achievementsHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   achievementsIconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: RADIUS.sm,
-    backgroundColor: PROFILE_GREEN_SOFT,
+    width: 34,
+    height: 34,
+    borderRadius: RADIUS.md,
+    backgroundColor: 'rgba(34,225,128,0.18)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
@@ -1042,6 +1050,12 @@ const s = StyleSheet.create({
     fontWeight: '800',
     color: BRAND.textPrimary,
     letterSpacing: -0.25,
+  },
+  achievementsSub: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: BRAND.textSecondary,
+    marginTop: 2,
   },
   achievementsCountPill: {
     paddingHorizontal: 10,

@@ -1,4 +1,4 @@
-/** NexRyde loading / splash brand tokens — sourced from designSystem. */
+/** NEXRYDE loading / splash brand tokens — sourced from designSystem. */
 import { BRAND, SURFACE } from '@/src/constants/designSystem';
 
 export const NEX_LOADING = {

@@ -286,7 +286,7 @@ export function RiderFaceLivenessCapture({ visible, onClose, onPairCaptured }: R
             ) : null}
 
             {Platform.OS === 'web' ? (
-              <Text style={styles.webHint}>Live biometric scanning works best in the native Nexryde app.</Text>
+              <Text style={styles.webHint}>Live biometric scanning works best in the native NEXRYDE app.</Text>
             ) : null}
           </View>
         </SafeAreaView>

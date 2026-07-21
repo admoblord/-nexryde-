@@ -1,4 +1,4 @@
-"""Nexryde Driver Control System — cost protection and fair dispatch.
+"""NEXRYDE Driver Control System — cost protection and fair dispatch.
 
 Features:
   1. Zone-based active-driver cap (max 30 per zone by default).

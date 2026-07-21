@@ -23,7 +23,7 @@ async def process_due_scheduled_notifications() -> int:
             uids = job.get("user_ids") or []
             if not uids and job.get("target"):
                 uids = await get_user_ids_for_broadcast_target(str(job.get("target")))
-            title = str(job.get("title") or "Nexryde")
+            title = str(job.get("title") or "NEXRYDE")
             body = str(job.get("body") or "")
             data = job.get("data") if isinstance(job.get("data"), dict) else {}
             data = {**data, "type": str(data.get("type") or job.get("notif_type") or "admin_broadcast")}

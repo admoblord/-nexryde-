@@ -99,7 +99,7 @@ type Props = {
   errorMessage?: string | null;
   matchedDriverName?: string | null;
   onCancel: () => void;
-  onUpdateBid: () => void;
+  onUpdateBid?: () => void;
   onTryAgain?: () => void;
 };
 
@@ -286,15 +286,15 @@ export default function FindingDriverScreenV2({
   }, [isError, onCancel]);
 
   const phaseTitle = isError
-    ? 'No driver available right now'
+    ? 'No drivers nearby'
     : isMatched
-      ? matchedDriverName ? `${matchedDriverName} accepted!` : 'Driver confirmed!'
+      ? matchedDriverName ? `${matchedDriverName} is on the way` : 'Driver confirmed'
       : timeElapsedSec >= 90
-        ? 'Still searching for you'
+        ? 'Still looking for you'
         : timeElapsedSec >= 60
           ? 'Reaching more drivers'
           : timeElapsedSec >= 30
-            ? 'Expanding search area'
+            ? 'Expanding your search'
             : 'Finding your driver';
 
   return (
@@ -483,7 +483,7 @@ export default function FindingDriverScreenV2({
                 </Animated.View>
               </View>
               <Text style={styles.phaseTitleTxt}>{phaseTitle}</Text>
-              <Text style={styles.matchedSubTxt}>Opening live tracking…</Text>
+              <Text style={styles.matchedSubTxt}>Opening your live trip…</Text>
             </View>
           ) : (
             <View style={styles.searchInner}>
@@ -539,6 +539,7 @@ export default function FindingDriverScreenV2({
                   <TouchableOpacity
                     style={styles.fareChip}
                     onPress={() => {
+                      if (!onUpdateBid) return;
                       if (Platform.OS !== 'web') void Haptics.selectionAsync();
                       onUpdateBid();
                     }}
@@ -591,7 +592,7 @@ export default function FindingDriverScreenV2({
           {!isError ? (
             <View style={styles.safetyStrip}>
               <View style={styles.safetyDot} />
-              <Text style={styles.safetyTxt}>All NexRyde drivers are verified &amp; background-checked</Text>
+              <Text style={styles.safetyTxt}>All NEXRYDE drivers are verified &amp; background-checked</Text>
             </View>
           ) : null}
         </ScrollView>

@@ -108,11 +108,11 @@ export default function DriverCompleteTripConfirmModal({
                 end={{ x: 1, y: 0.5 }}
                 style={StyleSheet.absoluteFillObject}
               />
-              <Text style={styles.pillTxt}>END TRIP</Text>
+              <Text style={styles.pillTxt}>Complete</Text>
             </View>
             <Text style={styles.title}>Complete this trip?</Text>
             <Text style={styles.sub}>
-              Only confirm after <Text style={styles.subEm}>{displayName}</Text> has left the vehicle and you are at
+              Confirm only after <Text style={styles.subEm}>{displayName}</Text> has left the car and you’re at
               the drop-off.
             </Text>
 
@@ -228,10 +228,10 @@ const styles = StyleSheet.create({
     minWidth: 108,
   },
   pillTxt: {
-    fontSize: 10,
-    fontWeight: '900',
+    fontSize: 11,
+    fontWeight: '800',
     color: '#BBF7D0',
-    letterSpacing: 1.1,
+    letterSpacing: 0.2,
     zIndex: 1,
   },
   title: {

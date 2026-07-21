@@ -753,7 +753,7 @@ async def _maybe_process_safe_arrival_check(trip: dict) -> dict:
             await send_push_notification(
                 trip["rider_id"],
                 "Safe Arrival Check-In",
-                "Nexryde Safety is checking in because you have not confirmed safe arrival yet.",
+                "NEXRYDE Safety is checking in because you have not confirmed safe arrival yet.",
                 {"type": "safe_arrival_checkin", "trip_id": trip.get("id")},
             )
 
@@ -955,7 +955,7 @@ async def _build_black_box_record(trip: dict, events: list[dict]) -> dict:
             "communication_digest": communication_digest,
         },
         "black_shield": {
-            "name": "Nexryde Black Shield",
+            "name": "NEXRYDE Black Shield",
             "protection_mode": "end_to_end_encrypted_tamper_evident",
             "tamper_proof_ledger_root": previous_hash,
             "decentralized_ledger_anchor": _black_box_signature(
@@ -3005,7 +3005,7 @@ async def explain_geo_fence_deviation(trip_id: str, request: GeoFenceExplanation
                 "guardian_alert": {
                     "active": True,
                     "type": "geo_fence_explained",
-                    "message": "Driver explained the route change. Nexryde is still monitoring this trip.",
+                    "message": "Driver explained the route change. NEXRYDE is still monitoring this trip.",
                     "reason": request.reason.strip(),
                     "triggered_at": now,
                 },
@@ -3437,7 +3437,7 @@ async def report_vehicle_mismatch(trip_id: str, request: Request):
              "$push": {"mismatch_reports": mismatch_record}}
         )
     await _log_trip_event(trip_id, "mismatch_reported", rider_id, mismatch_record)
-    return {"success": True, "message": "Mismatch report submitted. Nexryde safety team has been notified."}
+    return {"success": True, "message": "Mismatch report submitted. NEXRYDE safety team has been notified."}
 
 
 @trips_router.post("/trips/{trip_id}/confirm-safe-arrival")
@@ -3671,7 +3671,7 @@ async def _update_trip_location_impl(trip_id: str, request: LocationUpdate, http
                 guardian_alert = {
                     "active": True,
                     "type": "gps_spoofing",
-                    "message": "Trip flagged for suspected GPS spoofing. Nexryde froze the fare and suspended the driver pending investigation.",
+                    "message": "Trip flagged for suspected GPS spoofing. NEXRYDE froze the fare and suspended the driver pending investigation.",
                     "jump_km": round(moved_km, 3),
                     "estimated_speed_kmh": round(current_speed_kmh, 1),
                     "triggered_at": now.isoformat(),
@@ -3680,7 +3680,7 @@ async def _update_trip_location_impl(trip_id: str, request: LocationUpdate, http
                     await send_push_notification(
                         trip["rider_id"],
                         "GPS Fraud Protection Active",
-                        "Suspected GPS spoofing detected. Your fare is frozen while Nexryde investigates.",
+                        "Suspected GPS spoofing detected. Your fare is frozen while NEXRYDE investigates.",
                         {"type": "gps_spoofing_alert", "trip_id": trip_id},
                     )
                 if trip.get("driver_id"):
@@ -3819,7 +3819,7 @@ async def _update_trip_location_impl(trip_id: str, request: LocationUpdate, http
             guardian_alert = {
                 "active": True,
                 "type": "speed_spike",
-                "message": f"Speed spike detected at {round(current_speed_kmh)} km/h. Nexryde has warned the driver and logged a safety violation.",
+                "message": f"Speed spike detected at {round(current_speed_kmh)} km/h. NEXRYDE has warned the driver and logged a safety violation.",
                 "speed_kmh": round(current_speed_kmh, 1),
                 "threshold_kmh": SPEED_SPIKE_LIMIT_KMH,
                 "triggered_at": now.isoformat(),
@@ -3827,7 +3827,7 @@ async def _update_trip_location_impl(trip_id: str, request: LocationUpdate, http
             await send_push_notification(
                 trip.get("rider_id"),
                 "Speed Spike Alert",
-                f"Your driver reached {round(current_speed_kmh)} km/h. Stay alert while Nexryde intervenes.",
+                f"Your driver reached {round(current_speed_kmh)} km/h. Stay alert while NEXRYDE intervenes.",
                 {"type": "speed_spike_alert", "trip_id": trip_id},
             )
             await send_push_notification(
@@ -4799,7 +4799,7 @@ async def complete_trip(trip_id: str, request: Request):
         await send_push_notification(
             trip["rider_id"],
             "Confirm Safe Arrival",
-            "Please confirm you arrived safely. Nexryde will check in automatically if you do not respond.",
+            "Please confirm you arrived safely. NEXRYDE will check in automatically if you do not respond.",
             {"type": "safe_arrival_checkin", "trip_id": trip_id},
         )
         await maybe_send_rider_favorite_engagement_pushes(trip["rider_id"], trip.get("driver_id"))
@@ -4987,7 +4987,7 @@ async def cancel_trip(trip_id: str, request: dict, http_request: Request):
         await send_push_notification(
             trip["rider_id"],
             "Driver Cancelled",
-            "Your driver cancelled this trip. You can request another NexRyde.",
+            "Your driver cancelled this trip. You can request another NEXRYDE.",
             {"type": "driver_cancelled", "trip_id": trip_id, "delivery_slot": "cancel"},
             source="trip",
         )

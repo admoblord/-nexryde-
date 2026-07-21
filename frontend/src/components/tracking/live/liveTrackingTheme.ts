@@ -1,5 +1,5 @@
 /**
- * NexRyde Live Tracking — premium dark glass design system.
+ * NEXRYDE Live Tracking — premium dark glass design system.
  */
 import type { ViewStyle } from 'react-native';
 import { BRAND, SURFACE } from '@/src/constants/designSystem';

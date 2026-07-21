@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end production validation for NexRyde notifications.
+"""End-to-end production validation for NEXRYDE notifications.
 
 Uses an isolated Mongo DB + the real ``send_push_notification`` path
 (audience guards, trip participant checks, delivery ledger). Expo/FCM
@@ -498,7 +498,7 @@ async def scenario_6_offline_device() -> None:
         "e2e-live-device",
         token,
         "fcm",
-        "NexRyde offline reconnect test",
+        "NEXRYDE offline reconnect test",
         "If you saw this after reconnecting, offline delivery works.",
         {"type": "admin_broadcast", "channel_id": "engagement_high"},
     )
@@ -576,7 +576,7 @@ async def scenario_7_logging() -> None:
 
 
 async def main() -> int:
-    print(f"\n=== NexRyde Notification E2E Production Proof ===")
+    print(f"\n=== NEXRYDE Notification E2E Production Proof ===")
     print(f"Isolated DB: {E2E_DB}")
     print(f"Transport: stubbed Expo/FCM (records deliveries)\n")
 

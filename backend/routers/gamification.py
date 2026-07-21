@@ -92,7 +92,7 @@ async def _build_driver_of_month_payload(month_key: str) -> dict:
             "subtitle": "Community votes decide who gets featured, cash bonus, and a home-delivered trophy.",
             "cash_bonus": DRIVER_OF_MONTH_CASH_BONUS,
             "trophy_delivery": "Physical trophy delivered to the winner's home",
-            "social_hook": "Built for viral hometown pride and shareable Nexryde moments.",
+            "social_hook": "Built for viral hometown pride and shareable NEXRYDE moments.",
             "candidates": candidates,
             "created_at": datetime.utcnow().isoformat(),
         }

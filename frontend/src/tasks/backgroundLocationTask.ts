@@ -79,7 +79,7 @@ export async function startDriverBackgroundLocation(): Promise<void> {
       distanceInterval: 20,  // 20 m — ignore GPS jitter while parked
       showsBackgroundLocationIndicator: true,
       foregroundService: {
-        notificationTitle: 'NexRyde — online',
+        notificationTitle: 'NEXRYDE — online',
         notificationBody: 'Waiting for ride requests near you.',
         notificationColor: '#1a1a2e',
       },

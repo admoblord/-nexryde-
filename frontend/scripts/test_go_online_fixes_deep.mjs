@@ -84,8 +84,9 @@ if (wsEffectMatch) {
   const deps = wsEffectMatch[1];
   if (!deps.includes('token')) pass('S1', 'WS effect: token NOT in deps (no reconnect on refresh)');
   else fail('S1', 'WS effect: token still in deps', deps);
-  if (deps.includes('isDashboardVisible') && deps.includes('driverId')) {
-    pass('S1', 'WS effect: deps are isDashboardVisible + driverId only');
+  // Socket follows session phase (confirmed/reconnecting) — not a raw isDashboardVisible toggle.
+  if (deps.includes('connectionPhase') && deps.includes('driverId')) {
+    pass('S1', 'WS effect: deps include connectionPhase + driverId');
   } else fail('S1', 'WS effect: wrong deps', deps);
 } else {
   fail('S1', 'WS effect block not found');

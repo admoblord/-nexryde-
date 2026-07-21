@@ -75,7 +75,7 @@ function CompletionBrandHeader() {
       </View>
       <View style={styles.driverPill}>
         <Ionicons name="car-sport" size={13} color={NEON} />
-        <Text style={styles.driverPillTxt}>DRIVER</Text>
+        <Text style={styles.driverPillTxt}>Driver</Text>
       </View>
     </View>
   );
@@ -136,7 +136,7 @@ function EarningsBreakdownGrid({ payload }: { payload: TripCompletionPayload }) 
           ]}
         >
           <Text style={[styles.earnColLbl, 'highlight' in col && col.highlight && styles.earnColLblBonus]}>
-            {'highlight' in col && col.highlight ? 'Bonus ⭐' : col.label}
+            {'highlight' in col && col.highlight ? 'Bonus' : col.label}
           </Text>
           <Text style={[styles.earnColVal, 'highlight' in col && col.highlight && styles.earnColValBonus]}>
             {col.value != null && Number.isFinite(Number(col.value))
@@ -248,7 +248,7 @@ export default function DriverTripCompletionPanel({
           <View style={styles.topPillIconCircle}>
             <Ionicons name="checkmark" size={18} color="#022C22" />
           </View>
-          <Text style={styles.topPillTxt}>TRIP COMPLETED</Text>
+          <Text style={styles.topPillTxt}>Done</Text>
         </LinearGradient>
       </Animated.View>
 
@@ -296,7 +296,7 @@ export default function DriverTripCompletionPanel({
             <View style={styles.successBannerIcon}>
               <Ionicons name="checkmark" size={22} color="#022C22" />
             </View>
-            <Text style={styles.successBannerTxt}>TRIP COMPLETED</Text>
+            <Text style={styles.successBannerTxt}>Trip completed</Text>
           </LinearGradient>
 
           <View style={styles.tripSummaryCard}>
@@ -350,7 +350,7 @@ export default function DriverTripCompletionPanel({
 
           <View style={styles.earningsCard}>
             <View style={styles.earningsTopRow}>
-              <Text style={styles.earningsLbl}>TOTAL EARNINGS</Text>
+              <Text style={styles.earningsLbl}>Total earnings</Text>
               <View style={styles.earningsWalletIcon}>
                 <Ionicons name="wallet" size={20} color={NEON} />
               </View>
@@ -552,10 +552,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   topPillTxt: {
-    fontSize: 12,
-    fontWeight: '900',
+    fontSize: 13,
+    fontWeight: '800',
     color: '#F8FAFC',
-    letterSpacing: 1.1,
+    letterSpacing: 0.2,
   },
   sheet: {
     zIndex: 2,
@@ -632,9 +632,9 @@ const styles = StyleSheet.create({
   },
   successBannerTxt: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '800',
     color: '#F8FAFC',
-    letterSpacing: 1,
+    letterSpacing: -0.1,
   },
   tripSummaryCard: {
     flexDirection: 'row',
@@ -753,10 +753,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   earningsLbl: {
-    fontSize: 11,
-    fontWeight: '900',
+    fontSize: 12,
+    fontWeight: '700',
     color: NEON,
-    letterSpacing: 1.2,
+    letterSpacing: 0.15,
   },
   earningsWalletIcon: {
     width: 40,

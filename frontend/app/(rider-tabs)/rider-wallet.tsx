@@ -46,6 +46,7 @@ import { openSquadCheckoutUrl } from '@/src/services/squadCheckoutOpen';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
+import { RIDER_PRIMARY_CTA_GRADIENT } from '@/src/constants/riderRideChrome';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useThemeColors } from '@/src/constants/theme';
 import { WalletScreenSkeleton } from '@/src/components/shared/SkeletonLoader';
@@ -359,7 +360,7 @@ export default function RiderWalletScreen() {
         const balAfter = await load();
         setTopupState({ phase: 'success', reference: ref, amountNgn: amountForDisplay, balanceNgn: typeof balAfter === 'number' ? balAfter : 0 });
         pulseSuccess();
-        if (!silent) Alert.alert('Wallet Funded', `₦${amountForDisplay.toLocaleString()} has been added to your Nexryde wallet.`);
+        if (!silent) Alert.alert('Wallet Funded', `₦${amountForDisplay.toLocaleString()} has been added to your NEXRYDE wallet.`);
       } else {
         const isCancelled = String(data?.status || '').toLowerCase() === 'cancelled';
         const isMismatch = data?.detail === 'amount_mismatch';
@@ -451,18 +452,19 @@ export default function RiderWalletScreen() {
 
           <View style={s.heroTop}>
             <View>
-              <Text style={s.heroLabel}>NexRyde wallet</Text>
+              <Text style={s.heroLabel}>NEXRYDE wallet</Text>
               <Text style={s.heroName}>{user?.name?.split(' ')[0] || 'Rider'}</Text>
             </View>
             <View style={s.heroBadge}>
-              <Ionicons name="wallet" size={18} color={C.green} />
-              <Text style={s.heroBadgeText}>Active</Text>
+              <Ionicons name="shield-checkmark" size={16} color={C.green} />
+              <Text style={s.heroBadgeText}>Protected</Text>
             </View>
           </View>
 
           <Animated.View style={{ opacity: balanceFade, transform: [{ scale: balanceScale }] }}>
             <Text style={s.heroBalanceLabel}>Available balance</Text>
             <Text style={s.heroBalance}>{formattedBalance}</Text>
+            <Text style={s.heroBalanceHint}>Use for rides · top up anytime</Text>
           </Animated.View>
 
           {hasPromo && (
@@ -554,7 +556,10 @@ export default function RiderWalletScreen() {
             <View style={s.sectionIconWrap}>
               <Ionicons name="add-circle" size={20} color={C.green} />
             </View>
-            <Text style={[s.sectionTitle, { color: colors.text }]}>Top up</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.sectionTitle, { color: colors.text }]}>Top up</Text>
+              <Text style={s.sectionSub}>Instant credit · secured by Squad</Text>
+            </View>
           </View>
 
           {/* Amount presets */}
@@ -600,17 +605,20 @@ export default function RiderWalletScreen() {
             disabled={busy !== null}
             activeOpacity={0.88}
           >
-            <LinearGradient colors={busy === 'checkout' ? ['#475569', '#334155'] : [C.green, '#16A34A']} style={s.payBtnGrad}>
+            <LinearGradient
+              colors={busy === 'checkout' ? ['#475569', '#334155'] : [...RIDER_PRIMARY_CTA_GRADIENT]}
+              style={s.payBtnGrad}
+            >
               {busy === 'checkout' ? (
                 <View style={s.payBtnInner}>
                   <ActivityIndicator color="#FFF" size="small" />
-                  <Text style={s.payBtnText}>Opening Squad…</Text>
+                  <Text style={[s.payBtnText, { color: '#FFF' }]}>Opening Squad…</Text>
                 </View>
               ) : (
                 <View style={s.payBtnInner}>
-                  <Ionicons name="card" size={22} color="#FFF" />
+                  <Ionicons name="card" size={22} color={BRAND.bgDeep} />
                   <Text style={s.payBtnText}>
-                    Pay ₦{parsedAmount() > 0 ? parsedAmount().toLocaleString() : '—'} via Squad
+                    Add ₦{parsedAmount() > 0 ? parsedAmount().toLocaleString() : '—'}
                   </Text>
                 </View>
               )}
@@ -626,7 +634,7 @@ export default function RiderWalletScreen() {
           {/* Divider */}
           <View style={s.divider}>
             <View style={[s.dividerLine, { backgroundColor: colors.border }]} />
-            <Text style={[s.dividerText, { color: colors.textMuted }]}>already paid?</Text>
+            <Text style={[s.dividerText, { color: colors.textMuted }]}>Paid already?</Text>
             <View style={[s.dividerLine, { backgroundColor: colors.border }]} />
           </View>
 
@@ -651,7 +659,9 @@ export default function RiderWalletScreen() {
               </View>
             )}
           </TouchableOpacity>
-          <Text style={[s.verifyHint, { color: colors.textMuted }]}>Tap after completing payment in Squad to instantly credit your wallet.</Text>
+          <Text style={[s.verifyHint, { color: colors.textMuted }]}>
+            Finish in Squad, then verify here — balance updates instantly.
+          </Text>
         </View>
 
         {/* ── REWARDS ────────────────────────────────────────────────────── */}
@@ -761,7 +771,7 @@ export default function RiderWalletScreen() {
                     const url = inviteUrl || buildInviteUrl(referralUsername, referralCode);
                     const msg = buildShareMessage(referralUsername, referralCode, user?.name ?? undefined);
                     const { Share } = require('react-native');
-                    Share.share({ message: msg, url }, { dialogTitle: 'Invite to Nexryde' }).catch(() => {});
+                    Share.share({ message: msg, url }, { dialogTitle: 'Invite to NEXRYDE' }).catch(() => {});
                   }}
                   activeOpacity={0.85}
                 >
@@ -886,7 +896,7 @@ export default function RiderWalletScreen() {
               <Ionicons name="business-outline" size={20} color="#0891B2" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[s.futureTitle, { color: colors.text }]}>Nexryde Banking</Text>
+              <Text style={[s.futureTitle, { color: colors.text }]}>NEXRYDE Banking</Text>
               <Text style={[s.futureSub, { color: colors.textMuted }]}>Earn interest, send money, pay bills — coming soon</Text>
             </View>
             <View style={s.futureBadge}><Text style={s.futureBadgeText}>SOON</Text></View>
@@ -947,7 +957,8 @@ const s = StyleSheet.create({
   heroBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: BRAND.primaryMuted, borderWidth: StyleSheet.hairlineWidth, borderColor: `${BRAND.primary}44`, borderRadius: RADIUS.full, paddingHorizontal: 12, paddingVertical: 6 },
   heroBadgeText: { color: C.green, fontSize: 12, fontWeight: '800' },
   heroBalanceLabel: { color: BRAND.textSecondary, fontSize: 11, fontWeight: '700', marginBottom: 6 },
-  heroBalance: { color: C.white, fontSize: 40, fontWeight: '900', letterSpacing: -1 },
+  heroBalance: { color: C.white, fontSize: 42, fontWeight: '900', letterSpacing: -1.2 },
+  heroBalanceHint: { color: BRAND.textMuted, fontSize: 12, fontWeight: '600', marginTop: 6 },
   promoStrip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(245,158,11,0.15)', borderRadius: RADIUS.sm, paddingHorizontal: 12, paddingVertical: 8, marginTop: SPACING.md, alignSelf: 'flex-start' },
   promoStripText: { color: C.amberLight, fontSize: 12, fontWeight: '700' },
   heroFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: SPACING.md, paddingTop: SPACING.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: SURFACE.hairline },
@@ -979,6 +990,7 @@ const s = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: SPACING.stack, marginBottom: SPACING.md },
   sectionIconWrap: { width: 36, height: 36, borderRadius: RADIUS.md, backgroundColor: BRAND.primaryMuted, alignItems: 'center', justifyContent: 'center' },
   sectionTitle: { fontSize: 15, fontWeight: '800', color: C.white, letterSpacing: -0.15 },
+  sectionSub: { fontSize: 11, fontWeight: '600', color: BRAND.textMuted, marginTop: 2 },
 
   // Presets
   presetsRow: { gap: 8, paddingBottom: 4, marginBottom: 12 },
@@ -996,7 +1008,7 @@ const s = StyleSheet.create({
   payBtn: { borderRadius: 16, overflow: 'hidden', marginBottom: 12, shadowColor: C.green, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 12, elevation: 8 },
   payBtnGrad: { paddingVertical: 18, paddingHorizontal: 24 },
   payBtnInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
-  payBtnText: { color: C.white, fontSize: 17, fontWeight: '900' },
+  payBtnText: { color: BRAND.bgDeep, fontSize: 17, fontWeight: '900' },
 
   // Retry
   retryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderRadius: 12, borderWidth: 2, borderColor: C.blue, marginBottom: 12 },

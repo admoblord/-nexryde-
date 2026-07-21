@@ -173,8 +173,8 @@ async def _snapshot_approved_documents(
     return snapshot
 
 TIER_CONFIG = {
-    "basic": {"name": "Nexryde Basic", "monthly_fee": 18000, "earning_per_ride": {"min": 200, "max": 300}},
-    "premium": {"name": "Nexryde Premium", "monthly_fee": 18000, "earning_per_ride": {"min": 300, "max": 450}},
+    "basic": {"name": "NEXRYDE Basic", "monthly_fee": 18000, "earning_per_ride": {"min": 200, "max": 300}},
+    "premium": {"name": "NEXRYDE Premium", "monthly_fee": 18000, "earning_per_ride": {"min": 300, "max": 450}},
 }
 
 

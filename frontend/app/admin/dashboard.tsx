@@ -1,5 +1,5 @@
 /**
- * NexRyde Admin Dashboard
+ * NEXRYDE Admin Dashboard
  * Control-center screen for monitoring the live platform.
  * Accessible only to users with role === 'admin'.
  */
@@ -282,7 +282,7 @@ export default function AdminDashboard() {
           <View style={s.loginLogo}>
             <Ionicons name="shield-checkmark" size={40} color={PALETTE.accent} />
           </View>
-          <Text style={s.loginTitle}>NexRyde Admin</Text>
+          <Text style={s.loginTitle}>NEXRYDE Admin</Text>
           <Text style={s.loginSub}>Sign in with your admin credentials</Text>
           {loginError && (
             <View style={s.errorBanner}>
@@ -338,7 +338,7 @@ export default function AdminDashboard() {
             <Ionicons name="shield-checkmark" size={16} color={PALETTE.accent} />
           </View>
           <View>
-            <Text style={s.headerTitle}>NexRyde Admin</Text>
+            <Text style={s.headerTitle}>NEXRYDE Admin</Text>
             <Text style={s.headerSub}>
               {lastFetch ? `Updated ${timeAgo(lastFetch)}` : 'Loading…'}
             </Text>

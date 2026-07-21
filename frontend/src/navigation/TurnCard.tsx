@@ -51,7 +51,7 @@ interface TurnCardProps {
   tripStatus?: string;
 }
 
-// ── Arrived-at-pickup card (unique to Nexryde — shown instead of nav when status=arrived) ──
+// ── Arrived-at-pickup card (unique to NEXRYDE — shown instead of nav when status=arrived) ──
 function ArrivedCard() {
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;

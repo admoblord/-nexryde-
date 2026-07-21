@@ -33,7 +33,7 @@ class DriverNotificationManager(private val context: Context) {
       }
     return NotificationCompat.Builder(appContext, CHANNEL_DRIVER_SERVICE)
       .setSmallIcon(R.mipmap.ic_launcher)
-      .setContentTitle("NexRyde • Listening for rides")
+      .setContentTitle("NEXRYDE • Listening for rides")
       .setContentText(body)
       .setOngoing(true)
       .setOnlyAlertOnce(true)
@@ -79,7 +79,7 @@ class DriverNotificationManager(private val context: Context) {
     val openApp = PendingIntent.getActivity(appContext, OFFER_NOTIFICATION_ID + 1, launch, pendingFlags())
     val notification = NotificationCompat.Builder(appContext, CHANNEL_DRIVER_OFFERS)
       .setSmallIcon(R.mipmap.ic_launcher)
-      .setContentTitle("New NexRyde ride request")
+      .setContentTitle("New NEXRYDE ride request")
       .setContentText("${offer.pickup} · ${offer.fare}")
       .setPriority(NotificationCompat.PRIORITY_MAX)
       .setCategory(NotificationCompat.CATEGORY_CALL)
@@ -105,7 +105,7 @@ class DriverNotificationManager(private val context: Context) {
       "Driver Online Service",
       NotificationManager.IMPORTANCE_LOW
     ).apply {
-      description = "Keeps NexRyde driver online status active"
+      description = "Keeps NEXRYDE driver online status active"
       setShowBadge(false)
     }
     val offerChannel = NotificationChannel(
@@ -113,7 +113,7 @@ class DriverNotificationManager(private val context: Context) {
       "Ride Offers",
       NotificationManager.IMPORTANCE_HIGH
     ).apply {
-      description = "Incoming NexRyde ride requests"
+      description = "Incoming NEXRYDE ride requests"
       lockscreenVisibility = Notification.VISIBILITY_PUBLIC
       enableVibration(true)
       vibrationPattern = longArrayOf(0, 700, 250, 700, 250, 900)

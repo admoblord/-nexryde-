@@ -102,7 +102,7 @@ async def grant_document_grace(
     grace_end_local = grace_until.strftime("%d %b %Y")
     title = f"{doc_label} expired — 1 week grace granted"
     message = (
-        f"Your {doc_label} has expired. NexRyde has granted you a 1-week grace period "
+        f"Your {doc_label} has expired. NEXRYDE has granted you a 1-week grace period "
         f"until {grace_end_local} to upload your renewed document. "
         f"After that date you will not be able to go online or accept trips until renewal is approved."
     )
@@ -434,7 +434,7 @@ async def run_monthly_verification_check():
                 sent = await send_push_notification(
                     driver_id,
                     "Monthly Verification Reminder",
-                    f"Please upload your {missing_text} when convenient. This helps keep Nexryde safe.",
+                    f"Please upload your {missing_text} when convenient. This helps keep NEXRYDE safe.",
                     {
                         "type": "monthly_verification_reminder",
                         "slot": "compliance_daily",

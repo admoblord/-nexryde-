@@ -284,16 +284,16 @@ function InsightsCard({ completed }: { completed: any[] }) {
 
   return (
     <View style={[styles.insightsCard, { backgroundColor: cardBg, borderColor: border }]}>
-      <Text style={[styles.insightsTitle, { color: colors.text }]}>Your activity</Text>
+      <Text style={[styles.insightsTitle, { color: colors.text }]}>This month</Text>
       <View style={styles.insightsRow}>
         <View style={styles.insightCell}>
           <Text style={styles.insightValue}>{ridesMonth}</Text>
-          <Text style={styles.insightLabel}>Rides this month</Text>
+          <Text style={styles.insightLabel}>Rides</Text>
         </View>
         <View style={styles.insightDivider} />
         <View style={styles.insightCell}>
           <Text style={styles.insightValue}>{fmtFare(spendMonth)}</Text>
-          <Text style={styles.insightLabel}>Spent this month</Text>
+          <Text style={styles.insightLabel}>Spent</Text>
         </View>
       </View>
       {topDest ? (
@@ -415,10 +415,10 @@ export default function RiderTripsScreen() {
       <Text style={[styles.emptyTitle, { color: colors.text }]}>No {activeTab} trips</Text>
       <Text style={[styles.emptySub, { color: colors.textMuted }]}>
         {activeTab === 'upcoming'
-          ? 'No active trips right now'
+          ? 'Nothing on the calendar — book when you are ready'
           : activeTab === 'completed'
-            ? 'Your completed trips will appear here'
-            : 'No cancelled trips'}
+            ? 'Finished rides show up here with receipts'
+            : 'Cancelled bookings will appear here'}
       </Text>
       {activeTab === 'upcoming' ? (
         <TouchableOpacity style={styles.bookBtn} onPress={() => router.push('/rider/book' as any)}>
@@ -463,7 +463,7 @@ export default function RiderTripsScreen() {
           style={styles.shieldBtn}
           onPress={() => router.push('/shield-disputes' as any)}
           accessibilityRole="button"
-          accessibilityLabel="NexRyde Shield"
+          accessibilityLabel="NEXRYDE Shield"
         >
           <Ionicons name="shield-checkmark-outline" size={22} color={BRAND.primary} />
         </TouchableOpacity>
@@ -593,7 +593,7 @@ const styles = StyleSheet.create({
 
   insightsCard: {
     borderRadius: RADIUS.xl,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     padding: SPACING.md,
   },
   insightsTitle: { fontSize: 14, fontWeight: '800', marginBottom: SPACING.sm, letterSpacing: -0.1 },

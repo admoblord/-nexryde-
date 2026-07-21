@@ -82,17 +82,17 @@ def _subscription_end_date_valid(sub: dict) -> bool:
 def work_zone_entitlement_message(plan_status: str) -> str:
     if plan_status == "trial":
         return (
-            "Included with your NexRyde driver plan — "
+            "Included with your NEXRYDE driver plan — "
             "subscribe anytime to keep Work Zone after your trial"
         )
     if plan_status in {"active", "grace_period"}:
-        return "Included with your NexRyde subscription"
+        return "Included with your NEXRYDE subscription"
     return "Subscribe to activate Work Zone"
 
 
 async def resolve_work_zone_entitlement(user_id: str) -> tuple[bool, str]:
     """
-    Work Zone is included with the NexRyde driver plan — no separate add-on.
+    Work Zone is included with the NEXRYDE driver plan — no separate add-on.
     Delegates to ``resolve_driver_plan_entitlement`` (go-online parity).
     """
     from driver_trial_policy import resolve_driver_plan_entitlement

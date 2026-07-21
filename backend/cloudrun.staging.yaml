@@ -1,5 +1,5 @@
 ##############################################################################
-# NexRyde Backend — Staging Cloud Run Service
+# NEXRYDE Backend — Staging Cloud Run Service
 #
 # Deploy with:
 #   gcloud run services replace backend/cloudrun.staging.yaml \

@@ -1,5 +1,5 @@
 /**
- * Nexryde Driver Withdrawal
+ * NEXRYDE Driver Withdrawal
  * Powerhouse withdrawal engine with banking-grade UI.
  *
  * Flow:
@@ -81,7 +81,7 @@ function getStatusCfg(status: StatusKey) {
 // ── Timeline steps for a withdrawal ─────────────────────────────────────────
 
 const TIMELINE_STEPS = [
-  { status: 'pending_settlement', label: 'Submitted', sub: 'Nexryde received your request' },
+  { status: 'pending_settlement', label: 'Submitted', sub: 'NEXRYDE received your request' },
   { status: 'processing',         label: 'Processing', sub: 'Bank transfer initiated' },
   { status: 'paid',               label: 'Paid',       sub: 'Money sent to your bank' },
 ];

@@ -246,7 +246,7 @@ export default function ModernRiderHome() {
                   paymentStatus: currentTrip.payment_status,
                   tripStatus: currentTrip.status,
                 } satisfies RiderTripDisplayOpts)
-              : 'Where would you like to go?'}
+              : 'Live map · book in seconds'}
           </Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -287,11 +287,13 @@ export default function ModernRiderHome() {
           >
             <View style={styles.whereToBarDot} />
             <Text style={[styles.whereToBarText, { color: homeTheme.sub }]}>Where to?</Text>
-            <Ionicons name="arrow-forward" size={16} color={BRAND.primary} />
+            <View style={styles.whereToGoPill}>
+              <Text style={styles.whereToGoPillTxt}>Go</Text>
+            </View>
           </TouchableOpacity>
           <View style={{ marginHorizontal: flow.padH }}>
             <TripMapErrorBoundary>
-              <RiderHomeMapStrip isDark={isDark} onPress={openBook} />
+              <RiderHomeMapStrip isDark={isDark} height={260} onPress={openBook} />
             </TripMapErrorBoundary>
           </View>
         </>
@@ -357,7 +359,7 @@ export default function ModernRiderHome() {
                       {place.address}
                     </Text>
                   ) : (
-                    <Text style={styles.savedPlaceTap}>Tap to add</Text>
+                    <Text style={styles.savedPlaceTap}>Add place</Text>
                   )}
                 </TouchableOpacity>
               );
@@ -482,6 +484,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: BRAND.textSecondary,
+    letterSpacing: 0.2,
+  },
+  whereToGoPill: {
+    backgroundColor: BRAND.primary,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  whereToGoPillTxt: {
+    color: BRAND.bgDeep,
+    fontSize: 13,
+    fontWeight: '900',
     letterSpacing: 0.2,
   },
   heroSection: {

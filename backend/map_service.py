@@ -1,5 +1,5 @@
 """
-NexRyde Map Service with Cost Controls
+NEXRYDE Map Service with Cost Controls
 Prevents API abuse and controls Google Maps expenses
 """
 

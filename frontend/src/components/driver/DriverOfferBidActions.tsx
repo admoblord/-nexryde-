@@ -240,7 +240,7 @@ export function DriverOfferBidActions({
             accessibilityLabel="Set your counter price"
           >
             <Ionicons name="pricetag-outline" size={18} color={AMB} />
-            <Text style={s.openBidTxt}>Set your price (counter bid)</Text>
+            <Text style={s.openBidTxt}>Set your price</Text>
             <Ionicons name="chevron-up" size={16} color={MUT} />
           </Pressable>
         )}
@@ -309,7 +309,7 @@ const s = StyleSheet.create({
     gap: 8,
   },
   bidPanelHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  bidTitle: { fontSize: 12, fontWeight: '800', color: AMB, letterSpacing: 0.6, textTransform: 'uppercase' },
+  bidTitle: { fontSize: 12, fontWeight: '700', color: AMB, letterSpacing: 0.15 },
   bidClose: { padding: 4 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: {

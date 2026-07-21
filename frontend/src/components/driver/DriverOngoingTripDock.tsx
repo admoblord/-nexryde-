@@ -193,15 +193,9 @@ export default function DriverOngoingTripDock({
       </Pressable>
 
       <View style={st.brandRow}>
-        <View style={st.logoMark}>
-          <LinearGradient colors={[CYAN, NEON]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={st.logoGrad}>
-            <Text style={st.logoLetter}>N</Text>
-          </LinearGradient>
-          <Text style={st.brandTxt}>NEXRYDE</Text>
-        </View>
         <View style={st.onDriverPill}>
           <LivePulseDot />
-          <Text style={st.onDriverTxt}>ON DRIVER</Text>
+          <Text style={st.onDriverTxt}>On trip</Text>
         </View>
       </View>
 
@@ -223,7 +217,7 @@ export default function DriverOngoingTripDock({
             <View style={st.routeTop}>
               <View style={st.onRoutePill}>
                 <Ionicons name="navigate" size={12} color={BLUE} />
-                <Text style={st.onRouteTxt}>ON ROUTE</Text>
+                <Text style={st.onRouteTxt}>En route</Text>
               </View>
               <View style={st.routeMapIcon}>
                 <Ionicons name="map" size={20} color={CYAN} />
@@ -245,7 +239,7 @@ export default function DriverOngoingTripDock({
             ) : null}
             <View style={st.liveBadge}>
               <LivePulseDot />
-              <Text style={st.liveBadgeTxt}>LIVE UPDATING</Text>
+              <Text style={st.liveBadgeTxt}>Live</Text>
             </View>
             <Text style={st.tripMeta} numberOfLines={1}>
               {tripShortId} · {paymentMethodLabel}
@@ -254,7 +248,7 @@ export default function DriverOngoingTripDock({
 
           <View style={st.fareCard}>
             <View style={st.fareCol}>
-              <Text style={st.fareLbl}>CURRENT FARE</Text>
+              <Text style={st.fareLbl}>Current fare</Text>
               <Text
                 style={st.fareMain}
                 numberOfLines={1}
@@ -271,7 +265,7 @@ export default function DriverOngoingTripDock({
             </View>
             <View style={st.fareDivider} />
             <View style={st.fareCol}>
-              <Text style={st.fareLbl}>DISTANCE FARE</Text>
+              <Text style={st.fareLbl}>Distance fare</Text>
               <Text style={st.fareSecondary} numberOfLines={1}>
                 {distFare}
               </Text>
@@ -288,7 +282,7 @@ export default function DriverOngoingTripDock({
               <View style={[st.statIcon, st.statIconBlue]}>
                 <Ionicons name="location" size={18} color={BLUE} />
               </View>
-              <Text style={st.statLbl}>DISTANCE</Text>
+              <Text style={st.statLbl}>Distance</Text>
               <Text style={st.statVal} numberOfLines={1}>
                 {distanceToDropLabel}
               </Text>
@@ -298,7 +292,7 @@ export default function DriverOngoingTripDock({
               <View style={[st.statIcon, st.statIconGreen]}>
                 <Ionicons name="time-outline" size={18} color={NEON} />
               </View>
-              <Text style={st.statLbl}>TIME</Text>
+              <Text style={st.statLbl}>Time</Text>
               <Text style={st.statVal} numberOfLines={2}>
                 {formatDriverTripElapsed(elapsedSec)}
               </Text>
@@ -316,19 +310,20 @@ export default function DriverOngoingTripDock({
             </View>
           </View>
 
-          <Text style={st.sectionKicker}>WITH RIDER</Text>
+          <Text style={st.sectionKicker}>With rider</Text>
           <View style={st.riderCard}>
             <TripProfileAvatar
-              size={52}
+              size={64}
               uri={riderPhoto}
-              borderColor={NEON}
+              borderColor="#FFFFFF"
+              borderWidth={2.5}
               accessibilityLabel={`Photo of ${firstName(riderName)}`}
             />
             <View style={st.riderMid}>
               <Text style={st.riderName} numberOfLines={1}>
                 {riderName.trim() || 'Rider'}
               </Text>
-              <Text style={st.dropKicker}>DROP-OFF</Text>
+              <Text style={st.dropKicker}>Drop-off</Text>
               <Text style={st.dropMain} numberOfLines={1}>
                 {dropLineShort || 'Destination'}
               </Text>
@@ -348,7 +343,7 @@ export default function DriverOngoingTripDock({
                   </Text>
                 </View>
               ) : isNewRider ? (
-                <Text style={st.riderRating}>New to NEXRYDE</Text>
+                <Text style={st.riderRating}>New rider</Text>
               ) : null}
             </View>
             <View style={st.riderActions}>
@@ -401,7 +396,7 @@ export default function DriverOngoingTripDock({
               accessibilityLabel="Pause trip"
             >
               <Ionicons name="pause" size={20} color="#FFF" />
-              <Text style={st.pauseTxt}>PAUSE TRIP</Text>
+              <Text style={st.pauseTxt}>Pause trip</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[st.emergencyBtn, busy && st.disabled]}
@@ -416,7 +411,7 @@ export default function DriverOngoingTripDock({
               accessibilityLabel="Emergency"
             >
               <Ionicons name="warning" size={20} color="#FFF" />
-              <Text style={st.emergencyTxt}>EMERGENCY</Text>
+              <Text style={st.emergencyTxt}>Emergency</Text>
             </TouchableOpacity>
           </View>
 
@@ -432,7 +427,7 @@ export default function DriverOngoingTripDock({
             accessibilityLabel="Open navigation to drop-off"
           >
             <Ionicons name="navigate" size={20} color={NEON} />
-            <Text style={st.navTxt}>OPEN NAVIGATION</Text>
+            <Text style={st.navTxt}>Open navigation</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -489,7 +484,7 @@ export default function DriverOngoingTripDock({
                 <View style={st.completeIconWrap}>
                   <Ionicons name="checkmark-done" size={24} color="#022C22" />
                 </View>
-                <Text style={st.completeTxt}>COMPLETE TRIP</Text>
+                <Text style={st.completeTxt}>Complete trip</Text>
               </>
             )}
           </LinearGradient>
@@ -518,20 +513,10 @@ const st = StyleSheet.create({
   brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     paddingHorizontal: 16,
     marginBottom: 8,
   },
-  logoMark: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  logoGrad: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logoLetter: { fontSize: 18, fontWeight: '900', color: '#FFF' },
-  brandTxt: { fontSize: 16, fontWeight: '800', color: '#F8FAFC', letterSpacing: 0.6 },
   onDriverPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -663,10 +648,10 @@ const st = StyleSheet.create({
   statHintRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   statHint: { fontSize: 9, fontWeight: '600', color: NEON },
   sectionKicker: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
     color: BLUE,
-    letterSpacing: 0.8,
+    letterSpacing: 0.2,
     marginBottom: 8,
   },
   riderCard: {
@@ -682,7 +667,7 @@ const st = StyleSheet.create({
   },
   riderMid: { flex: 1, minWidth: 0, paddingTop: 2 },
   riderName: { fontSize: 15, fontWeight: '800', color: '#FFF', marginBottom: 6 },
-  dropKicker: { fontSize: 9, fontWeight: '800', color: '#FCA5A5', letterSpacing: 0.6, marginBottom: 2 },
+  dropKicker: { fontSize: 10, fontWeight: '700', color: '#FCA5A5', letterSpacing: 0.15, marginBottom: 2 },
   dropMain: { fontSize: 13, fontWeight: '700', color: '#E2E8F0', marginBottom: 2 },
   riderLoc: { fontSize: 12, color: '#94A3B8', lineHeight: 16, marginBottom: 4 },
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
@@ -792,7 +777,7 @@ const st = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  completeTxt: { fontSize: 19, fontWeight: '900', color: '#022C22', letterSpacing: 0.4 },
+  completeTxt: { fontSize: 18, fontWeight: '900', color: '#022C22', letterSpacing: -0.2 },
   completeHint: {
     fontSize: 11,
     fontWeight: '600',

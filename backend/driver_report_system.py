@@ -1,5 +1,5 @@
 """
-NexRyde Driver Report & Safety System
+NEXRYDE Driver Report & Safety System
 Allows riders to report abusive/offensive drivers
 Implements automatic suspension based on report count
 """

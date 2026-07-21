@@ -1,5 +1,5 @@
 """
-NexRyde Operations Center — extended admin APIs for the world-class admin panel.
+NEXRYDE Operations Center — extended admin APIs for the world-class admin panel.
 All routes require admin session (Bearer / x-admin-token).
 """
 from __future__ import annotations
@@ -741,7 +741,7 @@ async def get_content_config():
         "privacy_url": "/privacy-policy",
         "support_url": "/support-page",
         "safety_tips": "Always verify your driver and share trip details with a trusted contact.",
-        "onboarding_headline": "Welcome to NexRyde",
+        "onboarding_headline": "Welcome to NEXRYDE",
     }
     return {"content": {**defaults, **(doc or {}).get("value", {})}}
 

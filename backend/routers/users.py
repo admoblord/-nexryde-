@@ -871,7 +871,7 @@ async def get_preferences(user_id: str, request: Request):
         "notification_channels": user.get("notification_channels", {}),
         "notification_types": user.get("notification_types", {}),
         "ride_mood": user.get("ride_mood_preferences", default_mood),
-        "pickup_code_enabled": bool(user.get("pickup_code_enabled", True)),
+        "pickup_code_enabled": bool(user.get("pickup_code_enabled", False)),
     }
 
 

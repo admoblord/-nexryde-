@@ -39,7 +39,7 @@ export default function DriverOfferRingtoneScreen() {
           </View>
           <Text style={styles.introTitle}>Pick your alert sound</Text>
           <Text style={styles.introBody}>
-            Nexryde repeats your chosen tone until you accept or decline an offer. Preview each tone below — Groove
+            NEXRYDE repeats your chosen tone until you accept or decline an offer. Preview each tone below — Groove
             loop runs longer so it carries better over traffic noise.
           </Text>
         </View>

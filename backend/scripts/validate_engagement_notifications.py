@@ -132,7 +132,7 @@ def main() -> int:
         ),
     )
 
-    print("\n=== NexRyde Engagement Notification Validation Report ===\n")
+    print("\n=== NEXRYDE Engagement Notification Validation Report ===\n")
     failed = 0
     for name, ok, detail in results:
         mark = "PASS" if ok else "FAIL"

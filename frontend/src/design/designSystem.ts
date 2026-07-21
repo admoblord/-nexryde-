@@ -1,5 +1,5 @@
 /**
- * Nexryde design tokens — ride-hailing clarity (8pt grid, 3 type levels, semantic colors).
+ * NEXRYDE design tokens — ride-hailing clarity (8pt grid, 3 type levels, semantic colors).
  * Use for high-stakes flows (driver offers, trip CTAs). Import alongside COLORS from theme for legacy screens.
  */
 

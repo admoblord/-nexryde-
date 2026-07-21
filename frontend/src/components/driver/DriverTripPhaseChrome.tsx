@@ -205,10 +205,9 @@ const s = StyleSheet.create({
   kickerRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   liveDot: { width: 6, height: 6, borderRadius: 3 },
   kicker: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.15,
   },
   title: {
     marginTop: 2,

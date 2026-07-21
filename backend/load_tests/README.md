@@ -1,4 +1,4 @@
-# NexRyde Load Tests
+# NEXRYDE Load Tests
 
 ## Quick start
 

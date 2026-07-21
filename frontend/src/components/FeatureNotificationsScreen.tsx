@@ -137,9 +137,16 @@ export default function FeatureNotificationsScreen({ role }: Props) {
   }, [userId, canCallAuthedApi]);
 
   const load = useCallback(async () => {
-    await Promise.all([loadFeatures(), loadBackendNotifs()]);
-    setLoading(false);
-    setRefreshing(false);
+    const LOAD_TIMEOUT_MS = 12000;
+    try {
+      await Promise.race([
+        Promise.all([loadFeatures(), loadBackendNotifs()]),
+        new Promise<void>((resolve) => setTimeout(resolve, LOAD_TIMEOUT_MS)),
+      ]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, [loadFeatures, loadBackendNotifs]);
 
   useEffect(() => {
@@ -148,6 +155,9 @@ export default function FeatureNotificationsScreen({ role }: Props) {
       return;
     }
     void load();
+    // Absolute failsafe — never leave the tab spinning forever on weak networks.
+    const failsafe = setTimeout(() => setLoading(false), 15000);
+    return () => clearTimeout(failsafe);
   }, [load, canCallAuthedApi]);
 
   const markNotifRead = async (notifId: string) => {
@@ -212,7 +222,7 @@ export default function FeatureNotificationsScreen({ role }: Props) {
         <View style={{ flex: 1 }}>
           <Text style={[styles.title, { color: colors.text }]}>Notifications</Text>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-            Stay updated on your activity
+            Trip alerts, offers, and account updates
           </Text>
         </View>
         {totalUnread > 0 && (
@@ -238,7 +248,7 @@ export default function FeatureNotificationsScreen({ role }: Props) {
           <Ionicons
             name="pulse"
             size={14}
-            color={tab === 'activity' ? '#FFF' : colors.textSecondary}
+            color={tab === 'activity' ? BRAND.bgDeep : colors.textSecondary}
           />
           <Text
             style={[
@@ -265,7 +275,7 @@ export default function FeatureNotificationsScreen({ role }: Props) {
           <Ionicons
             name="megaphone"
             size={14}
-            color={tab === 'updates' ? '#FFF' : colors.textSecondary}
+            color={tab === 'updates' ? BRAND.bgDeep : colors.textSecondary}
           />
           <Text
             style={[
@@ -328,9 +338,9 @@ export default function FeatureNotificationsScreen({ role }: Props) {
                   ]}
                 >
                   <Ionicons name="notifications-off-outline" size={32} color={colors.textMuted} />
-                  <Text style={[styles.emptyTitle, { color: colors.text }]}>No activity yet</Text>
+                  <Text style={[styles.emptyTitle, { color: colors.text }]}>All caught up</Text>
                   <Text style={[styles.emptyText, { color: colors.textMuted }]}>
-                    Trip updates, document status, payments and other alerts will appear here.
+                    Trip updates, payments, and account alerts land here.
                   </Text>
                 </View>
               ) : (
@@ -499,11 +509,11 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   tabPillActive: {
-    backgroundColor: BRAND.accentBlue,
-    borderColor: BRAND.accentBlue,
+    backgroundColor: BRAND.primary,
+    borderColor: BRAND.primary,
   },
   tabPillText: { fontSize: 13, fontWeight: '800' },
-  tabPillTextActive: { color: '#FFF' },
+  tabPillTextActive: { color: BRAND.bgDeep },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { flexGrow: 1 },
   markAllBtn: {
@@ -537,8 +547,8 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   notifCardUnread: {
-    backgroundColor: 'rgba(56,189,248,0.08)',
-    borderColor: 'rgba(56,189,248,0.28)',
+    backgroundColor: BRAND.primaryMuted,
+    borderColor: SURFACE.glassBorder,
   },
   notifIconWrap: {
     width: 40,

@@ -81,6 +81,8 @@ import { geocodeAddressForRider } from '@/src/services/riderSavedPlaces';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useThemeColors } from '@/src/constants/theme';
 import { RIDER_PRIMARY_CTA_GRADIENT } from '@/src/constants/riderRideChrome';
+import { BookingBidInput } from '@/src/components/rider/BookingBidInput';
+import { BRAND, SURFACE } from '@/src/constants/designSystem';
 
 /** Set `EXPO_PUBLIC_BOOKING_PROMO=false` to hide the booking promo strip entirely. */
 const BOOKING_PROMO_ENABLED = String(process.env.EXPO_PUBLIC_BOOKING_PROMO ?? 'true').toLowerCase() !== 'false';
@@ -207,35 +209,45 @@ async function reverseGeocodeViaBackend(
 }
 
 const COLORS = {
-  bg: '#0D1420',
-  card: '#1A2332',
-  cardLight: '#232F42',
-  green: '#00D46A',
-  blue: '#0EA5E9',
-  accentBlue: '#0EA5E9',
-  /** Inner route highlight on map (Nexryde mint, not generic sky-blue). */
-  routeHighlight: '#86EFAC',
-  lime: '#B8F11B',
-  white: '#FFFFFF',
-  muted: '#94A3B8',
-  dim: '#64748B',
-  yellow: '#FFB800',
-  red: '#EF4444',
-  purple: '#9333EA',
+  bg: BRAND.bgDeep,
+  card: BRAND.bgCard,
+  cardLight: BRAND.bgElevated,
+  green: BRAND.primary,
+  blue: BRAND.info,
+  accentBlue: BRAND.info,
+  /** Inner route highlight on map (NEXRYDE mint, not generic sky-blue). */
+  routeHighlight: BRAND.primaryMint,
+  lime: BRAND.primaryLight,
+  white: BRAND.white,
+  muted: BRAND.textSecondary,
+  dim: BRAND.textMuted,
+  yellow: BRAND.warning,
+  red: BRAND.danger,
+  purple: BRAND.accentPurple,
 };
 
-const VEHICLES = [
-  { id: 'economy', name: 'Standard', icon: 'car', time: '4-5 min', desc: 'Affordable', color: '#00D46A' },
-  { id: 'comfort', name: 'Comfort', icon: 'car-sport', time: '5-7 min', desc: 'More space', color: '#0EA5E9' },
-  { id: 'xl', name: 'XL', icon: 'bus', time: '6-8 min', desc: '6 seats', color: '#FFB800' },
-  { id: 'premium', name: 'Premium', icon: 'rocket', time: '5-6 min', desc: 'Luxury', color: '#9333EA' },
+type BookingVehicle = {
+  id: string;
+  name: string;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  time: string;
+  desc: string;
+  seats: number;
+  color: string;
+};
+
+const VEHICLES: BookingVehicle[] = [
+  { id: 'economy', name: 'Standard', icon: 'car', time: '4–5 min', desc: 'Everyday rides · 4 seats', seats: 4, color: BRAND.primary },
+  { id: 'comfort', name: 'Comfort', icon: 'car-sport', time: '5–7 min', desc: 'Extra space · quieter', seats: 4, color: BRAND.info },
+  { id: 'xl', name: 'XL', icon: 'bus', time: '6–8 min', desc: 'Group trips · 6 seats', seats: 6, color: BRAND.warning },
+  { id: 'premium', name: 'Premium', icon: 'diamond', time: '5–6 min', desc: 'Top-rated · luxury', seats: 4, color: BRAND.accentPurple },
 ];
 
 const RIDE_PREFERENCE_OPTIONS = [
-  { id: 'quiet_ride', label: 'Quiet Ride', icon: 'volume-mute' as const },
-  { id: 'chatty_driver', label: 'Chatty Driver', icon: 'chatbubbles' as const },
-  { id: 'music_on', label: 'Music On', icon: 'musical-notes' as const },
-  { id: 'cold_ac', label: 'AC Must Be Cold', icon: 'snow' as const },
+  { id: 'quiet_ride', label: 'Quiet ride', icon: 'volume-mute' as const },
+  { id: 'chatty_driver', label: 'Chatty driver', icon: 'chatbubbles' as const },
+  { id: 'music_on', label: 'Music on', icon: 'musical-notes' as const },
+  { id: 'cold_ac', label: 'Cold AC', icon: 'snow' as const },
 ];
 
 
@@ -365,6 +377,8 @@ function BookInDriveStyle() {
   const [estateGateCode, setEstateGateCode] = useState('');
   const [savingGateCode, setSavingGateCode] = useState(false);
   const [gateCodeSaved, setGateCodeSaved] = useState(false);
+  /** Mood + gate code stay collapsed until rider opens trip options (Uber-tight sheet). */
+  const [showTripOptions, setShowTripOptions] = useState(false);
   const [includeGateCode, setIncludeGateCode] = useState(false);
   const [editingGateCode, setEditingGateCode] = useState(false);
   const [recentDestinations, setRecentDestinations] = useState<
@@ -383,10 +397,11 @@ function BookInDriveStyle() {
     if (String(user?.gender || '').toLowerCase() === 'female') {
       base.push({
         id: 'female_only',
-        name: 'Women Only',
+        name: 'Women only',
         icon: 'woman',
-        time: '6-9 min',
-        desc: 'Female driver only',
+        time: '6–9 min',
+        desc: 'Female drivers · 4 seats',
+        seats: 4,
         color: '#EC4899',
       });
     }
@@ -2086,6 +2101,13 @@ function BookInDriveStyle() {
   };
 
   const veh = selectedVehicle ? availableVehicles.find(v => v.id === selectedVehicle) : null;
+  const routeReady = Boolean(destination?.trim());
+  const tripOptionsSummary = [
+    ridePreferences.length > 0 ? `${ridePreferences.length} mood` : null,
+    includeGateCode && estateGateCode.trim() ? 'gate code' : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   const smartMinUi = fareDetails?.min_price != null ? Math.round(Number(fareDetails.min_price)) : null;
   const smartMaxUi = fareDetails?.max_price != null ? Math.round(Number(fareDetails.max_price)) : null;
@@ -2242,7 +2264,10 @@ function BookInDriveStyle() {
       <StatusBar barStyle={bookingTheme.statusBar} backgroundColor={bookingTheme.bg} />
       {/* MAP SECTION */}
       <View
-        style={[s.mapArea, { backgroundColor: bookingTheme.mapBg }]}
+        style={[
+          s.mapArea,
+          { backgroundColor: bookingTheme.mapBg, height: routeReady ? '54%' : '46%' },
+        ]}
       >
         {pickupCoords ? (
           !useNativeBookingMap ? (
@@ -2357,7 +2382,7 @@ function BookInDriveStyle() {
         {pickupCoords && !destinationCoords ? (
           <View style={[s.mapRouteHint, { left: flow.padH, right: flow.padH }]} pointerEvents="none">
             <Ionicons name="navigate-circle-outline" size={15} color={COLORS.lime} />
-            <Text style={s.mapRouteHintText}>Scroll down to choose your destination</Text>
+            <Text style={s.mapRouteHintText}>Set your destination below</Text>
           </View>
         ) : null}
 
@@ -2472,9 +2497,12 @@ function BookInDriveStyle() {
             s.sheetContent,
             {
               paddingHorizontal: flow.padH,
-              paddingTop: Math.round(flow.sectionGap * 0.4),
-              paddingBottom: Math.max(insets.bottom + 16, 56),
-              gap: Math.round(flow.sectionGap * 0.42),
+              paddingTop: Math.round(flow.sectionGap * 0.35),
+              paddingBottom:
+                currentFare > 0
+                  ? Math.max(insets.bottom + 96, 120)
+                  : Math.max(insets.bottom + 16, 56),
+              gap: Math.round(flow.sectionGap * (routeReady ? 0.32 : 0.42)),
             },
           ]}
           showsVerticalScrollIndicator={false}
@@ -2485,85 +2513,94 @@ function BookInDriveStyle() {
         >
           <View style={s.sheetHandle} accessibilityRole="none" />
 
-          {BOOKING_PROMO_ENABLED && bookingPromoVisible ? (
-            <View style={s.bookFlowPromoBanner}>
-              <View style={s.bookFlowPromoIconWrap}>
-                <Ionicons name="pricetag" size={18} color={COLORS.blue} />
-              </View>
-              <View style={s.bookFlowPromoTextCol}>
-                <Text style={s.bookFlowPromoTitle}>Ride on your schedule</Text>
-                <Text style={s.bookFlowPromoBody}>
-                  Book ahead and lock your route when it suits you.
-                </Text>
-                <View style={s.bookFlowPromoActions}>
+          {!routeReady ? (
+            <>
+              {BOOKING_PROMO_ENABLED && bookingPromoVisible ? (
+                <View style={s.bookFlowPromoBanner}>
+                  <View style={s.bookFlowPromoIconWrap}>
+                    <Ionicons name="pricetag" size={18} color={COLORS.blue} />
+                  </View>
+                  <View style={s.bookFlowPromoTextCol}>
+                    <Text style={s.bookFlowPromoTitle}>Ride on your schedule</Text>
+                    <Text style={s.bookFlowPromoBody}>
+                      Book ahead and lock your route when it suits you.
+                    </Text>
+                    <View style={s.bookFlowPromoActions}>
+                      <TouchableOpacity
+                        style={s.bookFlowPromoCta}
+                        onPress={openScheduleRide}
+                        activeOpacity={0.88}
+                        accessibilityRole="button"
+                        accessibilityLabel="Open schedule from promo"
+                      >
+                        <Text style={s.bookFlowPromoCtaText}>Schedule</Text>
+                        <Ionicons name="arrow-forward" size={14} color={COLORS.bg} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
                   <TouchableOpacity
-                    style={s.bookFlowPromoCta}
-                    onPress={openScheduleRide}
-                    activeOpacity={0.88}
+                    onPress={dismissBookingPromo}
+                    style={s.bookFlowPromoClose}
+                    hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+                    accessibilityLabel="Dismiss promo"
                     accessibilityRole="button"
-                    accessibilityLabel="Open schedule from promo"
                   >
-                    <Text style={s.bookFlowPromoCtaText}>Schedule</Text>
-                    <Ionicons name="arrow-forward" size={14} color={COLORS.bg} />
+                    <Ionicons name="close" size={22} color={COLORS.muted} />
                   </TouchableOpacity>
                 </View>
+              ) : null}
+
+              <Text style={s.bookFlowHeroTitle}>Where are you headed?</Text>
+              <Text style={s.bookFlowHeroSub}>Live map pickup · choose a ride · set your offer · go.</Text>
+
+              <View style={s.bookFlowServiceRow}>
+                <TouchableOpacity
+                  style={s.bookFlowServiceCard}
+                  onPress={openDestinationSearch}
+                  activeOpacity={0.88}
+                  accessibilityLabel="Find a ride"
+                  accessibilityRole="button"
+                >
+                  <View style={[s.bookFlowServiceIconBg, { backgroundColor: 'rgba(0,212,106,0.14)' }]}>
+                    <Ionicons name="car-sport" size={26} color={COLORS.green} />
+                  </View>
+                  <Text style={s.bookFlowServiceTitle}>Rides</Text>
+                  <Text style={s.bookFlowServiceSub}>{`Let's go`}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={s.bookFlowServiceCard}
+                  onPress={openScheduleRide}
+                  activeOpacity={0.88}
+                  accessibilityLabel="Schedule a ride"
+                  accessibilityRole="button"
+                >
+                  <View style={[s.bookFlowServiceIconBg, { backgroundColor: 'rgba(14,165,233,0.18)' }]}>
+                    <Ionicons name="calendar" size={24} color={COLORS.blue} />
+                  </View>
+                  <Text style={s.bookFlowServiceTitle}>Schedule</Text>
+                  <Text style={s.bookFlowServiceSub}>Book ahead</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={s.bookFlowServiceCard}
+                  onPress={() => router.push('/rider/family')}
+                  activeOpacity={0.88}
+                  accessibilityLabel="Family and favorites"
+                  accessibilityRole="button"
+                >
+                  <View style={[s.bookFlowServiceIconBg, { backgroundColor: 'rgba(147,51,234,0.2)' }]}>
+                    <Ionicons name="people" size={24} color={COLORS.purple} />
+                  </View>
+                  <Text style={s.bookFlowServiceTitle}>Family</Text>
+                  <Text style={s.bookFlowServiceSub}>People you trust</Text>
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                onPress={dismissBookingPromo}
-                style={s.bookFlowPromoClose}
-                hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
-                accessibilityLabel="Dismiss promo"
-                accessibilityRole="button"
-              >
-                <Ionicons name="close" size={22} color={COLORS.muted} />
-              </TouchableOpacity>
+            </>
+          ) : (
+            <View style={s.confirmHeader}>
+              <Text style={s.confirmHeaderTitle}>Confirm your ride</Text>
+              <Text style={s.confirmHeaderSub}>Pick a vehicle · set your offer · request</Text>
             </View>
-          ) : null}
-
-          <Text style={s.bookFlowHeroTitle}>Go wherever, whenever.</Text>
-          <Text style={s.bookFlowHeroSub}>Pickup follows your map. Set where you are headed below.</Text>
-
-          <View style={s.bookFlowServiceRow}>
-            <TouchableOpacity
-              style={s.bookFlowServiceCard}
-              onPress={openDestinationSearch}
-              activeOpacity={0.88}
-              accessibilityLabel="Find a ride"
-              accessibilityRole="button"
-            >
-              <View style={[s.bookFlowServiceIconBg, { backgroundColor: 'rgba(0,212,106,0.14)' }]}>
-                <Ionicons name="car-sport" size={26} color={COLORS.green} />
-              </View>
-              <Text style={s.bookFlowServiceTitle}>Rides</Text>
-              <Text style={s.bookFlowServiceSub}>{`Let's go`}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={s.bookFlowServiceCard}
-              onPress={openScheduleRide}
-              activeOpacity={0.88}
-              accessibilityLabel="Schedule a ride"
-              accessibilityRole="button"
-            >
-              <View style={[s.bookFlowServiceIconBg, { backgroundColor: 'rgba(14,165,233,0.18)' }]}>
-                <Ionicons name="calendar" size={24} color={COLORS.blue} />
-              </View>
-              <Text style={s.bookFlowServiceTitle}>Schedule</Text>
-              <Text style={s.bookFlowServiceSub}>Book ahead</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={s.bookFlowServiceCard}
-              onPress={() => router.push('/rider/family')}
-              activeOpacity={0.88}
-              accessibilityLabel="Family and favorites"
-              accessibilityRole="button"
-            >
-              <View style={[s.bookFlowServiceIconBg, { backgroundColor: 'rgba(147,51,234,0.2)' }]}>
-                <Ionicons name="people" size={24} color={COLORS.purple} />
-              </View>
-              <Text style={s.bookFlowServiceTitle}>Family</Text>
-              <Text style={s.bookFlowServiceSub}>People you trust</Text>
-            </TouchableOpacity>
-          </View>
+          )}
 
           <View style={s.bookFlowWhereShell}>
             <TouchableOpacity
@@ -2632,41 +2669,43 @@ function BookInDriveStyle() {
             )
           ) : null}
 
-          <View style={s.bookFlowRecentBlock}>
-            <Text style={s.bookFlowRecentHeading}>Recent</Text>
-            {recentDestinations.length > 0 ? (
-              recentDestinations.slice(0, 5).map((item, idx) => {
-                const title = String(item.address || item.description || '').trim();
-                if (!title) return null;
-                return (
-                  <TouchableOpacity
-                    key={`recent-${idx}-${title.slice(0, 24)}`}
-                    style={s.bookFlowRecentRow}
-                    onPress={() => applyRecentDestination(item)}
-                    activeOpacity={0.88}
-                  >
-                    <View style={s.bookFlowRecentIcon}>
-                      <Ionicons name="time-outline" size={18} color={COLORS.dim} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.bookFlowRecentTitle} numberOfLines={1}>{title}</Text>
-                      <Text style={s.bookFlowRecentMeta}>
-                        {Number.isFinite(item.lat) && Number.isFinite(item.lng) ? 'Saved pin' : 'Recent place'}
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={16} color={COLORS.dim} />
-                  </TouchableOpacity>
-                );
-              })
-            ) : (
-              <View style={s.recentEmptyRow}>
-                <Ionicons name="location-outline" size={18} color={COLORS.dim} />
-                <Text style={s.recentEmptyText}>Your recent destinations will appear here</Text>
-              </View>
-            )}
-          </View>
+          {!routeReady ? (
+            <View style={s.bookFlowRecentBlock}>
+              <Text style={s.bookFlowRecentHeading}>Recent</Text>
+              {recentDestinations.length > 0 ? (
+                recentDestinations.slice(0, 5).map((item, idx) => {
+                  const title = String(item.address || item.description || '').trim();
+                  if (!title) return null;
+                  return (
+                    <TouchableOpacity
+                      key={`recent-${idx}-${title.slice(0, 24)}`}
+                      style={s.bookFlowRecentRow}
+                      onPress={() => applyRecentDestination(item)}
+                      activeOpacity={0.88}
+                    >
+                      <View style={s.bookFlowRecentIcon}>
+                        <Ionicons name="time-outline" size={18} color={COLORS.dim} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.bookFlowRecentTitle} numberOfLines={1}>{title}</Text>
+                        <Text style={s.bookFlowRecentMeta}>
+                          {Number.isFinite(item.lat) && Number.isFinite(item.lng) ? 'Saved pin' : 'Recent place'}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={16} color={COLORS.dim} />
+                    </TouchableOpacity>
+                  );
+                })
+              ) : (
+                <View style={s.recentEmptyRow}>
+                  <Ionicons name="location-outline" size={18} color={COLORS.dim} />
+                  <Text style={s.recentEmptyText}>Your recent destinations will appear here</Text>
+                </View>
+              )}
+            </View>
+          ) : null}
 
-          {scheduledRides.length > 0 && (
+          {!routeReady && scheduledRides.length > 0 ? (
             <View style={s.scheduledCard}>
               <View style={s.scheduledHeader}>
                 <Text style={s.scheduledTitle}>Scheduled rides active</Text>
@@ -2684,98 +2723,40 @@ function BookInDriveStyle() {
                 </View>
               ))}
             </View>
-          )}
+          ) : null}
 
-          {pickupCoords && destinationCoords && (routeSafetyLoading || routeSafety !== null || routeSafetyFailed) ? (
-            <View
-              style={[
-                s.routeSafetyCard,
-                routeSafety?.route_risk_level === 'high' && s.routeSafetyCardHigh,
-              ]}
-            >
-              <View style={s.routeSafetyHeader}>
-                <Ionicons
-                  name="shield-half-outline"
-                  size={20}
-                  color={routeSafety?.route_risk_level === 'high' ? COLORS.red : COLORS.yellow}
-                />
-                <Text style={s.routeSafetyTitle}>
-                  {routeSafety ? `Route safety · ${routeSafety.city}` : 'Route safety'}
-                </Text>
-              </View>
-              {routeSafetyLoading && !routeSafety ? (
-                <Text style={s.routeSafetySub}>Checking corridor against known risk anchors…</Text>
-              ) : routeSafety ? (
-                <>
-                  {routeSafety.route_risk_level === 'high' ? (
-                    <View style={s.routeSafetyWarnBanner}>
-                      <Ionicons name="warning" size={18} color="#0D1420" />
-                      <Text style={s.routeSafetyWarnText}>
-                        Higher-risk corridor — travel alert: share trip, stay on main roads, avoid stops after dark.
-                      </Text>
-                    </View>
-                  ) : null}
-                  <Text style={s.routeSafetyRisk}>
-                    Corridor risk:{' '}
-                    <Text
-                      style={{
-                        fontWeight: '900',
-                        color:
-                          routeSafety.route_risk_level === 'high'
-                            ? COLORS.red
-                            : routeSafety.route_risk_level === 'moderate'
-                              ? COLORS.yellow
-                              : COLORS.green,
-                      }}
-                    >
-                      {routeSafety.route_risk_level.toUpperCase()}
-                    </Text>
-                  </Text>
-                  {routeSafety.risk_zones_on_route?.length ? (
-                    <>
-                      <Text style={s.routeSafetySub}>Anchors near this pickup–drop corridor:</Text>
-                      {routeSafety.risk_zones_on_route.slice(0, 5).map((z) => (
-                        <Text key={z.area} style={s.routeSafetyBullet}>
-                          • {z.area} ({z.risk})
-                        </Text>
-                      ))}
-                    </>
-                  ) : (
-                    <Text style={s.routeSafetySub}>No mapped high-risk anchors in this corridor box.</Text>
-                  )}
-                  {routeSafety.safety_tips?.length ? (
-                    <Text style={s.routeSafetyTips} numberOfLines={4}>
-                      {routeSafety.safety_tips.join(' · ')}
-                    </Text>
-                  ) : null}
-                </>
-              ) : routeSafetyFailed ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Ionicons name="cloud-offline-outline" size={14} color={COLORS.dim} />
-                  <Text style={s.routeSafetySub}>Could not check route safety — no network</Text>
-                </View>
-              ) : (
-                <Text style={s.routeSafetySub}>Checking route…</Text>
-              )}
+          {/* Compact safety alert — high risk only (keeps confirm sheet Uber-tight) */}
+          {routeReady && routeSafety?.route_risk_level === 'high' ? (
+            <View style={s.routeSafetyCompact}>
+              <Ionicons name="warning" size={16} color={BRAND.warning} />
+              <Text style={s.routeSafetyCompactText} numberOfLines={2}>
+                Higher-risk corridor — share your trip and stay on main roads.
+              </Text>
             </View>
           ) : null}
 
           {/* ── First-ride 20% discount banner ── */}
-          {isFirstRider && (
+          {routeReady && isFirstRider && (
             <View style={s.firstRideBanner}>
               <View style={s.firstRideBannerIcon}>
-                <Ionicons name="gift-outline" size={18} color="#00D46A" />
+                <Ionicons name="gift-outline" size={18} color={BRAND.primary} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={s.firstRideBannerTitle}>Your first ride — 20% off! 🎉</Text>
-                <Text style={s.firstRideBannerSub}>Discount applied automatically at checkout. No code needed.</Text>
+                <Text style={s.firstRideBannerTitle}>Welcome gift — 20% off your first ride</Text>
+                <Text style={s.firstRideBannerSub}>Applied automatically. No promo code needed.</Text>
               </View>
             </View>
           )}
 
-          {/* ── Inline Ride Categories (all visible, no modal required) ── */}
+          {/* ── Ride products with live fare matrix (after destination) ── */}
+          {routeReady ? (
           <View style={s.inlineCatSection}>
-            <Text style={s.inlineCatTitle}>Choose your ride</Text>
+            <View style={s.inlineCatHeaderRow}>
+              <Text style={s.inlineCatTitle}>Choose your ride</Text>
+              {Object.keys(fareMatrix).length > 0 ? (
+                <Text style={s.inlineCatLive}>Live fares</Text>
+              ) : null}
+            </View>
             {availableVehicles.map((v) => {
               const price = fareMatrix[v.id];
               const listOrig = fareMatrixOriginal[v.id];
@@ -2800,6 +2781,9 @@ function BookInDriveStyle() {
                     }
                   }}
                   activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${v.name}, ${v.desc}${price > 0 ? `, ₦${price.toLocaleString()}` : ''}`}
+                  accessibilityState={{ selected: isSelected }}
                 >
                   <View style={[s.inlineCatIcon, { backgroundColor: v.color + (isSelected ? '28' : '18') }]}>
                     <Ionicons name={v.icon as any} size={26} color={isSelected ? v.color : COLORS.muted} />
@@ -2818,11 +2802,13 @@ function BookInDriveStyle() {
                         </Text>
                         {listOrig != null && listOrig > price ? (
                           <Text style={s.inlineCatOrigPrice}>₦{listOrig.toLocaleString()}</Text>
-                        ) : null}
+                        ) : (
+                          <Text style={s.inlineCatEtaHint}>est. fare</Text>
+                        )}
                       </>
                     ) : (
                       <Text style={s.inlineCatPriceMuted}>
-                        {pickup && destination ? '—' : 'Enter route'}
+                        {pickup && destination ? '—' : 'Set route'}
                       </Text>
                     )}
                   </View>
@@ -2839,155 +2825,61 @@ function BookInDriveStyle() {
               );
             })}
           </View>
+          ) : null}
 
-          {/* Fare / Calculate */}
+          {/* Fare / bid / pay — confirm path */}
           {currentFare > 0 ? (
             <View style={s.fareSection}>
-              {optimizedRoute ? (
-                <View style={s.aiRouteCard}>
-                  <View style={s.aiRouteHeader}>
-                    <Ionicons name="navigate-circle" size={20} color={COLORS.blue} />
-                    <Text style={s.aiRouteTitle}>Route Optimisation</Text>
-                  </View>
-                  <Text style={s.aiRouteText}>
-                    Fastest route selected for current Lagos/Nigerian traffic conditions:{' '}
-                    {TrafficIntelligence.formatDelay(Number(optimizedRoute.trafficDelay))}
-                    {optimizedRoute.timeSavedVsAlternative
-                      ? ` saved versus a slower alternative.`
-                      : '.'}
-                  </Text>
-                  <Text style={s.aiRouteMeta}>
-                    Traffic level:{' '}
-                    {String(optimizedRoute.trafficLevel || 'light').toUpperCase()} • Route score{' '}
-                    {Number.isFinite(Number(optimizedRoute.aiScore)) ? Math.round(Number(optimizedRoute.aiScore)) : 0}/100
-                  </Text>
-                </View>
-              ) : null}
               {(smartBaseUi != null && smartBaseUi > 0) || (suggestedBidUi != null && suggestedBidUi > 0) ? (
-                <View style={{ marginBottom: 10, gap: 8 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-                    <View style={{ backgroundColor: '#1e293b', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                      <Ionicons name="cash-outline" size={13} color="#22d3ee" />
-                      <Text style={{ color: '#e2e8f0', fontSize: 12, fontWeight: '700' }}>
-                        ₦{(smartMinUi ?? smartBaseUi ?? 0).toLocaleString()} – ₦{(smartMaxUi ?? Math.round((smartBaseUi ?? 0) * 1.3)).toLocaleString()}
-                      </Text>
+                <View style={s.fareChipRow}>
+                  <View style={s.fareBandChip}>
+                    <Ionicons name="cash-outline" size={13} color={BRAND.info} />
+                    <Text style={s.fareBandChipText}>
+                      ₦{(smartMinUi ?? smartBaseUi ?? 0).toLocaleString()} – ₦
+                      {(smartMaxUi ?? Math.round((smartBaseUi ?? 0) * 1.3)).toLocaleString()}
+                    </Text>
+                  </View>
+                  {fareInsightChips.surgeCompact ? (
+                    <View style={s.fareSurgeChip}>
+                      <Ionicons name="flash" size={12} color="#f59e0b" />
+                      <Text style={s.fareSurgeChipText}>{fareInsightChips.surgeCompact}</Text>
                     </View>
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      onPress={() => {
-                        if (suggestedBidUi != null && suggestedBidUi > 0) {
-                          Haptics.selectionAsync();
-                          setCurrentFare(suggestedBidUi);
-                        }
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel="Apply suggested fare"
-                      disabled={!suggestedBidUi}
-                      style={{ backgroundColor: '#0f2d18', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                    >
-                      <Ionicons name="star" size={12} color="#fbbf24" />
-                      <Text style={{ color: '#86efac', fontSize: 12, fontWeight: '700' }}>
-                        Suggested ₦{(suggestedBidUi ?? smartBaseUi ?? 0).toLocaleString()}
-                      </Text>
-                    </TouchableOpacity>
-                    {fareDetails?.first_ride_discount_applied && (
-                      <View style={{ backgroundColor: 'rgba(0,212,106,0.18)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: 'rgba(0,212,106,0.35)' }}>
-                        <Ionicons name="gift-outline" size={12} color="#00D46A" />
-                        <Text style={{ color: '#00D46A', fontSize: 11, fontWeight: '800' }}>First ride −20%</Text>
-                      </View>
-                    )}
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-                    {fareInsightChips.routeLabel ? (
-                      <View style={{ backgroundColor: '#1e293b', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Ionicons name="navigate-outline" size={12} color="#94a3b8" />
-                        <Text style={{ color: '#cbd5e1', fontSize: 11, fontWeight: '700' }}>{fareInsightChips.routeLabel}</Text>
-                      </View>
-                    ) : null}
-                    {fareInsightChips.cityLabel ? (
-                      <View style={{ backgroundColor: '#1e293b', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Ionicons name="location-outline" size={12} color="#94a3b8" />
-                        <Text style={{ color: '#cbd5e1', fontSize: 11, fontWeight: '700' }}>{fareInsightChips.cityLabel}</Text>
-                      </View>
-                    ) : null}
-                    {fareInsightChips.surgeCompact ? (
-                      <View style={{ backgroundColor: 'rgba(245,158,11,0.14)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: 'rgba(245,158,11,0.4)' }}>
-                        <Ionicons name="flash" size={12} color="#f59e0b" />
-                        <Text style={{ color: '#fbbf24', fontSize: 11, fontWeight: '800' }}>{fareInsightChips.surgeCompact}</Text>
-                      </View>
-                    ) : null}
-                    {fareInsightChips.shortTrip ? (
-                      <View style={{ backgroundColor: 'rgba(14,165,233,0.15)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: 'rgba(14,165,233,0.35)' }}>
-                        <Ionicons name="map-outline" size={12} color={COLORS.blue} />
-                        <Text style={{ color: COLORS.blue, fontSize: 11, fontWeight: '800' }}>
-                          {`Short trip · under ${fareDetails?.short_trip_threshold_km ?? 5} km`}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </View>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 6 }}>
-                    <TouchableOpacity
-                      onPress={() => {
-                        Haptics.selectionAsync();
-                        handleCalculateFare();
-                      }}
-                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                      accessibilityLabel="Refresh fare estimate"
-                      accessibilityRole="button"
-                    >
-                      <Ionicons name="refresh" size={15} color={COLORS.blue} />
-                      <Text style={{ color: COLORS.blue, fontSize: 12, fontWeight: '700' }}>Refresh estimate</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => setFareExplainModal('surge')} accessibilityLabel="About surge pricing" accessibilityRole="button">
-                      <Ionicons name="information-circle-outline" size={20} color="#94a3b8" />
-                    </TouchableOpacity>
-                    {fareDetails?.competitive_positioning_summary ||
-                    (fareDetails?.competitive_positioning_bullets?.length ?? 0) > 0 ? (
-                      <TouchableOpacity
-                        onPress={() => setFareExplainModal('positioning')}
-                        accessibilityLabel="Why Nexryde pricing"
-                        accessibilityRole="button"
-                      >
-                        <Ionicons name="rocket-outline" size={20} color="#a78bfa" />
-                      </TouchableOpacity>
-                    ) : null}
-                    {!isDistanceOnlyFare(fareDetails) ? (
-                      <TouchableOpacity onPress={() => setFareExplainModal('short')} accessibilityLabel="About short trip rates" accessibilityRole="button">
-                        <Ionicons name="map-outline" size={20} color="#94a3b8" />
-                      </TouchableOpacity>
-                    ) : null}
-                    <TouchableOpacity onPress={() => setFareExplainModal('breakdown')} accessibilityLabel="Fare breakdown" accessibilityRole="button">
-                      <Ionicons name="list-outline" size={20} color="#94a3b8" />
-                    </TouchableOpacity>
-                  </View>
+                  ) : null}
+                  {fareDetails?.first_ride_discount_applied ? (
+                    <View style={s.fareGiftChip}>
+                      <Ionicons name="gift-outline" size={12} color={BRAND.primary} />
+                      <Text style={s.fareGiftChipText}>−20%</Text>
+                    </View>
+                  ) : null}
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      handleCalculateFare();
+                    }}
+                    style={s.fareRefreshChip}
+                    accessibilityLabel="Refresh fare estimate"
+                    accessibilityRole="button"
+                  >
+                    <Ionicons name="refresh" size={14} color={COLORS.blue} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setFareExplainModal('breakdown')}
+                    accessibilityLabel="Fare breakdown"
+                    accessibilityRole="button"
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="information-circle-outline" size={18} color={COLORS.dim} />
+                  </TouchableOpacity>
                 </View>
               ) : null}
-              <Animated.View style={[s.fareRow, { opacity: fareReveal }]}>
-                <TouchableOpacity
-                  style={s.fareBtn}
-                  onPress={() =>
-                    setCurrentFare((prev) =>
-                      Math.max(smartMinUi ?? 100, Math.max(100, prev - 100)),
-                    )
-                  }
-                  accessibilityLabel="Decrease fare"
-                  accessibilityRole="button"
-                >
-                  <Text style={s.fareBtnText}>−</Text>
-                </TouchableOpacity>
-                <Text style={s.fareAmount}>₦{currentFare.toLocaleString()}</Text>
-                <TouchableOpacity
-                  style={s.fareBtn}
-                  onPress={() =>
-                    setCurrentFare((prev) =>
-                      smartMaxUi != null ? Math.min(smartMaxUi, prev + 100) : prev + 100,
-                    )
-                  }
-                  accessibilityLabel="Increase fare"
-                  accessibilityRole="button"
-                >
-                  <Text style={s.fareBtnText}>+</Text>
-                </TouchableOpacity>
+              <Animated.View style={{ opacity: fareReveal }}>
+                <BookingBidInput
+                  value={currentFare}
+                  onChange={setCurrentFare}
+                  smartMin={smartMinUi}
+                  smartMax={smartMaxUi}
+                  suggested={suggestedBidUi}
+                />
               </Animated.View>
               <View>
                 <Text style={s.paySectionLabel}>Pay with</Text>
@@ -2999,7 +2891,10 @@ function BookInDriveStyle() {
                     accessibilityRole="button"
                   >
                     <Ionicons name="cash" size={20} color={ridePaymentMethod === 'cash' ? COLORS.green : COLORS.dim} />
-                    <Text style={[s.payChipText, ridePaymentMethod === 'cash' && s.payChipTextOn]}>Cash</Text>
+                    <View>
+                      <Text style={[s.payChipText, ridePaymentMethod === 'cash' && s.payChipTextOn]}>Cash</Text>
+                      <Text style={s.payChipSub}>Pay driver</Text>
+                    </View>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[s.payChip, ridePaymentMethod === 'wallet' && s.payChipOn]}
@@ -3008,7 +2903,10 @@ function BookInDriveStyle() {
                     accessibilityRole="button"
                   >
                     <Ionicons name="wallet" size={20} color={ridePaymentMethod === 'wallet' ? COLORS.green : COLORS.dim} />
-                    <Text style={[s.payChipText, ridePaymentMethod === 'wallet' && s.payChipTextOn]}>Wallet</Text>
+                    <View>
+                      <Text style={[s.payChipText, ridePaymentMethod === 'wallet' && s.payChipTextOn]}>Wallet</Text>
+                      <Text style={s.payChipSub}>NEXRYDE balance</Text>
+                    </View>
                   </TouchableOpacity>
                 </View>
                 {ridePaymentMethod === 'wallet' && walletBalance != null && currentFare > 0 && walletBalance < currentFare ? (
@@ -3024,216 +2922,260 @@ function BookInDriveStyle() {
                       ? walletBalance != null
                         ? `Balance ₦${walletBalance.toLocaleString()} · charged after trip`
                         : 'Loading balance…'
-                      : 'Pay the driver in person'}
+                      : 'Pay your driver in cash at drop-off'}
                   </Text>
                 )}
               </View>
-              <View>
-                <Text style={s.paySectionLabel}>Ride mood</Text>
-                <Text style={s.preferenceHint}>Tell the driver how you want the ride to feel.</Text>
-                <View style={s.preferenceRow}>
-                  {RIDE_PREFERENCE_OPTIONS.map((option) => {
-                    const active = ridePreferences.includes(option.id);
-                    return (
-                      <TouchableOpacity
-                        key={option.id}
-                        style={[s.preferenceChip, active && s.preferenceChipOn]}
-                        onPress={() => toggleRidePreference(option.id)}
-                        accessibilityRole="button"
-                        accessibilityLabel={option.label}
-                      >
-                        <Ionicons
-                          name={option.icon}
-                          size={16}
-                          color={active ? COLORS.green : COLORS.muted}
-                        />
-                        <Text style={[s.preferenceChipText, active && s.preferenceChipTextOn]}>
-                          {option.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-                <TouchableOpacity
-                  onPress={() => router.push('/rider/mood-preferences')}
-                  style={{ marginTop: 8, alignSelf: 'flex-end' }}
-                >
-                  <Text style={{ color: COLORS.accentBlue, fontSize: 12, fontWeight: '700' }}>
-                    Manage preferences →
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              {/* ── Estate Gate Code ─────────────────────────────────── */}
-              <View>
-                <View style={s.gateSectionHeader}>
-                  <View style={s.gateSectionLeft}>
-                    <View style={s.gateIconBadge}>
-                      <Ionicons name="key" size={14} color="#F59E0B" />
-                    </View>
-                    <View>
-                      <Text style={s.paySectionLabel}>Estate Gate Code</Text>
-                      <Text style={s.preferenceHint}>Shared with driver automatically on arrival.</Text>
-                    </View>
-                  </View>
-                  {gateCodeSaved && (
-                    <Switch
-                      value={includeGateCode}
-                      onValueChange={setIncludeGateCode}
-                      trackColor={{ false: COLORS.dim, true: '#065F46' }}
-                      thumbColor={includeGateCode ? '#22C55E' : '#94A3B8'}
-                    />
-                  )}
-                </View>
 
-                {/* Saved + collapsed state */}
-                {gateCodeSaved && !editingGateCode ? (
-                  <View style={[s.gateSavedCard, !includeGateCode && s.gateSavedCardOff]}>
-                    <View style={s.gateSavedRow}>
-                      <Ionicons
-                        name={includeGateCode ? 'shield-checkmark' : 'shield-outline'}
-                        size={20}
-                        color={includeGateCode ? '#22C55E' : COLORS.dim}
-                      />
-                      <View style={{ flex: 1 }}>
-                        {estateName ? (
-                          <Text style={s.gateSavedEstate} numberOfLines={1}>{estateName}</Text>
-                        ) : null}
-                        <Text style={[s.gateSavedCode, !includeGateCode && { color: COLORS.dim }]}>
-                          {estateGateCode.replace(/./g, '●')}
-                        </Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', gap: 8 }}>
-                        <TouchableOpacity onPress={() => setEditingGateCode(true)} style={s.gateEditBtn}>
-                          <Ionicons name="create-outline" size={14} color={COLORS.muted} />
-                          <Text style={s.gateEditBtnText}>Edit</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={handleClearGateCode} style={s.gateEditBtn}>
-                          <Ionicons name="trash-outline" size={14} color="#EF4444" />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                    {includeGateCode && (
-                      <View style={s.gateActivePill}>
-                        <View style={s.gateActiveDot} />
-                        <Text style={s.gateActivePillText}>Active for this ride · shared on arrival</Text>
-                      </View>
-                    )}
+              {/* Trip options — mood + gate collapsed by default */}
+              <TouchableOpacity
+                style={s.tripOptionsToggle}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setShowTripOptions((v) => !v);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={showTripOptions ? 'Hide trip options' : 'Show trip options'}
+                accessibilityState={{ expanded: showTripOptions }}
+              >
+                <View style={s.tripOptionsToggleLeft}>
+                  <Ionicons name="options-outline" size={18} color={BRAND.primary} />
+                  <View>
+                    <Text style={s.tripOptionsToggleTitle}>Trip options</Text>
+                    <Text style={s.tripOptionsToggleSub}>
+                      {tripOptionsSummary || 'Mood · estate gate code'}
+                    </Text>
                   </View>
-                ) : (
-                  /* Input form (new or editing) */
-                  <View style={s.gateCard}>
-                    <View style={s.gateInputWrapper}>
-                      <Ionicons name="home-outline" size={16} color={COLORS.muted} style={s.gateInputIcon} />
-                      <TextInput
-                        value={estateName}
-                        onChangeText={setEstateName}
-                        placeholder="Estate or apartment name (optional)"
-                        placeholderTextColor={COLORS.dim}
-                        style={s.gateInputField}
-                      />
+                </View>
+                <Ionicons
+                  name={showTripOptions ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color={COLORS.muted}
+                />
+              </TouchableOpacity>
+
+              {showTripOptions ? (
+                <View style={s.tripOptionsBody}>
+                  <View>
+                    <Text style={s.paySectionLabel}>Ride mood</Text>
+                    <Text style={s.preferenceHint}>Your driver sees this before pickup.</Text>
+                    <View style={s.preferenceRow}>
+                      {RIDE_PREFERENCE_OPTIONS.map((option) => {
+                        const active = ridePreferences.includes(option.id);
+                        return (
+                          <TouchableOpacity
+                            key={option.id}
+                            style={[s.preferenceChip, active && s.preferenceChipOn]}
+                            onPress={() => toggleRidePreference(option.id)}
+                            accessibilityRole="button"
+                            accessibilityLabel={option.label}
+                          >
+                            <Ionicons
+                              name={option.icon}
+                              size={16}
+                              color={active ? COLORS.green : COLORS.muted}
+                            />
+                            <Text style={[s.preferenceChipText, active && s.preferenceChipTextOn]}>
+                              {option.label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
                     </View>
-                    <View style={s.gateInputWrapper}>
-                      <Ionicons name="key-outline" size={16} color="#F59E0B" style={s.gateInputIcon} />
-                      <TextInput
-                        value={estateGateCode}
-                        onChangeText={setEstateGateCode}
-                        placeholder="Gate code  e.g. 1234 or A#7"
-                        placeholderTextColor={COLORS.dim}
-                        style={[s.gateInputField, { letterSpacing: 2 }]}
-                        autoCapitalize="characters"
-                        returnKeyType="done"
-                        onSubmitEditing={handleSaveGateCode}
-                      />
+                  </View>
+
+                  <View>
+                    <View style={s.gateSectionHeader}>
+                      <View style={s.gateSectionLeft}>
+                        <View style={s.gateIconBadge}>
+                          <Ionicons name="key" size={14} color="#F59E0B" />
+                        </View>
+                        <View>
+                          <Text style={s.paySectionLabel}>Estate gate code</Text>
+                          <Text style={s.preferenceHint}>Shared with driver on arrival.</Text>
+                        </View>
+                      </View>
+                      {gateCodeSaved && (
+                        <Switch
+                          value={includeGateCode}
+                          onValueChange={setIncludeGateCode}
+                          trackColor={{ false: COLORS.dim, true: '#065F46' }}
+                          thumbColor={includeGateCode ? '#22C55E' : '#94A3B8'}
+                        />
+                      )}
                     </View>
-                    <LinearGradient
-                      colors={['#065F46', '#047857']}
-                      start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                      style={s.gateSaveBtnGrad}
-                    >
-                      <TouchableOpacity
-                        style={s.gateSaveBtn}
-                        onPress={handleSaveGateCode}
-                        disabled={savingGateCode}
-                        accessibilityRole="button"
-                        accessibilityLabel="Save gate code"
-                      >
-                        {savingGateCode ? (
-                          <ActivityIndicator size="small" color="#fff" />
-                        ) : (
-                          <>
-                            <Ionicons name="shield-checkmark-outline" size={16} color="#fff" />
-                            <Text style={s.gateSaveBtnText}>Save Gate Code</Text>
-                          </>
+
+                    {gateCodeSaved && !editingGateCode ? (
+                      <View style={[s.gateSavedCard, !includeGateCode && s.gateSavedCardOff]}>
+                        <View style={s.gateSavedRow}>
+                          <Ionicons
+                            name={includeGateCode ? 'shield-checkmark' : 'shield-outline'}
+                            size={20}
+                            color={includeGateCode ? '#22C55E' : COLORS.dim}
+                          />
+                          <View style={{ flex: 1 }}>
+                            {estateName ? (
+                              <Text style={s.gateSavedEstate} numberOfLines={1}>{estateName}</Text>
+                            ) : null}
+                            <Text style={[s.gateSavedCode, !includeGateCode && { color: COLORS.dim }]}>
+                              {estateGateCode.replace(/./g, '●')}
+                            </Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', gap: 8 }}>
+                            <TouchableOpacity onPress={() => setEditingGateCode(true)} style={s.gateEditBtn}>
+                              <Ionicons name="create-outline" size={14} color={COLORS.muted} />
+                              <Text style={s.gateEditBtnText}>Edit</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={handleClearGateCode} style={s.gateEditBtn}>
+                              <Ionicons name="trash-outline" size={14} color="#EF4444" />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                        {includeGateCode && (
+                          <View style={s.gateActivePill}>
+                            <View style={s.gateActiveDot} />
+                            <Text style={s.gateActivePillText}>Active · shared on arrival</Text>
+                          </View>
                         )}
-                      </TouchableOpacity>
-                    </LinearGradient>
-                    {editingGateCode && (
-                      <TouchableOpacity onPress={() => setEditingGateCode(false)} style={s.gateCancelBtn}>
-                        <Text style={s.gateCancelBtnText}>Cancel</Text>
-                      </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <View style={s.gateCard}>
+                        <View style={s.gateInputWrapper}>
+                          <Ionicons name="home-outline" size={16} color={COLORS.muted} style={s.gateInputIcon} />
+                          <TextInput
+                            value={estateName}
+                            onChangeText={setEstateName}
+                            placeholder="Estate name (optional)"
+                            placeholderTextColor={COLORS.dim}
+                            style={s.gateInputField}
+                          />
+                        </View>
+                        <View style={s.gateInputWrapper}>
+                          <Ionicons name="key-outline" size={16} color="#F59E0B" style={s.gateInputIcon} />
+                          <TextInput
+                            value={estateGateCode}
+                            onChangeText={setEstateGateCode}
+                            placeholder="Gate code e.g. 1234"
+                            placeholderTextColor={COLORS.dim}
+                            style={[s.gateInputField, { letterSpacing: 2 }]}
+                            autoCapitalize="characters"
+                            returnKeyType="done"
+                            onSubmitEditing={handleSaveGateCode}
+                          />
+                        </View>
+                        <LinearGradient
+                          colors={['#065F46', '#047857']}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 0 }}
+                          style={s.gateSaveBtnGrad}
+                        >
+                          <TouchableOpacity
+                            style={s.gateSaveBtn}
+                            onPress={handleSaveGateCode}
+                            disabled={savingGateCode}
+                            accessibilityRole="button"
+                            accessibilityLabel="Save gate code"
+                          >
+                            {savingGateCode ? (
+                              <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                              <>
+                                <Ionicons name="shield-checkmark-outline" size={16} color="#fff" />
+                                <Text style={s.gateSaveBtnText}>Save gate code</Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        </LinearGradient>
+                        {editingGateCode && (
+                          <TouchableOpacity onPress={() => setEditingGateCode(false)} style={s.gateCancelBtn}>
+                            <Text style={s.gateCancelBtnText}>Cancel</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
                     )}
                   </View>
-                )}
-              </View>
-              {/* Nearby driver count hint */}
-              {nearbyDrivers.length > 0 && !isLoading && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 8 }}>
-                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.green }} />
-                  <Text style={{ color: '#86EFAC', fontSize: 12, fontWeight: '700' }}>
-                    {nearbyDrivers.length} driver{nearbyDrivers.length !== 1 ? 's' : ''} nearby — quick pickup likely
+                </View>
+              ) : null}
+
+              {nearbyDrivers.length > 0 && !isLoading ? (
+                <View style={s.nearbyDriversHint}>
+                  <View style={s.nearbyDriversDot} />
+                  <Text style={s.nearbyDriversText}>
+                    {nearbyDrivers.length} driver{nearbyDrivers.length !== 1 ? 's' : ''} nearby
                   </Text>
                 </View>
-              )}
-              <TouchableOpacity style={[s.findBtn, isLoading && { opacity: 0.7 }]} onPress={findOffers} disabled={isLoading} accessibilityLabel="Find ride offers" accessibilityRole="button">
-                <LinearGradient
-                  colors={isLoading ? ['#64748b', '#475569'] : [...RIDER_PRIMARY_CTA_GRADIENT]}
-                  style={[s.btnGrad, { paddingVertical: 18 }]}
-                >
-                  {isLoading ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <ActivityIndicator color="#fff" size="small" />
-                      <Text style={[s.findBtnText, { color: '#fff', fontSize: 16 }]}>Finding drivers...</Text>
-                    </View>
-                  ) : (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Ionicons name="car-sport" size={22} color="#FFF" />
-                      <Text style={[s.findBtnText, { color: '#FFF', fontSize: 17, fontWeight: '900' }]}>Request Ride — ₦{currentFare.toLocaleString()}</Text>
-                    </View>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
+              ) : null}
             </View>
-          ) : (
+          ) : routeReady ? (
+            <View style={s.fareLoadingRow}>
+              {isLoading ? (
+                <>
+                  <ActivityIndicator color={BRAND.primary} />
+                  <Text style={s.fareLoadingText}>Getting live fares…</Text>
+                </>
+              ) : (
+                <TouchableOpacity
+                  style={s.calcBtn}
+                  onPress={() => handleCalculateFare()}
+                  disabled={!pickup || !destination}
+                  accessibilityLabel="Get fare estimate"
+                  accessibilityRole="button"
+                >
+                  <LinearGradient
+                    colors={selectedVehicle ? [...RIDER_PRIMARY_CTA_GRADIENT] : ['#334155', '#475569']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={[s.calcBtnGrad, { paddingVertical: 16 }]}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Ionicons name={selectedVehicle ? 'pricetag' : 'car-outline'} size={20} color="#0D1420" />
+                      <Text style={[s.calcBtnText, { color: '#0D1420', fontSize: 16, fontWeight: '900' }]}>
+                        {selectedVehicle ? 'Get fare estimate' : 'Select a ride above'}
+                      </Text>
+                    </View>
+                  </LinearGradient>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : null}
+        </ScrollView>
+
+        {/* Sticky confirm CTA — always visible when fare is ready */}
+        {currentFare > 0 ? (
+          <View
+            style={[
+              s.stickyCtaBar,
+              { paddingBottom: Math.max(insets.bottom, 12), paddingHorizontal: flow.padH },
+            ]}
+          >
             <TouchableOpacity
-              style={s.calcBtn}
-              onPress={() => handleCalculateFare()}
-              disabled={isLoading || !pickup || !destination}
-              accessibilityLabel="Calculate fare"
+              style={[s.findBtn, isLoading && { opacity: 0.7 }]}
+              onPress={findOffers}
+              disabled={isLoading}
+              accessibilityLabel={`Confirm ${veh?.name || 'ride'} for ₦${currentFare.toLocaleString()}`}
               accessibilityRole="button"
             >
               <LinearGradient
-                colors={pickup && destination && selectedVehicle ? [...RIDER_PRIMARY_CTA_GRADIENT] : ['#334155', '#475569']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[s.calcBtnGrad, { paddingVertical: 18 }]}
+                colors={isLoading ? ['#64748b', '#475569'] : [...RIDER_PRIMARY_CTA_GRADIENT]}
+                style={[s.btnGrad, { paddingVertical: 17 }]}
               >
                 {isLoading ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <ActivityIndicator color={COLORS.white} />
-                    <Text style={[s.calcBtnText, { color: '#FFF' }]}>Calculating...</Text>
+                    <ActivityIndicator color="#fff" size="small" />
+                    <Text style={[s.findBtnText, { color: '#fff', fontSize: 16 }]}>Matching drivers…</Text>
                   </View>
                 ) : (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Ionicons name={selectedVehicle ? 'calculator' : 'car-outline'} size={20} color="#FFF" />
-                    <Text style={[s.calcBtnText, { color: '#FFF', fontSize: 16 }]}>
-                      {selectedVehicle ? 'Get Fare Estimate' : 'Select Vehicle First'}
+                    <Ionicons name="car-sport" size={22} color="#0D1420" />
+                    <Text style={[s.findBtnText, { color: '#0D1420', fontSize: 17, fontWeight: '900' }]}>
+                      Confirm {veh?.name || 'ride'} · ₦{currentFare.toLocaleString()}
                     </Text>
                   </View>
                 )}
               </LinearGradient>
             </TouchableOpacity>
-          )}
-        </ScrollView>
+          </View>
+        ) : null}
       </Animated.View>
 
       <Modal
@@ -3250,7 +3192,7 @@ function BookInDriveStyle() {
                   {fareExplainModal === 'surge' && 'Surge pricing'}
                   {fareExplainModal === 'short' && 'Short trips'}
                   {fareExplainModal === 'breakdown' && 'Fare breakdown'}
-                  {fareExplainModal === 'positioning' && 'Why Nexryde'}
+                  {fareExplainModal === 'positioning' && 'Why NEXRYDE'}
                 </Text>
                 <ScrollView style={{ maxHeight: 360 }} keyboardShouldPersistTaps="handled">
                   {fareExplainModal === 'surge' ? (
@@ -3526,7 +3468,129 @@ function BookInDriveStyle() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  mapArea: { height: '42%', position: 'relative', backgroundColor: '#0D1420', overflow: 'hidden' },
+  mapArea: { height: '46%', position: 'relative', backgroundColor: BRAND.bgDeep, overflow: 'hidden' },
+  confirmHeader: { marginBottom: 2 },
+  confirmHeaderTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: COLORS.white,
+    letterSpacing: -0.4,
+  },
+  confirmHeaderSub: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.muted,
+    marginTop: 4,
+  },
+  routeSafetyCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(245,158,11,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.4)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  routeSafetyCompactText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FDE68A',
+    lineHeight: 16,
+  },
+  fareChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
+  },
+  fareBandChip: {
+    backgroundColor: SURFACE.cardElevated,
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: SURFACE.hairline,
+  },
+  fareBandChipText: { color: BRAND.textPrimary, fontSize: 12, fontWeight: '700' },
+  fareSurgeChip: {
+    backgroundColor: 'rgba(245,158,11,0.14)',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.4)',
+  },
+  fareSurgeChipText: { color: '#fbbf24', fontSize: 11, fontWeight: '800' },
+  fareGiftChip: {
+    backgroundColor: BRAND.primaryMuted,
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: SURFACE.glassBorder,
+  },
+  fareGiftChipText: { color: BRAND.primary, fontSize: 11, fontWeight: '800' },
+  fareRefreshChip: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: SURFACE.tile,
+  },
+  tripOptionsToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: SURFACE.tile,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: SURFACE.hairline,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  tripOptionsToggleLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  tripOptionsToggleTitle: { fontSize: 14, fontWeight: '800', color: COLORS.white },
+  tripOptionsToggleSub: { fontSize: 11, fontWeight: '600', color: COLORS.muted, marginTop: 2 },
+  tripOptionsBody: { gap: 16, marginTop: 4 },
+  nearbyDriversHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  nearbyDriversDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.green },
+  nearbyDriversText: { color: '#86EFAC', fontSize: 12, fontWeight: '700' },
+  fareLoadingRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 8,
+  },
+  fareLoadingText: { color: COLORS.muted, fontSize: 13, fontWeight: '700' },
+  stickyCtaBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingTop: 10,
+    backgroundColor: 'rgba(13,20,32,0.96)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: SURFACE.hairline,
+  },
   mapBidRouteCard: {
     position: 'absolute',
     top: 68,
@@ -3936,7 +4000,16 @@ const s = StyleSheet.create({
   },
   preferredText: { fontSize: 13, fontWeight: '800', color: '#FCA5A5' },
   preferredSub: { marginTop: 3, fontSize: 11, fontWeight: '600', color: 'rgba(252,211,231,0.85)', lineHeight: 15 },
-  sheet: { flex: 1, backgroundColor: COLORS.bg, borderTopLeftRadius: 30, borderTopRightRadius: 30, marginTop: -24, paddingTop: 10 },
+  sheet: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    marginTop: -24,
+    paddingTop: 10,
+    overflow: 'hidden',
+    position: 'relative',
+  },
   sheetHidden: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 0, overflow: 'hidden', opacity: 0, marginTop: 0, paddingTop: 0 },
   sheetContent: { flexGrow: 1 },
   scheduledCard: {
@@ -3974,59 +4047,85 @@ const s = StyleSheet.create({
   vehDesc: { fontSize: 13, color: COLORS.muted, marginTop: 2 },
   // ── Inline ride category selector ──────────────────────────────────────
   inlineCatSection: { marginBottom: 16 },
+  inlineCatHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
   inlineCatTitle: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '800',
     color: COLORS.muted,
-    marginBottom: 10,
-    letterSpacing: 0.4,
+    letterSpacing: 0.5,
     textTransform: 'uppercase',
+  },
+  inlineCatLive: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: BRAND.primary,
+    letterSpacing: 0.3,
   },
   inlineCatRow: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.card,
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 8,
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    marginBottom: 10,
     gap: 12,
     borderWidth: 1.5,
     borderColor: 'rgba(148,163,184,0.14)',
     position: 'relative',
   },
   inlineCatRowActive: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(34,225,128,0.08)',
+    shadowColor: BRAND.primary,
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
   inlineCatIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: 13,
+    width: 50,
+    height: 50,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
   },
   inlineCatName: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '800',
     color: COLORS.white,
   },
   inlineCatMeta: {
     fontSize: 12,
     color: COLORS.muted,
-    marginTop: 2,
+    marginTop: 3,
+    lineHeight: 16,
   },
   inlineCatPriceCol: {
     alignItems: 'flex-end',
-    minWidth: 72,
+    minWidth: 84,
+    paddingRight: 4,
   },
   inlineCatPrice: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '900',
     color: COLORS.white,
+    letterSpacing: -0.3,
   },
   inlineCatPriceMuted: {
     fontSize: 13,
     color: COLORS.dim,
     fontWeight: '600',
+  },
+  inlineCatEtaHint: {
+    fontSize: 10,
+    color: COLORS.dim,
+    fontWeight: '600',
+    marginTop: 2,
   },
   inlineCatCheck: {
     position: 'absolute',
@@ -4049,9 +4148,9 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: 'rgba(0,212,106,0.1)',
+    backgroundColor: BRAND.primaryMuted,
     borderWidth: 1,
-    borderColor: 'rgba(0,212,106,0.3)',
+    borderColor: SURFACE.glassBorder,
     borderRadius: 14,
     padding: 12,
     marginBottom: 12,
@@ -4060,14 +4159,14 @@ const s = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 12,
-    backgroundColor: 'rgba(0,212,106,0.18)',
+    backgroundColor: 'rgba(34,225,128,0.18)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   firstRideBannerTitle: {
     fontSize: 13,
     fontWeight: '800',
-    color: '#00D46A',
+    color: BRAND.primary,
     marginBottom: 2,
   },
   firstRideBannerSub: {
@@ -4080,7 +4179,7 @@ const s = StyleSheet.create({
     position: 'absolute',
     top: 8,
     right: 8,
-    backgroundColor: '#00D46A',
+    backgroundColor: BRAND.primary,
     borderRadius: 8,
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -4088,7 +4187,7 @@ const s = StyleSheet.create({
   firstRideBadgeText: {
     fontSize: 10,
     fontWeight: '900',
-    color: '#0D1420',
+    color: BRAND.bgDeep,
   },
   routeSafetyCard: {
     backgroundColor: '#1E293B',
@@ -4175,8 +4274,9 @@ const s = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'transparent',
   },
-  payChipOn: { borderColor: COLORS.green, backgroundColor: 'rgba(0,212,106,0.12)' },
+  payChipOn: { borderColor: COLORS.green, backgroundColor: BRAND.primaryMuted },
   payChipText: { fontSize: 14, fontWeight: '800', color: COLORS.muted },
+  payChipSub: { fontSize: 10, fontWeight: '600', color: COLORS.dim, marginTop: 2 },
   payChipTextOn: { color: COLORS.white },
   payHint: { fontSize: 11, color: COLORS.dim, marginTop: 8, lineHeight: 15 },
   preferenceHint: { fontSize: 11, color: COLORS.dim, marginTop: 2, marginBottom: 10, lineHeight: 15 },

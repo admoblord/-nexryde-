@@ -1,5 +1,5 @@
 """
-Nexryde road-based fare model (premium vs Lagride).
+NEXRYDE road-based fare model (premium vs Lagride).
 
 Formula (before surge):
   Direct: (Base + Distance×PerKm) × Service × Location

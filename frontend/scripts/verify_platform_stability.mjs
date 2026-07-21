@@ -73,6 +73,11 @@ function checkFrontendInvariants() {
   ]) {
     expectNotIncludes(rel, 'pickup_code_required !== false', `${rel} does not default pickup code to required`);
   }
+  expectIncludes(
+    'frontend/src/components/driver/DriverArrivedPickupDock.tsx',
+    'pickupCodeRequired = false',
+    'Arrived dock defaults pickup code off',
+  );
 }
 
 function checkBackendInvariants() {
@@ -83,6 +88,21 @@ function checkBackendInvariants() {
   expectIncludes('backend/driver_presence.py', 'PRESENCE_TTL_SEC = 180', 'Redis driver presence survives short network gaps');
   expectIncludes('backend/routers/driver_control.py', 'heartbeat_interval_sec', 'Heartbeat response publishes cadence');
   expectIncludes('backend/routers/driver_control.py', 'set_driver_online', 'Heartbeat restores Redis presence from Mongo truth');
+  expectIncludes(
+    'backend/trip_ws_payload.py',
+    'pickup_code_required", False)',
+    'Realtime payload defaults pickup code off',
+  );
+  expectIncludes(
+    'backend/routers/users.py',
+    'pickup_code_enabled", False)',
+    'Preferences API defaults pickup code off',
+  );
+  expectIncludes(
+    'backend/routers/trips.py',
+    'pickup_code_enabled", False)',
+    'Trip booking treats pickup code as opt-in',
+  );
 }
 
 function checkPythonCompile() {

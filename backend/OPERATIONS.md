@@ -1,4 +1,4 @@
-# Nexryde core — operations quick reference
+# NEXRYDE core — operations quick reference
 
 ## One-click local checks
 

@@ -308,7 +308,7 @@ export default function SmartModeScreen() {
               <View style={styles.settingRowLeft}>
                 <Text style={styles.settingLabel}>Income predictability</Text>
                 <Text style={styles.settingDesc}>
-                  Set your monthly target and Nexryde boosts dispatch when you fall behind pace.
+                  Set your monthly target and NEXRYDE boosts dispatch when you fall behind pace.
                 </Text>
               </View>
               <Switch
@@ -336,7 +336,7 @@ export default function SmartModeScreen() {
               thumbTintColor={COLORS.accentPurple}
             />
             <Text style={styles.settingHint}>
-              Nexryde will use this target to shape monthly dispatch priority for you.
+              NEXRYDE will use this target to shape monthly dispatch priority for you.
             </Text>
 
             <View style={styles.salaryStatusRow}>

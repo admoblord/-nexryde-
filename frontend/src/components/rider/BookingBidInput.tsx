@@ -1,21 +1,23 @@
 /**
- * Bid control — slider on server min/max band with suggested marker (single modern pattern).
+ * Premium bid control — ± steppers + slider on server min/max band (Uber-class pattern).
  */
 import React, { useEffect, useRef, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, Platform, Animated } from 'react-native';
+import { View, Text, StyleSheet, Platform, Animated, TouchableOpacity, Pressable } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { bidAdjustStep } from '@/src/utils/bookingPriceBreakdown';
+import { BRAND, SURFACE } from '@/src/constants/designSystem';
 
 const C = {
-  lime: '#B8F11B',
-  white: '#FFFFFF',
-  muted: '#94A3B8',
-  dim: '#64748B',
-  green: '#00D46A',
-  border: 'rgba(148,163,184,0.22)',
+  lime: BRAND.primaryLight,
+  white: BRAND.textPrimary,
+  muted: BRAND.textSecondary,
+  dim: BRAND.textMuted,
+  green: BRAND.primary,
+  border: SURFACE.glassBorder,
   track: 'rgba(148,163,184,0.35)',
+  card: SURFACE.cardElevated,
 };
 
 type Props = {
@@ -85,6 +87,13 @@ export function BookingBidInput({ value, onChange, smartMin, smartMax, suggested
     if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
+  const nudge = (dir: -1 | 1) => {
+    const base = value > 0 ? value : suggested ?? floor;
+    const step = bidAdjustStep(base);
+    hapticLight();
+    apply(base + dir * step);
+  };
+
   const suggestedRatio =
     suggested != null && suggested >= floor && suggested <= cap && cap > floor
       ? (suggested - floor) / (cap - floor)
@@ -96,13 +105,35 @@ export function BookingBidInput({ value, onChange, smartMin, smartMax, suggested
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.label}>Your bid</Text>
+      <Text style={styles.label}>Your offer</Text>
 
-      <Animated.View style={[styles.priceRow, { transform: [{ scale: pulse }] }]}>
-        <Text style={styles.price} accessibilityLabel={`Your bid ₦${sliderValue.toLocaleString()}`}>
-          ₦{sliderValue.toLocaleString()}
-        </Text>
-      </Animated.View>
+      <View style={styles.stepperRow}>
+        <TouchableOpacity
+          style={styles.stepBtn}
+          onPress={() => nudge(-1)}
+          accessibilityLabel="Decrease bid"
+          accessibilityRole="button"
+          activeOpacity={0.85}
+        >
+          <Text style={styles.stepBtnText}>−</Text>
+        </TouchableOpacity>
+
+        <Animated.View style={[styles.priceRow, { transform: [{ scale: pulse }] }]}>
+          <Text style={styles.price} accessibilityLabel={`Your bid ₦${sliderValue.toLocaleString()}`}>
+            ₦{sliderValue.toLocaleString()}
+          </Text>
+        </Animated.View>
+
+        <TouchableOpacity
+          style={styles.stepBtn}
+          onPress={() => nudge(1)}
+          accessibilityLabel="Increase bid"
+          accessibilityRole="button"
+          activeOpacity={0.85}
+        >
+          <Text style={styles.stepBtnText}>+</Text>
+        </TouchableOpacity>
+      </View>
 
       <View style={styles.sliderLabels}>
         <Text style={styles.edge}>₦{floor.toLocaleString()}</Text>
@@ -137,17 +168,25 @@ export function BookingBidInput({ value, onChange, smartMin, smartMax, suggested
       </View>
 
       {suggested != null && suggested > 0 ? (
-        <View style={styles.suggestedRow}>
-          <Ionicons name="star" size={12} color={C.green} />
+        <Pressable
+          onPress={() => {
+            hapticLight();
+            apply(suggested);
+          }}
+          style={styles.suggestedRow}
+          accessibilityRole="button"
+          accessibilityLabel={`Apply suggested fare ₦${suggested.toLocaleString()}`}
+        >
+          <Ionicons name="sparkles" size={13} color={C.green} />
           <Text style={styles.suggestedTxt}>
-            Suggested ₦{suggested.toLocaleString()}
+            Tap for suggested ₦{suggested.toLocaleString()}
             {smartMin != null && smartMax != null
               ? ` · Drivers accept ₦${smartMin.toLocaleString()}–₦${smartMax.toLocaleString()}`
               : ''}
           </Text>
-        </View>
+        </Pressable>
       ) : (
-        <Text style={styles.dragCopy}>Slide to adjust your offer</Text>
+        <Text style={styles.dragCopy}>Adjust with +/− or slide your offer</Text>
       )}
     </View>
   );
@@ -157,27 +196,50 @@ const styles = StyleSheet.create({
   wrap: {
     gap: 8,
     marginBottom: 4,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: C.border,
-    backgroundColor: 'rgba(15,20,25,0.5)',
+    backgroundColor: 'rgba(18,28,46,0.72)',
   },
   label: {
     color: C.muted,
     fontSize: 11,
     fontWeight: '800',
-    letterSpacing: 0.8,
+    letterSpacing: 0.9,
     textTransform: 'uppercase',
     textAlign: 'center',
   },
-  priceRow: { alignItems: 'center', paddingVertical: 4 },
+  stepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 18,
+    paddingVertical: 2,
+  },
+  stepBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: C.card,
+    borderWidth: 1.5,
+    borderColor: 'rgba(34,225,128,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepBtnText: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: C.white,
+    marginTop: -2,
+  },
+  priceRow: { alignItems: 'center', minWidth: 140 },
   price: {
     color: C.lime,
-    fontSize: 40,
+    fontSize: 38,
     fontWeight: '900',
-    letterSpacing: -0.5,
+    letterSpacing: -0.6,
   },
   sliderLabels: {
     flexDirection: 'row',
@@ -204,6 +266,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     flexWrap: 'wrap',
+    paddingVertical: 4,
   },
   suggestedTxt: {
     color: C.dim,

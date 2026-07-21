@@ -1,4 +1,4 @@
-"""NexRyde Smart Pricing bounds + route preview helpers (server-side only)."""
+"""NEXRYDE Smart Pricing bounds + route preview helpers (server-side only)."""
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple

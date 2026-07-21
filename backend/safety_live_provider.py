@@ -9,7 +9,7 @@ Env:
   SAFETY_NEWSAPI_KEY or NEWSAPI_KEY   — https://newsapi.org (recommended)
   SAFETY_GNEWS_API_KEY or GNEWS_API_KEY — https://gnews.io (alternative)
   SAFETY_PROVIDER=newsapi|gnews       — default: newsapi if a NewsAPI key is set else gnews if key set
-  SAFETY_HTTP_USER_AGENT              — required style for Nominatim (default Nexryde bot string)
+  SAFETY_HTTP_USER_AGENT              — required style for Nominatim (default NEXRYDE bot string)
 """
 
 from __future__ import annotations

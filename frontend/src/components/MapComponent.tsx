@@ -169,7 +169,7 @@ const NativeMap: React.FC<MapComponentProps> = ({
         onMapReady={onMapReady}
         customMapStyle={NEXRYDE_MAP_STYLE}
       >
-        {/* Route polyline — layered Nexryde greens */}
+        {/* Route polyline — layered NEXRYDE greens */}
         {cleanRoute.length >= DIRECTIONS_ROUTE_MIN_POINTS ? (
           <>
             <Polyline

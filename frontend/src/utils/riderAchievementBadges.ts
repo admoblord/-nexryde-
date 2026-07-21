@@ -15,7 +15,7 @@ export const RIDER_BADGE_META: RiderAchievementBadgeMeta[] = [
     id: 'first_ride',
     icon: 'flag',
     title: 'First Ride',
-    description: 'You completed your first Nexryde trip.',
+    description: 'You completed your first NEXRYDE trip.',
     accent: '#22C55E',
   },
   {
@@ -130,19 +130,19 @@ export function buildAchievementWhatsAppMessage(
   const url = (opts.inviteUrl || '').trim();
   const inviteLine = url
     ? `Join with my invite link — we both earn ₦500 after your first ride:\n${url}`
-    : 'Download Nexryde for rides in Nigeria — smart matching & fair fares.';
+    : 'Download NEXRYDE for rides in Nigeria — smart matching & fair fares.';
 
   switch (badgeId) {
     case 'first_ride': {
       const first = (opts.displayName || '').trim().split(/\s+/)[0] || 'I';
-      return `${first} just completed their first Nexryde ride! 🚗\n\n${inviteLine}`;
+      return `${first} just completed their first NEXRYDE ride! 🚗\n\n${inviteLine}`;
     }
     case 'rides_100':
-      return `I just completed 100 rides on Nexryde! 🎉\n\n${inviteLine}`;
+      return `I just completed 100 rides on NEXRYDE! 🎉\n\n${inviteLine}`;
     case 'five_star_rider':
-      return `I'm a 5★ rider on Nexryde! ⭐\n\n${inviteLine}`;
+      return `I'm a 5★ rider on NEXRYDE! ⭐\n\n${inviteLine}`;
     default:
-      return `I'm riding with Nexryde! 🚗\n\n${inviteLine}`;
+      return `I'm riding with NEXRYDE! 🚗\n\n${inviteLine}`;
   }
 }
 

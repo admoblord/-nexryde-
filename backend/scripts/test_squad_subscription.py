@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NexRyde — Squad Subscription Payment Integration Test
+NEXRYDE — Squad Subscription Payment Integration Test
 Tests both City Rider and Road Warrior tiers end-to-end.
 Usage: python3 scripts/test_squad_subscription.py
 """
@@ -347,7 +347,7 @@ async def test_webhook_endpoint(client: httpx.AsyncClient):
 
 async def main():
     print(f"\n{BOLD}{'═'*60}{RESET}")
-    print(f"{BOLD}  NexRyde × Squad Subscription Payment Test{RESET}")
+    print(f"{BOLD}  NEXRYDE × Squad Subscription Payment Test{RESET}")
     print(f"{BOLD}  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{RESET}")
     print(f"{BOLD}  Backend: {BASE_URL}{RESET}")
     print(f"{BOLD}{'═'*60}{RESET}")

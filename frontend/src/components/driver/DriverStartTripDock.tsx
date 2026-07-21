@@ -107,9 +107,10 @@ export default function DriverStartTripDock({
 
       <View style={s.profileRow}>
         <TripProfileAvatar
-          size={56}
+          size={64}
           uri={riderPhoto}
-          borderColor="rgba(52,245,184,0.45)"
+          borderColor="#FFFFFF"
+          borderWidth={2.5}
           accessibilityLabel={`Photo of ${firstName(riderName)}`}
         />
         <View style={{ flex: 1, minWidth: 0 }}>
@@ -163,7 +164,7 @@ export default function DriverStartTripDock({
           <View style={[s.statIconWrap, s.statIconWrapMint]}>
             <Ionicons name="location-outline" size={17} color="#86EFAC" />
           </View>
-          <Text style={s.statLbl}>DISTANCE</Text>
+          <Text style={s.statLbl}>Distance</Text>
           <Text style={s.statVal} numberOfLines={1}>
             {distanceLabel}
           </Text>
@@ -172,7 +173,7 @@ export default function DriverStartTripDock({
           <View style={[s.statIconWrap, s.statIconWrapSky]}>
             <Ionicons name="time-outline" size={17} color="#7DD3FC" />
           </View>
-          <Text style={s.statLbl}>DURATION</Text>
+          <Text style={s.statLbl}>Duration</Text>
           <Text style={s.statVal} numberOfLines={1}>
             {durationLabel}
           </Text>
@@ -181,7 +182,7 @@ export default function DriverStartTripDock({
           <View style={[s.statIconWrap, s.statIconWrapFare]}>
             <Ionicons name="cash-outline" size={17} color="#4ADE80" />
           </View>
-          <Text style={s.statLbl}>EST. FARE</Text>
+          <Text style={s.statLbl}>Est. fare</Text>
           <Text style={[s.statVal, s.statValFare]} numberOfLines={1}>
             {fareLabel}
           </Text>
@@ -236,9 +237,9 @@ export default function DriverStartTripDock({
                 <Ionicons name="play" size={20} color="#022C22" />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.startTitle}>START TRIP</Text>
+                <Text style={s.startTitle}>Start trip</Text>
                 <Text style={s.startSub} numberOfLines={1}>
-                  Fare begins after you start
+                  Fare begins when you start
                 </Text>
               </View>
               <View style={s.startChevronCircle}>
@@ -264,7 +265,7 @@ export default function DriverStartTripDock({
           style={s.callInner}
         >
           <Ionicons name="call" size={20} color={riderPhone ? '#F8FAFC' : '#64748B'} />
-          <Text style={[s.callTxt, !riderPhone && s.callTxtOff]}>CALL RIDER</Text>
+          <Text style={[s.callTxt, !riderPhone && s.callTxtOff]}>Call rider</Text>
         </LinearGradient>
       </TouchableOpacity>
 
@@ -277,7 +278,7 @@ export default function DriverStartTripDock({
         accessibilityLabel="Cancel trip"
       >
         <Ionicons name="close-circle" size={20} color="#F87171" />
-        <Text style={s.cancelTxt}>CANCEL TRIP</Text>
+        <Text style={s.cancelTxt}>Cancel trip</Text>
       </TouchableOpacity>
     </View>
   );
@@ -414,10 +415,10 @@ const s = StyleSheet.create({
   statIconWrapSky: { backgroundColor: 'rgba(59,130,246,0.14)' },
   statIconWrapFare: { backgroundColor: 'rgba(52,245,184,0.16)' },
   statLbl: {
-    fontSize: 9,
-    fontWeight: '900',
+    fontSize: 10,
+    fontWeight: '700',
     color: '#64748B',
-    letterSpacing: 0.65,
+    letterSpacing: 0.15,
     marginBottom: 4,
   },
   statVal: { fontSize: 13, fontWeight: '800', color: '#F1F5F9' },
@@ -469,10 +470,10 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   startTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '900',
     color: '#022C22',
-    letterSpacing: 1.1,
+    letterSpacing: -0.2,
   },
   startSub: {
     marginTop: 2,
@@ -497,7 +498,7 @@ const s = StyleSheet.create({
     gap: 10,
     paddingVertical: 14,
   },
-  callTxt: { fontSize: 14, fontWeight: '900', color: '#F8FAFC', letterSpacing: 0.8 },
+  callTxt: { fontSize: 14, fontWeight: '800', color: '#F8FAFC', letterSpacing: 0.1 },
   callTxtOff: { color: '#64748B' },
   cancelBtn: {
     flexDirection: 'row',
@@ -510,5 +511,5 @@ const s = StyleSheet.create({
     borderColor: 'rgba(248,113,113,0.45)',
     backgroundColor: 'rgba(127,29,29,0.12)',
   },
-  cancelTxt: { fontSize: 13, fontWeight: '800', color: '#FCA5A5', letterSpacing: 0.6 },
+  cancelTxt: { fontSize: 13, fontWeight: '800', color: '#FCA5A5', letterSpacing: 0.1 },
 });

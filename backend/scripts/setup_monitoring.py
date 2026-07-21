@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NexRyde — Cloud Monitoring alert policies + uptime checks setup.
+NEXRYDE — Cloud Monitoring alert policies + uptime checks setup.
 
 Uses the Cloud Monitoring REST API directly (no gcloud alpha required).
 
@@ -70,7 +70,7 @@ def _get_or_create_email_channel() -> str:
             return name
     body = {
         "type": "email",
-        "displayName": "NexRyde Ops Alerts",
+        "displayName": "NEXRYDE Ops Alerts",
         "labels": {"email_address": ALERT_EMAIL},
         "enabled": True,
     }
@@ -102,7 +102,7 @@ def create_alert_policy(display_name: str, conditions: list, severity: str, chan
 
 def create_uptime_check() -> None:
     body = {
-        "displayName": "NexRyde Backend /api/health/ready",
+        "displayName": "NEXRYDE Backend /api/health/ready",
         "httpCheck": {
             "path": "/api/health/ready",
             "port": 443,
@@ -123,7 +123,7 @@ def create_uptime_check() -> None:
     resp = requests.get(
         f"{BASE}/uptimeCheckConfigs",
         headers=HEADERS,
-        params={"filter": f'displayName="NexRyde Backend /api/health/ready"'},
+        params={"filter": f'displayName="NEXRYDE Backend /api/health/ready"'},
         timeout=15,
     )
     if resp.status_code == 200 and resp.json().get("uptimeCheckConfigs"):
@@ -142,7 +142,7 @@ def main():
 
     # 1. High 5xx error rate
     create_alert_policy(
-        "NexRyde — High 5xx Error Rate",
+        "NEXRYDE — High 5xx Error Rate",
         [{
             "displayName": "Cloud Run 5xx > 1%",
             "conditionThreshold": {
@@ -170,7 +170,7 @@ def main():
 
     # 2. High latency
     create_alert_policy(
-        "NexRyde — High p95 Latency (> 3s)",
+        "NEXRYDE — High p95 Latency (> 3s)",
         [{
             "displayName": "Cloud Run p95 latency > 3s",
             "conditionThreshold": {
@@ -197,7 +197,7 @@ def main():
 
     # 3. Instance count spike
     create_alert_policy(
-        "NexRyde — Instance Count Spike (> 8)",
+        "NEXRYDE — Instance Count Spike (> 8)",
         [{
             "displayName": "Cloud Run active instances > 8",
             "conditionThreshold": {
@@ -224,7 +224,7 @@ def main():
 
     # 4. DB 503 spike
     create_alert_policy(
-        "NexRyde — Database Unavailable (503 spike)",
+        "NEXRYDE — Database Unavailable (503 spike)",
         [{
             "displayName": "Cloud Run 503 responses > 3 in 2min",
             "conditionThreshold": {

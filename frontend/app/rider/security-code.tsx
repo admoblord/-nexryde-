@@ -71,7 +71,7 @@ export default function PickUpCodeScreen() {
   const [codeRevealed, setCodeRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
   const [pickupAddress, setPickupAddress] = useState('');
-  const [pickupCodeRequired, setPickupCodeRequired] = useState(true);
+  const [pickupCodeRequired, setPickupCodeRequired] = useState(false);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;

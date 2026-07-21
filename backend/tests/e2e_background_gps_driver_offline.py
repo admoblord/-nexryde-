@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NexRyde Background GPS + Driver Offline Mid-Trip Test
+NEXRYDE Background GPS + Driver Offline Mid-Trip Test
 =======================================================
 Simulates what happens when:
   A) The driver sends location updates during a trip (background GPS path)

@@ -177,7 +177,7 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "start": "07:00",
         "end": "10:00",
         "preferred_minute": 20,
-        "title": "Good morning. Book your ride with NexRyde.",
+        "title": "Good morning. Book your ride with NEXRYDE.",
         "body": "Avoid morning traffic. Request a ride now.",
         "action": "open_booking",
         "delivery_window": "morning",
@@ -191,7 +191,7 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "end": "15:00",
         "preferred_minute": 20,
         "title": "Going out for lunch?",
-        "body": "Book a NexRyde in seconds.",
+        "body": "Book a NEXRYDE in seconds.",
         "action": "open_booking",
         "delivery_window": "afternoon",
     },
@@ -217,7 +217,7 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "end": "21:00",
         "preferred_minute": 10,
         "title": "Weekend plans?",
-        "body": "Travel comfortably with NexRyde.",
+        "body": "Travel comfortably with NEXRYDE.",
         "action": "open_booking",
         "delivery_window": "weekend",
     },
@@ -229,7 +229,7 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "start": "11:00",
         "end": "19:00",
         "preferred_minute": 25,
-        "title": "We miss you on NexRyde",
+        "title": "We miss you on NEXRYDE",
         "body": "Reliable rides are available near {area}. Book when you are ready.",
         "action": "open_booking",
         "delivery_window": "offpeak",
@@ -242,7 +242,7 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "start": "10:00",
         "end": "18:00",
         "preferred_minute": 5,
-        "title": "Complete your first NexRyde",
+        "title": "Complete your first NEXRYDE",
         "body": "Your first ride is a few taps away from {area}.",
         "action": "open_booking",
         "delivery_window": "offpeak",
@@ -270,7 +270,7 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "preferred_minute": 40,
         "requires_weather": True,
         "title": "Rainy day rides in {city}",
-        "body": "If the weather turns, book a comfortable NexRyde from {area}.",
+        "body": "If the weather turns, book a comfortable NEXRYDE from {area}.",
         "action": "open_booking",
         "delivery_window": "weather",
     },
@@ -283,8 +283,8 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "end": "18:00",
         "preferred_minute": 50,
         "requires_promo": True,
-        "title": "NexRyde offer near {area}",
-        "body": "Open NexRyde to check available ride offers in {city}.",
+        "title": "NEXRYDE offer near {area}",
+        "body": "Open NEXRYDE to check available ride offers in {city}.",
         "action": "open_booking",
         "delivery_window": "promo",
     },
@@ -325,7 +325,7 @@ COPY_VARIANTS: dict[str, list[dict[str, str]]] = {
         {"title": "Good morning", "body": "Morning rush has started in {area}. Go online and start earning."},
         {"title": "Riders are requesting trips", "body": "Riders are already requesting trips near {area}."},
         {"title": "Your work zone is becoming busy", "body": "Go online now."},
-        {"title": "Start your day with NexRyde", "body": "Catch early commuters near {area}."},
+        {"title": "Start your day with NEXRYDE", "body": "Catch early commuters near {area}."},
     ],
     "driver_midday_reminder": [
         {"title": "Lunch hour demand", "body": "Lunch hour demand is increasing near {area}."},
@@ -348,7 +348,7 @@ COPY_VARIANTS: dict[str, list[dict[str, str]]] = {
     "driver_offline_reminder": [
         {"title": "Go online reminder", "body": "Turn on driver mode when you are available near {area}."},
         {"title": "Riders may be waiting", "body": "Go online to start receiving trip requests in {city}."},
-        {"title": "Ready to earn?", "body": "Open NexRyde Driver and start earning today."},
+        {"title": "Ready to earn?", "body": "Open NEXRYDE Driver and start earning today."},
     ],
     "peak_demand_reminder": [
         {"title": "Peak demand near {area}", "body": "This is one of today's busiest earning periods."},
@@ -374,53 +374,53 @@ COPY_VARIANTS: dict[str, list[dict[str, str]]] = {
         {"title": "Demand is increasing in {demand_area}", "body": "The backend is seeing active pickup requests near that area."},
     ],
     "rider_morning_commute": [
-        {"title": "Good morning", "body": "Book your ride with NexRyde."},
+        {"title": "Good morning", "body": "Book your ride with NEXRYDE."},
         {"title": "Avoid morning traffic", "body": "Request a ride now."},
         {"title": "Your driver is nearby", "body": "Your driver is only a few taps away."},
         {"title": "Morning commute", "body": "Book a comfortable ride from {area}."},
     ],
     "rider_afternoon_ride": [
-        {"title": "Going out for lunch?", "body": "Book a NexRyde in seconds."},
+        {"title": "Going out for lunch?", "body": "Book a NEXRYDE in seconds."},
         {"title": "Need to move around today?", "body": "Reliable rides are available nearby."},
-        {"title": "Afternoon ride", "body": "Ride comfortably this afternoon with NexRyde."},
-        {"title": "Lunchtime trip?", "body": "Open NexRyde and request a driver near {area}."},
+        {"title": "Afternoon ride", "body": "Ride comfortably this afternoon with NEXRYDE."},
+        {"title": "Lunchtime trip?", "body": "Open NEXRYDE and request a driver near {area}."},
     ],
     "rider_evening_ride": [
         {"title": "Heading home?", "body": "Book your ride now."},
-        {"title": "Beat the evening rush", "body": "Beat the evening rush with NexRyde."},
+        {"title": "Beat the evening rush", "body": "Beat the evening rush with NEXRYDE."},
         {"title": "Safe evening rides", "body": "Safe evening rides are waiting."},
         {"title": "Evening movement", "body": "Request a ride home from {area}."},
     ],
     "rider_weekend_travel": [
-        {"title": "Weekend plans?", "body": "Travel comfortably with NexRyde."},
+        {"title": "Weekend plans?", "body": "Travel comfortably with NEXRYDE."},
         {"title": "Going out tonight?", "body": "Book a safe ride now."},
         {"title": "Weekend travel", "body": "Request a ride for outings, visits, or errands."},
-        {"title": "Move around {city}", "body": "Book a reliable NexRyde in seconds."},
+        {"title": "Move around {city}", "body": "Book a reliable NEXRYDE in seconds."},
     ],
     "rider_inactive_reminder": [
-        {"title": "We miss you on NexRyde", "body": "Reliable rides are available near {area}."},
+        {"title": "We miss you on NEXRYDE", "body": "Reliable rides are available near {area}."},
         {"title": "Ready when you are", "body": "Book a comfortable ride across {city}."},
-        {"title": "It has been a while", "body": "Open NexRyde and book your next ride."},
+        {"title": "It has been a while", "body": "Open NEXRYDE and book your next ride."},
     ],
     "complete_first_ride": [
-        {"title": "Complete your first NexRyde", "body": "Your first ride is a few taps away."},
-        {"title": "Start with NexRyde", "body": "Book from {area} and ride comfortably."},
+        {"title": "Complete your first NEXRYDE", "body": "Your first ride is a few taps away."},
+        {"title": "Start with NEXRYDE", "body": "Book from {area} and ride comfortably."},
     ],
     "saved_places_reminder": [
         {"title": "Saved places make booking faster", "body": "Add Home and Work for one-tap rides."},
         {"title": "Save your frequent places", "body": "Book faster from {area} next time."},
     ],
     "rider_weather_ready": [
-        {"title": "Rainy day rides in {city}", "body": "If the weather turns, book a comfortable NexRyde from {area}."},
-        {"title": "Do not get caught in the rain", "body": "NexRyde is ready when the weather changes."},
+        {"title": "Rainy day rides in {city}", "body": "If the weather turns, book a comfortable NEXRYDE from {area}."},
+        {"title": "Do not get caught in the rain", "body": "NEXRYDE is ready when the weather changes."},
         {"title": "Weather may slow movement", "body": "Book ahead and travel comfortably."},
-        {"title": "Rain-ready rides near {area}", "body": "Open NexRyde when you need a dry, reliable trip."},
+        {"title": "Rain-ready rides near {area}", "body": "Open NEXRYDE when you need a dry, reliable trip."},
     ],
     "rider_promo": [
-        {"title": "NexRyde offer near {area}", "body": "Open NexRyde to check available ride offers in {city}."},
-        {"title": "It has been a while", "body": "Open NexRyde and book your next ride."},
-        {"title": "Your next trip is one tap away", "body": "Come back and ride with NexRyde."},
-        {"title": "Trusted rides are ready", "body": "Open NexRyde when you need to move around {city}."},
+        {"title": "NEXRYDE offer near {area}", "body": "Open NEXRYDE to check available ride offers in {city}."},
+        {"title": "It has been a while", "body": "Open NEXRYDE and book your next ride."},
+        {"title": "Your next trip is one tap away", "body": "Come back and ride with NEXRYDE."},
+        {"title": "Trusted rides are ready", "body": "Open NEXRYDE when you need to move around {city}."},
     ],
     "rider_driver_availability": [
         {"title": "More drivers are online near {area}", "body": "{online_drivers_near} drivers are currently available nearby."},
@@ -440,7 +440,7 @@ COPY_VARIANTS: dict[str, list[dict[str, str]]] = {
 def _normalize_variant(rule_id: str, idx: int, raw: dict[str, Any]) -> dict[str, str]:
     return {
         "id": str(raw.get("id") or f"{rule_id}_v{idx + 1}"),
-        "title": str(raw.get("title") or "NexRyde"),
+        "title": str(raw.get("title") or "NEXRYDE"),
         "body": str(raw.get("body") or ""),
     }
 
@@ -461,7 +461,7 @@ def _variants_for_rule(rule: dict[str, Any]) -> list[dict[str, str]]:
         _normalize_variant(
             rule_id,
             0,
-            {"title": str(rule.get("title") or "NexRyde"), "body": str(rule.get("body") or "")},
+            {"title": str(rule.get("title") or "NEXRYDE"), "body": str(rule.get("body") or "")},
         )
     ]
 
@@ -550,7 +550,7 @@ def _priority_actions(rule: dict[str, Any], role: str) -> list[dict[str, str]]:
         return [{"id": "go_online", "title": "Go Online", "route": "/(driver-tabs)/driver-home"}]
     if action == "open_booking" or role == "rider":
         return [{"id": "book_ride", "title": "Book Ride", "route": "/rider/book"}]
-    return [{"id": "open_app", "title": "Open NexRyde", "route": "/"}]
+    return [{"id": "open_app", "title": "Open NEXRYDE", "route": "/"}]
 
 
 def _is_quiet_hour(local_now: datetime) -> bool:
@@ -1134,7 +1134,7 @@ async def _send_rule_to_user(user: dict[str, Any], rule: dict[str, Any], local_n
     delivery_window = str(rule.get("delivery_window") or slot_id)
     log_id = f"{user_id}:{meta['day']}:{slot_id}"
     selected_copy = await _copy_for_rule(user_id, rule, meta)
-    title = _format_copy(str(selected_copy.get("title") or "NexRyde"), meta)
+    title = _format_copy(str(selected_copy.get("title") or "NEXRYDE"), meta)
     body = _format_copy(str(selected_copy.get("body") or ""), meta)
     try:
         await db.engagement_notification_log.insert_one(

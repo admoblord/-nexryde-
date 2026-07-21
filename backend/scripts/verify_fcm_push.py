@@ -39,7 +39,7 @@ async def main() -> int:
         "fcm-smoke-test",
         token,
         "fcm",
-        "NexRyde FCM test",
+        "NEXRYDE FCM test",
         "Firebase Cloud Messaging is configured correctly.",
         {
             "type": "admin_broadcast",

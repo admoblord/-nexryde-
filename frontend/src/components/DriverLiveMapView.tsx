@@ -1,5 +1,5 @@
 /**
- * DriverLiveMapView — Nexryde 2030 Driver Map Experience
+ * DriverLiveMapView — NEXRYDE 2030 Driver Map Experience
  *
  * Full-screen Google Maps live view for drivers when online.
  * Features:
@@ -64,6 +64,7 @@ import DriverArrivedPickupDock from '@/src/components/driver/DriverArrivedPickup
 import DriverStartTripDock from '@/src/components/driver/DriverStartTripDock';
 import DriverOngoingTripDock from '@/src/components/driver/DriverOngoingTripDock';
 import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
+import { resolveRiderPhotoUri } from '@/src/utils/tripProfilePhotos';
 import { DRIVER_OFFER_COUNTDOWN_SECONDS } from '@/src/constants/driverOffer';
 import {
   DOCK_BLUR_INTENSITY,
@@ -255,7 +256,7 @@ function serializeMapsNativePayload(error: { nativeEvent?: unknown } | null | un
   }
 }
 
-/* ─────────────────────── Dark "Nexryde Night" map style ───────────────────────── */
+/* ─────────────────────── Dark "NEXRYDE Night" map style ───────────────────────── */
 /** Canonical night map — shared with rider booking/tracking (2026 edition). */
 export const NEXRYDE_MAP_STYLE: MapStyleElement[] = SHARED_NEXRYDE_MAP_STYLE as MapStyleElement[];
 
@@ -320,10 +321,15 @@ interface Props {
   /** Opens app messages (enforcement, announcements). Defaults to driver notifications tab. */
   onInboxPress?: () => void;
   onWorkZone?: () => void;
+  /** Driver's own portrait for map header (Uber-style always-visible face). */
+  profileImageUri?: string | null;
+  onProfilePress?: () => void;
   /** True while the online/offline toggle is processing */
   toggling?: boolean;
   /** Verification / subscription status for offline banner */
   driverApproved?: boolean;
+  /** No cached/server status yet — show Checking, not Pending. */
+  verificationChecking?: boolean;
   trialReady?: boolean;
 
   /** Open Google Maps / in-app nav to current leg (pickup vs dropoff by status). */
@@ -498,8 +504,11 @@ function DriverLiveMapViewInner({
   onShieldPress,
   onInboxPress,
   onWorkZone,
+  profileImageUri = null,
+  onProfilePress,
   toggling = false,
   driverApproved = true,
+  verificationChecking = false,
   trialReady = true,
   embeddedOfferTrip = null,
   embeddedOfferCountdown = 0,
@@ -1799,6 +1808,7 @@ function DriverLiveMapViewInner({
     distToStepM: navRemainingToStepEndM,
     stepIndex: navStepIndex,
     tripStatus: tripStatusStr,
+    pickupCodeRequired,
   });
 
   /* Traveled path breadcrumb (Uber/Bolt-style trail behind the car). */
@@ -2499,6 +2509,15 @@ function DriverLiveMapViewInner({
           inboxUnread={
             showOnlineIdleChrome || hasEmbeddedOffer ? mapInboxUnread : 0
           }
+          profileImageUri={
+            profileImageUri ||
+            (typeof user?.profile_image === 'string' ? user.profile_image : null)
+          }
+          onProfilePress={
+            onProfilePress ||
+            (() => router.push('/(driver-tabs)/driver-profile' as never))
+          }
+          showOnlineDot={isOnline && !isReconnecting}
         />
       </View>
 
@@ -2720,7 +2739,7 @@ function DriverLiveMapViewInner({
         <View style={[styles.mapOnlineBadge, { top: insets.top + 52 + 56, left: flow.padH }]} pointerEvents="none">
           <View style={[styles.mapOnlineDot, isReconnecting && { backgroundColor: '#FBBF24' }]} />
           <Text style={styles.mapOnlineText}>
-            {isReconnecting ? 'RECONNECTING' : 'ONLINE'}
+            {isReconnecting ? 'Reconnecting' : 'Online'}
           </Text>
         </View>
       ) : null}
@@ -2880,11 +2899,6 @@ function DriverLiveMapViewInner({
           >
             <Ionicons name="locate" size={20} color={BRAND.primary} />
           </TouchableOpacity>
-          <View style={styles.zoomStackLeft}>
-            <ZoomButton icon="add" onPress={handleZoomIn} />
-            <View style={zoomStyles.divider} />
-            <ZoomButton icon="remove" onPress={handleZoomOut} />
-          </View>
         </View>
       ) : (
         <>
@@ -2941,7 +2955,7 @@ function DriverLiveMapViewInner({
           {String(activeTrip.status) === 'accepted' && onTripOpenNavigation ? (
               <DriverNavigatePickupDock
                 riderName={activeTrip.rider_name || 'Rider'}
-                riderPhoto={activeTrip.rider_profile_image || activeTrip.rider_photo ? String(activeTrip.rider_profile_image || activeTrip.rider_photo) : null}
+                riderPhoto={resolveRiderPhotoUri(activeTrip as unknown as Record<string, unknown>)}
                 ratingAvg={activeTrip.rider_reputation_avg ?? null}
                 ratingTrips={activeTrip.rider_trip_count ?? null}
                 isNewRider={!!activeTrip.rider_new_account}
@@ -3006,7 +3020,7 @@ function DriverLiveMapViewInner({
                   : undefined
               }
               riderName={activeTrip.rider_name || 'Rider'}
-              riderPhoto={activeTrip.rider_profile_image || activeTrip.rider_photo ? String(activeTrip.rider_profile_image || activeTrip.rider_photo) : null}
+              riderPhoto={resolveRiderPhotoUri(activeTrip as unknown as Record<string, unknown>)}
               ratingAvg={activeTrip.rider_reputation_avg ?? null}
               ratingTrips={activeTrip.rider_trip_count ?? null}
               isNewRider={!!activeTrip.rider_new_account}
@@ -3084,7 +3098,7 @@ function DriverLiveMapViewInner({
             startTripDockExpanded ? (
               <DriverStartTripDock
                 riderName={activeTrip.rider_name || 'Rider'}
-                riderPhoto={activeTrip.rider_profile_image || activeTrip.rider_photo ? String(activeTrip.rider_profile_image || activeTrip.rider_photo) : null}
+                riderPhoto={resolveRiderPhotoUri(activeTrip as unknown as Record<string, unknown>)}
                 ratingAvg={activeTrip.rider_reputation_avg ?? null}
                 ratingTrips={activeTrip.rider_trip_count ?? null}
                 isNewRider={!!activeTrip.rider_new_account}
@@ -3154,7 +3168,7 @@ function DriverLiveMapViewInner({
                 tripShortId={`Trip ${formatTripShortId(activeTrip.id)}`}
                 paymentMethodLabel={formatPaymentLabel(activeTrip.payment_method)}
                 riderName={activeTrip.rider_name || 'Rider'}
-                riderPhoto={activeTrip.rider_profile_image || activeTrip.rider_photo ? String(activeTrip.rider_profile_image || activeTrip.rider_photo) : null}
+                riderPhoto={resolveRiderPhotoUri(activeTrip as unknown as Record<string, unknown>)}
                 ratingAvg={activeTrip.rider_reputation_avg ?? null}
                 ratingTrips={activeTrip.rider_trip_count ?? null}
                 isNewRider={!!activeTrip.rider_new_account}
@@ -3296,11 +3310,11 @@ function DriverLiveMapViewInner({
             />
             <View style={styles.tripDockTopRow}>
               <TripProfileAvatar
-                size={48}
-                uri={activeTrip.rider_profile_image ? String(activeTrip.rider_profile_image) : null}
+                size={56}
                 person={activeTrip as unknown as Record<string, unknown>}
                 role="rider"
-                borderColor="rgba(96,165,250,0.45)"
+                borderColor="#FFFFFF"
+                borderWidth={2.5}
                 accessibilityLabel={`Photo of ${activeTrip.rider_name || 'rider'}`}
               />
               <View style={{ flex: 1, minWidth: 0 }}>
@@ -3662,7 +3676,7 @@ function DriverLiveMapViewInner({
               <View style={styles.oiHeroRow}>
                 <View style={styles.oiOnlinePill}>
                   <View style={styles.oiOnlineDot} />
-                  <Text style={styles.oiOnlineTxt}>ONLINE</Text>
+                  <Text style={styles.oiOnlineTxt}>Online</Text>
                 </View>
                 <TouchableOpacity
                   style={styles.oiEarnCenter}
@@ -3674,7 +3688,7 @@ function DriverLiveMapViewInner({
                 >
                   <View style={styles.oiTodayLabelRow}>
                     <Ionicons name="wallet-outline" size={12} color={BRAND.primary} />
-                    <Text style={styles.oiTodayLabel}>TODAY</Text>
+                    <Text style={styles.oiTodayLabel}>Today</Text>
                     <Ionicons name="chevron-forward" size={11} color={BRAND.textMuted} />
                   </View>
                   <View style={styles.oiEarnAmountRow}>
@@ -3754,7 +3768,7 @@ function DriverLiveMapViewInner({
       ) : null}
 
       {/* ══════════════════════════════════════════════════════════════
-          OFFLINE BOTTOM BAR  —  Large GO button, Nexryde green
+          OFFLINE BOTTOM BAR  —  Large GO button, NEXRYDE green
           ══════════════════════════════════════════════════════════════ */}
       {!isOnline && (
         <>
@@ -3773,7 +3787,12 @@ function DriverLiveMapViewInner({
             </TouchableOpacity>
 
             {/* Centre: GO button */}
-            {!driverApproved ? (
+            {verificationChecking ? (
+              <TouchableOpacity style={styles.goPendingBtn} onPress={onFeatureHub} activeOpacity={0.88}>
+                <ActivityIndicator size="small" color="#93C5FD" />
+                <Text style={[styles.goPendingText, { color: '#93C5FD' }]}>Checking…</Text>
+              </TouchableOpacity>
+            ) : !driverApproved ? (
               <TouchableOpacity style={styles.goPendingBtn} onPress={onFeatureHub} activeOpacity={0.88}>
                 <Ionicons name="time-outline" size={22} color="#FBBF24" />
                 <Text style={styles.goPendingText}>Pending</Text>
@@ -3850,7 +3869,7 @@ function DriverLiveMapViewInner({
               <Ionicons name="options-outline" size={20} color="#94A3B8" />
             </TouchableOpacity>
             <Text style={styles.offlineStripText}>
-              {toggling ? 'CONNECTING…' : "YOU'RE OFFLINE"}
+              {toggling ? 'Connecting…' : 'Offline'}
             </Text>
             <TouchableOpacity
               onPress={onFeatureHub}
@@ -4329,10 +4348,10 @@ const styles = StyleSheet.create({
     backgroundColor: BRAND.primary,
   },
   oiOnlineTxt: {
-    fontSize: 11,
-    fontWeight: '900',
+    fontSize: 12,
+    fontWeight: '800',
     color: BRAND.primary,
-    letterSpacing: 0.9,
+    letterSpacing: 0.15,
   },
   oiEarnCenter: {
     flex: 1,
@@ -4393,10 +4412,10 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   oiTodayLabel: {
-    fontSize: 10,
-    fontWeight: '800',
+    fontSize: 11,
+    fontWeight: '700',
     color: BRAND.primary,
-    letterSpacing: 1.1,
+    letterSpacing: 0.15,
   },
   oiEarnAmountRow: {
     flexDirection: 'row',
@@ -6711,10 +6730,10 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(34,229,160,0.12)',
   },
   offlineStripText: {
-    fontSize: 11,
-    fontWeight: '900',
+    fontSize: 13,
+    fontWeight: '700',
     color: '#94A3B8',
-    letterSpacing: 2.2,
+    letterSpacing: 0.1,
   },
   offlineStripLeft: { padding: 8 },
   offlineStripRight: { padding: 8 },

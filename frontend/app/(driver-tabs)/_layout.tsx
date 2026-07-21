@@ -59,6 +59,34 @@ export default function DriverTabLayout() {
     void warmTokenCache();
   }, []);
 
+  // Warm durable verification fact into memory + display store before Home mounts.
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { readDriverBootCache } = await import('@/src/services/driverBootCache');
+        const { useDriverDisplayStore } = await import('@/src/store/driverDisplayStore');
+        const snap = await readDriverBootCache(userId);
+        if (cancelled || !snap?.verificationStatus) return;
+        useDriverDisplayStore.getState().setDriverDisplay({
+          driverId: userId,
+          verificationStatus: snap.verificationStatus,
+          subscriptionStatus: snap.subscriptionStatus,
+          trialTripsCompleted: snap.trialTripsCompleted,
+          trialTripsTarget: snap.trialTripsTarget,
+          trialExtended: snap.trialExtended,
+          displayHydrated: true,
+        });
+      } catch {
+        /* non-fatal */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
   const tabScreenOptions = useMemo(
     () =>
       buildTabScreenOptions({

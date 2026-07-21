@@ -1,19 +1,21 @@
 /**
- * Uber-grade driver dashboard boot — RENDER FIRST, enrich in background.
+ * Bolt/Uber-grade driver boot — DISPLAY from local fact, AUTHORIZE at go-online.
  *
- * 1. Open dashboard gate immediately (cache or safe defaults).
- * 2. All network calls run in background with 5s timeouts.
- * 3. Never block UI on subscription / onboarding fetch.
- * 4. 8s global watchdog only if gate somehow still closed.
+ * Once approved locally, the dashboard never blocks on "Checking your account".
+ * Background sync may silently apply hard downgrades (suspended/rejected).
+ * Go-online still awaits server confirmation at tap time.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BACKEND_URL, getDriverSubscriptionStatus } from '@/src/services/api';
 import { authedFetch } from '@/src/utils/sessionRefresh';
 import {
+  peekDriverBootCache,
   readDriverBootCache,
   writeDriverBootCache,
   type DriverBootSnapshot,
 } from '@/src/services/driverBootCache';
+import { writeDriverVerificationFact } from '@/src/services/driverVerificationFact';
+import { useDriverDisplayStore } from '@/src/store/driverDisplayStore';
 import {
   STARTUP_GLOBAL_WATCHDOG_MS,
   STARTUP_REQUEST_TIMEOUT_MS,
@@ -48,6 +50,8 @@ export type DriverBootState = {
   isGateOpen: boolean;
   isRefreshing: boolean;
   fromCache: boolean;
+  /** True once onboarding-status (or equivalent) has answered for this session. */
+  verificationConfirmedByServer: boolean;
   error: string | null;
   retrying: boolean;
   verificationStatus: string | null;
@@ -63,17 +67,9 @@ export type DriverBootState = {
   lockedPendingApproval: boolean;
   retry: () => void;
   refresh: () => void;
+  /** Await background onboarding refresh (for go-online gate). Returns latest status. */
+  refreshAndWait: (timeoutMs?: number) => Promise<{ ok: boolean; verificationStatus: string | null }>;
   continueOffline: () => void;
-};
-
-/** Conservative defaults — never invent "approved" (that caused Activate CTA vs profile Pending). */
-const DEFAULT_SNAPSHOT: Omit<DriverBootSnapshot, 'driverId' | 'savedAt'> = {
-  verificationStatus: 'pending_review',
-  subscriptionStatus: 'none',
-  trialTripsCompleted: 0,
-  trialTripsTarget: 15,
-  trialExtended: false,
-  onboardingCompleted: true,
 };
 
 /** Canonical verification: driver_profiles.verification_status (via onboarding-status). */
@@ -83,33 +79,25 @@ function resolveVerificationStatus(
 ): string {
   const v = typeof raw === 'string' ? raw.trim() : '';
   if (v) return v;
-  // Missing field: pending until server confirms — do not assume approved.
   if (opts.locked || !opts.completed) return 'pending_review';
   return 'pending_review';
 }
 
-function applySnapshot(
-  snap: Pick<
-    DriverBootSnapshot,
-    | 'verificationStatus'
-    | 'subscriptionStatus'
-    | 'trialTripsCompleted'
-    | 'trialTripsTarget'
-    | 'trialExtended'
-  >,
-  setters: {
-    setVerificationStatus: (v: string) => void;
-    setSubscriptionStatus: (v: string) => void;
-    setTrialTripsCompleted: (n: number) => void;
-    setTrialTripsTarget: (n: number) => void;
-    setTrialExtended: (b: boolean) => void;
+function syncDisplayStore(
+  driverId: string,
+  snap: {
+    verificationStatus?: string | null;
+    subscriptionStatus?: string | null;
+    trialTripsCompleted?: number;
+    trialTripsTarget?: number;
+    trialExtended?: boolean;
+    displayHydrated?: boolean;
   },
 ) {
-  setters.setVerificationStatus(snap.verificationStatus);
-  setters.setSubscriptionStatus(snap.subscriptionStatus);
-  setters.setTrialTripsCompleted(snap.trialTripsCompleted);
-  setters.setTrialTripsTarget(snap.trialTripsTarget);
-  setters.setTrialExtended(snap.trialExtended);
+  useDriverDisplayStore.getState().setDriverDisplay({
+    driverId,
+    ...snap,
+  });
 }
 
 export function useDriverBoot({
@@ -117,16 +105,22 @@ export function useDriverBoot({
   enabled = true,
   onRedirect,
 }: UseDriverBootArgs): DriverBootState {
-  const [isGateOpen, setIsGateOpen] = useState(false);
+  const peeked = driverId ? peekDriverBootCache(driverId) : null;
+  const [isGateOpen, setIsGateOpen] = useState(Boolean(peeked));
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [fromCache, setFromCache] = useState(false);
+  const [fromCache, setFromCache] = useState(Boolean(peeked));
+  const [verificationConfirmedByServer, setVerificationConfirmedByServer] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
-  const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
-  const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
-  const [trialTripsCompleted, setTrialTripsCompleted] = useState(0);
-  const [trialTripsTarget, setTrialTripsTarget] = useState(15);
-  const [trialExtended, setTrialExtended] = useState(false);
+  const [verificationStatus, setVerificationStatus] = useState<string | null>(
+    peeked?.verificationStatus ?? null,
+  );
+  const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(
+    peeked?.subscriptionStatus ?? null,
+  );
+  const [trialTripsCompleted, setTrialTripsCompleted] = useState(peeked?.trialTripsCompleted ?? 0);
+  const [trialTripsTarget, setTrialTripsTarget] = useState(peeked?.trialTripsTarget ?? 15);
+  const [trialExtended, setTrialExtended] = useState(peeked?.trialExtended ?? false);
   const [trialDaysRemaining, setTrialDaysRemaining] = useState<number | null>(null);
   const [trialDayLimit, setTrialDayLimit] = useState<number | null>(14);
   const [trialEmphasis, setTrialEmphasis] = useState<'trips' | 'days'>('trips');
@@ -135,29 +129,71 @@ export function useDriverBoot({
   const [lockedPendingApproval, setLockedPendingApproval] = useState(false);
 
   const runIdRef = useRef(0);
-  const gateOpenRef = useRef(false);
+  const gateOpenRef = useRef(Boolean(peeked));
   const onRedirectRef = useRef(onRedirect);
   onRedirectRef.current = onRedirect;
+  const verificationStatusRef = useRef<string | null>(verificationStatus);
+  const subscriptionStatusRef = useRef<string | null>(subscriptionStatus);
+  const trialTripsCompletedRef = useRef(trialTripsCompleted);
+  const trialTripsTargetRef = useRef(trialTripsTarget);
+  const trialExtendedRef = useRef(trialExtended);
+  const serverConfirmedRef = useRef(false);
+  const refreshWaitersRef = useRef<Array<(ok: boolean) => void>>([]);
 
-  const openGate = useCallback((cached: boolean) => {
+  verificationStatusRef.current = verificationStatus;
+  subscriptionStatusRef.current = subscriptionStatus;
+  trialTripsCompletedRef.current = trialTripsCompleted;
+  trialTripsTargetRef.current = trialTripsTarget;
+  trialExtendedRef.current = trialExtended;
+  serverConfirmedRef.current = verificationConfirmedByServer;
+
+  const resolveRefreshWaiters = useCallback((ok: boolean) => {
+    const waiters = refreshWaitersRef.current;
+    refreshWaitersRef.current = [];
+    waiters.forEach((w) => w(ok));
+  }, []);
+
+  const applyLocalSnapshot = useCallback(
+    (snap: DriverBootSnapshot, cached: boolean) => {
+      setVerificationStatus(snap.verificationStatus);
+      setSubscriptionStatus(snap.subscriptionStatus);
+      setTrialTripsCompleted(snap.trialTripsCompleted);
+      setTrialTripsTarget(snap.trialTripsTarget);
+      setTrialExtended(snap.trialExtended);
+      if (driverId) {
+        syncDisplayStore(driverId, {
+          verificationStatus: snap.verificationStatus,
+          subscriptionStatus: snap.subscriptionStatus,
+          trialTripsCompleted: snap.trialTripsCompleted,
+          trialTripsTarget: snap.trialTripsTarget,
+          trialExtended: snap.trialExtended,
+          displayHydrated: true,
+        });
+      }
+      if (!gateOpenRef.current) {
+        gateOpenRef.current = true;
+        setIsGateOpen(true);
+        setFromCache(cached);
+        setError(null);
+        startupLog('RENDER_COMPLETE', { fromCache: cached, verificationStatus: snap.verificationStatus });
+      } else {
+        setFromCache(cached);
+      }
+    },
+    [driverId],
+  );
+
+  const openGateWithDefaults = useCallback(() => {
     if (gateOpenRef.current) return;
     gateOpenRef.current = true;
     setIsGateOpen(true);
-    setFromCache(cached);
+    setFromCache(false);
     setError(null);
-    startupLog('RENDER_COMPLETE', { fromCache: cached });
-  }, []);
-
-  const openGateWithDefaults = useCallback(() => {
-    applySnapshot(DEFAULT_SNAPSHOT, {
-      setVerificationStatus,
-      setSubscriptionStatus,
-      setTrialTripsCompleted,
-      setTrialTripsTarget,
-      setTrialExtended,
-    });
-    openGate(false);
-  }, [openGate]);
+    if (driverId) {
+      syncDisplayStore(driverId, { displayHydrated: true });
+    }
+    startupLog('RENDER_COMPLETE', { fromCache: false, verificationStatus: null });
+  }, [driverId]);
 
   const loadSubscriptionBackground = useCallback(async (locked: boolean, runId: number) => {
     startupLog('SUBSCRIPTION_VERIFY_START');
@@ -177,7 +213,11 @@ export function useDriverBoot({
     const tripsTarget = sub.trial_trips_target ?? 15;
     const extended = sub.trial_extended ?? false;
     const daysRemaining =
-      sub.trial_days_remaining != null ? Number(sub.trial_days_remaining) : sub.days_remaining != null ? Number(sub.days_remaining) : null;
+      sub.trial_days_remaining != null
+        ? Number(sub.trial_days_remaining)
+        : sub.days_remaining != null
+          ? Number(sub.days_remaining)
+          : null;
     const dayLimit = sub.trial_day_limit != null ? Number(sub.trial_day_limit) : null;
     const emphasis = sub.trial_emphasis === 'days' ? 'days' : 'trips';
     if (!locked) setSubscriptionStatus(status);
@@ -191,17 +231,23 @@ export function useDriverBoot({
     setEarlySubscribeMessage(String(sub.early_subscribe_message ?? ''));
     startupLog('SUBSCRIPTION_VERIFY_END', { status });
 
-    // Persist the freshly-verified subscription so the next cold start shows the
-    // correct state instantly (e.g. an active trial never flashes "Activate to Drive").
-    // Merge with existing cache so we never clobber the verification status.
     if (driverId) {
+      syncDisplayStore(driverId, {
+        subscriptionStatus: status,
+        trialTripsCompleted: tripsCompleted,
+        trialTripsTarget: tripsTarget,
+        trialExtended: extended,
+      });
       void (async () => {
         try {
           const prev = await readDriverBootCache(driverId);
+          const keepVerification =
+            verificationStatusRef.current === 'approved' || prev?.verificationStatus === 'approved'
+              ? 'approved'
+              : prev?.verificationStatus || verificationStatusRef.current || 'pending_review';
           await writeDriverBootCache({
             driverId,
-            // Never invent approved from subscription fetch — onboarding owns verification.
-            verificationStatus: prev?.verificationStatus || 'pending_review',
+            verificationStatus: keepVerification,
             subscriptionStatus: status,
             trialTripsCompleted: tripsCompleted,
             trialTripsTarget: tripsTarget,
@@ -217,7 +263,10 @@ export function useDriverBoot({
 
   const fetchOnboardingBackground = useCallback(
     async (runId: number) => {
-      if (!driverId) return;
+      if (!driverId) {
+        resolveRefreshWaiters(false);
+        return;
+      }
       startupLog('PROFILE_FETCH_START', { source: 'useDriverBoot_background' });
 
       const response = await timedStartupRequestOrNull(
@@ -242,6 +291,8 @@ export function useDriverBoot({
           source: 'useDriverBoot_background',
           status: response?.status,
         });
+        // Keep local approved display — do not fall back to Checking.
+        resolveRefreshWaiters(false);
         return;
       }
 
@@ -262,35 +313,51 @@ export function useDriverBoot({
         locked,
       });
 
+      setVerificationConfirmedByServer(true);
+      serverConfirmedRef.current = true;
+
+      const wasLocallyApproved = verificationStatusRef.current === 'approved';
+      // Server answered — update display (including rare downgrades). Never blocked the UI waiting.
+      setVerificationStatus(vStatus);
+      syncDisplayStore(driverId, { verificationStatus: vStatus });
+      await writeDriverVerificationFact(driverId, vStatus);
+
       if (!completed) {
-        setVerificationStatus(vStatus);
         const pendingReviewOnDashboard =
           step === 'documents_review' || step === 'dashboard_limited';
         if (pendingReviewOnDashboard) {
           setLockedPendingApproval(true);
           setSubscriptionStatus('locked_until_approval');
-        } else {
+          syncDisplayStore(driverId, { subscriptionStatus: 'locked_until_approval' });
+        } else if (!wasLocallyApproved) {
+          // Don't yank a known-approved driver into onboarding mid-session on a flaky payload.
           onRedirectRef.current?.({ step, status });
         }
+        resolveRefreshWaiters(true);
         return;
       }
 
-      setVerificationStatus(vStatus);
-      if (locked) setSubscriptionStatus('locked_until_approval');
+      if (locked) {
+        setSubscriptionStatus('locked_until_approval');
+        syncDisplayStore(driverId, { subscriptionStatus: 'locked_until_approval' });
+      }
 
       void loadSubscriptionBackground(locked, runId);
 
       await writeDriverBootCache({
         driverId,
         verificationStatus: vStatus,
-        subscriptionStatus: locked ? 'locked_until_approval' : subscriptionStatus || 'none',
-        trialTripsCompleted,
-        trialTripsTarget,
-        trialExtended,
+        subscriptionStatus: locked
+          ? 'locked_until_approval'
+          : subscriptionStatusRef.current || 'none',
+        trialTripsCompleted: trialTripsCompletedRef.current,
+        trialTripsTarget: trialTripsTargetRef.current,
+        trialExtended: trialExtendedRef.current,
         onboardingCompleted: true,
       });
+      resolveRefreshWaiters(true);
     },
-    [driverId, loadSubscriptionBackground, subscriptionStatus, trialExtended, trialTripsCompleted, trialTripsTarget],
+    [driverId, loadSubscriptionBackground, resolveRefreshWaiters],
   );
 
   const runBoot = useCallback(
@@ -299,8 +366,11 @@ export function useDriverBoot({
       setIsRefreshing(true);
       if (isRetry) setRetrying(true);
       setError(null);
+      // Do NOT clear display verification — only entitlement confirmation resets.
+      setVerificationConfirmedByServer(false);
+      serverConfirmedRef.current = false;
 
-      startupLog('APP_START', { driverId, retry: isRetry, mode: 'render_first' });
+      startupLog('APP_START', { driverId, retry: isRetry, mode: 'local_fact_first' });
 
       if (!driverId || !enabled) {
         openGateWithDefaults();
@@ -309,33 +379,51 @@ export function useDriverBoot({
         return;
       }
 
+      // Sync first paint from memory/fact (no await).
+      const peekedSnap = peekDriverBootCache(driverId);
+      if (peekedSnap?.verificationStatus) {
+        applyLocalSnapshot(peekedSnap, true);
+      }
+
       const cached = await readDriverBootCache(driverId);
       if (runId !== runIdRef.current) return;
 
-      if (cached?.onboardingCompleted) {
-        applySnapshot(cached, {
-          setVerificationStatus,
-          setSubscriptionStatus,
-          setTrialTripsCompleted,
-          setTrialTripsTarget,
-          setTrialExtended,
-        });
-        openGate(true);
-      } else {
+      if (cached?.verificationStatus) {
+        // Approved (or any known status) paints instantly — do not require onboardingCompleted.
+        applyLocalSnapshot(cached, true);
+      } else if (!gateOpenRef.current) {
+        // No cache: leave verificationStatus null → brief "Checking your account…"
         openGateWithDefaults();
+        // Cap Checking UI — never spin for minutes on weak Nigerian networks.
+        setTimeout(() => {
+          if (runId !== runIdRef.current) return;
+          if (verificationStatusRef.current == null) {
+            startupLog('CHECKING_TIMEOUT', { afterMs: 8000 });
+            setError('Still confirming your account. Pull to retry, or check your connection.');
+          }
+        }, 8000);
       }
 
       setIsRefreshing(false);
       setRetrying(false);
 
-      // Onboarding owns verification + locked gate; subscription loads from there
-      // (or Activate). Avoid racing unlocked subscription before verification resolves.
+      // Silent background reconfirm — never blocks dashboard for known-approved.
       void fetchOnboardingBackground(runId);
     },
-    [driverId, enabled, fetchOnboardingBackground, openGate, openGateWithDefaults],
+    [driverId, enabled, fetchOnboardingBackground, applyLocalSnapshot, openGateWithDefaults],
   );
 
   useEffect(() => {
+    if (driverId && peeked?.verificationStatus) {
+      syncDisplayStore(driverId, {
+        verificationStatus: peeked.verificationStatus,
+        subscriptionStatus: peeked.subscriptionStatus,
+        trialTripsCompleted: peeked.trialTripsCompleted,
+        trialTripsTarget: peeked.trialTripsTarget,
+        trialExtended: peeked.trialExtended,
+        displayHydrated: true,
+      });
+    }
     void runBoot(false);
 
     const watchdog = setTimeout(() => {
@@ -349,18 +437,45 @@ export function useDriverBoot({
     return () => {
       runIdRef.current += 1;
       clearTimeout(watchdog);
+      resolveRefreshWaiters(false);
     };
-  }, [driverId, enabled, runBoot, openGateWithDefaults]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- boot once per driver/enabled
+  }, [driverId, enabled]);
 
   const retry = useCallback(() => {
-    gateOpenRef.current = false;
-    setIsGateOpen(false);
+    // Keep local approved visible while retrying network.
     void runBoot(true);
   }, [runBoot]);
 
   const refresh = useCallback(() => {
     void fetchOnboardingBackground(++runIdRef.current);
   }, [fetchOnboardingBackground]);
+
+  const refreshAndWait = useCallback(
+    async (timeoutMs = 6000): Promise<{ ok: boolean; verificationStatus: string | null }> => {
+      if (serverConfirmedRef.current) {
+        return { ok: true, verificationStatus: verificationStatusRef.current };
+      }
+      return new Promise((resolve) => {
+        const finish = (ok: boolean) => {
+          resolve({
+            ok: ok || serverConfirmedRef.current,
+            verificationStatus: verificationStatusRef.current,
+          });
+        };
+        const timer = setTimeout(() => {
+          resolveRefreshWaiters(false);
+          finish(serverConfirmedRef.current);
+        }, timeoutMs);
+        refreshWaitersRef.current.push((ok) => {
+          clearTimeout(timer);
+          finish(ok);
+        });
+        void fetchOnboardingBackground(++runIdRef.current);
+      });
+    },
+    [fetchOnboardingBackground, resolveRefreshWaiters],
+  );
 
   const continueOffline = useCallback(() => {
     openGateWithDefaults();
@@ -371,6 +486,7 @@ export function useDriverBoot({
     isGateOpen,
     isRefreshing,
     fromCache,
+    verificationConfirmedByServer,
     error,
     retrying,
     verificationStatus,
@@ -386,6 +502,7 @@ export function useDriverBoot({
     lockedPendingApproval,
     retry,
     refresh,
+    refreshAndWait,
     continueOffline,
   };
 }

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { MarkerAnimated, AnimatedRegion } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { PERFECT_TRACKING } from '@/src/components/tracking/trackingMapTokens';
 import { bearingDeg, isValidMapCoord } from '@/src/components/tracking/map/mapUtils';
 import {
@@ -28,7 +29,13 @@ type Props = {
 const DEFAULT_MOVE_MS = 4000;
 const ANDROID = Platform.OS === 'android';
 
-/** Yellow taxi + green direction arrow — glides and rotates like Bolt. */
+/** Shortest-path heading lerp (degrees) for smooth turns. */
+function lerpHeading(from: number, to: number, t: number): number {
+  let delta = ((((to - from) % 360) + 540) % 360) - 180;
+  return (from + delta * t + 360) % 360;
+}
+
+/** Premium taxi marker — glides + rotates with Uber/Bolt-class motion. */
 export function DriverCarMarker({
   lat,
   lng,
@@ -44,6 +51,7 @@ export function DriverCarMarker({
   const [displayHeading, setDisplayHeading] = useState(0);
   const propSeqRef = useRef(0);
   const mountedRef = useRef(false);
+  const headingAnimRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
 
   useEffect(() => {
     if (mountedRef.current) return;
@@ -69,18 +77,17 @@ export function DriverCarMarker({
   }, [lat, lng]);
 
   useEffect(() => {
-    if (ANDROID) return;
     const glowLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(glowAnim, {
           toValue: 1,
-          duration: 1000,
+          duration: 1100,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
         Animated.timing(glowAnim, {
           toValue: 0,
-          duration: 1000,
+          duration: 1100,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
@@ -88,8 +95,8 @@ export function DriverCarMarker({
     );
     const brightLoop = Animated.loop(
       Animated.sequence([
-        Animated.timing(carBright, { toValue: 1.12, duration: 1000, useNativeDriver: true }),
-        Animated.timing(carBright, { toValue: 1, duration: 1000, useNativeDriver: true }),
+        Animated.timing(carBright, { toValue: 1.08, duration: 1100, useNativeDriver: true }),
+        Animated.timing(carBright, { toValue: 1, duration: 1100, useNativeDriver: true }),
       ]),
     );
     glowLoop.start();
@@ -123,6 +130,8 @@ export function DriverCarMarker({
     } else if (prev) {
       nextHeading = bearingDeg(prev.lat, prev.lng, lat, lng);
     }
+
+    const fromHeading = lastHeadingRef.current;
     lastHeadingRef.current = nextHeading;
     lastCoord.current = { lat, lng };
 
@@ -130,8 +139,21 @@ export function DriverCarMarker({
       prev == null
         ? DRIVER_STATIONARY_THRESHOLD * 2
         : Math.abs(prev.lat - lat) + Math.abs(prev.lng - lng);
+
     if (dist > DRIVER_STATIONARY_THRESHOLD) {
-      setDisplayHeading(nextHeading);
+      // Smooth heading over ~280ms instead of snapping.
+      if (headingAnimRef.current) cancelAnimationFrame(headingAnimRef.current);
+      const start = Date.now();
+      const dur = 280;
+      const step = () => {
+        const t = Math.min(1, (Date.now() - start) / dur);
+        const eased = 1 - (1 - t) * (1 - t);
+        setDisplayHeading(lerpHeading(fromHeading, nextHeading, eased));
+        if (t < 1) {
+          headingAnimRef.current = requestAnimationFrame(step);
+        }
+      };
+      headingAnimRef.current = requestAnimationFrame(step);
       trackVerifyRotation(nextHeading, true, movedM);
     } else {
       trackVerifyRotation(nextHeading, false, movedM);
@@ -153,43 +175,49 @@ export function DriverCarMarker({
       .start();
   }, [lat, lng, heading, animatedCoord, moveDurationMs]);
 
+  useEffect(
+    () => () => {
+      if (headingAnimRef.current) cancelAnimationFrame(headingAnimRef.current);
+    },
+    [],
+  );
+
   if (!isValidMapCoord(lat, lng)) return null;
 
-  const rotatorInner = (
-    <>
-      <View style={styles.arrowSlot}>
-        <Ionicons name="navigate" size={18} color={PERFECT_TRACKING.green} />
-      </View>
-      {ANDROID ? (
-        <View style={styles.taxiBox}>
-          <Ionicons name="car-sport" size={21} color="#111827" />
-        </View>
-      ) : (
-        <Animated.View style={[styles.taxiBox, { transform: [{ scale: carBright }] }]}>
-          <Ionicons name="car-sport" size={21} color="#111827" />
-        </Animated.View>
-      )}
-    </>
+  const taxiBody = (
+    <Animated.View style={[styles.taxiBox, { transform: [{ scale: carBright }] }]}>
+      <LinearGradient
+        colors={['#FDE047', '#EAB308', '#CA8A04']}
+        start={{ x: 0.2, y: 0 }}
+        end={{ x: 0.8, y: 1 }}
+        style={styles.taxiGrad}
+      >
+        <Ionicons name="car-sport" size={20} color="#111827" />
+      </LinearGradient>
+    </Animated.View>
   );
 
   const markerBody = (
     <View style={styles.wrap} pointerEvents="none">
-      {ANDROID ? (
-        <View style={[styles.halo, styles.haloStatic]} />
-      ) : (
-        <Animated.View
-          style={[
-            styles.halo,
-            {
-              opacity: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.28, 0.55] }),
-              transform: [
-                { scale: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.35] }) },
-              ],
-            },
-          ]}
-        />
-      )}
-      <View style={styles.rotator}>{rotatorInner}</View>
+      <Animated.View
+        style={[
+          styles.halo,
+          {
+            opacity: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.32, 0.62] }),
+            transform: [
+              { scale: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.4] }) },
+            ],
+          },
+        ]}
+      />
+      <View style={styles.rotator}>
+        {moving ? (
+          <View style={styles.arrowSlot}>
+            <Ionicons name="navigate" size={16} color={PERFECT_TRACKING.green} />
+          </View>
+        ) : null}
+        {taxiBody}
+      </View>
     </View>
   );
 
@@ -209,39 +237,45 @@ export function DriverCarMarker({
 
 const styles = StyleSheet.create({
   wrap: {
-    width: 52,
-    height: 52,
+    width: 56,
+    height: 56,
     alignItems: 'center',
     justifyContent: 'center',
   },
   halo: {
     position: 'absolute',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: PERFECT_TRACKING.yellow,
   },
-  haloStatic: { opacity: 0.5 },
   rotator: {
     alignItems: 'center',
     justifyContent: 'center',
   },
   arrowSlot: {
-    marginBottom: 2,
-    width: 24,
-    height: 22,
+    marginBottom: 1,
+    width: 22,
+    height: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
   taxiBox: {
-    width: 30,
-    height: 30,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 2.5,
+    borderColor: '#FFFFFF',
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  taxiGrad: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 8,
-    backgroundColor: PERFECT_TRACKING.yellow,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-    elevation: 10,
   },
 });

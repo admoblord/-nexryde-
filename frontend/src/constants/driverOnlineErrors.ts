@@ -27,7 +27,7 @@ const CODE_MESSAGES: Record<DriverOnlineErrorCode, string> = {
   ERR_LOCATION: 'Allow location access so riders can see you nearby.',
   ERR_NOTIFICATIONS: 'Allow notifications so you never miss a ride request.',
   ERR_BATTERY_OPTIMIZATION:
-    'Turn off battery optimization for NexRyde so listening for rides stays reliable.',
+    'Turn off battery optimization for NEXRYDE so listening for rides stays reliable.',
   ERR_NO_VEHICLE: 'Register a vehicle in Driver Profile before going online.',
   ERR_NO_ACTIVE_PLAN: 'Start your free trial or subscribe to receive trips.',
   ERR_AUTH: 'Your session expired. Sign in again, then go online.',

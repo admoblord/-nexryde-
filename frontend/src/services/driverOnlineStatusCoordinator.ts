@@ -1,5 +1,5 @@
 /**
- * Uber-style online/offline coordinator helpers for NexRyde.
+ * Uber-style online/offline coordinator helpers for NEXRYDE.
  *
  * Extends the existing driverSessionStore + PUT /api/drivers/{id}/online —
  * does NOT introduce a second DriverStatusContext or /api/v1 surface.
@@ -51,7 +51,7 @@ export function buildOnlineToggleUrl(baseUrl: string, q: OnlineToggleQuery): str
   return `${baseUrl.replace(/\/$/, '')}/api/drivers/${encodeURIComponent(q.driverId)}/online?${qs}`;
 }
 
-/** Map proposal labels → existing NexRyde session phases (documentation + tests). */
+/** Map proposal labels → existing NEXRYDE session phases (documentation + tests). */
 export const PROPOSAL_TO_NEXRYDE_STATE = {
   OFFLINE: 'offline',
   TRANSITIONING_ONLINE: 'connecting',

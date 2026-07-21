@@ -351,7 +351,7 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
       followRef.current = true;
       try {
         mapRef.current.fitToCoordinates(fitCoords, {
-          edgePadding: { top: 120, right: 56, bottom: 220, left: 56 },
+          edgePadding: { top: 130, right: 48, bottom: 260, left: 48 },
           animated: true,
         });
       } catch {
@@ -382,15 +382,16 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
         mapRef.current.animateCamera(
           {
             center: {
-              latitude: driver.lat * 0.72 + frame.latitude * 0.28,
-              longitude: driver.lng * 0.72 + frame.longitude * 0.28,
+              // Bias slightly behind the car so the road ahead reads clearly (Uber-style).
+              latitude: driver.lat * 0.78 + frame.latitude * 0.22,
+              longitude: driver.lng * 0.78 + frame.longitude * 0.22,
             },
-            zoom: Math.max(frame.zoom, MAP_3D.riderZoom - 1),
+            zoom: Math.max(frame.zoom, MAP_3D.riderZoom - 0.6),
             heading: driverHeading || 0,
             pitch: MAP_3D.riderPitch,
-            altitude: MAP_3D.tripAltitude + 120,
+            altitude: MAP_3D.tripAltitude + 80,
           },
-          { duration: 520 },
+          { duration: 680 },
         );
         const targetLabel = isOngoing ? 'dropoff' : 'pickup';
         trackVerifyCamera(

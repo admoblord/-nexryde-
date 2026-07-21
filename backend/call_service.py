@@ -1,5 +1,5 @@
 """
-NexRyde Call/Communication System with Privacy Protection
+NEXRYDE Call/Communication System with Privacy Protection
 Implements masked calls and secure communication
 """
 

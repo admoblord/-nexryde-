@@ -68,7 +68,7 @@ export default function ActiveTripBar() {
         const targetLabel = user?.role === 'driver' ? 'Rider' : 'Driver';
         Alert.alert(
           `Call ${targetLabel}`,
-          'Nexryde secure call via masked relay number.\nYour real number is hidden.',
+          'NEXRYDE secure call via masked relay number.\nYour real number is hidden.',
           [
             {
               text: 'Call via Phone',

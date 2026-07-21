@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
   Platform,
   Alert,
@@ -28,7 +27,7 @@ import {
   DRIVER_CANCEL_TRIP_ALERT,
   formatPickupWaitPeek,
 } from '@/src/components/driver/driverDockUtils';
-import { resolvePublicMediaUri } from '@/src/utils/resolvePublicMediaUri';
+import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 
 const GREEN = '#22C55E';
 const RED = '#EF4444';
@@ -129,7 +128,7 @@ function TripRouteTimeline({
         <View style={s.timelineBody}>
           <View style={s.timelineStop}>
             <View style={s.timelineStopHead}>
-              <Text style={s.addrLabel}>PICKUP</Text>
+              <Text style={s.addrLabel}>Pickup</Text>
               {onNavPickup ? (
                 <TouchableOpacity
                   style={[s.navMini, disabled && s.navMiniOff]}
@@ -152,7 +151,7 @@ function TripRouteTimeline({
           </View>
           <View style={[s.timelineStop, { marginTop: 16 }]}>
             <View style={s.timelineStopHead}>
-              <Text style={s.addrLabel}>DESTINATION</Text>
+              <Text style={s.addrLabel}>Drop-off</Text>
               {onNavDest ? (
                 <TouchableOpacity
                   style={[s.navMini, disabled && s.navMiniOff]}
@@ -212,7 +211,7 @@ export default function DriverArrivedPickupDock({
   routeDistanceLabel,
   routeDurationLabel,
   tripActionBusy,
-  pickupCodeRequired = true,
+  pickupCodeRequired = false,
   riderPhone,
   canMessage,
   onVerifyPickupCode,
@@ -226,10 +225,9 @@ export default function DriverArrivedPickupDock({
   onCancelTrip,
 }: DriverArrivedPickupDockProps) {
   const { height: winH } = useWindowDimensions();
-  const initial = driverFirstName(riderName).charAt(0).toUpperCase() || 'R';
   const waitLabel = formatPickupWaitPeek(waitingSec);
   const expandedMaxH = Math.round(winH * 0.52);
-  const resolvedPhoto = resolvePublicMediaUri(riderPhoto);
+  const resolvedPhoto = riderPhoto;
   const expandAnim = useRef(new Animated.Value(expanded ? 1 : 0)).current;
   const bodyMaxH = Math.max(0, expandedMaxH);
 
@@ -289,9 +287,11 @@ export default function DriverArrivedPickupDock({
           <View style={s.peekLeft}>
             <PulsingDot />
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={s.peekStatus}>AT PICKUP</Text>
+              <Text style={s.peekStatus}>At pickup</Text>
               {!expanded ? (
-                <Text style={s.peekHint} numberOfLines={1}>{driverFirstName(riderName)} is waiting</Text>
+                <Text style={s.peekHint} numberOfLines={1}>
+                  {driverFirstName(riderName)} is waiting
+                </Text>
               ) : null}
             </View>
           </View>
@@ -330,13 +330,13 @@ export default function DriverArrivedPickupDock({
           />
 
           <View style={s.riderCard}>
-            {resolvedPhoto ? (
-              <Image source={{ uri: resolvedPhoto }} style={s.avatar} />
-            ) : (
-              <LinearGradient colors={['#3B82F6', '#1D4ED8']} style={s.avatarPh}>
-                <Text style={s.avatarPhTxt}>{initial}</Text>
-              </LinearGradient>
-            )}
+            <TripProfileAvatar
+              size={64}
+              uri={resolvedPhoto}
+              borderColor="#FFFFFF"
+              borderWidth={2.5}
+              accessibilityLabel={`Photo of ${driverFirstName(riderName)}`}
+            />
             <View style={s.riderMeta}>
               <Text style={s.riderName} numberOfLines={1}>
                 {driverFirstName(riderName)}
@@ -352,10 +352,10 @@ export default function DriverArrivedPickupDock({
                   </Text>
                 </View>
               ) : isNewRider ? (
-                <Text style={s.riderHint}>New to NEXRYDE</Text>
+                <Text style={s.riderHint}>New rider</Text>
               ) : (
                 <Text style={s.riderHint}>
-                  {pickupCodeRequired ? 'Ask for their 4-digit code' : 'Confirm rider identity'}
+                  {pickupCodeRequired ? 'Ask for their 4-digit code' : 'Confirm it’s your rider'}
                 </Text>
               )}
             </View>
@@ -388,12 +388,12 @@ export default function DriverArrivedPickupDock({
                   </View>
                   <View style={s.verifyTextCol}>
                     <Text style={s.verifyTitle}>
-                      {pickupCodeRequired ? 'Verify code & start' : 'Start trip now'}
+                      {pickupCodeRequired ? 'Verify code & start' : 'Start trip'}
                     </Text>
                     <Text style={s.verifySub}>
                       {pickupCodeRequired
-                        ? 'Enter the 4-digit code from rider\'s app'
-                        : 'Begin metered ride to destination'}
+                        ? 'Enter the 4-digit code from their app'
+                        : 'Fare starts when you begin the trip'}
                     </Text>
                   </View>
                   <View style={s.verifyArrow}>
@@ -444,7 +444,7 @@ export default function DriverArrivedPickupDock({
             <Ionicons name="shield-checkmark" size={18} color={GREEN} />
             <Text style={s.safetyTxt}>
               <Text style={s.safetyStrong}>Safety: </Text>
-              Match name and photo before starting the trip
+              Match name and photo before you start
             </Text>
             <Ionicons name="chevron-forward" size={16} color={MUTED} />
           </TouchableOpacity>
@@ -470,7 +470,7 @@ export default function DriverArrivedPickupDock({
               <Ionicons name="person-remove-outline" size={18} color="#FBBF24" />
               <View style={{ flex: 1 }}>
                 <Text style={s.noShowTitle}>Rider no-show</Text>
-                <Text style={s.noShowSub}>Free wait ended · cancel with reason</Text>
+                <Text style={s.noShowSub}>Free wait ended · cancel as no-show</Text>
               </View>
               <Ionicons name="chevron-forward" size={16} color={MUTED} />
             </TouchableOpacity>
@@ -572,10 +572,10 @@ const s = StyleSheet.create({
     backgroundColor: GREEN,
   },
   peekStatus: {
-    fontSize: 12,
-    fontWeight: '900',
+    fontSize: 13,
+    fontWeight: '800',
     color: GREEN,
-    letterSpacing: 1.3,
+    letterSpacing: 0.2,
   },
   peekHint: {
     marginTop: 2,
@@ -721,10 +721,10 @@ const s = StyleSheet.create({
     opacity: 0.4,
   },
   addrLabel: {
-    fontSize: 10,
-    fontWeight: '800',
+    fontSize: 11,
+    fontWeight: '700',
     color: MUTED,
-    letterSpacing: 1,
+    letterSpacing: 0.2,
   },
   addrMain: {
     fontSize: 15,

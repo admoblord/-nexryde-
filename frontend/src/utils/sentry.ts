@@ -1,5 +1,5 @@
 /**
- * Central Sentry wiring for the NexRyde app (single binary, rider + driver roles).
+ * Central Sentry wiring for the NEXRYDE app (single binary, rider + driver roles).
  *
  * - initSentry() is called once at the very top of app/_layout.tsx (module load),
  *   before the root component mounts, so native + JS crashes are captured early.

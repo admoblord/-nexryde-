@@ -1,5 +1,5 @@
 """
-NexRyde Trial Abuse Prevention System
+NEXRYDE Trial Abuse Prevention System
 Prevents drivers from creating multiple trial accounts
 """
 

@@ -1,5 +1,5 @@
 /**
- * Pick-up code verification — driver enters the 4-digit code from the rider's Nexryde app.
+ * Pick-up code verification — driver enters the 4-digit code from the rider's NEXRYDE app.
  * On success → trip is marked verified; driver returns to the live map Start dock (Navigate + Start).
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -51,6 +51,27 @@ export default function VerifyRiderCodeScreen() {
     // Auto-focus first input
     setTimeout(() => inputRefs.current[0]?.focus(), 350);
   }, []);
+
+  // Pickup code is optional — leave if this trip does not require it.
+  useEffect(() => {
+    if (!trip_id || !canCallAuthedApi) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const tripRes = await getTrip(String(trip_id));
+        const trip = tripRes.data as Trip | undefined;
+        if (cancelled || !trip) return;
+        if (trip.pickup_code_required !== true) {
+          router.replace('/(driver-tabs)/driver-home');
+        }
+      } catch {
+        /* stay on screen; submit will surface errors */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [trip_id, canCallAuthedApi, router]);
 
   const shake = () => {
     Vibration.vibrate(200);
@@ -158,7 +179,7 @@ export default function VerifyRiderCodeScreen() {
           <View style={styles.headerCenter}>
             <View style={styles.headerPill}>
               <Ionicons name="shield-checkmark" size={12} color="#86EFAC" />
-              <Text style={styles.headerPillTxt}>SECURE START</Text>
+              <Text style={styles.headerPillTxt}>Secure start</Text>
             </View>
           </View>
           <View style={{ width: 44 }} />
@@ -193,8 +214,8 @@ export default function VerifyRiderCodeScreen() {
 
               <View style={styles.flowCard}>
                 <Text style={styles.subtitle}>
-                  Ask your rider to open Nexryde — they will see a 4-digit code. Enter it to confirm identity, then
-                  return to the map to start the trip when everyone is ready.
+                  Ask your rider to open NEXRYDE and share their 4-digit code. Enter it to confirm it’s them, then
+                  return to the map to start when you’re both ready.
                 </Text>
 
                 <Animated.View style={[styles.pinRow, { transform: [{ translateX: shakeAnim }] }]}>

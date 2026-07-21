@@ -40,6 +40,9 @@ const REQUIRED_PROGUARD_KEEPS = [
   'com.nexryde.app.**',
   'com.reactnativeandroidwidget.**',
   'com.rnmaps.maps.**',
+  // Driver offline MapView uses Navigation SDK maps (play-services-maps excluded).
+  'com.google.android.libraries.navigation.**',
+  'com.google.android.react.navsdk.**',
   'io.sentry.**',
   'expo.modules.taskManager.**',
 ];

@@ -11,7 +11,7 @@ export const COLORS = {
   primaryLight: '#1E293B',      // Lighter navy
   primarySoft: 'rgba(15, 23, 42, 0.08)',
   
-  // Accent Green — canonical NexRyde green (see designSystem.BRAND.primary)
+  // Accent Green — canonical NEXRYDE green (see designSystem.BRAND.primary)
   accentGreen: '#22E180',
   accentGreenLight: '#4ADE80',  // Bright lime green
   accentGreenDark: '#16A34A',   // Darker green

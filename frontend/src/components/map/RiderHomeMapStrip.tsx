@@ -35,7 +35,7 @@ type Props = {
   onPress: () => void;
 };
 
-export function RiderHomeMapStrip({ height = 220, onPress }: Props) {
+export function RiderHomeMapStrip({ height = 260, onPress }: Props) {
   const mapRef = useRef<MapView>(null);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [locating, setLocating] = useState(true);
@@ -52,7 +52,7 @@ export function RiderHomeMapStrip({ height = 220, onPress }: Props) {
           pitch: MAP_3D.homePitch,
           heading: 0,
           zoom: MAP_3D.homeZoom,
-          altitude: 1100,
+          altitude: 900,
         },
         { duration: 480 },
       );
@@ -279,7 +279,7 @@ export function RiderHomeMapStrip({ height = 220, onPress }: Props) {
       >
         <View style={styles.footerLeft}>
           <Ionicons name="navigate" size={14} color={BRAND.primary} />
-          <Text style={styles.footerTitle}>Book from the map</Text>
+          <Text style={styles.footerTitle}>Explore live · book here</Text>
         </View>
         <View style={styles.footerCta}>
           <Text style={styles.footerCtaTxt}>Go</Text>

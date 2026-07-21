@@ -19,7 +19,7 @@ def test_trip_fare_amount_priority():
 
 def test_is_wallet_payment_method():
     assert is_wallet_payment_method("wallet") is True
-    assert is_wallet_payment_method("NexRyde_Wallet") is True
+    assert is_wallet_payment_method("NEXRYDE_Wallet") is True
     assert is_wallet_payment_method("balance") is True
     assert is_wallet_payment_method("cash") is False
     assert is_wallet_payment_method(None) is False

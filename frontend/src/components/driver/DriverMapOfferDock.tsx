@@ -230,11 +230,12 @@ function DriverMapOfferDock({
       {/* ── Top row: rider info + countdown ───────────────────────── */}
       <View style={s.topRow}>
         <TripProfileAvatar
-          size={48}
+          size={56}
           uri={riderPhoto ? String(riderPhoto) : null}
-          person={trip as Record<string, unknown>}
+          person={trip as unknown as Record<string, unknown>}
           role="rider"
-          borderColor={`${G}60`}
+          borderColor="#FFFFFF"
+          borderWidth={2}
           accessibilityLabel={`Photo of ${riderName}`}
         />
         <View style={s.riderInfo}>
@@ -305,7 +306,7 @@ function DriverMapOfferDock({
             <View style={s.routeLine} />
           </View>
           <View style={s.routeTextCol}>
-            <Text style={s.routeLabel}>PICKUP</Text>
+            <Text style={s.routeLabel}>Pickup</Text>
             <Text style={s.routeAddr} numberOfLines={2}>{pickupAddr}</Text>
           </View>
         </View>
@@ -315,7 +316,7 @@ function DriverMapOfferDock({
             <View style={[s.routeDot, { backgroundColor: '#60A5FA', borderRadius: 3 }]} />
           </View>
           <View style={s.routeTextCol}>
-            <Text style={s.routeLabel}>DROP-OFF</Text>
+            <Text style={s.routeLabel}>Drop-off</Text>
             <Text style={s.routeAddrBlue} numberOfLines={2}>{dropAddr}</Text>
           </View>
         </View>
@@ -449,7 +450,7 @@ function createOfferStyles(t: OfferTok) {
   routeDot: { width: 10, height: 10, borderRadius: 5 },
   routeLine: { width: 1.5, flex: 1, minHeight: 18, backgroundColor: 'rgba(255,255,255,0.12)', marginTop: 3 },
   routeTextCol: { flex: 1, minWidth: 0, paddingBottom: 8 },
-  routeLabel: { fontSize: 9, fontWeight: '800', color: MUT, letterSpacing: 0.8, marginBottom: 2 },
+  routeLabel: { fontSize: 10, fontWeight: '700', color: MUT, letterSpacing: 0.2, marginBottom: 2 },
   routeAddr: { fontSize: 14, fontWeight: '700', color: TXT, lineHeight: 20 },
   routeAddrBlue: { fontSize: 14, fontWeight: '700', color: '#93C5FD', lineHeight: 20 },
 

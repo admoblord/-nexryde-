@@ -168,7 +168,7 @@ export default function DriverSafetyHubScreen() {
       'Choose an emergency action:',
       [
         { text: 'State Police →', onPress: handlePoliceQuickAction },
-        { text: 'NexRyde support', onPress: () => router.push('/support') },
+        { text: 'NEXRYDE support', onPress: () => router.push('/support') },
         { text: 'Cancel', style: 'cancel' },
       ]
     );
@@ -222,7 +222,7 @@ export default function DriverSafetyHubScreen() {
                 </View>
                 <View>
                   <Text style={styles.sosTitle}>SOS Emergency</Text>
-                  <Text style={styles.sosSub}>NexRyde support · State Police</Text>
+                  <Text style={styles.sosSub}>NEXRYDE support · State Police</Text>
                 </View>
               </View>
               <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />

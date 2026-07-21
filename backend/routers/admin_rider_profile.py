@@ -24,7 +24,7 @@ admin_rider_profile_router = APIRouter(
 def _build_rider_timeline(user: dict, trips: list, transactions: list) -> list[dict]:
     events = []
     if user.get("created_at"):
-        events.append({"type": "registered", "label": "Registered on NexRyde", "timestamp": user.get("created_at")})
+        events.append({"type": "registered", "label": "Registered on NEXRYDE", "timestamp": user.get("created_at")})
     if public_nin_fields(user).get("has_nin"):
         events.append({
             "type": "nin_on_file",

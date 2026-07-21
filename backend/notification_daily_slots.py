@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 SlotRow = tuple[str, int, int, str, str, Optional[str]]
 
 _DEFAULT_SLOTS: list[SlotRow] = [
-    ("morning", 7, 30, "Good morning", "Book your ride with NexRyde.", "open_booking"),
-    ("lunch", 12, 15, "Going out for lunch?", "Book a NexRyde in seconds.", "open_booking"),
+    ("morning", 7, 30, "Good morning", "Book your ride with NEXRYDE.", "open_booking"),
+    ("lunch", 12, 15, "Going out for lunch?", "Book a NEXRYDE in seconds.", "open_booking"),
     ("evening", 17, 45, "Heading home?", "Book your ride now.", "open_booking"),
     ("night", 20, 30, "Going out tonight?", "Book a safe ride now.", "open_booking"),
 ]

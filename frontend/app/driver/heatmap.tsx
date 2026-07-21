@@ -1,5 +1,5 @@
 /**
- * Nexryde Demand Heatmap
+ * NEXRYDE Demand Heatmap
  * Live heat circles on a map + ranked zone cards + hourly forecast.
  * Auto-detects driver GPS, passes to backend for city-accurate zones.
  */

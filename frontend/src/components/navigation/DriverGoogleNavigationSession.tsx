@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { BRAND } from '@/src/constants/designSystem';
+import { isGoogleNavigationEnabled } from '@/src/constants/mapEngines';
 import { promptExternalNavigation } from '@/src/utils/openExternalNavigation';
 
 export type DriverNavDestination = {
@@ -32,7 +33,8 @@ type Props = {
 type NavSdk = typeof import('@googlemaps/react-native-navigation-sdk');
 
 function loadNavSdk(): NavSdk | null {
-  if (Platform.OS === 'web') return null;
+  // iOS unlinks this native module (GoogleMaps 10.13 vs maps 8.4). Never require it there.
+  if (Platform.OS !== 'android' || !isGoogleNavigationEnabled()) return null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     return require('@googlemaps/react-native-navigation-sdk') as NavSdk;
@@ -196,8 +198,8 @@ export function DriverGoogleNavigationSession(props: Props) {
   return (
     <NavigationProvider
       termsAndConditionsDialogOptions={{
-        title: 'NexRyde Navigation',
-        companyName: 'NexRyde',
+        title: 'NEXRYDE Navigation',
+        companyName: 'NEXRYDE',
         showOnlyDisclaimer: true,
       }}
       taskRemovedBehavior={TaskRemovedBehavior?.CONTINUE_SERVICE}

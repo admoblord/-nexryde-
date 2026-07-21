@@ -250,7 +250,7 @@ export default function NexrydeShieldScreen() {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert(
         '✓ Report Submitted',
-        'Your Nexryde Shield case has been opened. The other party will be notified and has 24 hours to respond.',
+        'Your NEXRYDE Shield case has been opened. The other party will be notified and has 24 hours to respond.',
         [{
           text: 'Got it',
           onPress: () => {
@@ -334,7 +334,7 @@ export default function NexrydeShieldScreen() {
                 <LinearGradient colors={[C.green + '40', C.green + '10']} style={s.shieldIconWrap}>
                   <Ionicons name="shield-checkmark" size={18} color={C.green} />
                 </LinearGradient>
-                <Text style={s.shieldRowText}>Nexryde Shield</Text>
+                <Text style={s.shieldRowText}>NEXRYDE Shield</Text>
               </View>
               <TouchableOpacity onPress={() => setShowReport(false)} hitSlop={{ top: 12, right: 12, bottom: 12, left: 12 }}>
                 <View style={s.closeBtn}><Ionicons name="close" size={18} color={C.muted} /></View>
@@ -655,7 +655,7 @@ export default function NexrydeShieldScreen() {
             <Ionicons name="shield-checkmark" size={18} color={C.green} />
           </LinearGradient>
           <View>
-            <Text style={s.headerTitle}>Nexryde Shield</Text>
+            <Text style={s.headerTitle}>NEXRYDE Shield</Text>
             <Text style={s.headerSub}>Dispute resolution</Text>
           </View>
         </View>

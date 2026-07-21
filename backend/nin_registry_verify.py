@@ -1,8 +1,8 @@
 """
-NexRyde NIN verification — format + on-file checks only (no government registry delay).
+NEXRYDE NIN verification — format + on-file checks only (no government registry delay).
 
 Government registry lookup (NIMC webhook) is opt-in via NIN_REGISTRY_ENABLED=true.
-Default: instant NexRyde verification when NIN is 11 valid digits and stored encrypted.
+Default: instant NEXRYDE verification when NIN is 11 valid digits and stored encrypted.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import httpx
 logger = logging.getLogger("server")
 
 _NAME_MATCH_MIN = float(os.getenv("NIN_NAME_MATCH_MIN", "0.72"))
-_NEXRYDE_VERIFIED_MSG = "NIN verified by NexRyde."
+_NEXRYDE_VERIFIED_MSG = "NIN verified by NEXRYDE."
 
 
 def registry_verification_enabled() -> bool:
@@ -62,7 +62,7 @@ def _nexryde_format_only_result() -> Dict[str, Any]:
 
 async def verify_nin_with_full_name(*, nin: str, full_name: str) -> Dict[str, Any]:
     """
-    NexRyde path (default): valid 11-digit NIN → verified immediately.
+    NEXRYDE path (default): valid 11-digit NIN → verified immediately.
     Registry path (opt-in): only when NIN_REGISTRY_ENABLED=true and webhook URL set.
     """
     ok, msg = validate_nin_format(nin)
@@ -95,7 +95,7 @@ async def verify_nin_with_full_name(*, nin: str, full_name: str) -> Dict[str, An
             r.raise_for_status()
             data = r.json() if r.content else {}
     except Exception as e:
-        logger.warning("NIN registry webhook failed — falling back to NexRyde verification: %s", e)
+        logger.warning("NIN registry webhook failed — falling back to NEXRYDE verification: %s", e)
         return _nexryde_format_only_result()
 
     verified = bool(data.get("verified") or data.get("success"))
@@ -117,11 +117,11 @@ async def verify_nin_with_full_name(*, nin: str, full_name: str) -> Dict[str, An
             "nexryde_verified": True,
             "name_match_ok": bool(name_ok),
             "name_match_score": round(ratio, 3),
-            "message": "NIN verified by NexRyde and identity registry.",
+            "message": "NIN verified by NEXRYDE and identity registry.",
             "provider_raw": {"verified": verified, "has_registered_name": bool(reg_name)},
         }
 
-    # Registry failed or unavailable — still finalize via NexRyde (no user-facing delay).
+    # Registry failed or unavailable — still finalize via NEXRYDE (no user-facing delay).
     out = _nexryde_format_only_result()
     out["registry_checked"] = True
     out["name_match_score"] = round(ratio, 3)
@@ -131,7 +131,7 @@ async def verify_nin_with_full_name(*, nin: str, full_name: str) -> Dict[str, An
 
 def finalize_nin_verification_from_result(vr: Dict[str, Any]) -> tuple[bool, bool]:
     """
-    NexRyde verification: valid format → nin_verified=True.
+    NEXRYDE verification: valid format → nin_verified=True.
     nin_registry_verified only True when registry explicitly matched (opt-in path).
     """
     if not vr.get("format_ok"):

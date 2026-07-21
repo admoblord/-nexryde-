@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NexRyde — Run All E2E Tests
+NEXRYDE — Run All E2E Tests
 ============================
 Runs every E2E scenario in sequence and summarises results.
 
@@ -61,7 +61,7 @@ async def run_module(label: str, path: Path) -> tuple[bool, float, str]:
 
 async def main():
     print(f"\n{BOLD}{'=' * 70}{RESET}")
-    print(f"{BOLD}  NexRyde — Complete E2E Test Suite{RESET}")
+    print(f"{BOLD}  NEXRYDE — Complete E2E Test Suite{RESET}")
     print(f"  BASE_URL : {os.environ.get('BASE_URL', 'http://localhost:8080')}")
     print(f"{BOLD}{'=' * 70}{RESET}\n")
 

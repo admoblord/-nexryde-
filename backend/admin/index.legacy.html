@@ -878,7 +878,7 @@ tr:hover td{background:rgba(255,255,255,0.02);}
             </div>
             <div class="inp-group">
               <label>Title</label>
-              <input type="text" id="notifTitle" class="inp" placeholder="e.g. Important Update from Nexryde">
+              <input type="text" id="notifTitle" class="inp" placeholder="e.g. Important Update from NEXRYDE">
             </div>
             <div class="inp-group">
               <label>Message Body</label>
@@ -1685,7 +1685,7 @@ async function openRiderDrawer(riderId){
           ${revealBtn}
         </div>
         <div class="rd-grid" style="margin-bottom:10px;">
-          ${rdCell('NIN Verified (NexRyde)', rider.nin_verified?'✅ Yes':'❌ No')}
+          ${rdCell('NIN Verified (NEXRYDE)', rider.nin_verified?'✅ Yes':'❌ No')}
           ${rdCell('Verification Date', ninVerifyDate ? fmtDate(ninVerifyDate) : '—')}
           ${rdCell('NIN On File', hasNin?'✅ Yes':'❌ No')}
         </div>
@@ -1728,7 +1728,7 @@ async function openRiderDrawer(riderId){
           ${rdCell('Total Spend', '₦'+fmtN(stats.total_spend))}
           ${rdCell('Rating', (rider.rating||5.0).toFixed(1)+' ⭐')}
           ${rdCell('Behavior Score', fmtN(rider.behavior_score||100))}
-          ${rdCell('Nexryde Score', fmtN(rider.nexryde_score||100))}
+          ${rdCell('NEXRYDE Score', fmtN(rider.nexryde_score||100))}
           ${rdCell('Risk Score', fmtN(rider.rider_risk_score||15))}
         </div>
       </div>

@@ -13,7 +13,7 @@
 // ── Core Palette ──────────────────────────────────────────────────────────────
 
 export const BRAND = {
-  /** Primary call-to-action. Matches NexRyde logotype green. */
+  /** Primary call-to-action. Matches NEXRYDE logotype green. */
   primary: '#22E180',
   primaryDark: '#16C76A',
   primaryLight: '#6DFFC3',
@@ -67,7 +67,7 @@ export const SURFACE = {
 } as const;
 
 /** App display name — use everywhere user-facing */
-export const APP_DISPLAY_NAME = 'NexRyde';
+export const APP_DISPLAY_NAME = 'NEXRYDE';
 
 // ── Spacing ───────────────────────────────────────────────────────────────────
 

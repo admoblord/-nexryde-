@@ -19,6 +19,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAppStore } from '@/src/store/appStore';
+import { useDriverDisplayStore } from '@/src/store/driverDisplayStore';
 import {
   deleteUserAccount,
   getDriverProfile,
@@ -27,6 +28,8 @@ import {
   BACKEND_URL,
   getAuthHeaders,
 } from '@/src/services/api';
+import { writeDriverVerificationFact } from '@/src/services/driverVerificationFact';
+import { writeDriverBootCache, readDriverBootCache } from '@/src/services/driverBootCache';
 import * as ImagePicker from 'expo-image-picker';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
@@ -219,13 +222,19 @@ export default function DriverProfileScreen() {
   );
   const { user, logout, setUser, subscription } = useAppStore();
   const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
+  const displayVerification = useDriverDisplayStore((s) =>
+    s.driverId && driverId && s.driverId === driverId ? s.verificationStatus : null,
+  );
+  const displaySubStatus = useDriverDisplayStore((s) =>
+    s.driverId && driverId && s.driverId === driverId ? s.subscriptionStatus : null,
+  );
+  const setDriverDisplay = useDriverDisplayStore((s) => s.setDriverDisplay);
 
   const [profileImage, setProfileImage] = useState<string | null>(user?.profile_image || null);
   const [showSwitchModal, setShowSwitchModal] = useState(false);
   const [driverCity, setDriverCity] = useState('');
   const [driverFullName, setDriverFullName] = useState('');
   const [driverVehicles, setDriverVehicles] = useState<DriverVehicle[]>([]);
-  const [isApproved, setIsApproved] = useState(false);
   const [trustSummary, setTrustSummary] = useState<any>(null);
   const [loadingTrust, setLoadingTrust] = useState(false);
 
@@ -252,13 +261,33 @@ export default function DriverProfileScreen() {
         const p = (profileRes.value as any).data as any;
         setDriverCity(p?.city || '');
         setDriverFullName(p?.full_name || '');
-        setIsApproved(p?.verification_status === 'approved');
+        const vStatus = typeof p?.verification_status === 'string' ? p.verification_status : '';
+        if (vStatus) {
+          setDriverDisplay({ driverId, verificationStatus: vStatus, displayHydrated: true });
+          void writeDriverVerificationFact(driverId, vStatus);
+          void (async () => {
+            try {
+              const prev = await readDriverBootCache(driverId);
+              await writeDriverBootCache({
+                driverId,
+                verificationStatus: vStatus,
+                subscriptionStatus: prev?.subscriptionStatus || displaySubStatus || 'trial',
+                trialTripsCompleted: prev?.trialTripsCompleted ?? 0,
+                trialTripsTarget: prev?.trialTripsTarget ?? 15,
+                trialExtended: prev?.trialExtended ?? false,
+                onboardingCompleted: true,
+              });
+            } catch {
+              /* non-fatal */
+            }
+          })();
+        }
       }
       if (vehiclesRes.status === 'fulfilled') {
         setDriverVehicles(((vehiclesRes.value as any)?.vehicles || []) as DriverVehicle[]);
       }
     } catch { /* non-critical */ }
-  }, [canCallAuthedApi, driverId]);
+  }, [canCallAuthedApi, displaySubStatus, driverId, setDriverDisplay]);
 
   useEffect(() => {
     if (!canCallAuthedApi) return;
@@ -346,9 +375,44 @@ export default function DriverProfileScreen() {
   const rating = (user?.rating ?? 5).toFixed(1);
   const trips = user?.total_trips ?? 0;
 
-  // Subscription
-  const subStatus = (subscription as any)?.status as string | undefined;
+  // Same persisted source as Home — hydrate display store from durable fact/cache.
+  useEffect(() => {
+    if (!driverId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const snap = await readDriverBootCache(driverId);
+        if (cancelled || !snap) return;
+        setDriverDisplay({
+          driverId,
+          verificationStatus: snap.verificationStatus,
+          subscriptionStatus: snap.subscriptionStatus,
+          trialTripsCompleted: snap.trialTripsCompleted,
+          trialTripsTarget: snap.trialTripsTarget,
+          trialExtended: snap.trialExtended,
+          displayHydrated: true,
+        });
+      } catch {
+        /* non-fatal */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [driverId, setDriverDisplay]);
+
+  const isApproved = displayVerification === 'approved';
+  const verificationLabel =
+    displayVerification === 'approved'
+      ? 'Verified'
+      : displayVerification == null
+        ? 'Checking…'
+        : 'Pending';
+
+  const subStatus =
+    ((subscription as any)?.status as string | undefined) || displaySubStatus || undefined;
   const subTier = (subscription as any)?.tier as string | undefined;
+  const subChecking = subStatus == null;
   const isActiveSub = subStatus === 'trial' || subStatus === 'active' || subStatus === 'grace_period';
   const subLabel = subStatus === 'trial'
     ? 'Free Trial'
@@ -472,7 +536,7 @@ export default function DriverProfileScreen() {
             </View>
             <Text style={s.heroSub}>
               {driverCity ? `${driverCity} · ` : ''}
-              {user?.phone || user?.email || 'NexRyde Driver'}
+              {user?.phone || user?.email || 'NEXRYDE Driver'}
             </Text>
 
             <View style={s.badgeRow}>
@@ -484,18 +548,32 @@ export default function DriverProfileScreen() {
                 style={[
                   s.statusBadge,
                   {
-                    backgroundColor: isApproved ? PROFILE_GREEN_SOFT : 'rgba(245,158,11,0.12)',
-                    borderColor: isApproved ? `${PROFILE_GREEN}44` : 'rgba(245,158,11,0.28)',
+                    backgroundColor: isApproved
+                      ? PROFILE_GREEN_SOFT
+                      : displayVerification == null
+                        ? 'rgba(148,163,184,0.14)'
+                        : 'rgba(245,158,11,0.12)',
+                    borderColor: isApproved
+                      ? `${PROFILE_GREEN}44`
+                      : displayVerification == null
+                        ? 'rgba(148,163,184,0.28)'
+                        : 'rgba(245,158,11,0.28)',
                   },
                 ]}
               >
                 <Text
                   style={[
                     s.statusBadgeText,
-                    { color: isApproved ? PROFILE_GREEN : BRAND.warning },
+                    {
+                      color: isApproved
+                        ? PROFILE_GREEN
+                        : displayVerification == null
+                          ? BRAND.textMuted
+                          : BRAND.warning,
+                    },
                   ]}
                 >
-                  {isApproved ? 'Verified' : 'Pending'}
+                  {verificationLabel}
                 </Text>
               </View>
               {isActiveSub ? (
@@ -598,7 +676,13 @@ export default function DriverProfileScreen() {
                   </View>
                   <View style={s.subInfo}>
                     <Text style={s.subTitle}>
-                      {isActiveSub ? `${subLabel} · Active` : 'No Active Plan'}
+                      {subChecking
+                        ? 'Checking plan…'
+                        : isActiveSub
+                          ? subStatus === 'trial'
+                            ? 'Free Trial · Active'
+                            : `${subLabel} · Active`
+                          : 'No Active Plan'}
                     </Text>
                     {isOnTrial ? (
                       <View style={{ gap: 4 }}>
@@ -653,14 +737,14 @@ export default function DriverProfileScreen() {
 
         {/* ── TRUST SCORE ── */}
         {loadingTrust ? (
-          <Section title="NexRyde score">
+          <Section title="NEXRYDE score">
             <View style={s.loadingRow}>
               <Ionicons name="reload" size={16} color={colors.textMuted} />
               <Text style={[s.loadingText, { color: colors.textMuted }]}>Loading your score…</Text>
             </View>
           </Section>
         ) : trustSummary ? (
-          <Section title="NexRyde score">
+          <Section title="NEXRYDE score">
             <LinearGradient colors={[PROFILE_GREEN_SOFT, 'rgba(56,189,248,0.05)']} style={s.scoreHero}>
               <View style={s.scoreHeroLeft}>
                 <Text style={[s.scoreMainValue, { color: colors.text }]}>
@@ -751,14 +835,14 @@ export default function DriverProfileScreen() {
             </LinearGradient>
           </TouchableOpacity>
           <MenuRow icon="shield-checkmark" gradColors={['#78350F', '#D97706']} title="Safety Alerts" subtitle="Danger zones & emergency protection" onPress={() => router.push('/driver/safety-alerts')} />
-          <MenuRow icon="ribbon" gradColors={['#134E4A', '#0D9488']} title="NexRyde Shield" subtitle="Disputes and ride protection" onPress={() => router.push('/shield-disputes')} />
+          <MenuRow icon="ribbon" gradColors={['#134E4A', '#0D9488']} title="NEXRYDE Shield" subtitle="Disputes and ride protection" onPress={() => router.push('/shield-disputes')} />
         </Section>
 
         {/* ── MODE ── */}
         <Section title="Mode & preferences">
           <MenuRow icon="settings" gradColors={['#166534', PROFILE_GREEN]} title="Settings" subtitle="App preferences & defaults" onPress={() => router.push('/settings')} />
           <MenuRow icon="swap-horizontal" gradColors={['#3730A3', '#4F46E5']} title="Switch to Rider Mode" subtitle="Book rides as a passenger" onPress={() => setShowSwitchModal(true)} />
-          <MenuRow icon="business" gradColors={['#0F4C75', '#0C7BB3']} title="NexRyde Wallet as Bank" subtitle="Coming soon — interest, transfers & more" onPress={() => {}} badge="Soon" />
+          <MenuRow icon="business" gradColors={['#0F4C75', '#0C7BB3']} title="NEXRYDE Wallet as Bank" subtitle="Coming soon — interest, transfers & more" onPress={() => {}} badge="Soon" />
         </Section>
 
         {/* ── SUPPORT & LEGAL ── */}
@@ -782,7 +866,7 @@ export default function DriverProfileScreen() {
           }}
         >
           <Text style={[s.version, { color: colors.textMuted }]}>
-            NexRyde Driver v{Constants.expoConfig?.version ?? '1.0.0'}
+            NEXRYDE Driver v{Constants.expoConfig?.version ?? '1.0.0'}
           </Text>
         </TouchableOpacity>
 

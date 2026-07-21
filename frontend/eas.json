@@ -11,7 +11,7 @@
         "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-backend-993913300770.us-central1.run.app",
         "EAS_SKIP_AUTO_FINGERPRINT": "1"
       },
-      "autoIncrement": true,
+      "autoIncrement": false,
       "android": {
         "prebuildCommand": "npx expo prebuild --platform android --no-install && node ./scripts/verify_driver_experience_package.cjs --require-success",
         "buildType": "apk"

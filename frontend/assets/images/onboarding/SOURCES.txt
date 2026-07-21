@@ -1,0 +1,11 @@
+Real photography used in splash / onboarding (not AI-generated).
+
+splash-hero.png  — Gimi Media “Black Woman With Gadgets In Taxi” — Black woman in taxi backseat with phone (ride passenger), free commercial license
+book-ride.jpg    — Unsplash xpTsS9PJMXQ, Lagos, Nigeria — passenger smile in car (golden hour)
+ride-safe.jpg    — Unsplash photo-1522529599102 — real photo, warm smiling Black man (NOT AI; not splash)
+favorites.jpg    — Pexels #30678206, Lagos couple with phone (REAL photo, NOT AI; same source family as login-hero)
+
+login-hero.png   — Pexels #16915386, Lagos couple on Danfo bumper (Olanma Etigwe-uwa) — Nigerian faces + local ride/transit feel
+
+Intent: every onboarding frame should read as e-hailing at a glance
+(car interior, phone + vehicle, or driver/rider trust).

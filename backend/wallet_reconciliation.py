@@ -1,7 +1,7 @@
 """Wallet reconciliation — flag divergence between the spendable balance,
 the transaction ledger, and the parallel ``db.wallets`` store.
 
-NexRyde keeps wallet money in three places that *should* agree:
+NEXRYDE keeps wallet money in three places that *should* agree:
 
 1. ``users.wallet_balance``   — the spendable balance every debit/credit mutates
                                 (the source of truth used at booking/payment).

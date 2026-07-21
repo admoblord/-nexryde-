@@ -132,10 +132,11 @@ function LiveEtaTopCardInner({ topInset, title, etaMinutes, distanceKm, arrived,
   })();
 
   const labelText = (() => {
-    if (connecting) return 'CONNECTING';
-    if (effectivePhase === 'arrived') return 'YOUR DRIVER IS HERE';
-    if (effectivePhase === 'ongoing') return 'HEADING TO DESTINATION';
-    return title.toUpperCase();
+    if (connecting) return 'Connecting';
+    if (effectivePhase === 'arrived') return 'Driver is here';
+    if (effectivePhase === 'ongoing') return 'To your destination';
+    // Prefer calm title from parent (e.g. "Driver arriving") over ALL CAPS.
+    return title || 'Driver arriving';
   })();
 
   return (
@@ -222,13 +223,13 @@ const styles = StyleSheet.create({
   },
   textCol: { flex: 1, minWidth: 0 },
   labelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
-  label: { fontSize: 10, fontWeight: '800', letterSpacing: 0.6 },
+  label: { fontSize: 12, fontWeight: '800', letterSpacing: 0.2 },
   eta: {
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: '900',
-    letterSpacing: -0.5,
+    letterSpacing: -0.6,
     fontVariant: ['tabular-nums'],
-    lineHeight: 22,
+    lineHeight: 26,
   },
   dist: {
     fontSize: 12,

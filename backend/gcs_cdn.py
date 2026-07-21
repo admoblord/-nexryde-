@@ -1,5 +1,5 @@
 """
-Google Cloud Storage CDN helper for NexRyde profile/document images.
+Google Cloud Storage CDN helper for NEXRYDE profile/document images.
 
 Provides:
   upload_image_to_gcs(bucket, object_name, data_bytes, content_type) → public URL

@@ -1,5 +1,5 @@
 /**
- * NexRyde Scheduled Offer and Engagement Notifications
+ * NEXRYDE Scheduled Offer and Engagement Notifications
  *
  * Delivers daily local notifications to every logged-in driver and rider.
  * Messages are plain Nigeria English — no emojis — so they display correctly
@@ -108,7 +108,7 @@ type Msg = [string, string]; // [title, body]
 
 const DRIVER_06: Msg[] = [
   ['{area} is waking up',             '{area} riders are already booking to beat the {route} traffic. Go online now before another driver takes them.'],
-  ['Morning surge in {area}',         'High demand, few drivers online. {area} bookings are live right now. Open NexRyde and take them.'],
+  ['Morning surge in {area}',         'High demand, few drivers online. {area} bookings are live right now. Open NEXRYDE and take them.'],
   ['{area} morning rush starts now',   'Workers heading out of {area} need rides before the road locks up. Be their driver this morning.'],
   ['Early risers in {area} are booking','Beat your competition. Go online now and grab the morning trips before 8 AM.'],
   ['Your first trip today is waiting', 'A rider in {area} is looking for a driver right now. Log in and pick up the fare.'],
@@ -118,7 +118,7 @@ const DRIVER_06: Msg[] = [
   ['{area} needs drivers right now',   'Morning bookings are building up in {area}. Go online and be the driver they find first.'],
   ['Hit your daily target from {area}','Morning rides in {area} are short, fast, and come back to back. Ten trips before noon is possible.'],
   ['{route} will be gridlocked by 7:30','Beat the jam. {area} riders are booking now before the road becomes impossible. Go online.'],
-  ['Riders in {area} prefer NexRyde',  'They are searching the app right now. Go online and take the trip before someone else does.'],
+  ['Riders in {area} prefer NEXRYDE',  'They are searching the app right now. Go online and take the trip before someone else does.'],
   ['{area} surge window is open now',  'Demand just went up in {area}. Go online now and make the most of it while it lasts.'],
   ['Smart {city} drivers start early', 'They know {area} morning bookings are where the real money is. Start before they take all the trips.'],
   ['Good morning from {area}',         'The top earners in {city} are already live. Do not start your day behind. Go online now.'],
@@ -179,57 +179,57 @@ const DRIVER_20: Msg[] = [
 ];
 
 const RIDER_0730: Msg[] = [
-  ['Good morning from {area}',         'Your NexRyde driver is near {area} right now. Book now and arrive on time without any stress.'],
-  ['Running late in {area}?',          'Relax. A NexRyde driver is close by right now. One tap and you are on your way.'],
+  ['Good morning from {area}',         'Your NEXRYDE driver is near {area} right now. Book now and arrive on time without any stress.'],
+  ['Running late in {area}?',          'Relax. A NEXRYDE driver is close by right now. One tap and you are on your way.'],
   ['Drivers are live near {area}',     'No waiting, no price haggling on {route}. Book now and start moving in under 2 minutes.'],
-  ['Beat {route} traffic this morning','Book NexRyde from {area} and skip the morning congestion. Arrive on time and calm.'],
+  ['Beat {route} traffic this morning','Book NEXRYDE from {area} and skip the morning congestion. Arrive on time and calm.'],
   ['Skip the {area} morning rush',     'Book now and we will route you around {route}. Start your morning the smart way.'],
-  ['Trusted ride from {area}',         'Verified driver. Fixed fare. No surprises. Start your {area} day the NexRyde way.'],
-  ['{route} is filling up fast',       'Book your NexRyde from {area} before the road gets impossible. A driver is near you now.'],
-  ['Safe, verified ride from {area}',  'Every NexRyde driver is background-checked. Your morning in {area} is safe with us.'],
+  ['Trusted ride from {area}',         'Verified driver. Fixed fare. No surprises. Start your {area} day the NEXRYDE way.'],
+  ['{route} is filling up fast',       'Book your NEXRYDE from {area} before the road gets impossible. A driver is near you now.'],
+  ['Safe, verified ride from {area}',  'Every NEXRYDE driver is background-checked. Your morning in {area} is safe with us.'],
   ['Your driver is near {area}',       'Live tracking. Real-time arrival updates. Book now and see exactly when they reach you.'],
-  ['Start your {area} morning right',  'NexRyde takes you out of {area} without the stress. Every single morning, without fail.'],
-  ['Most affordable ride in {area}',   'Better than a taxi, faster than the bus. Book your NexRyde from {area} now.'],
-  ['Leave {area} on time every day',   'NexRyde drivers know {city} roads very well. Do not leave your morning to chance.'],
-  ['Your ride is 30 seconds away',     'Open NexRyde, set your destination, tap book. Your driver from {area} is already coming.'],
-  ['{city} is moving. Are you?',        'Morning activity from {area} is underway. Book your NexRyde now and stay ahead.'],
-  ['Peace of mind from {area}',        'Live tracking, SOS button, verified drivers. That is NexRyde every single morning.'],
+  ['Start your {area} morning right',  'NEXRYDE takes you out of {area} without the stress. Every single morning, without fail.'],
+  ['Most affordable ride in {area}',   'Better than a taxi, faster than the bus. Book your NEXRYDE from {area} now.'],
+  ['Leave {area} on time every day',   'NEXRYDE drivers know {city} roads very well. Do not leave your morning to chance.'],
+  ['Your ride is 30 seconds away',     'Open NEXRYDE, set your destination, tap book. Your driver from {area} is already coming.'],
+  ['{city} is moving. Are you?',        'Morning activity from {area} is underway. Book your NEXRYDE now and stay ahead.'],
+  ['Peace of mind from {area}',        'Live tracking, SOS button, verified drivers. That is NEXRYDE every single morning.'],
 ];
 
 const RIDER_1300: Msg[] = [
-  ['Lunch break in {area}?',           'Skip the parking stress near {area}. Book NexRyde and enjoy your full break.'],
+  ['Lunch break in {area}?',           'Skip the parking stress near {area}. Book NEXRYDE and enjoy your full break.'],
   ['Heading out from {area} now?',     'Drivers available near {area} right now. Tap, book, and be there in minutes.'],
-  ['Quick ride from {area}',           'Your NexRyde wallet is ready. Book from {area} — fast, safe, and affordable.'],
-  ['Quick errand from {area}?',        'NexRyde gets you out of {area} and back without the hassle. Tap to book.'],
+  ['Quick ride from {area}',           'Your NEXRYDE wallet is ready. Book from {area} — fast, safe, and affordable.'],
+  ['Quick errand from {area}?',        'NEXRYDE gets you out of {area} and back without the hassle. Tap to book.'],
   ['Afternoon plans from {area} sorted?','One tap from {area} and your driver is on the way. No overthinking needed.'],
   ['Smart {city} riders book ahead',   'Beat afternoon demand spikes from {area}. Book now before fares go up.'],
-  ['Afternoon shopping from {area}?',  'No need to carry bags on a bus. Book NexRyde and ride from {area} in comfort.'],
-  ['Business meeting from {area}?',    'Arrive fresh and on time without {route} stress. Book NexRyde and own the afternoon.'],
-  ['Too hot to walk in {area}?',       'Stay cool. Book a NexRyde from {area} and let your driver handle the road.'],
-  ['Make the most of your lunch break','Eat, relax, and still get back on time. NexRyde from {area} makes it easy.'],
-  ['Afternoon appointment from {area}?','Do not stress about parking in {city}. Book NexRyde and arrive completely relaxed.'],
-  ['Somewhere to be after {area}?',    'Your NexRyde driver is already nearby. Tap to book and get there without stress.'],
-  ['{area} riders are booking now',    'NexRyde drivers are live near {area}. Book for yourself or share with a colleague.'],
-  ['Running {area} afternoon errands?','Fast, comfortable, trackable. NexRyde is the smarter way to move around {city}.'],
-  ['Your {area} afternoon ride waits', 'Book NexRyde right now and beat the afternoon traffic from {area}. Driver is near you.'],
+  ['Afternoon shopping from {area}?',  'No need to carry bags on a bus. Book NEXRYDE and ride from {area} in comfort.'],
+  ['Business meeting from {area}?',    'Arrive fresh and on time without {route} stress. Book NEXRYDE and own the afternoon.'],
+  ['Too hot to walk in {area}?',       'Stay cool. Book a NEXRYDE from {area} and let your driver handle the road.'],
+  ['Make the most of your lunch break','Eat, relax, and still get back on time. NEXRYDE from {area} makes it easy.'],
+  ['Afternoon appointment from {area}?','Do not stress about parking in {city}. Book NEXRYDE and arrive completely relaxed.'],
+  ['Somewhere to be after {area}?',    'Your NEXRYDE driver is already nearby. Tap to book and get there without stress.'],
+  ['{area} riders are booking now',    'NEXRYDE drivers are live near {area}. Book for yourself or share with a colleague.'],
+  ['Running {area} afternoon errands?','Fast, comfortable, trackable. NEXRYDE is the smarter way to move around {city}.'],
+  ['Your {area} afternoon ride waits', 'Book NEXRYDE right now and beat the afternoon traffic from {area}. Driver is near you.'],
 ];
 
 const RIDER_1800: Msg[] = [
-  ['Evening ride from {area}?',        'Your NexRyde driver is nearby. Book now and get home safely without any stress.'],
-  ['{area} evening rush is here',      'Beat the {route} traffic tonight. Book your NexRyde now and get moving first.'],
-  ['Heading home from {area}?',        'NexRyde drivers are available near {area} right now. One tap and you are on your way.'],
-  ['Evening plans from {area}?',       'Wherever you are going tonight, book your NexRyde from {area} and relax in the car.'],
-  ['Skip {area} evening traffic',      'Book NexRyde now and let your driver handle the evening rush on {route}.'],
-  ['Safe evening ride from {area}',    'Live tracking. Verified drivers. Book NexRyde from {area} and arrive home safely tonight.'],
-  ['No more waiting in {area}',        'NexRyde drivers are available now near {area}. Book in seconds. No haggling on price.'],
-  ['End your {area} day right',        'You worked hard all day. Let NexRyde handle your ride home from {area} tonight.'],
+  ['Evening ride from {area}?',        'Your NEXRYDE driver is nearby. Book now and get home safely without any stress.'],
+  ['{area} evening rush is here',      'Beat the {route} traffic tonight. Book your NEXRYDE now and get moving first.'],
+  ['Heading home from {area}?',        'NEXRYDE drivers are available near {area} right now. One tap and you are on your way.'],
+  ['Evening plans from {area}?',       'Wherever you are going tonight, book your NEXRYDE from {area} and relax in the car.'],
+  ['Skip {area} evening traffic',      'Book NEXRYDE now and let your driver handle the evening rush on {route}.'],
+  ['Safe evening ride from {area}',    'Live tracking. Verified drivers. Book NEXRYDE from {area} and arrive home safely tonight.'],
+  ['No more waiting in {area}',        'NEXRYDE drivers are available now near {area}. Book in seconds. No haggling on price.'],
+  ['End your {area} day right',        'You worked hard all day. Let NEXRYDE handle your ride home from {area} tonight.'],
   ['Evening discount for {area} riders','Book now during the evening hours and enjoy a smooth, affordable ride from {area}.'],
-  ['Your {area} evening ride is ready','Open NexRyde, set your destination, and your driver from {area} is on the way.'],
-  ['Get home safely from {area}',      'Your safety matters. Book a verified NexRyde driver from {area} for your evening trip.'],
-  ['{area} to anywhere in {city}',     'NexRyde connects you from {area} to every part of {city} quickly and safely.'],
-  ['Weekend evening in {area}?',       'Book NexRyde for your evening out in {area}. Your driver will be there in minutes.'],
-  ['Night out from {area}?',           'Book your NexRyde before you leave {area} tonight. Your driver will be waiting.'],
-  ['Comfortable ride from {area}',     'Air-conditioned, tracked, verified. That is what every NexRyde evening ride from {area} offers.'],
+  ['Your {area} evening ride is ready','Open NEXRYDE, set your destination, and your driver from {area} is on the way.'],
+  ['Get home safely from {area}',      'Your safety matters. Book a verified NEXRYDE driver from {area} for your evening trip.'],
+  ['{area} to anywhere in {city}',     'NEXRYDE connects you from {area} to every part of {city} quickly and safely.'],
+  ['Weekend evening in {area}?',       'Book NEXRYDE for your evening out in {area}. Your driver will be there in minutes.'],
+  ['Night out from {area}?',           'Book your NEXRYDE before you leave {area} tonight. Your driver will be waiting.'],
+  ['Comfortable ride from {area}',     'Air-conditioned, tracked, verified. That is what every NEXRYDE evening ride from {area} offers.'],
 ];
 
 // ─── Slot registry ─────────────────────────────────────────────────────────────
@@ -274,7 +274,7 @@ function rotationIdx(): number {
 async function ensureOffersChannel(): Promise<void> {
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync('offers', {
-    name: 'NexRyde Offers and Tips',
+    name: 'NEXRYDE Offers and Tips',
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 300, 150, 300],
     lightColor: '#00D47E',
@@ -320,7 +320,7 @@ async function scheduleForRole(role: 'driver' | 'rider', area: AreaInfo): Promis
       ids.push(id);
     } catch (err) {
       // Non-fatal: one slot failing should not block others
-      console.warn(`[NexRyde] Failed to schedule slot ${slot.key}:`, err);
+      console.warn(`[NEXRYDE] Failed to schedule slot ${slot.key}:`, err);
     }
   }
 
@@ -344,7 +344,7 @@ export async function scheduleOfferNotificationsForRole(_role: 'driver' | 'rider
     await cancelPreviousNotifications();
     await AsyncStorage.removeItem(STORAGE_KEY);
   } catch (err) {
-    console.error('[NexRyde] scheduleOfferNotificationsForRole cleanup error:', err);
+    console.error('[NEXRYDE] scheduleOfferNotificationsForRole cleanup error:', err);
   }
 }
 

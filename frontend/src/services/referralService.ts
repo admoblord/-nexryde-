@@ -32,7 +32,7 @@ export function buildShareMessage(
   const url = buildInviteUrl(username, code);
   const handle = username || senderName?.split(' ')[0] || 'a friend';
   return (
-    `🚗 Join Nexryde — Nigeria's smartest ride app!\n\n` +
+    `🚗 Join NEXRYDE — Nigeria's smartest ride app!\n\n` +
     `Use ${handle}'s invite link and we BOTH earn ₦500 after your first ride:\n${url}`
   );
 }
@@ -45,7 +45,7 @@ export async function shareInviteLink(
 ): Promise<void> {
   const url = buildInviteUrl(username, code);
   const message = buildShareMessage(username, code, senderName);
-  await Share.share({ message, url }, { dialogTitle: 'Invite to Nexryde' });
+  await Share.share({ message, url }, { dialogTitle: 'Invite to NEXRYDE' });
 }
 
 /** Read any pending referral identifier stored from a deep link. */

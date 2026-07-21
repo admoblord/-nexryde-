@@ -68,8 +68,8 @@ export const DRIVER_OFFER_RINGTONES: ReadonlyArray<{
   label: string;
   hint: string;
 }> = [
-  { id: 'nexryde1', label: 'NexRyde 1', hint: 'Official NexRyde alert tone' },
-  { id: 'nexryde2', label: 'NexRyde 2', hint: 'Official NexRyde alert tone' },
-  { id: 'nexryde3', label: 'NexRyde 3', hint: 'Official NexRyde alert tone' },
-  { id: 'nexryde4', label: 'NexRyde 4', hint: 'Official NexRyde alert tone' },
+  { id: 'nexryde1', label: 'NEXRYDE 1', hint: 'Official NEXRYDE alert tone' },
+  { id: 'nexryde2', label: 'NEXRYDE 2', hint: 'Official NEXRYDE alert tone' },
+  { id: 'nexryde3', label: 'NEXRYDE 3', hint: 'Official NEXRYDE alert tone' },
+  { id: 'nexryde4', label: 'NEXRYDE 4', hint: 'Official NEXRYDE alert tone' },
 ];

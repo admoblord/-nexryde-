@@ -1,5 +1,5 @@
 /**
- * Nexryde Prayer Times & Daily Readings
+ * NEXRYDE Prayer Times & Daily Readings
  * Beautiful Islamic companion screen for drivers.
  * Opens instantly from cache, refreshes in background.
  */

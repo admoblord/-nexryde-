@@ -196,7 +196,7 @@ def test_public_config_included_with_subscription():
     cfg = work_zone_public_config()
     assert cfg["included_with_subscription"] is True
     assert cfg["no_additional_fee"] is True
-    assert "Included with your NexRyde driver plan" in cfg["copy"]["subtitle"]
+    assert "Included with your NEXRYDE driver plan" in cfg["copy"]["subtitle"]
     assert "free" not in cfg
     assert "monthly_price" not in cfg
     assert "daily_price" not in cfg

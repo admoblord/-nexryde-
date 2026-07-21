@@ -1113,7 +1113,7 @@ async def _verify_reference_with_paystack(reference: str, expected_amount: float
 # Tier config (matches fare_config.py / server.calculate_fare)
 TIER_CONFIG = {
     "basic": {
-        "name": "Nexryde Basic",
+        "name": "NEXRYDE Basic",
         "monthly_fee": 18000,
         "earning_per_ride": {"min": 200, "max": 300},
         "commission": 0.15,
@@ -1122,7 +1122,7 @@ TIER_CONFIG = {
         "benefits": ["Standard rides"],
     },
     "premium": {
-        "name": "Nexryde Premium",
+        "name": "NEXRYDE Premium",
         "monthly_fee": 18000,
         "earning_per_ride": {"min": 300, "max": 450},
         "commission": 0.10,
@@ -1245,7 +1245,7 @@ async def create_virtual_account(request: CreateVirtualAccountRequest, http_requ
     full_name_raw = (
         profile.get("full_name")
         or driver.get("name")
-        or "Nexryde Driver"
+        or "NEXRYDE Driver"
     ).strip()
     full_name = _squad_require_customer_name_for_va(full_name_raw)
     email = _squad_require_va_email(driver.get("email") or f"{request.driver_id}@nexryde.app")
@@ -1743,7 +1743,7 @@ async def initiate_subscription_checkout(
 
     driver = await db.users.find_one({"id": driver_id}) or {}
     profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
-    full_name = (profile.get("full_name") or driver.get("name") or "Nexryde Driver").strip()
+    full_name = (profile.get("full_name") or driver.get("name") or "NEXRYDE Driver").strip()
     email = driver.get("email") or f"{driver_id}@nexryde.app"
 
     transaction_ref, intent_id = await _reserve_subscription_payment_intent(
@@ -2327,7 +2327,7 @@ async def initiate_rider_wallet_checkout(
     amount_kobo = int(round(amount_ngn * 100))
 
     user = await db.users.find_one({"id": user_id}) or {}
-    full_name = (user.get("name") or "Nexryde User").strip()
+    full_name = (user.get("name") or "NEXRYDE User").strip()
     raw_email = (user.get("email") or "").strip()
     if raw_email:
         email = _validate_rider_wallet_checkout_email(raw_email)
@@ -4103,7 +4103,7 @@ async def wallet_callback_v2(reference: Optional[str] = None):
 <html>
   <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1" /></head>
   <body style="font-family: sans-serif; padding: 24px;">
-    <h3>Returning to Nexryde Wallet</h3>
+    <h3>Returning to NEXRYDE Wallet</h3>
     <p>Payment verification continues securely in-app.</p>
     <a href="{deep_link}">Tap here if the app did not open automatically</a>
     <script>window.location.href = "{deep_link}";</script>
@@ -4129,7 +4129,7 @@ async def subscription_payment_callback(reference: Optional[str] = None):
   <body style="background:#0A0A0A;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center;padding:24px;box-sizing:border-box;">
     <div>
       <div style="font-size:48px;margin-bottom:16px;">✅</div>
-      <h2 style="margin:0 0 8px;font-size:22px;">Returning to Nexryde</h2>
+      <h2 style="margin:0 0 8px;font-size:22px;">Returning to NEXRYDE</h2>
       <p style="color:#aaa;margin:0 0 24px;">Your payment is being verified. Please wait…</p>
       <a href="{deep_link}" style="display:inline-block;background:#00D084;color:#fff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:600;">
         Tap here if app did not open

@@ -559,7 +559,7 @@ async def submit_driver_witness_report(request: DriverWitnessReportRequest, http
         "authority_forwarding_status": "queued",
         "retaliation_protection": witness_report["retaliation_protection"],
         "reward_points_earned": reward_points,
-        "message": "Witness report submitted securely. Nexryde queued it for authority forwarding.",
+        "message": "Witness report submitted securely. NEXRYDE queued it for authority forwarding.",
     }
 
 # ==================== MULTI-LANGUAGE ====================
@@ -928,7 +928,7 @@ async def get_trip_insurance(trip_id: str, request: Request):
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
     verify_trip_participant(request, trip)
-    return {"trip_id": trip_id, "is_insured": True, "coverage": {"personal_accident": "₦500,000", "medical_expenses": "₦100,000", "property_damage": "₦50,000"}, "provider": "Nexryde Insurance Partners"}
+    return {"trip_id": trip_id, "is_insured": True, "coverage": {"personal_accident": "₦500,000", "medical_expenses": "₦100,000", "property_damage": "₦50,000"}, "provider": "NEXRYDE Insurance Partners"}
 
 @support_router.post("/trips/{trip_id}/track")
 async def update_trip_tracking(trip_id: str, update: TripTrackingUpdate, request: Request):

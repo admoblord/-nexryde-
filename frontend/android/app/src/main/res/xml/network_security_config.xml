@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  NexRyde Network Security Config
+  NEXRYDE Network Security Config
   ================================
   - All traffic MUST be HTTPS (no cleartext HTTP allowed in release builds)
   - Only system-trusted CAs are accepted; user-installed CAs are rejected

@@ -21,7 +21,7 @@ import {
   Linking,
   Platform,
   AppState,
-  Image,
+  InteractionManager,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useSegments, type Href } from 'expo-router';
@@ -74,6 +74,7 @@ import {
 } from '@/src/utils/driverStartupTrace';
 import { driverFlowLog } from '@/src/utils/driverOnlineFlowLog';
 import { useDriverSessionStore } from '@/src/store/driverSessionStore';
+import { useDriverDisplayStore } from '@/src/store/driverDisplayStore';
 import { driverOffersSocket } from '@/src/services/driverOffersSocket';
 import { loadWorkZoneOnce } from '@/src/services/workZoneSession';
 import { useWorkZoneIdleSuggestion } from '@/src/hooks/useWorkZoneIdleSuggestion';
@@ -156,6 +157,8 @@ import { FeatureHubDrawer } from '@/src/components/FeatureHubDrawer';
 import { SkeletonBlock } from '@/src/components/SkeletonBlock';
 import { SURFACE,  HOME_PALETTE, BRAND } from '@/src/constants/designSystem';
 import { useFlowLayout } from '@/src/constants/flowLayout';
+import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
+import { resolvePublicMediaUri } from '@/src/utils/resolvePublicMediaUri';
 import DriverLiveMapView, {
   NEXRYDE_MAP_STYLE,
   type ActiveTrip,
@@ -166,6 +169,7 @@ import DriverTripCompletionPanel, {
 } from '@/src/components/driver/DriverTripCompletionPanel';
 import DriverCompleteTripConfirmModal from '@/src/components/driver/DriverCompleteTripConfirmModal';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import { TripMapErrorBoundary } from '@/src/components/TripMapErrorBoundary';
 
 const { width } = Dimensions.get('window');
 
@@ -435,11 +439,28 @@ export default function ModernDriverHome() {
     onRedirect: handleBootRedirect,
   });
 
-  const verificationStatus = boot.verificationStatus;
-  const subscriptionStatus = boot.subscriptionStatus;
-  const trialTripsCompleted = boot.trialTripsCompleted;
-  const trialTripsTarget = boot.trialTripsTarget;
-  const trialExtended = boot.trialExtended;
+  // Same display source as Profile — prefer shared store so tabs never disagree.
+  const storeVerification = useDriverDisplayStore((s) =>
+    driverId && s.driverId === driverId ? s.verificationStatus : null,
+  );
+  const storeSubscription = useDriverDisplayStore((s) =>
+    driverId && s.driverId === driverId ? s.subscriptionStatus : null,
+  );
+  const storeTrialCompleted = useDriverDisplayStore((s) =>
+    driverId && s.driverId === driverId ? s.trialTripsCompleted : 0,
+  );
+  const storeTrialTarget = useDriverDisplayStore((s) =>
+    driverId && s.driverId === driverId ? s.trialTripsTarget : 15,
+  );
+  const storeTrialExtended = useDriverDisplayStore((s) =>
+    driverId && s.driverId === driverId ? s.trialExtended : false,
+  );
+
+  const verificationStatus = storeVerification ?? boot.verificationStatus;
+  const subscriptionStatus = storeSubscription ?? boot.subscriptionStatus;
+  const trialTripsCompleted = storeVerification != null ? storeTrialCompleted : boot.trialTripsCompleted;
+  const trialTripsTarget = storeVerification != null ? storeTrialTarget : boot.trialTripsTarget;
+  const trialExtended = storeVerification != null ? storeTrialExtended : boot.trialExtended;
   const trialDaysRemaining = boot.trialDaysRemaining;
   const trialDayLimit = boot.trialDayLimit;
   const trialEmphasis = boot.trialEmphasis;
@@ -473,6 +494,19 @@ export default function ModernDriverHome() {
   const toggling = statusToggleBusy || operationalState === 'CONNECTING';
   const sessionEngaged =
     connectionPhase === 'confirmed' || connectionPhase === 'reconnecting';
+  /**
+   * Hysteresis: hide blips — only show "Reconnecting" after ~5s continuous
+   * reconnecting. Leaving reconnecting cancels the timer (no flicker).
+   */
+  const [showReconnectingChrome, setShowReconnectingChrome] = useState(false);
+  useEffect(() => {
+    if (connectionPhase !== 'reconnecting') {
+      setShowReconnectingChrome(false);
+      return;
+    }
+    const t = setTimeout(() => setShowReconnectingChrome(true), 5000);
+    return () => clearTimeout(t);
+  }, [connectionPhase]);
   const isOnlineRef = useRef(connectionPhase !== 'offline');
   isOnlineRef.current = connectionPhase !== 'offline';
   const [appInForeground, setAppInForeground] = useState(AppState.currentState === 'active');
@@ -602,12 +636,42 @@ export default function ModernDriverHome() {
       clearInterval(interval);
     };
   }, [driverId, user?.total_trips]);
+  /**
+   * Display-only from local fact/cache (same store as Profile).
+   * Known-approved drivers NEVER see "Checking your account".
+   */
+  const displayHydrated = useDriverDisplayStore(
+    (s) => Boolean(driverId && s.driverId === driverId && s.displayHydrated),
+  );
   const driverApproved = verificationStatus === 'approved';
-  const trialReady = subscriptionStatus ? ['trial', 'active', 'grace_period'].includes(subscriptionStatus) : false;
+  /** Only after local fact lookup — never while hydrate is still pending. */
+  const verificationChecking = displayHydrated && verificationStatus == null && !driverApproved;
+  const awaitingLocalFact = Boolean(driverId) && !displayHydrated && !driverApproved;
+  const verificationPendingExplicit =
+    !driverApproved &&
+    (verificationStatus === 'pending' ||
+      verificationStatus === 'pending_review' ||
+      verificationStatus === 'rejected' ||
+      verificationStatus === 'documents_rejected');
+  const trialReady = subscriptionStatus
+    ? ['trial', 'active', 'grace_period'].includes(subscriptionStatus)
+    : false;
+  const planBlocksGo =
+    subscriptionStatus === 'none' ||
+    subscriptionStatus === 'pending_payment' ||
+    subscriptionStatus === 'expired' ||
+    subscriptionStatus === 'locked_until_approval';
+  /**
+   * Show GO ONLINE from local approved fact even before subscription sync.
+   * Server still authorizes at tap time.
+   */
+  const displayGoReady = driverApproved && (trialReady || (subscriptionStatus == null && !planBlocksGo));
   const trialRemaining = Math.max(0, trialTripsTarget - trialTripsCompleted);
   const showTrialProgress = driverApproved && subscriptionStatus === 'trial' && trialTripsTarget > 0;
-  const driverCanReceiveOffers = driverApproved && trialReady;
-  const verificationLocked = Boolean(verificationStatus && !driverApproved);
+  /** Offers require server-confirmed entitlement — not stale cache alone. */
+  const driverCanReceiveOffers =
+    driverApproved && trialReady && boot.verificationConfirmedByServer;
+  const verificationLocked = Boolean(verificationPendingExplicit);
   const [incomingRide, setIncomingRide] = useState<any>(null);
   const incomingOfferAlertKey =
     incomingRide?.offer_id != null
@@ -634,18 +698,39 @@ export default function ModernDriverHome() {
   useEffect(() => {
     if (Platform.OS !== 'android' || !driverId) return;
     // Keep FGS + token refresh across reconnect blips (not only confirmed).
+    // Never start FGS without the same permission preflight GO ONLINE requires —
+    // login hydrate of is_online=true used to skip it and crash Android 14+.
     if (connectionPhase === 'confirmed' || connectionPhase === 'reconnecting') {
-      void startNativeDriverExperience(driverId);
-      const sessionRefresh = setInterval(() => {
-        void refreshNativeDriverSession();
-      }, 60 * 1000);
-      return () => clearInterval(sessionRefresh);
+      let cancelled = false;
+      let sessionRefresh: ReturnType<typeof setInterval> | undefined;
+      void (async () => {
+        const preflight = await evaluateDriverPermissionPreflight();
+        if (cancelled) return;
+        if (!preflight.ready) {
+          driverFlowLog('FGS_START_BLOCKED_PERMISSIONS', {
+            code: preflight.firstBlockingCode,
+            missing: preflight.missing.map((m) => m.key),
+          });
+          stopNativeDriverExperience();
+          confirmOffline();
+          setPermissionPreflight(preflight);
+          return;
+        }
+        void startNativeDriverExperience(driverId);
+        sessionRefresh = setInterval(() => {
+          void refreshNativeDriverSession();
+        }, 60 * 1000);
+      })();
+      return () => {
+        cancelled = true;
+        if (sessionRefresh) clearInterval(sessionRefresh);
+      };
     }
     if (connectionPhase === 'offline') {
       stopNativeDriverExperience();
     }
     return undefined;
-  }, [connectionPhase, driverId]);
+  }, [confirmOffline, connectionPhase, driverId]);
 
   // Overlay is required in pre-flight BEFORE GO. Soft safety net only if somehow online without it.
   useEffect(() => {
@@ -675,7 +760,7 @@ export default function ModernDriverHome() {
       if (allowed) return;
       Alert.alert(
         'Enable full-screen ride alerts',
-        'Android requires NexRyde to be allowed to show full-screen notifications before incoming rides can appear over the lock screen or another app. Enable this so you never miss a ride request.',
+        'Android requires NEXRYDE to be allowed to show full-screen notifications before incoming rides can appear over the lock screen or another app. Enable this so you never miss a ride request.',
         [
           { text: 'Later', style: 'cancel' },
           { text: 'Open Settings', onPress: requestNativeFullScreenIntentPermission },
@@ -1176,6 +1261,35 @@ export default function ModernDriverHome() {
           });
           return;
         }
+        // Android: never auto-restore online on login/hydrate.
+        // Going online is an explicit GO ONLINE action (permissions + typed FGS).
+        // Auto-start was the process-death path on API 34+ (MissingForegroundServiceType /
+        // ForegroundServiceDidNotStartInTime).
+        if (Platform.OS === 'android') {
+          driverFlowLog('GO_ONLINE_DESYNC', {
+            action: 'hydrate_keep_offline_require_go_online',
+            serverOnline: true,
+          });
+          hydrateServerOnline(false);
+          driverOffersSocket.disconnect();
+          stopNativeDriverExperience();
+          const requestId = createStatusRequestId('offline');
+          void fetchWithTimeout(
+            buildOnlineToggleUrl(BACKEND_URL, { driverId, isOnline: false, requestId }),
+            {
+              method: 'PUT',
+              headers: { ...getAuthHeaders(), 'X-Request-Id': requestId },
+              timeoutMs: 8000,
+            },
+          ).catch(() => {});
+          void refreshPermissionPreflight();
+          startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
+            ok: true,
+            isOnline: false,
+            skipped: 'android_require_go_online',
+          });
+          return;
+        }
         driverFlowLog('GO_ONLINE_DESYNC', { action: 'hydrate_restore_online', serverOnline: true });
         hydrateServerOnline(true);
         driverOffersSocket.connect(driverId);
@@ -1191,12 +1305,45 @@ export default function ModernDriverHome() {
           hydrateServerOnline(false);
           driverOffersSocket.disconnect();
         }
+      } else if (serverOnline && Platform.OS === 'android' && localPhase !== 'confirmed' && localPhase !== 'reconnecting') {
+        // Any non-online local phase on Android: stay offline; user must GO ONLINE.
+        driverFlowLog('GO_ONLINE_DESYNC', {
+          action: 'hydrate_keep_offline_require_go_online_else',
+          serverOnline: true,
+          localPhase,
+        });
+        hydrateServerOnline(false);
+        driverOffersSocket.disconnect();
+        stopNativeDriverExperience();
+        const requestId = createStatusRequestId('offline');
+        void fetchWithTimeout(
+          buildOnlineToggleUrl(BACKEND_URL, { driverId, isOnline: false, requestId }),
+          {
+            method: 'PUT',
+            headers: { ...getAuthHeaders(), 'X-Request-Id': requestId },
+            timeoutMs: 8000,
+          },
+        ).catch(() => {});
+        startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
+          ok: true,
+          isOnline: false,
+          skipped: 'android_require_go_online',
+        });
+        return;
       } else {
         hydrateServerOnline(serverOnline);
         if (serverOnline) driverOffersSocket.connect(driverId);
       }
-      void updateDriverOnlineStatus(serverOnline, driverId);
-      startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', { ok: true, isOnline: serverOnline });
+      void updateDriverOnlineStatus(
+        Platform.OS === 'android' ? localPhase === 'confirmed' || localPhase === 'reconnecting' : serverOnline,
+        driverId,
+      );
+      startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
+        ok: true,
+        isOnline: Platform.OS === 'android'
+          ? localPhase === 'confirmed' || localPhase === 'reconnecting'
+          : serverOnline,
+      });
     } catch (e) {
       startupStepEnd('PROFILE_FETCH_FAILED', 'profile_hydrate', {
         error: e instanceof Error ? e.message : String(e),
@@ -1972,7 +2119,7 @@ export default function ModernDriverHome() {
         )
       );
       if (!ride || riderOffer <= 0) {
-        toast.show('Open NexRyde to accept this ride.', 'warning');
+        toast.show('Open NEXRYDE to accept this ride.', 'warning');
         return;
       }
       await submitIncomingAcceptance(riderOffer, ride);
@@ -2433,9 +2580,23 @@ export default function ModernDriverHome() {
           return;
         }
 
-        if (!driverApproved) {
+        // Entitlement gate: re-confirm with server before going online (cache is display-only).
+        let entitlementStatus = verificationStatus;
+        if (!boot.verificationConfirmedByServer) {
+          const result = await boot.refreshAndWait(6000);
+          entitlementStatus = result.verificationStatus ?? entitlementStatus;
+          if (!result.ok && entitlementStatus !== 'approved') {
+            releaseGoOnlineLock();
+            Alert.alert(
+              'Connection needed',
+              'We could not confirm go-online with the server. Check your connection and try again.',
+            );
+            return;
+          }
+        }
+        if (entitlementStatus !== 'approved') {
           releaseGoOnlineLock();
-          if (verificationStatus === null || boot.isRefreshing) {
+          if (entitlementStatus == null) {
             boot.refresh();
             return;
           }
@@ -2445,9 +2606,14 @@ export default function ModernDriverHome() {
           );
           return;
         }
-        if (!trialReady) {
+        // Plan may still be syncing after local approved paint — re-read after server confirm.
+        const planNow = boot.subscriptionStatus;
+        const planReadyNow = planNow
+          ? ['trial', 'active', 'grace_period'].includes(planNow)
+          : trialReady;
+        if (!planReadyNow) {
           releaseGoOnlineLock();
-          const isTrialEnded = subscriptionStatus === 'pending_payment';
+          const isTrialEnded = planNow === 'pending_payment' || subscriptionStatus === 'pending_payment';
           Alert.alert(
             isTrialEnded ? 'Trial ended' : 'Activation needed',
             isTrialEnded
@@ -2518,7 +2684,7 @@ export default function ModernDriverHome() {
         <DriverLiveMapView
           driverCoords={driverCoords}
           isOnline={sessionEngaged}
-          isReconnecting={connectionPhase === 'reconnecting'}
+          isReconnecting={showReconnectingChrome}
           driverCanReceiveOffers={driverCanReceiveOffers}
           todayEarnings={earnings.today}
           driverOffersWsConnected={driverOffersWsConnected}
@@ -2528,12 +2694,15 @@ export default function ModernDriverHome() {
           onGoOffline={handleToggleOnline}
           toggling={toggling}
           driverApproved={driverApproved}
-          trialReady={trialReady}
+          verificationChecking={verificationChecking}
+          trialReady={displayGoReady}
           onFeatureHub={() => setFeatureHubOpen(true)}
           onSearch={() => guardedPush('/driver/heatmap')}
           onShieldPress={() => guardedPush('/(driver-tabs)/driver-safety')}
           onInboxPress={() => guardedPush('/(driver-tabs)/driver-notifications')}
           onWorkZone={() => guardedPush('/driver/work-zone')}
+          profileImageUri={user?.profile_image ?? null}
+          onProfilePress={() => guardedPush('/(driver-tabs)/driver-profile')}
           activeTrip={activeTripForMap}
           embeddedOfferTrip={incomingRide}
           embeddedOfferCountdown={rideCountdown}
@@ -2649,7 +2818,9 @@ export default function ModernDriverHome() {
     driverCoords={driverCoords}
     profileImageUri={user?.profile_image ?? null}
     driverApproved={driverApproved}
-    trialReady={trialReady}
+    verificationChecking={verificationChecking}
+    awaitingLocalFact={awaitingLocalFact}
+    trialReady={displayGoReady}
     subscriptionStatus={subscriptionStatus}
     trialTripsCompleted={trialTripsCompleted}
     trialTripsTarget={trialTripsTarget}
@@ -2743,15 +2914,27 @@ const DriverOfflineMapPreview = React.memo(function DriverOfflineMapPreview({
 }: DriverOfflineMapPreviewProps) {
   const mapRef = useRef<MapView | null>(null);
   const didCenterOnce = useRef(false);
-  const mountLogged = useRef(false);
   const lastMapPushRef = useRef(0);
   const [displayCoords, setDisplayCoords] = useState<{ lat: number; lng: number } | null>(null);
+  // Defer native MapView until after login transitions settle. Immediate mount + liteMode
+  // under Navigation SDK / R8 was a process-death path on driver offline home.
+  const [nativeMapEnabled, setNativeMapEnabled] = useState(Platform.OS !== 'android');
+  const [mapEpoch, setMapEpoch] = useState(0);
 
   useEffect(() => {
-    if (__DEV__ && !mountLogged.current) {
-      mountLogged.current = true;
-      console.log('[DRIVER_HOME_MAP_MOUNT]');
-    }
+    if (Platform.OS !== 'android') return;
+    let cancelled = false;
+    const handle = InteractionManager.runAfterInteractions(() => {
+      setTimeout(() => {
+        if (cancelled) return;
+        startupLog('DRIVER_HOME_MAP_MOUNT', { deferredMs: 900 });
+        setNativeMapEnabled(true);
+      }, 900);
+    });
+    return () => {
+      cancelled = true;
+      handle.cancel?.();
+    };
   }, []);
 
   /* Throttle marker/camera feed — layout is fixed; avoid re-render churn from GPS stream */
@@ -2772,7 +2955,7 @@ const DriverOfflineMapPreview = React.memo(function DriverOfflineMapPreview({
   }, [latitude, longitude]);
 
   useEffect(() => {
-    if (displayCoords == null || !mapRef.current || didCenterOnce.current) return;
+    if (!nativeMapEnabled || displayCoords == null || !mapRef.current || didCenterOnce.current) return;
     didCenterOnce.current = true;
     mapRef.current.animateToRegion(
       {
@@ -2783,43 +2966,61 @@ const DriverOfflineMapPreview = React.memo(function DriverOfflineMapPreview({
       },
       300,
     );
-  }, [displayCoords]);
+  }, [displayCoords, nativeMapEnabled]);
 
   return (
     <View style={ohStyles.mapCard}>
       <View style={ohStyles.mapMapLayer}>
-        <MapView
-          ref={mapRef}
+        <LinearGradient
+          colors={['#0B1220', '#132033', '#0B1220']}
           style={StyleSheet.absoluteFillObject}
-          provider={PROVIDER_GOOGLE}
-          customMapStyle={NEXRYDE_MAP_STYLE}
-          initialRegion={INITIAL_OFFLINE_MAP_REGION}
-          scrollEnabled={false}
-          zoomEnabled={false}
-          pitchEnabled={false}
-          rotateEnabled={false}
-          showsUserLocation={false}
-          showsMyLocationButton={false}
-          showsCompass={false}
-          showsPointsOfInterest={false}
-          showsBuildings={false}
-          showsTraffic={false}
-          toolbarEnabled={false}
-          liteMode={Platform.OS === 'android'}
-          moveOnMarkerPress={false}
-        >
-          {displayCoords != null ? (
-            <Marker
-              coordinate={{ latitude: displayCoords.lat, longitude: displayCoords.lng }}
-              anchor={{ x: 0.5, y: 1 }}
-              tracksViewChanges={false}
+          pointerEvents="none"
+        />
+        {nativeMapEnabled ? (
+          <TripMapErrorBoundary
+            key={`offline-map-${mapEpoch}`}
+            onRetry={() => {
+              didCenterOnce.current = false;
+              setNativeMapEnabled(false);
+              setMapEpoch((n) => n + 1);
+              setTimeout(() => setNativeMapEnabled(true), 400);
+            }}
+          >
+            <MapView
+              ref={mapRef}
+              style={StyleSheet.absoluteFillObject}
+              provider={PROVIDER_GOOGLE}
+              customMapStyle={NEXRYDE_MAP_STYLE}
+              initialRegion={INITIAL_OFFLINE_MAP_REGION}
+              scrollEnabled={false}
+              zoomEnabled={false}
+              pitchEnabled={false}
+              rotateEnabled={false}
+              showsUserLocation={false}
+              showsMyLocationButton={false}
+              showsCompass={false}
+              showsPointsOfInterest={false}
+              showsBuildings={false}
+              showsTraffic={false}
+              toolbarEnabled={false}
+              // liteMode + Navigation SDK maps has caused Android process death on login.
+              liteMode={false}
+              moveOnMarkerPress={false}
             >
-              <View style={ohStyles.mapPinWrap} collapsable={false}>
-                <Ionicons name="location" size={44} color={BRAND.primary} />
-              </View>
-            </Marker>
-          ) : null}
-        </MapView>
+              {displayCoords != null ? (
+                <Marker
+                  coordinate={{ latitude: displayCoords.lat, longitude: displayCoords.lng }}
+                  anchor={{ x: 0.5, y: 1 }}
+                  tracksViewChanges={false}
+                >
+                  <View style={ohStyles.mapPinWrap} collapsable={false}>
+                    <Ionicons name="location" size={44} color={BRAND.primary} />
+                  </View>
+                </Marker>
+              ) : null}
+            </MapView>
+          </TripMapErrorBoundary>
+        ) : null}
 
         <LinearGradient
           colors={['rgba(6,11,20,0.2)', 'transparent', 'rgba(6,11,20,0.88)']}
@@ -2861,6 +3062,8 @@ function DriverOfflineHome({
   driverCoords,
   profileImageUri,
   driverApproved,
+  verificationChecking,
+  awaitingLocalFact = false,
   trialReady,
   subscriptionStatus,
   trialTripsCompleted,
@@ -2892,6 +3095,10 @@ function DriverOfflineHome({
   driverCoords: { lat: number; lng: number; heading?: number } | null;
   profileImageUri: string | null;
   driverApproved: boolean;
+  /** No local fact after hydrate — never show Waiting for Approval. */
+  verificationChecking: boolean;
+  /** Cold start before local fact read — do not show Checking copy. */
+  awaitingLocalFact?: boolean;
   trialReady: boolean;
   subscriptionStatus: string | null;
   trialTripsCompleted: number;
@@ -2960,9 +3167,17 @@ function DriverOfflineHome({
 
   const permissionsReady = !permissionPreflight || permissionPreflight.ready;
   const canTapGoOnline = driverApproved && trialReady && permissionsReady && !toggling;
-  const notApproved = !driverApproved;
+  const pendingExplicit =
+    !verificationChecking &&
+    !driverApproved &&
+    (verificationStatus === 'pending' ||
+      verificationStatus === 'pending_review' ||
+      verificationStatus === 'rejected' ||
+      verificationStatus === 'documents_rejected' ||
+      // Known non-approved status from server/cache (not null).
+      Boolean(verificationStatus));
   const trialEnded = subscriptionStatus === 'pending_payment';
-  const needsSubscription = driverApproved && !trialReady;
+  const needsSubscription = driverApproved && !trialReady && subscriptionStatus != null;
   const trialBannerParts = splitTrialBannerForEmphasis({
     completed: trialTripsCompleted,
     target: trialTripsTarget,
@@ -3012,24 +3227,20 @@ function DriverOfflineHome({
           <View style={ohStyles.topBarCenterSlot} pointerEvents="box-none">
             <View style={ohStyles.offlinePill}>
               <View style={ohStyles.offlineDot} />
-              <Text style={ohStyles.offlinePillText}>OFFLINE</Text>
+              <Text style={ohStyles.offlinePillText}>Offline</Text>
             </View>
           </View>
 
           <TouchableOpacity style={ohStyles.profileTap} onPress={onProfile} activeOpacity={0.82}>
-            <View style={ohStyles.profileRing}>
-              {profileImageUri ? (
-                <Image source={{ uri: profileImageUri }} style={ohStyles.profileImg} />
-              ) : (
-                <Ionicons name="person" size={20} color="#94A3B8" />
-              )}
-              <View
-                style={[
-                  ohStyles.profileStatusDot,
-                  !profileReadyDot && ohStyles.profileStatusDotMuted,
-                ]}
-              />
-            </View>
+            <TripProfileAvatar
+              size={48}
+              uri={resolvePublicMediaUri(profileImageUri)}
+              borderColor="#FFFFFF"
+              borderWidth={2.5}
+              showOnlineDot
+              onlineDotColor={profileReadyDot ? BRAND.primary : '#64748B'}
+              accessibilityLabel="Your driver profile photo"
+            />
           </TouchableOpacity>
         </View>
 
@@ -3070,7 +3281,18 @@ function DriverOfflineHome({
         />
 
         {/* Gates only — map + GO carry the rest */}
-        {notApproved && (
+        {verificationChecking ? (
+          <View style={ohStyles.bannerInfo}>
+            <ActivityIndicator size="small" color="#93C5FD" />
+            <View style={{ flex: 1 }}>
+              <Text style={[ohStyles.bannerTitle, { color: '#93C5FD' }]}>Checking your account…</Text>
+              <Text style={ohStyles.bannerBody}>
+                Confirming your verification status. This only takes a moment.
+              </Text>
+            </View>
+          </View>
+        ) : null}
+        {pendingExplicit ? (
           <View style={ohStyles.bannerWarn}>
             <Ionicons name="time-outline" size={18} color="#FBBF24" />
             <View style={{ flex: 1 }}>
@@ -3083,7 +3305,7 @@ function DriverOfflineHome({
             </View>
             <Ionicons name="chevron-forward" size={16} color="#FBBF24" />
           </View>
-        )}
+        ) : null}
         {needsSubscription && (
           <TouchableOpacity
             style={trialEnded ? ohStyles.bannerTrialEnded : ohStyles.bannerInfo}
@@ -3172,7 +3394,7 @@ function DriverOfflineHome({
                       <Ionicons name="radio" size={24} color="#022C22" />
                     )}
                     <Text style={ohStyles.goBtnTextLight}>
-                      {toggling ? 'Connecting…' : 'GO ONLINE'}
+                      {toggling ? 'Connecting…' : 'Go online'}
                     </Text>
                   </View>
                   {!toggling ? (
@@ -3184,7 +3406,17 @@ function DriverOfflineHome({
               </TouchableOpacity>
             </Animated.View>
           </View>
-        ) : notApproved ? (
+        ) : awaitingLocalFact ? (
+          <TouchableOpacity style={ohStyles.goBtnPending} activeOpacity={0.8} disabled>
+            <ActivityIndicator size="small" color="#94A3B8" />
+            <Text style={[ohStyles.goBtnPendingText, { color: '#94A3B8' }]}>Loading…</Text>
+          </TouchableOpacity>
+        ) : verificationChecking ? (
+          <TouchableOpacity style={ohStyles.goBtnPending} activeOpacity={0.8} disabled>
+            <ActivityIndicator size="small" color="#93C5FD" />
+            <Text style={[ohStyles.goBtnPendingText, { color: '#93C5FD' }]}>Checking your account…</Text>
+          </TouchableOpacity>
+        ) : pendingExplicit ? (
           <TouchableOpacity style={ohStyles.goBtnPending} activeOpacity={0.8}>
             <Ionicons name="time-outline" size={20} color="#FBBF24" />
             <Text style={ohStyles.goBtnPendingText}>Waiting for Approval</Text>
@@ -3246,31 +3478,12 @@ const ohStyles = StyleSheet.create({
   },
   topCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
   topBarCenterSlot: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  profileTap: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
-  profileRing: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 2,
-    borderColor: 'rgba(148,163,184,0.22)',
+  profileTap: {
+    width: 56,
+    height: 56,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'visible',
   },
-  profileImg: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1e293b' },
-  profileStatusDot: {
-    position: 'absolute',
-    bottom: -1,
-    right: -1,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: BRAND.primary,
-    borderWidth: 2,
-    borderColor: '#060B14',
-  },
-  profileStatusDotMuted: { backgroundColor: '#64748B' },
   offlinePill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3288,7 +3501,7 @@ const ohStyles = StyleSheet.create({
     elevation: 4,
   },
   offlineDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#64748B' },
-  offlinePillText: { fontSize: 11, fontWeight: '800', color: '#94A3B8', letterSpacing: 2 },
+  offlinePillText: { fontSize: 12, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.15 },
 
   trialProgressSlot: {
     height: OFFLINE_TRIAL_SLOT_HEIGHT,
@@ -3556,10 +3769,10 @@ const ohStyles = StyleSheet.create({
     gap: 12,
   },
   goBtnTextLight: {
-    fontSize: 20,
+    fontSize: 19,
     fontWeight: '900',
     color: '#022C22',
-    letterSpacing: 2,
+    letterSpacing: -0.2,
   },
   goHalftone: {
     position: 'absolute',

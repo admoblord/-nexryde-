@@ -1,5 +1,5 @@
 """
-NexRyde Subscription Management System
+NEXRYDE Subscription Management System
 Handles phased pricing, trials, payments, and enforcement
 """
 
@@ -233,7 +233,7 @@ class PaymentEnforcer:
     def send_payment_reminder(driver_id: str, days_before_due: int):
         """Send payment reminder notification"""
         messages = {
-            5: "📅 Your NexRyde subscription renews in 5 days. Pay now to avoid interruption.",
+            5: "📅 Your NEXRYDE subscription renews in 5 days. Pay now to avoid interruption.",
             1: "⚠️ PAYMENT DUE TOMORROW! Avoid suspension - pay now.",
             0: "🚨 PAYMENT OVERDUE! Limited access active. Pay within 7 days.",
             -3: "🚨 ACCOUNT WILL BE SUSPENDED IN 4 DAYS! Pay immediately.",

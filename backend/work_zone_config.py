@@ -66,7 +66,7 @@ def work_zone_public_config() -> dict[str, Any]:
         "idle_suggestion_minutes": 30,
         "copy": {
             "title": "Work Zone",
-            "subtitle": "Included with your NexRyde driver plan",
+            "subtitle": "Included with your NEXRYDE driver plan",
             "tagline": "Know your area. Know your money. Before you start your engine.",
             "subscription_note": (
                 "No additional fee — included for every driver on an active trial or subscription."

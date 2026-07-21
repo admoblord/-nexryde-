@@ -6,7 +6,7 @@ const widgetConfig = {
   widgets: [
     {
       name: 'DriverStatus',
-      label: 'Nexryde Driver Status',
+      label: 'NEXRYDE Driver Status',
       minWidth: '180dp',
       minHeight: '110dp',
       targetCellWidth: 3,
@@ -92,7 +92,7 @@ module.exports = ({ config }) => ({
     googleMapsDirectionsKey:
       process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_ANDROID_KEY,
     // Optional paid tile provider fallback only. Public OpenStreetMap tile servers
-    // are intentionally not used by NexRyde production clients.
+    // are intentionally not used by NEXRYDE production clients.
     mapTileUrlTemplate: MAP_TILE_URL_TEMPLATE,
     mapTileProviderName: MAP_TILE_PROVIDER_NAME,
   },

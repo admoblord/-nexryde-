@@ -61,9 +61,9 @@ type Row = {
 };
 
 const QUICK = [
-  { label: 'Emergency', route: '/(rider-tabs)/rider-safety', icon: 'warning' as const, variant: 'danger' as const },
-  { label: 'Police & help', route: '/support', icon: 'shield' as const, variant: 'police' as const },
-  { label: 'Witness', route: '/rider/share-trip', icon: 'eye' as const, variant: 'witness' as const },
+  { label: 'SOS', route: '/(rider-tabs)/rider-safety', icon: 'warning' as const, variant: 'danger' as const },
+  { label: 'Police', route: '/support', icon: 'shield' as const, variant: 'police' as const },
+  { label: 'Share trip', route: '/rider/share-trip', icon: 'eye' as const, variant: 'witness' as const },
   { label: 'Settings', route: '/settings', icon: 'settings' as const, variant: 'neutral' as const },
 ];
 
@@ -72,15 +72,15 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
     title: 'Verification',
     rows: [
       {
-        label: 'Pick-up Code',
-        desc: 'Your 4-digit code — shown to driver at pickup to confirm identity',
+        label: 'Pickup code',
+        desc: '4-digit code your driver confirms at pickup',
         route: '/rider/security-code',
         icon: 'keypad',
         tone: 'safe',
       },
       {
         label: 'Rider verification',
-        desc: 'Complete profile verification',
+        desc: 'Finish profile checks for safer matching',
         route: '/(auth)/rider-verification',
         icon: 'checkmark-done',
         tone: 'safe',
@@ -92,7 +92,7 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
     rows: [
       {
         label: 'Live tracking',
-        desc: 'Map, ETA & silent safety tools during trips',
+        desc: 'Map, ETA, and silent safety tools on trip',
         route: '/rider/tracking',
         icon: 'navigate',
         tone: 'danger',
@@ -111,7 +111,7 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
     rows: [
       {
         label: 'Trip recording',
-        desc: 'Optional protected trip capture',
+        desc: 'Optional protected audio on your ride',
         route: '/rider/ride-recording',
         icon: 'mic',
         tone: 'info',
@@ -320,7 +320,7 @@ export default function RiderSafetyScreen() {
       setSosModalVisible(false);
       Alert.alert(
         'SOS Sent',
-        'Emergency alert has been sent to your contacts and NexRyde support.',
+        'Emergency alert has been sent to your contacts and NEXRYDE support.',
       );
     } catch (error: any) {
       Alert.alert('SOS Failed', error?.response?.data?.detail || 'Could not send SOS right now.');
@@ -334,7 +334,7 @@ export default function RiderSafetyScreen() {
       <TabBrandStrip role="rider" />
       <View style={[styles.hero, { paddingHorizontal: flow.padH }]}>
         <Text style={styles.heroTitle}>Safety center</Text>
-        <Text style={styles.heroSub}>Verification, emergencies, and trip protection — in one place.</Text>
+        <Text style={styles.heroSub}>Verified rides, emergency help, and live trip protection — always on.</Text>
       </View>
 
       <ScrollView
@@ -400,12 +400,16 @@ export default function RiderSafetyScreen() {
           <View style={styles.sosIconWrap}>
             <Ionicons name="alert-circle" size={44} color="#FFF" />
           </View>
-          <Text style={styles.sosText}>{sendingSos ? 'Sending SOS...' : 'Emergency SOS'}</Text>
-          <Text style={styles.sosSubtext}>
-            {effectiveTripId ? 'Trigger a protected emergency alert now' : 'SOS available only in active trip'}
+          <Text style={[styles.sosText, !effectiveTripId && styles.sosTextMuted]}>
+            {sendingSos ? 'Sending SOS…' : 'Emergency SOS'}
+          </Text>
+          <Text style={[styles.sosSubtext, !effectiveTripId && styles.sosSubtextMuted]}>
+            {effectiveTripId
+              ? 'One tap sends your live location to trusted contacts'
+              : 'Available once your ride is underway'}
           </Text>
           <EmergencyButton
-            label={effectiveTripId ? 'Send SOS alert' : 'No active trip'}
+            label={effectiveTripId ? 'Send SOS now' : 'Start a trip to enable'}
             style={styles.sosCta}
             onPress={() => setSosModalVisible(true)}
             compact={false}
@@ -488,7 +492,7 @@ export default function RiderSafetyScreen() {
       <ConfirmationModal
         visible={sosModalVisible}
         title="Confirm Emergency SOS"
-        message="This sends your live location and trip details to emergency contacts and NexRyde support."
+        message="This sends your live location and trip details to emergency contacts and NEXRYDE support."
         confirmText={sendingSos ? 'Sending...' : 'Send SOS'}
         cancelText="Cancel"
         destructive
@@ -601,22 +605,30 @@ const styles = StyleSheet.create({
     padding: SPACING.xl,
     alignItems: 'center',
     marginBottom: SPACING.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(239,68,68,0.35)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.45)',
+    shadowColor: BRAND.danger,
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
   },
   sosIconWrap: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(0,0,0,0.12)',
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    backgroundColor: 'rgba(0,0,0,0.16)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.sm,
     borderWidth: 3,
-    borderColor: 'rgba(255,255,255,0.35)',
+    borderColor: 'rgba(255,255,255,0.4)',
   },
   sosDisabled: {
-    backgroundColor: BRAND.textMuted,
+    backgroundColor: SURFACE.cardElevated,
+    borderColor: SURFACE.hairline,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   sosText: {
     fontSize: 22,
@@ -625,11 +637,19 @@ const styles = StyleSheet.create({
     marginTop: SPACING.sm,
     letterSpacing: -0.5,
   },
+  sosTextMuted: {
+    color: BRAND.textPrimary,
+  },
   sosSubtext: {
     fontSize: 13,
     fontWeight: '700',
     color: '#FEE2E2',
     marginTop: SPACING.xs,
+    textAlign: 'center',
+    paddingHorizontal: SPACING.md,
+  },
+  sosSubtextMuted: {
+    color: BRAND.textSecondary,
   },
   sosCta: {
     marginTop: SPACING.md,

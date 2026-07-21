@@ -279,7 +279,7 @@ export default function NexrydeStoriesScreen() {
           <Ionicons name="arrow-back" size={22} color={COLORS.white} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>Nexryde Stories</Text>
+          <Text style={styles.headerTitle}>NEXRYDE Stories</Text>
           <Text style={styles.headerSubtitle}>{feedTitle}</Text>
         </View>
       </LinearGradient>

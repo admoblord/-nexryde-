@@ -385,7 +385,7 @@ export default function DriverEarningsScreen() {
         <View style={s.zeroBanner}>
           <Ionicons name="shield-checkmark" size={18} color={D.neon} />
           <Text style={s.zeroBannerTxt}>
-            {dashboard?.commission_message ?? 'You keep 100% of every fare. No NexRyde cut.'}
+            {dashboard?.commission_message ?? 'You keep 100% of every fare. No NEXRYDE cut.'}
           </Text>
         </View>
 

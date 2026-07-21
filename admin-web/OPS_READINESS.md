@@ -1,4 +1,4 @@
-# NexRyde Admin Operations Center — Production Readiness Report
+# NEXRYDE Admin Operations Center — Production Readiness Report
 
 **Generated:** July 2026  
 **Panel URL:** `https://nexryde-backend-993913300770.us-central1.run.app/admin/`  
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-The NexRyde admin panel has been extended from a functional foundation into an **enterprise Operations Center** while preserving existing branding, sidebar navigation, colors, and routes. Core ops workflows (driver/rider profiles, live monitoring, dispatch, fraud, maps usage, audit) are implemented and API-backed.
+The NEXRYDE admin panel has been extended from a functional foundation into an **enterprise Operations Center** while preserving existing branding, sidebar navigation, colors, and routes. Core ops workflows (driver/rider profiles, live monitoring, dispatch, fraud, maps usage, audit) are implemented and API-backed.
 
 ---
 

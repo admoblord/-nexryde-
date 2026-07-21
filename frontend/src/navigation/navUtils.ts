@@ -194,7 +194,7 @@ export function maneuverToRotation(maneuver: string): number {
 
 // ── Maneuver → accent colour ───────────────────────────────────────────────
 export function maneuverToColor(maneuver: string): string {
-  if (maneuver.includes('left')) return '#34D399'; // mint / emerald — Nexryde lane cue
+  if (maneuver.includes('left')) return '#34D399'; // mint / emerald — NEXRYDE lane cue
   if (maneuver.includes('right')) return '#f59e0b'; // amber
   if (maneuver.includes('u-turn')) return '#f87171'; // red
   if (maneuver.includes('roundabout')) return '#a78bfa'; // violet

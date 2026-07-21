@@ -1,5 +1,5 @@
 """
-NexRyde Performance Rewards System
+NEXRYDE Performance Rewards System
 Automatically rewards top-performing drivers with free subscription months
 """
 

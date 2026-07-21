@@ -62,7 +62,7 @@ export default function SettingsScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Text style={[styles.lead, { color: colors.textMuted }]}>
-          Control how NexRyde behaves on this device. Changes apply right away.
+          Control how NEXRYDE behaves on this device. Changes apply right away.
         </Text>
         <AppearanceSection />
         <View style={[styles.sectionCard, { backgroundColor: cardBg, borderColor: border }]}>

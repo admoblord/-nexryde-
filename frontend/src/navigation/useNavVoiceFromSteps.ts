@@ -18,6 +18,8 @@ export function useNavVoiceFromSteps(opts: {
   distToStepM: number | null;
   stepIndex: number;
   tripStatus: string;
+  /** Only prompt for pickup code when the rider enabled it for this trip. */
+  pickupCodeRequired?: boolean;
 }) {
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(false);
@@ -82,10 +84,14 @@ export function useNavVoiceFromSteps(opts: {
       const key = 'arrived-once';
       if (!announcedRef.current.has(key)) {
         announcedRef.current.add(key);
-        speak('You have arrived at the pickup point. Ask the rider for their pickup code.');
+        speak(
+          opts.pickupCodeRequired
+            ? 'You have arrived at the pickup point. Ask the rider for their pickup code.'
+            : 'You have arrived at the pickup point.',
+        );
       }
     }
-  }, [opts.tripStatus, speak]);
+  }, [opts.tripStatus, opts.pickupCodeRequired, speak]);
 
   return {
     muted,

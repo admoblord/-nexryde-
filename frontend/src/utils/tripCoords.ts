@@ -115,10 +115,11 @@ export function mergeTripFromStatusPayload(
     arrived_at: (data.arrived_at as string | null | undefined) ?? prev?.arrived_at ?? null,
     started_at: (data.started_at as string | null | undefined) ?? prev?.started_at ?? null,
     completed_at: (data.completed_at as string | null | undefined) ?? prev?.completed_at ?? null,
+    // Strict true only — missing/false must never force verify-before-start.
     pickup_code_required:
       data.pickup_code_required !== undefined
-        ? Boolean(data.pickup_code_required)
-        : prev?.pickup_code_required,
+        ? data.pickup_code_required === true
+        : prev?.pickup_code_required === true,
     pickup_code_verified: Boolean(
       data.pickup_code_verified || data.security_code_verified || prev?.pickup_code_verified,
     ),

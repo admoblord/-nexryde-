@@ -1,4 +1,4 @@
-"""Nexryde Incentives — Rider first-ride reward, referral system, credit rules.
+"""NEXRYDE Incentives — Rider first-ride reward, referral system, credit rules.
 
 Core rule (enforced everywhere):
     NO RIDE → NO REWARD → NO COST
@@ -364,7 +364,7 @@ async def get_referral_code(request: Request):
     invite_url = _build_invite_url(username, code)
     handle = (username + "'s") if username else "my"
     share_message = (
-        "🚗 Join Nexryde — Nigeria's smartest ride app!\n\n"
+        "🚗 Join NEXRYDE — Nigeria's smartest ride app!\n\n"
         f"Use {handle} invite link and we BOTH earn "
         f"₦{REFERRAL_REWARD_INVITEE_NGN:,.0f} after your first ride:\n{invite_url}"
     )
@@ -374,7 +374,7 @@ async def get_referral_code(request: Request):
         "invite_url": invite_url,
         "inviter_reward": REFERRAL_REWARD_INVITER_NGN,
         "invitee_reward": REFERRAL_REWARD_INVITEE_NGN,
-        "message": f"Join Nexryde via {invite_url} and get ₦{REFERRAL_REWARD_INVITEE_NGN:,.0f} after your first ride.",
+        "message": f"Join NEXRYDE via {invite_url} and get ₦{REFERRAL_REWARD_INVITEE_NGN:,.0f} after your first ride.",
         "share_message": share_message,
     }
 

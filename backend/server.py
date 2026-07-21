@@ -259,7 +259,7 @@ async def service_health_liveness():
 
 # ── Android App Links verification ────────────────────────────────────────────
 # Serves the Digital Asset Links file so Android can verify that
-# https://nexryde.app/invite/* links open Nexryde directly without a chooser.
+# https://nexryde.app/invite/* links open NEXRYDE directly without a chooser.
 # SHA-256 fingerprint: Google Play Console → Release → Setup → App signing
 _ASSETLINKS_SHA256 = os.environ.get("ANDROID_SHA256_CERT", "")
 
@@ -323,7 +323,7 @@ async def apple_app_site_association():
 
 # ── Referral invite redirect page ─────────────────────────────────────────────
 # When someone taps a nexryde.app/invite/{slug} link:
-#   • If Nexryde is installed → Android intent URL opens the app directly.
+#   • If NEXRYDE is installed → Android intent URL opens the app directly.
 #   • If not installed → falls back to Play Store.
 # This page also stores the referral identifier in the URL so the app can
 # read it from Linking.getInitialURL() on cold-start.
@@ -338,7 +338,7 @@ _INVITE_HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0D1420">
-<title>Join Nexryde — Nigeria's Smartest Ride App</title>
+<title>Join NEXRYDE — Nigeria's Smartest Ride App</title>
 <style>
   *{{box-sizing:border-box;margin:0;padding:0}}
   body{{background:#0D1420;color:#F8FAFC;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;padding-bottom:env(safe-area-inset-bottom,24px)}}
@@ -369,21 +369,21 @@ _INVITE_HTML = """<!DOCTYPE html>
   <div class="brand">NEXRYDE</div>
   <div class="badge">You've been invited</div>
   <h1>Nigeria's Smartest Ride App</h1>
-  <p class="sub">Your friend invited you to join Nexryde — book rides in seconds, keep 100% of your fare as a driver.</p>
+  <p class="sub">Your friend invited you to join NEXRYDE — book rides in seconds, keep 100% of your fare as a driver.</p>
   <div class="reward">
     <div class="reward-label">New rider welcome bonus</div>
     <div class="reward-amount">₦500 FREE</div>
     <div class="reward-sub">Applied automatically on your first ride</div>
   </div>
   <a class="btn btn-android" id="openBtn" href="{intent_url}">
-    <span>🚀</span> Open Nexryde App
+    <span>🚀</span> Open NEXRYDE App
   </a>
   <div class="store-btns" id="storeBtns">
     <div class="divider">Download the app</div>
     <a class="btn btn-android" href="{play_store_url}">📱 Get it on Play Store</a>
     <a class="btn btn-ios" href="{app_store_url}">🍎 Download on App Store</a>
   </div>
-  <p class="note" id="note">Already installed? Tap "Open Nexryde App" above.</p>
+  <p class="note" id="note">Already installed? Tap "Open NEXRYDE App" above.</p>
 </div>
 <script>
 (function(){{
@@ -402,7 +402,7 @@ _INVITE_HTML = """<!DOCTYPE html>
   if (isIOS) {{
     // iOS: use universal link / custom scheme; fall back to App Store
     openBtn.href    = deeplink;
-    openBtn.innerHTML = '<span>🍎</span> Open Nexryde on iPhone';
+    openBtn.innerHTML = '<span>🍎</span> Open NEXRYDE on iPhone';
     openBtn.className = 'btn btn-ios';
     note.textContent  = 'If the app is not installed, you will be redirected to the App Store.';
     var timer = setTimeout(function(){{ window.location = appStore; }}, 2500);
@@ -418,7 +418,7 @@ _INVITE_HTML = """<!DOCTYPE html>
     // Desktop / unknown: show both store buttons
     openBtn.style.display = 'none';
     storeBtns.style.display = 'block';
-    note.textContent = 'Scan the QR code or search "Nexryde" in your device's app store.';
+    note.textContent = 'Scan the QR code or search "NEXRYDE" in your device's app store.';
   }}
 }})();
 </script>
@@ -427,7 +427,7 @@ _INVITE_HTML = """<!DOCTYPE html>
 
 @app.get("/invite/{identifier}", response_class=HTMLResponse, include_in_schema=False)
 async def invite_redirect(identifier: str):
-    """Smart invite landing page — opens the Nexryde app on Android or iOS, or shows store buttons."""
+    """Smart invite landing page — opens the NEXRYDE app on Android or iOS, or shows store buttons."""
     slug = identifier.strip()
     deeplink_url = f"nexryde://invite/{slug}"
     intent_url = (
@@ -995,7 +995,7 @@ class LostItem(BaseModel):
 # Tier System Configuration
 TIER_CONFIG = {
     "basic": {
-        "name": "Nexryde Basic",
+        "name": "NEXRYDE Basic",
         "monthly_fee": 18000,
         "earning_per_ride": {"min": 200, "max": 300},
         "requirements": {
@@ -1007,7 +1007,7 @@ TIER_CONFIG = {
         "color": "#C9A9A6"  # Rose gold
     },
     "premium": {
-        "name": "Nexryde Premium", 
+        "name": "NEXRYDE Premium", 
         "monthly_fee": 18000,  # Same fee!
         "earning_per_ride": {"min": 300, "max": 450},
         "requirements": {

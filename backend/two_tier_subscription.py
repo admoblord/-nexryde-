@@ -1,5 +1,5 @@
 """
-NexRyde Two-Tier Subscription System
+NEXRYDE Two-Tier Subscription System
 City Rider (Intra-City) + Road Warrior (Inter-City/Interstate)
 Phased Pricing with Route Caching & API Cost Protection
 """

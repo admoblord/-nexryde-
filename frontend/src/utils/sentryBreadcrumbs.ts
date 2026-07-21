@@ -1,5 +1,5 @@
 /**
- * Structured Sentry breadcrumbs and custom event tracking for NexRyde.
+ * Structured Sentry breadcrumbs and custom event tracking for NEXRYDE.
  *
  * Provides strongly-typed helpers so key user journeys appear in Sentry's
  * breadcrumb trail and Insights dashboards without scattering Sentry.* calls

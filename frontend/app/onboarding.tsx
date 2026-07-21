@@ -7,53 +7,55 @@ import {
   TouchableOpacity,
   FlatList,
   Animated,
+  type ImageSourcePropType,
+  type ListRenderItemInfo,
+  type NativeSyntheticEvent,
+  type NativeScrollEvent,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { OnboardingCabHero } from '@/src/components/onboarding/OnboardingCabHero';
+import { OnboardingPhotoHero } from '@/src/components/onboarding/OnboardingPhotoHero';
 import { useAppStore } from '@/src/store/appStore';
 import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 type Slide = {
   id: string;
-  variant: 'cab' | 'icon';
-  icon?: keyof typeof Ionicons.glyphMap;
-  iconColor: string;
+  image: ImageSourcePropType;
+  kicker: string;
   title: string;
   description: string;
 };
 
+/** Real lifestyle photography — Nigerian people + cars (e-hailing at a glance), not AI. */
 const SLIDES: Slide[] = [
   {
     id: '1',
-    variant: 'cab',
-    iconColor: '#00D084',
-    title: 'Book your ride',
+    image: require('../assets/images/onboarding/book-ride.jpg'),
+    kicker: 'YOUR CITY. YOUR TIME.',
+    title: 'A ride that feels right',
     description:
-      'Set pickup and destination, pick your vehicle, and get matched with a nearby driver in seconds.',
+      'Tell us where you’re going — a nearby NEXRYDE driver picks you up, and you’re moving in minutes.',
   },
   {
     id: '2',
-    variant: 'icon',
-    icon: 'shield-checkmark',
-    iconColor: '#38BDF8',
-    title: 'Ride safely',
+    image: require('../assets/images/onboarding/ride-safe.jpg'),
+    kicker: 'PEOPLE YOU CAN TRUST',
+    title: 'Safety that feels personal',
     description:
-      'Verified drivers, live trip sharing, SOS, and a security code so you always know it’s your Nexryde.',
+      'Verified NEXRYDE drivers, live tracking, trip sharing, and SOS — so every trip feels looked after.',
   },
   {
     id: '3',
-    variant: 'icon',
-    icon: 'heart',
-    iconColor: '#F472B6',
-    title: 'Save your favorites',
+    image: require('../assets/images/onboarding/favorites.jpg'),
+    kicker: 'RIDE WITH FAMILIAR FACES',
+    title: 'Save drivers you love',
     description:
-      'Had a great ride? Save your driver and book them again in one tap from home.',
+      'Had a great trip? Favorite that driver and request them again — one tap, same comfort.',
   },
 ];
 
@@ -64,8 +66,9 @@ export default function OnboardingScreen() {
   const user = useAppStore((s) => s.user);
   const isAuthenticated = useAppStore((s) => s.isAuthenticated);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<FlatList<Slide>>(null);
   const scrollX = useRef(new Animated.Value(0)).current;
+  const copyFade = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     if (!hasHydrated) return;
@@ -75,10 +78,20 @@ export default function OnboardingScreen() {
     );
   }, [hasHydrated, user?.id, user?.role, isAuthenticated, router]);
 
+  useEffect(() => {
+    copyFade.setValue(0.4);
+    Animated.timing(copyFade, {
+      toValue: 1,
+      duration: 380,
+      useNativeDriver: true,
+    }).start();
+  }, [currentIndex, copyFade]);
+
   const handleNext = async () => {
     if (currentIndex < SLIDES.length - 1) {
-      flatListRef.current?.scrollToIndex({ index: currentIndex + 1 });
-      setCurrentIndex(currentIndex + 1);
+      const next = currentIndex + 1;
+      flatListRef.current?.scrollToIndex({ index: next, animated: true });
+      setCurrentIndex(next);
     } else {
       await AsyncStorage.setItem('onboarding_complete', 'true');
       router.replace('/(auth)/login');
@@ -90,46 +103,72 @@ export default function OnboardingScreen() {
     router.replace('/(auth)/login');
   };
 
-  const renderSlide = ({ item }: { item: Slide }) => (
-    <View style={styles.slide}>
-      {item.variant === 'cab' ? (
-        <OnboardingCabHero size={200} />
-      ) : (
-        <LinearGradient
-          colors={[item.iconColor + '18', item.iconColor + '06', 'transparent']}
-          style={styles.iconHalo}
+  const onMomentumScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    setCurrentIndex(Math.round(e.nativeEvent.contentOffset.x / width));
+  };
+
+  const renderSlide = ({ item, index }: ListRenderItemInfo<Slide>) => {
+    const inputRange = [(index - 1) * width, index * width, (index + 1) * width];
+    const copyTranslateY = scrollX.interpolate({
+      inputRange,
+      outputRange: [28, 0, 28],
+      extrapolate: 'clamp',
+    });
+    const copyOpacity = scrollX.interpolate({
+      inputRange,
+      outputRange: [0.35, 1, 0.35],
+      extrapolate: 'clamp',
+    });
+
+    return (
+      <View style={styles.slide}>
+        <OnboardingPhotoHero source={item.image} animate={index === currentIndex} />
+        <Animated.View
+          style={[
+            styles.copyBlock,
+            {
+              paddingBottom: 120 + Math.max(insets.bottom, 16),
+              opacity: copyOpacity,
+              transform: [{ translateY: copyTranslateY }],
+            },
+          ]}
         >
-          <LinearGradient
-            colors={['rgba(15,23,42,0.98)', 'rgba(15,23,42,0.88)']}
-            style={styles.iconPlate}
-          >
-            <Ionicons name={item.icon!} size={72} color={item.iconColor} />
-          </LinearGradient>
-        </LinearGradient>
-      )}
-      <Text style={styles.kicker}>NEXRYDE</Text>
-      <Text style={styles.title}>{item.title}</Text>
-      <Text style={styles.description}>{item.description}</Text>
-    </View>
-  );
+          <Text style={styles.brand}>NEXRYDE</Text>
+          <Text style={styles.kicker}>{item.kicker}</Text>
+          <Text style={styles.title}>{item.title}</Text>
+          <Text style={styles.description}>{item.description}</Text>
+        </Animated.View>
+      </View>
+    );
+  };
 
   if (!hasHydrated || (user?.id && isAuthenticated)) {
     return null;
   }
 
+  const isLast = currentIndex === SLIDES.length - 1;
+
   return (
     <View style={styles.container}>
-      <LinearGradient colors={['#0D1420', '#19253F', '#0D1420']} style={StyleSheet.absoluteFillObject} />
-      <LinearGradient
-        colors={['rgba(0,208,132,0.06)', 'transparent']}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 0.45 }}
-        style={StyleSheet.absoluteFillObject}
-        pointerEvents="none"
+      <Animated.FlatList
+        ref={flatListRef}
+        data={SLIDES}
+        renderItem={renderSlide}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        keyExtractor={(item) => item.id}
+        bounces={false}
+        decelerationRate="fast"
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], {
+          useNativeDriver: false,
+        })}
+        scrollEventThrottle={16}
+        onMomentumScrollEnd={onMomentumScrollEnd}
       />
 
       <TouchableOpacity
-        style={[styles.skipBtn, { top: insets.top + 12 }]}
+        style={[styles.skipBtn, { top: insets.top + 10 }]}
         onPress={handleSkip}
         accessibilityLabel="Skip onboarding"
         accessibilityRole="button"
@@ -138,115 +177,139 @@ export default function OnboardingScreen() {
         <Text style={styles.skipText}>Skip</Text>
       </TouchableOpacity>
 
-      <FlatList
-        ref={flatListRef}
-        data={SLIDES}
-        renderItem={renderSlide}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        keyExtractor={(item) => item.id}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], {
-          useNativeDriver: false,
-        })}
-        onMomentumScrollEnd={(e) =>
-          setCurrentIndex(Math.round(e.nativeEvent.contentOffset.x / width))
-        }
-      />
-
-      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+      <Animated.View
+        style={[
+          styles.footer,
+          { paddingBottom: Math.max(insets.bottom, 20), opacity: copyFade },
+        ]}
+      >
         <View style={styles.dots}>
-          {SLIDES.map((_, i) => (
-            <View key={i} style={[styles.dot, currentIndex === i && styles.dotActive]} />
-          ))}
+          {SLIDES.map((_, i) => {
+            const inputRange = [(i - 1) * width, i * width, (i + 1) * width];
+            const w = scrollX.interpolate({
+              inputRange,
+              outputRange: [8, 28, 8],
+              extrapolate: 'clamp',
+            });
+            const opacity = scrollX.interpolate({
+              inputRange,
+              outputRange: [0.35, 1, 0.35],
+              extrapolate: 'clamp',
+            });
+            return <Animated.View key={i} style={[styles.dot, { width: w, opacity }]} />;
+          })}
         </View>
 
         <TouchableOpacity
           style={styles.nextBtn}
           onPress={handleNext}
-          accessibilityLabel={currentIndex === SLIDES.length - 1 ? 'Get started' : 'Next slide'}
+          accessibilityLabel={isLast ? 'Get started' : 'Next slide'}
           accessibilityRole="button"
           activeOpacity={0.92}
         >
           <LinearGradient
-            colors={['#4ADE80', '#00D084', '#0066FF']}
+            colors={['#4ADE80', '#22E180', '#0066FF']}
             style={styles.nextGradient}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
           >
-            <Text style={styles.nextText}>
-              {currentIndex === SLIDES.length - 1 ? 'Get started' : 'Next'}
-            </Text>
+            <Text style={styles.nextText}>{isLast ? 'Get started' : 'Next'}</Text>
             <Ionicons name="arrow-forward" size={20} color="#061A0F" />
           </LinearGradient>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0D1420' },
-  skipBtn: { position: 'absolute', right: 20, zIndex: 10, padding: 8 },
-  skipText: { color: '#94A3B8', fontSize: 16, fontWeight: '600', letterSpacing: 0.2 },
+  skipBtn: {
+    position: 'absolute',
+    right: 18,
+    zIndex: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(7,12,22,0.45)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  skipText: { color: '#F8FAFC', fontSize: 14, fontWeight: '700', letterSpacing: 0.2 },
   slide: {
     width,
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 36,
-    paddingTop: 24,
+    height,
+    justifyContent: 'flex-end',
   },
-  iconHalo: {
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 28,
+  copyBlock: {
+    paddingHorizontal: 28,
+    zIndex: 2,
   },
-  iconPlate: {
-    width: 168,
-    height: 168,
-    borderRadius: 84,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.4,
-    shadowRadius: 20,
-    elevation: 16,
+  brand: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: 'rgba(248,250,252,0.95)',
+    letterSpacing: 6,
+    marginBottom: 16,
+    textShadowColor: 'rgba(0,0,0,0.55)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 10,
   },
   kicker: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: 'rgba(0,208,132,0.85)',
-    letterSpacing: 3.2,
-    marginBottom: 8,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6DFFC3',
+    letterSpacing: 1.6,
+    marginBottom: 10,
+    textTransform: 'uppercase',
   },
   title: {
-    fontSize: 28,
-    fontWeight: '900',
+    fontSize: 36,
+    fontWeight: '800',
     color: '#F8FAFC',
-    textAlign: 'center',
+    letterSpacing: -0.8,
     marginBottom: 14,
-    letterSpacing: -0.5,
+    lineHeight: 42,
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 12,
   },
   description: {
     fontSize: 16,
-    fontWeight: '500',
-    color: '#94A3B8',
-    textAlign: 'center',
-    lineHeight: 24,
+    fontWeight: '400',
+    color: 'rgba(241,245,249,0.9)',
+    lineHeight: 25,
     maxWidth: 340,
+    letterSpacing: 0.15,
   },
-  footer: { paddingHorizontal: 24, paddingTop: 8, alignItems: 'center', gap: 22 },
-  dots: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.15)' },
-  dotActive: { width: 26, backgroundColor: '#00D084' },
-  nextBtn: { width: '100%', maxWidth: 400, borderRadius: 16, overflow: 'hidden' },
+  footer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    alignItems: 'center',
+    gap: 18,
+    zIndex: 10,
+  },
+  dots: { flexDirection: 'row', gap: 7, alignItems: 'center', height: 12 },
+  dot: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#22E180',
+  },
+  nextBtn: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 18,
+    overflow: 'hidden',
+    shadowColor: '#22E180',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    elevation: 12,
+  },
   nextGradient: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -254,5 +317,5 @@ const styles = StyleSheet.create({
     paddingVertical: 17,
     gap: 10,
   },
-  nextText: { fontSize: 17, fontWeight: '800', color: '#061A0F', letterSpacing: 0.2 },
+  nextText: { fontSize: 17, fontWeight: '900', color: '#061A0F', letterSpacing: 0.2 },
 });

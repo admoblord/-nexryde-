@@ -88,7 +88,7 @@ import { managedFetch } from '@/src/services/networkManager';
 
 function driverInfoFromTripDocument(trip: Record<string, unknown> | null | undefined) {
   if (!trip) return null;
-  const photos = pickDriverPhotoRaw(trip);
+  const photos = pickDriverPhotoRaw(trip as Record<string, unknown>);
   const info = {
     driver_id: trip.driver_id,
     name: trip.driver_name,
@@ -104,6 +104,10 @@ function driverInfoFromTripDocument(trip: Record<string, unknown> | null | undef
     verified: trip.driver_verified,
     face_image: photos.face,
     profile_image: photos.profile,
+    driver_face_image_url:
+      typeof (trip as { driver_face_image_url?: string }).driver_face_image_url === 'string'
+        ? (trip as { driver_face_image_url?: string }).driver_face_image_url
+        : null,
   };
   return Object.values(info).some((value) => value != null && value !== '') ? info : null;
 }

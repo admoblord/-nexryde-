@@ -69,7 +69,7 @@ class PaymentReminderSystem:
         message = f"""
 📅 PAYMENT REMINDER
 
-Your NexRyde subscription renews in 5 days.
+Your NEXRYDE subscription renews in 5 days.
 
 Amount Due: ₦{amount:,}
 Due Date: {due_date}
@@ -79,11 +79,11 @@ Pay now to avoid any interruption:
 
 Questions? Contact support.
 
-NexRyde Team
+NEXRYDE Team
         """.strip()
         
         await self.send_notification(driver_id, message, "payment_reminder", "medium")
-        await self.send_sms(driver_id, f"NexRyde: Payment of ₦{amount:,} due in 5 days. Pay at nexryde.com/pay")
+        await self.send_sms(driver_id, f"NEXRYDE: Payment of ₦{amount:,} due in 5 days. Pay at nexryde.com/pay")
         await self._payment_subscription_email(
             driver_id,
             "NEXRYDE — Subscription renews in 5 days",
@@ -110,7 +110,7 @@ Support: 0XXX XXX XXXX
         """.strip()
         
         await self.send_notification(driver_id, message, "payment_urgent", "high")
-        await self.send_sms(driver_id, f"URGENT: NexRyde payment ₦{amount:,} due tomorrow! Pay now.")
+        await self.send_sms(driver_id, f"URGENT: NEXRYDE payment ₦{amount:,} due tomorrow! Pay now.")
         await self.send_push_notification(driver_id, "Payment Due Tomorrow!", message, "payment_due_tomorrow")
         await self._payment_subscription_email(driver_id, "NEXRYDE — Payment due tomorrow", message, "due-1d")
     
@@ -184,7 +184,7 @@ This is your final warning.
         message = f"""
 ❌ ACCOUNT SUSPENDED
 
-Your NexRyde account has been suspended due to non-payment.
+Your NEXRYDE account has been suspended due to non-payment.
 
 Original Amount: ₦{amount:,}
 Reconnection Fee: ₦{reconnection_fee:,}

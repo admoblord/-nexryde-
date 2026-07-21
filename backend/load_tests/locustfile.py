@@ -1,5 +1,5 @@
 """
-NexRyde Load Test — Locust
+NEXRYDE Load Test — Locust
 
 Simulates real traffic patterns across the critical rider + driver path.
 

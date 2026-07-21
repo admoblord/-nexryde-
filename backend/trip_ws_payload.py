@@ -71,13 +71,14 @@ def rider_trip_payload_from_doc(trip: Optional[dict]) -> dict[str, Any]:
                 or 180
             ),
         },
-        "pickup_code_required": bool(trip.get("pickup_code_required", True)),
+        # Optional — only when rider enabled pickup_code_enabled at booking.
+        "pickup_code_required": bool(trip.get("pickup_code_required", False)),
         "pickup_code_verified": bool(
             trip.get("pickup_code_verified") or trip.get("security_code_verified")
         ),
         "pickup_code": (
             trip.get("pickup_code") or trip.get("security_code")
-            if trip.get("pickup_code_required", True)
+            if trip.get("pickup_code_required", False)
             else None
         ),
     }

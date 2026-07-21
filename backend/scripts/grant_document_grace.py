@@ -14,7 +14,7 @@ from driver_compliance import check_driver_document_expiry, grant_document_grace
 
 
 async def main() -> int:
-    parser = argparse.ArgumentParser(description="Grant NexRyde document grace to a driver")
+    parser = argparse.ArgumentParser(description="Grant NEXRYDE document grace to a driver")
     parser.add_argument("--email", help="Driver email")
     parser.add_argument("--driver-id", help="Driver user id")
     parser.add_argument("--document", default="drivers_license", help="Document type key")

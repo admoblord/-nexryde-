@@ -40,10 +40,19 @@
 -keep class com.swmansion.gesturehandler.** { *; }
 -keep class com.swmansion.rnscreens.** { *; }
 
-# ── Maps ─────────────────────────────────────────────────────────────────────
+# ── Maps + Navigation SDK (react-native-maps is wired to Nav SDK maps) ────────
+# Without these, R8 strips Nav classes → SIGSEGV / UnsatisfiedLinkError when
+# driver offline MapView mounts right after sign-in (rider may not hit same path).
 -keep class com.google.android.gms.maps.** { *; }
+-keep class com.google.android.libraries.maps.** { *; }
+-keep class com.google.android.libraries.navigation.** { *; }
+-keep class com.google.android.libraries.mapsplatform.** { *; }
+-keep class com.google.android.react.navsdk.** { *; }
+-keep class com.google.maps.android.** { *; }
 -keep class com.rnmaps.maps.** { *; }
 -dontwarn com.google.android.gms.**
+-dontwarn com.google.android.libraries.navigation.**
+-dontwarn com.google.android.react.navsdk.**
 
 # ── Sentry (native plugin may init even when JS DSN is empty) ─────────────────
 -keepattributes LineNumberTable,SourceFile

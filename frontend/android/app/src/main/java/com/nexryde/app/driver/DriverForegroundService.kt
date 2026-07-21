@@ -9,6 +9,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -26,6 +27,7 @@ import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.nexryde.app.R
@@ -63,6 +65,7 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
 
   override fun onCreate() {
     super.onCreate()
+    serviceProcessAlive = true
     createChannels(this)
     locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
     audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -80,6 +83,7 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
       }
       ACTION_UPDATE_SESSION -> {
         if (!isDriverServiceOnline) {
+          // Started via startService only — safe to stop without FGS promote.
           stopSelf()
           return START_NOT_STICKY
         }
@@ -100,7 +104,9 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
         token = intent.getStringExtra(EXTRA_TOKEN) ?: token
         backendUrl = intent.getStringExtra(EXTRA_BACKEND_URL) ?: backendUrl
         rideAlertManager.updateSession(driverId, token, backendUrl)
-        startForeground(NOTIFICATION_ID, buildPersistentNotification())
+        if (!promoteToForeground(requireLocation = true)) {
+          return abortForegroundStart("show_offer_promote_failed")
+        }
         presentRideAlert(extrasToOffer(intent))
         return START_STICKY
       }
@@ -111,7 +117,9 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
           stopSelf()
           return START_NOT_STICKY
         }
-        startForeground(NOTIFICATION_ID, buildPersistentNotification())
+        if (!promoteToForeground(requireLocation = true)) {
+          return abortForegroundStart("accept_offer_promote_failed")
+        }
         acceptOfferFromOverlay(extrasToOffer(intent))
         return START_STICKY
       }
@@ -122,7 +130,9 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
           stopSelf()
           return START_NOT_STICKY
         }
-        startForeground(NOTIFICATION_ID, buildPersistentNotification())
+        if (!promoteToForeground(requireLocation = true)) {
+          return abortForegroundStart("decline_offer_promote_failed")
+        }
         declineOfferFromOverlay(extrasToOffer(intent))
         return START_STICKY
       }
@@ -136,20 +146,109 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
         rideAlertManager.stopAlert()
         return START_STICKY
       }
+      ACTION_START, null -> {
+        return startOnlineFromIntent(intent)
+      }
       else -> {
-        driverId = intent?.getStringExtra(EXTRA_DRIVER_ID) ?: driverId
-        token = intent?.getStringExtra(EXTRA_TOKEN) ?: token
-        backendUrl = intent?.getStringExtra(EXTRA_BACKEND_URL) ?: backendUrl
-        rideAlertManager.updateSession(driverId, token, backendUrl)
-        rideStatus = intent?.getStringExtra(EXTRA_STATUS) ?: "Listening for rides"
-        isDriverServiceOnline = true
-        startForeground(NOTIFICATION_ID, buildPersistentNotification())
-        rideAlertManager.goOnline()
-        startLocationUpdates()
-        scheduleHeartbeat()
-        return START_STICKY
+        return startOnlineFromIntent(intent)
       }
     }
+  }
+
+  private fun startOnlineFromIntent(intent: Intent?): Int {
+    driverId = intent?.getStringExtra(EXTRA_DRIVER_ID) ?: driverId
+    token = intent?.getStringExtra(EXTRA_TOKEN) ?: token
+    backendUrl = intent?.getStringExtra(EXTRA_BACKEND_URL) ?: backendUrl
+    rideAlertManager.updateSession(driverId, token, backendUrl)
+    rideStatus = intent?.getStringExtra(EXTRA_STATUS) ?: "Listening for rides"
+
+    // After startForegroundService(), Android requires a successful startForeground()
+    // before any stopSelf(). Never abort with bare stopSelf on this path.
+    if (!hasLocationPermission()) {
+      return abortForegroundStart("refuse_start_missing_location_permission")
+    }
+    if (!promoteToForeground(requireLocation = true)) {
+      return abortForegroundStart("start_promote_failed")
+    }
+    isDriverServiceOnline = true
+    rideAlertManager.goOnline()
+    startLocationUpdates()
+    scheduleHeartbeat()
+    return START_STICKY
+  }
+
+  /**
+   * Satisfy the Android 14+ FGS contract for a service that declares
+   * foregroundServiceType=location|dataSync.
+   *
+   * - Always use the typed startForeground overload on API 34+.
+   * - Never claim LOCATION without runtime location permission.
+   * - DATA_SYNC-only is used for legal demotion when location is unavailable.
+   */
+  private fun promoteToForeground(requireLocation: Boolean): Boolean {
+    val notification = buildPersistentNotification()
+    val wantLocation = requireLocation && hasLocationPermission()
+    return try {
+      when {
+        Build.VERSION.SDK_INT >= 34 -> {
+          val type =
+            if (wantLocation) {
+              ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            } else {
+              ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            }
+          startForeground(NOTIFICATION_ID, notification, type)
+        }
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+          if (wantLocation) {
+            startForeground(
+              NOTIFICATION_ID,
+              notification,
+              ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
+            )
+          } else {
+            // Q–33: cannot claim location without permission; 2-arg is the demotion path.
+            startForeground(NOTIFICATION_ID, notification)
+          }
+        }
+        else -> startForeground(NOTIFICATION_ID, notification)
+      }
+      true
+    } catch (e: SecurityException) {
+      Log.e(TAG, "startForeground_security", e)
+      false
+    } catch (e: Exception) {
+      Log.e(TAG, "startForeground_failed", e)
+      false
+    }
+  }
+
+  /**
+   * Legal abort after startForegroundService: promote with a declared type, then tear down.
+   * Bare stopSelf() here causes ForegroundServiceDidNotStartInTimeException.
+   */
+  private fun abortForegroundStart(reason: String): Int {
+    Log.e(TAG, reason)
+    isDriverServiceOnline = false
+    // Prefer DATA_SYNC-only (no location) so promote can succeed without location permission.
+    if (!promoteToForeground(requireLocation = false)) {
+      // Last resort: still attempt an untyped promote on older APIs so the contract is met.
+      runCatching { startForeground(NOTIFICATION_ID, buildPersistentNotification()) }
+        .onFailure { Log.e(TAG, "abort_last_resort_startForeground_failed", it) }
+    }
+    runCatching { rideAlertManager.goOffline() }
+    runCatching { cancelAllDriverNotifications() }
+    runCatching { stopLocationUpdates() }
+    handler.removeCallbacksAndMessages(null)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+      stopForeground(STOP_FOREGROUND_REMOVE)
+    } else {
+      @Suppress("DEPRECATION")
+      stopForeground(true)
+    }
+    stopSelf()
+    return START_NOT_STICKY
   }
 
   override fun onDestroy() {
@@ -158,6 +257,7 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
     rideAlertManager.hide()
     DriverOverlayBubbleController.clear(rideAlertManager)
     isDriverServiceOnline = false
+    serviceProcessAlive = false
     super.onDestroy()
   }
 
@@ -476,6 +576,7 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
   }
 
   companion object {
+    private const val TAG = "NexrydeDriverFGS"
     const val ACTION_START = "com.nexryde.app.driver.START"
     const val ACTION_STOP = "com.nexryde.app.driver.STOP"
     const val ACTION_UPDATE_SESSION = "com.nexryde.app.driver.UPDATE_SESSION"
@@ -495,10 +596,18 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
     private const val LOCATION_INTERVAL_MS = 10_000L
     private const val LOCATION_DISTANCE_M = 10f
     @Volatile private var isDriverServiceOnline = false
+    /** True only while the service instance exists — used to avoid startService(STOP) on cold login. */
+    @Volatile private var serviceProcessAlive = false
 
     fun start(context: Context, driverId: String?, token: String?, backendUrl: String?) {
       if (isDriverServiceOnline) {
         updateSession(context, token, backendUrl)
+        return
+      }
+      val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+      val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
+      if (fine != PackageManager.PERMISSION_GRANTED && coarse != PackageManager.PERMISSION_GRANTED) {
+        Log.e(TAG, "skip_start_foreground_service_no_location")
         return
       }
       val intent = Intent(context, DriverForegroundService::class.java).apply {
@@ -507,19 +616,27 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
         putExtra(EXTRA_TOKEN, token)
         putExtra(EXTRA_BACKEND_URL, backendUrl)
       }
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
-      else context.startService(intent)
+      runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+        else context.startService(intent)
+      }.onFailure { Log.e(TAG, "start_foreground_service_failed", it) }
     }
 
     fun stop(context: Context) {
       isDriverServiceOnline = false
       DriverOverlayBubbleController.hide()
-      if (!isDriverServiceOnline) {
-        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.cancel(OFFER_NOTIFICATION_ID)
-        nm.cancel(NOTIFICATION_ID)
+      val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      nm.cancel(OFFER_NOTIFICATION_ID)
+      nm.cancel(NOTIFICATION_ID)
+      // Offline login used to call stop() every mount → startService(STOP) → onCreate of a
+      // brand-new service just to tear it down. Skip unless a process instance is alive.
+      if (!serviceProcessAlive) {
+        Log.i(TAG, "skip_stop_service_not_running")
+        return
       }
-      context.startService(Intent(context, DriverForegroundService::class.java).apply { action = ACTION_STOP })
+      runCatching {
+        context.startService(Intent(context, DriverForegroundService::class.java).apply { action = ACTION_STOP })
+      }.onFailure { Log.e(TAG, "stop_service_failed", it) }
     }
 
     fun updateSession(context: Context, token: String?, backendUrl: String?) {
@@ -534,12 +651,14 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
     fun showRideAlert(context: Context, offer: Map<String, String>) {
       if (!isDriverServiceOnline) return
       createChannels(context)
+      // Already in a foreground session — use startService, not startForegroundService,
+      // so we never re-enter the FGS start contract for offer UI.
       val intent = Intent(context, DriverForegroundService::class.java).apply {
         action = ACTION_SHOW_OFFER
         offer.forEach { (k, v) -> putExtra(k, v) }
       }
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
-      else context.startService(intent)
+      runCatching { context.startService(intent) }
+        .onFailure { Log.e(TAG, "show_ride_alert_start_failed", it) }
     }
 
     fun stopRideAlert(context: Context) {
@@ -560,8 +679,8 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
         action = ACTION_ACCEPT_OFFER
         offer.forEach { (k, v) -> putExtra(k, v) }
       }
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
-      else context.startService(intent)
+      runCatching { context.startService(intent) }
+        .onFailure { Log.e(TAG, "accept_ride_alert_start_failed", it) }
     }
 
     fun declineRideAlert(context: Context, offer: Map<String, String>) {
@@ -570,8 +689,8 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
         action = ACTION_DECLINE_OFFER
         offer.forEach { (k, v) -> putExtra(k, v) }
       }
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
-      else context.startService(intent)
+      runCatching { context.startService(intent) }
+        .onFailure { Log.e(TAG, "decline_ride_alert_start_failed", it) }
     }
 
     fun createChannels(context: Context) {
@@ -582,7 +701,7 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
         "Driver Online Service",
         NotificationManager.IMPORTANCE_LOW
       ).apply {
-        description = "Keeps NexRyde driver online status active"
+        description = "Keeps NEXRYDE driver online status active"
         setShowBadge(false)
       }
       val offerChannel = NotificationChannel(
@@ -590,7 +709,7 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
         "Ride Offers",
         NotificationManager.IMPORTANCE_HIGH
       ).apply {
-        description = "Incoming NexRyde ride requests"
+        description = "Incoming NEXRYDE ride requests"
         lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         enableVibration(true)
         vibrationPattern = longArrayOf(0, 700, 250, 700, 250, 900)

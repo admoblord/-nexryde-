@@ -184,7 +184,7 @@ class RideAlertManager(
     if (tripId.isBlank() || driver.isBlank() || bearer.isBlank()) {
       Log.w(TAG, "accept_blocked_missing_session tripId=$tripId offerId=${offer.offerId} driverPresent=${driver.isNotBlank()} tokenPresent=${bearer.isNotBlank()}")
       markFailed("Open app to accept")
-      DriverRideAlertActivity.markActionRetryable(tripId, offer.offerId, "Open NexRyde to accept, then retry.")
+      DriverRideAlertActivity.markActionRetryable(tripId, offer.offerId, "Open NEXRYDE to accept, then retry.")
       return
     }
     actionInFlight = true
@@ -242,7 +242,7 @@ class RideAlertManager(
     if (offerId.isBlank() || driver.isBlank() || bearer.isBlank()) {
       Log.w(TAG, "decline_missing_session tripId=${offer.tripId} offerId=$offerId driverPresent=${driver.isNotBlank()} tokenPresent=${bearer.isNotBlank()}")
       markFailed("Try again")
-      DriverRideAlertActivity.markActionRetryable(offer.tripId, offerId, "Could not decline yet. Open NexRyde or retry.")
+      DriverRideAlertActivity.markActionRetryable(offer.tripId, offerId, "Could not decline yet. Open NEXRYDE or retry.")
       return
     }
     actionInFlight = true

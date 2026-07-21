@@ -26,13 +26,13 @@ export async function ensureAndroidPushChannels(): Promise<void> {
     },
     {
       identifier: 'open_app',
-      buttonTitle: 'Open NexRyde',
+      buttonTitle: 'Open NEXRYDE',
       options: { opensAppToForeground: true },
     },
   ]);
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync('default', {
-    name: 'NexRyde Notifications',
+    name: 'NEXRYDE Notifications',
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: '#FFD700',
@@ -54,7 +54,7 @@ export async function ensureAndroidPushChannels(): Promise<void> {
     showBadge: true,
   });
   await Notifications.setNotificationChannelAsync('engagement_critical', {
-    name: 'Critical NexRyde Alerts',
+    name: 'Critical NEXRYDE Alerts',
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 400, 200, 400],
     lightColor: '#FF3B30',
@@ -63,7 +63,7 @@ export async function ensureAndroidPushChannels(): Promise<void> {
     showBadge: true,
   });
   await Notifications.setNotificationChannelAsync('engagement_high', {
-    name: 'High Priority NexRyde Updates',
+    name: 'High Priority NEXRYDE Updates',
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 260, 120, 260],
     lightColor: '#FFD700',
@@ -72,13 +72,13 @@ export async function ensureAndroidPushChannels(): Promise<void> {
     showBadge: true,
   });
   await Notifications.setNotificationChannelAsync('engagement_low', {
-    name: 'NexRyde Suggestions',
+    name: 'NEXRYDE Suggestions',
     importance: Notifications.AndroidImportance.DEFAULT,
     lightColor: '#00D47E',
     showBadge: false,
   });
   await Notifications.setNotificationChannelAsync('marketing', {
-    name: 'NexRyde Tips and Offers',
+    name: 'NEXRYDE Tips and Offers',
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 220, 120, 220],
     lightColor: '#00D47E',
@@ -89,7 +89,7 @@ export async function ensureAndroidPushChannels(): Promise<void> {
   // Legacy 'offers' channel: kept for older scheduled engagement payloads.
   // Must be importance HIGH or above — otherwise Android may drop it silently.
   await Notifications.setNotificationChannelAsync('offers', {
-    name: 'NexRyde Offers and Tips',
+    name: 'NEXRYDE Offers and Tips',
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 300, 150, 300],
     lightColor: '#00D47E',

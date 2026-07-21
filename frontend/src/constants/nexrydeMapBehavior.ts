@@ -30,7 +30,7 @@ export const MAP = {
 } as const;
 
 /**
- * NexRyde Night — single canonical dark map for driver + rider (2026 edition).
+ * NEXRYDE Night — single canonical dark map for driver + rider (2026 edition).
  * High-contrast roads for night driving; POI/transit stripped for clean focus.
  * Mutable array so react-native-maps accepts the prop without cast failure.
  */

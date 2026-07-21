@@ -287,6 +287,20 @@ export const useAppStore = create<AppState>()(
         } catch {
           /* non-fatal */
         }
+
+        try {
+          const uid = get().user?.id;
+          const { clearDriverBootCache } = await import('@/src/services/driverBootCache');
+          await clearDriverBootCache(uid || undefined);
+        } catch {
+          /* non-fatal */
+        }
+        try {
+          const { useDriverDisplayStore } = await import('@/src/store/driverDisplayStore');
+          useDriverDisplayStore.getState().clearDriverDisplay();
+        } catch {
+          /* non-fatal */
+        }
         // Cancel scheduled offer notifications so they don't fire after logout
         try {
           const { cancelOfferNotifications } = await import('@/src/services/nexrydeScheduledNotifications');

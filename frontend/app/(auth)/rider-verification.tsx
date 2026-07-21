@@ -217,13 +217,13 @@ export default function RiderVerificationScreen() {
                 disabled={!canSubmit || loading}
                 onPress={() => void handleSubmit()}
                 accessibilityRole="button"
-                accessibilityLabel="Continue to Nexryde"
+                accessibilityLabel="Continue to NEXRYDE"
               >
                 {loading ? (
                   <ActivityIndicator color="#022C22" />
                 ) : (
                   <>
-                    <Text style={styles.primaryBtnTxt}>Continue to Nexryde</Text>
+                    <Text style={styles.primaryBtnTxt}>Continue to NEXRYDE</Text>
                     <Ionicons name="arrow-forward" size={18} color="#022C22" />
                   </>
                 )}

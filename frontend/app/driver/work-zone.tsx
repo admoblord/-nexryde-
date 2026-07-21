@@ -1,5 +1,5 @@
 /**
- * Work Zone — included with NexRyde driver plan (trial + subscription).
+ * Work Zone — included with NEXRYDE driver plan (trial + subscription).
  */
 import React, { useMemo, useRef, useState } from 'react';
 import {

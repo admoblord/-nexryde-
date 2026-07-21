@@ -238,7 +238,7 @@ export function DriverDetailsPage() {
             finally { setBusy(false); }
           }}>Grant Free Month</button>
           <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => {
-            const title = prompt('Notification title:') || 'NexRyde';
+            const title = prompt('Notification title:') || 'NEXRYDE';
             const body = prompt('Message:') || '';
             if (body) act('/notify', { title, body }, 'Notification sent');
           }}>Notify</button>

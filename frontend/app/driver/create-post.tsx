@@ -133,7 +133,7 @@ export default function CreatePostScreen() {
         <View style={styles.tipsCard}>
           <Ionicons name="information-circle" size={20} color={COLORS.primary} />
           <Text style={styles.tipsText}>
-            Share your experiences, tips, questions, or achievements with the NexRyde community!
+            Share your experiences, tips, questions, or achievements with the NEXRYDE community!
           </Text>
         </View>
       </ScrollView>
