@@ -49,6 +49,7 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
   private val handler = Handler(Looper.getMainLooper())
   private var locationManager: LocationManager? = null
   private var lastLocation: Location? = null
+  private var lastLocationUploadAtMs: Long = 0L
   private var token: String? = null
   private var backendUrl: String? = null
   private var driverId: String? = null
@@ -174,6 +175,7 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
     rideAlertManager.goOnline()
     startLocationUpdates()
     scheduleHeartbeat()
+    scheduleLocationUpload()
     return START_STICKY
   }
 
@@ -274,6 +276,8 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
 
   override fun onLocationChanged(location: Location) {
     lastLocation = location
+    // Upload promptly when GPS moves; runnable covers quiet periods.
+    maybeUploadDriverLocation(force = false)
   }
 
   @Deprecated("Deprecated by Android framework")
@@ -310,10 +314,22 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
     handler.post(heartbeatRunnable)
   }
 
+  private fun scheduleLocationUpload() {
+    handler.removeCallbacks(locationUploadRunnable)
+    handler.post(locationUploadRunnable)
+  }
+
   private val heartbeatRunnable = object : Runnable {
     override fun run() {
       sendHeartbeat()
       handler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
+    }
+  }
+
+  private val locationUploadRunnable = object : Runnable {
+    override fun run() {
+      maybeUploadDriverLocation(force = true)
+      handler.postDelayed(this, LOCATION_UPLOAD_INTERVAL_MS)
     }
   }
 
@@ -336,6 +352,47 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
         conn.responseCode
         conn.disconnect()
       }
+    }.start()
+  }
+
+  /**
+   * Rider-visible pins + dispatch geo use PUT /drivers/{id}/location (~10s).
+   * Heartbeat alone (60s) left background pins stale for up to a minute (audit 8.1).
+   */
+  private fun maybeUploadDriverLocation(force: Boolean) {
+    val loc = lastLocation ?: return
+    val now = System.currentTimeMillis()
+    if (!force && now - lastLocationUploadAtMs < LOCATION_UPLOAD_INTERVAL_MS) return
+    lastLocationUploadAtMs = now
+    val base = backendUrl?.trim()?.trimEnd('/') ?: return
+    val bearer = token?.takeIf { it.isNotBlank() } ?: return
+    val id = driverId?.takeIf { it.isNotBlank() } ?: return
+    val lat = loc.latitude
+    val lng = loc.longitude
+    Thread {
+      runCatching {
+        val url = URL("$base/api/drivers/${URLEncoder.encode(id, "UTF-8")}/location")
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+          requestMethod = "PUT"
+          connectTimeout = 8000
+          readTimeout = 8000
+          setRequestProperty("Authorization", "Bearer $bearer")
+          setRequestProperty("Content-Type", "application/json")
+          doOutput = true
+        }
+        val body = JSONObject()
+          .put("latitude", lat)
+          .put("longitude", lng)
+        OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+        val status = conn.responseCode
+        conn.disconnect()
+        if (status == 401) {
+          handler.post {
+            DriverExperienceEvents.emit("heartbeat_force_offline", mapOf("status" to 401, "source" to "native_location_401"))
+            stopOnlineService()
+          }
+        }
+      }.onFailure { Log.w(TAG, "location_upload_failed", it) }
     }.start()
   }
 
@@ -593,6 +650,8 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
     private const val NOTIFICATION_ID = 6101
     private const val OFFER_NOTIFICATION_ID = 6102
     private const val HEARTBEAT_INTERVAL_MS = 60_000L
+    /** Matches Expo BG task + JS idle push — rider pins must not wait on 60s heartbeat. */
+    private const val LOCATION_UPLOAD_INTERVAL_MS = 10_000L
     private const val LOCATION_INTERVAL_MS = 10_000L
     private const val LOCATION_DISTANCE_M = 10f
     @Volatile private var isDriverServiceOnline = false

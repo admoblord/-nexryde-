@@ -65,6 +65,7 @@ import DriverStartTripDock from '@/src/components/driver/DriverStartTripDock';
 import DriverOngoingTripDock from '@/src/components/driver/DriverOngoingTripDock';
 import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 import { resolveRiderPhotoUri } from '@/src/utils/tripProfilePhotos';
+import { setForegroundInterval } from '@/src/utils/foregroundInterval';
 import { DRIVER_OFFER_COUNTDOWN_SECONDS } from '@/src/constants/driverOffer';
 import {
   DOCK_BLUR_INTENSITY,
@@ -664,15 +665,12 @@ function DriverLiveMapViewInner({
         /* silent */
       }
     };
-    void fetchUnread();
-    const iv = setInterval(fetchUnread, 30000);
-    const appSub = AppState.addEventListener('change', (next) => {
-      if (next === 'active') void fetchUnread();
-    });
+    const stop = setForegroundInterval(() => {
+      void fetchUnread();
+    }, 30000);
     return () => {
       cancelled = true;
-      clearInterval(iv);
-      appSub.remove();
+      stop();
     };
   }, [driverId, canCallAuthedApi]);
 
@@ -851,10 +849,17 @@ function DriverLiveMapViewInner({
   /* ── Extract pickup/dropoff coords (early — used by recenter + map) ── */
   const getCoord = (loc: any): { lat: number; lng: number } | null => {
     if (!loc) return null;
-    if (typeof loc === 'object' && 'lat' in loc) return { lat: Number(loc.lat), lng: Number(loc.lng) };
-    if (typeof loc === 'object' && 'latitude' in loc)
-      return { lat: Number(loc.latitude), lng: Number(loc.longitude) };
-    return null;
+    let lat: number | null = null;
+    let lng: number | null = null;
+    if (typeof loc === 'object' && 'lat' in loc) {
+      lat = Number(loc.lat);
+      lng = Number(loc.lng);
+    } else if (typeof loc === 'object' && 'latitude' in loc) {
+      lat = Number(loc.latitude);
+      lng = Number(loc.longitude);
+    }
+    if (lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng };
   };
   const pickupCoord = activeTrip ? getCoord(activeTrip.pickup_location) : null;
   const dropCoord = activeTrip ? getCoord(activeTrip.dropoff_location) : null;

@@ -14,3 +14,4 @@
  * The legacy 3.9 k-line implementation has been retired in favour of this stack.
  */
 export { default } from '@/src/components/tracking/live/LiveTrackingScreen';
+export { ErrorBoundary } from '@/src/components/rider/RiderScreenErrorBoundary';

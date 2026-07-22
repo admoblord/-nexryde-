@@ -182,6 +182,8 @@ interface TripData {
 
 function isPendingReceiptPayment(trip?: TripData | null): boolean {
   if (!trip) return false;
+  // Cash is settled at completion — never keep the booking lock for cash receipts.
+  if (isCashPaymentMethod(trip.payment_method)) return false;
   const status = String(trip.status || '').toLowerCase();
   const paymentStatus = String(trip.payment_status || '').toLowerCase();
   return status === 'pending_payment' || (status === 'completed' && paymentStatus === 'pending');
@@ -347,7 +349,7 @@ export default function TripReceiptScreen() {
     );
 
     return {
-      id:            trip.id,
+      id:            String(trip.id || ''),
       date:          valid ? dt!.toLocaleDateString() : 'N/A',
       time:          valid ? dt!.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
       pickup,
@@ -1268,7 +1270,9 @@ export default function TripReceiptScreen() {
 
               <View style={s.receiptIdRow}>
                 <Text style={s.receiptIdLabel}>Receipt</Text>
-                <Text style={s.receiptIdVal}>#{view.id.slice(0, 16).toUpperCase()}</Text>
+                <Text style={s.receiptIdVal}>
+                  #{String(view.id || '—').slice(0, 16).toUpperCase()}
+                </Text>
               </View>
 
               <TouchableOpacity

@@ -64,14 +64,17 @@ const NOTIF_ICON: Record<string, { icon: string; color: string }> = {
   default:               { icon: 'notifications', color: BRAND.textMuted },
 };
 
-function notifMeta(type: string) {
-  if (type.startsWith('enforcement_')) {
-    return NOTIF_ICON[type] || NOTIF_ICON.enforcement;
+function notifMeta(type: unknown) {
+  // Guard: backend notifications may arrive without a `type` — never call string
+  // methods on undefined (render-phase crash).
+  const t = typeof type === 'string' ? type : '';
+  if (t.startsWith('enforcement_')) {
+    return NOTIF_ICON[t] || NOTIF_ICON.enforcement;
   }
-  if (type.startsWith('surge_')) {
-    return NOTIF_ICON[type] || NOTIF_ICON.surge_active;
+  if (t.startsWith('surge_')) {
+    return NOTIF_ICON[t] || NOTIF_ICON.surge_active;
   }
-  return NOTIF_ICON[type] || NOTIF_ICON.default;
+  return NOTIF_ICON[t] || NOTIF_ICON.default;
 }
 
 function surgeNotifRoute(data?: Record<string, unknown>): string | null {

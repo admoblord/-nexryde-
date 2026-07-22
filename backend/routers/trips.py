@@ -1224,9 +1224,16 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
     # We cap at 30 candidates before the eligibility loop to bound the subsequent
     # trip_offers + subscriptions queries (N+1 mitigation).
     # If fewer than 3 qualify after filtering, we widen to 15 km automatically.
+    # Require a fresh heartbeat so killed apps (Mongo still is_online) are not offered.
+    from routers.driver_control import (
+        driver_heartbeat_is_fresh,
+        heartbeat_freshness_mongo_clause,
+    )
+
     DISPATCH_RADIUS_M_NEAR = 8_000   # 8 km — first pass (cheap)
     DISPATCH_RADIUS_M_FAR  = 15_000  # 15 km — fallback if too few nearby
     DISPATCH_CANDIDATE_CAP = 30      # max profiles to evaluate in loop
+    fresh_hb = heartbeat_freshness_mongo_clause()
 
     def _geo_pipeline(radius_m: int, limit: int) -> list:
         return [
@@ -1236,7 +1243,11 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
                     "distanceField": "_geo_dist",
                     "maxDistance": radius_m,
                     "spherical": True,
-                    "query": {"is_online": True, "verification_status": "approved"},
+                    "query": {
+                        "is_online": True,
+                        "verification_status": "approved",
+                        **fresh_hb,
+                    },
                 }
             },
             {"$project": {"_id": 0}},
@@ -1256,7 +1267,11 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
     except Exception:
         # Fallback: geospatial index may not exist on older deployments
         profiles = await db.driver_profiles.find(
-            {"is_online": True, "verification_status": "approved"},
+            {
+                "is_online": True,
+                "verification_status": "approved",
+                **fresh_hb,
+            },
             {"_id": 0},
         ).to_list(500)
 
@@ -1300,6 +1315,10 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
     for profile in profiles:
         driver_id = profile.get("user_id")
         if not driver_id or driver_id in blocked_drivers:
+            continue
+
+        # Belt-and-suspenders: never offer to a ghost even if query clause missed.
+        if not driver_heartbeat_is_fresh(profile):
             continue
 
         if str(driver_id) in busy_driver_ids:
@@ -4846,8 +4865,14 @@ async def confirm_trip_payment(trip_id: str, request: Request):
     verify_trip_participant(request, trip)
 
     actor_id = require_authenticated(request)
-    if actor_id != trip.get("rider_id"):
-        raise HTTPException(status_code=403, detail="Only the rider can confirm payment")
+    # Wallet settlement moves rider funds, so only the rider may trigger it.
+    # Cash/transfer are settled directly between rider and driver — the DRIVER
+    # is the one who knows the money arrived, so either participant may confirm.
+    if is_wallet_payment_method(trip.get("payment_method")):
+        if actor_id != trip.get("rider_id"):
+            raise HTTPException(status_code=403, detail="Only the rider can confirm a wallet payment")
+    elif actor_id not in {trip.get("rider_id"), trip.get("driver_id")}:
+        raise HTTPException(status_code=403, detail="Only trip participants can confirm payment")
 
     if trip.get("status") != "completed":
         raise HTTPException(status_code=400, detail="Payment can only be confirmed after trip completion")

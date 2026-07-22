@@ -12,6 +12,7 @@ import {
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect, useSegments } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -22,7 +23,7 @@ import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { logLegalGateCheck, syncUserLegalStatus } from '@/src/services/legalStatusSync';
 import { replaceLegalTermsIfNeeded } from '@/src/utils/navigationRouteGuard';
-import { normalizeTripStatus } from '@/src/utils/tripStatus';
+import { normalizeTripStatus, resolveRiderScreenStatus } from '@/src/utils/tripStatus';
 import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRiderTripRealtime';
 import { FeatureHubDrawer } from '@/src/components/FeatureHubDrawer';
 import { RiderSavedSlotPremiumIcon } from '@/src/components/RiderSavedSlotPremiumIcon';
@@ -49,6 +50,8 @@ import type { RiderTripDisplayOpts } from '@/src/utils/tripPaymentMethod';
 export default function ModernRiderHome() {
   const router = useRouter();
   const segments = useSegments();
+  // Tear down native MapView when this tab is blurred (single-map OOM policy).
+  const isFocused = useIsFocused();
   const { canCallAuthedApi } = useAuthedApiReady();
   const { userId: riderId } = useAuthedUserId();
   const { user, currentTrip, setCurrentTrip } = useAppStore();
@@ -191,7 +194,7 @@ export default function ModernRiderHome() {
   const handleRiderHomeTripWs = useCallback(
     (msg: RiderTripWsMessage) => {
       const t = (msg.trip || {}) as Record<string, any>;
-      const norm = normalizeTripStatus(msg.status, t.payment_status);
+      const norm = resolveRiderScreenStatus(msg.status, t.payment_status, t.payment_method);
       const prev = useAppStore.getState().currentTrip;
       if (!prev || String(prev.id) !== String(msg.trip_id)) return;
       setCurrentTrip({
@@ -293,7 +296,11 @@ export default function ModernRiderHome() {
           </TouchableOpacity>
           <View style={{ marginHorizontal: flow.padH }}>
             <TripMapErrorBoundary>
-              <RiderHomeMapStrip isDark={isDark} height={260} onPress={openBook} />
+              {isFocused ? (
+                <RiderHomeMapStrip isDark={isDark} height={260} onPress={openBook} />
+              ) : (
+                <View style={{ height: 260, borderRadius: 16, backgroundColor: isDark ? '#0B1220' : '#E2E8F0' }} />
+              )}
             </TripMapErrorBoundary>
           </View>
         </>
@@ -933,3 +940,5 @@ const styles = StyleSheet.create({
     lineHeight: 14,
   },
 });
+
+export { ErrorBoundary } from '@/src/components/rider/RiderScreenErrorBoundary';

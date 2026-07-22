@@ -2,13 +2,14 @@
 
 Features:
   1. Zone-based active-driver cap (max 30 per zone by default).
-  2. Auto-offline after 15 minutes of idle (no GPS heartbeat).
+  2. Auto-offline after IDLE_TIMEOUT_MINUTES of no heartbeat (aligned with
+     Redis presence TTL ~180s; client heartbeat is 60s).
   3. Request-ignore cooldown: 3 ignored requests → 15–30 min cooldown.
 """
 import uuid
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from database import db
@@ -20,10 +21,48 @@ driver_control_router = APIRouter(prefix="/api", tags=["Driver Control"])
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 MAX_DRIVERS_PER_ZONE = 30           # hard cap per zone
-IDLE_TIMEOUT_MINUTES = 15           # auto-offline if no heartbeat
+# Heartbeat is ~60s (JS + FGS). Redis presence TTL is 180s. A 15-minute Mongo
+# ghost window left killed apps receiving offers — keep Mongo ≤ Redis TTL.
+IDLE_TIMEOUT_MINUTES = 3
 IGNORE_COOLDOWN_THRESHOLD = 3       # ignored requests before cooldown
 IGNORE_COOLDOWN_MINUTES_MIN = 15
 IGNORE_COOLDOWN_MINUTES_MAX = 30
+
+
+def heartbeat_fresh_cutoff(now: Optional[datetime] = None) -> datetime:
+    """UTC cutoff: heartbeats older than this are stale for online/dispatch."""
+    base = now or datetime.now(timezone.utc)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=timezone.utc)
+    return base - timedelta(minutes=IDLE_TIMEOUT_MINUTES)
+
+
+def heartbeat_freshness_mongo_clause(now: Optional[datetime] = None) -> dict[str, Any]:
+    """Mongo fragment requiring a fresh last_heartbeat (datetime or legacy ISO)."""
+    cutoff = heartbeat_fresh_cutoff(now)
+    return {
+        "$or": [
+            {"last_heartbeat": {"$gte": cutoff}},
+            {"last_heartbeat": {"$gte": cutoff.isoformat()}},
+        ]
+    }
+
+
+def driver_heartbeat_is_fresh(profile: dict[str, Any], *, now: Optional[datetime] = None) -> bool:
+    """True when profile.last_heartbeat is within IDLE_TIMEOUT_MINUTES."""
+    raw = profile.get("last_heartbeat")
+    if raw is None:
+        return False
+    if isinstance(raw, str):
+        try:
+            raw = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+    if not isinstance(raw, datetime):
+        return False
+    if raw.tzinfo is None:
+        raw = raw.replace(tzinfo=timezone.utc)
+    return raw >= heartbeat_fresh_cutoff(now)
 
 
 # ── Zone helpers ─────────────────────────────────────────────────────────────
@@ -128,7 +167,14 @@ async def driver_heartbeat(request: Request):
         update["current_lat"] = lat_f
         update["current_lng"] = lng_f
         update["current_zone"] = _resolve_zone(lat_f, lng_f)
-        update["current_location"] = {"lat": lat_f, "lng": lng_f, "updated_at": now.isoformat()}
+        # Preserve GeoJSON Point shape used by $geoNear / rider map pins.
+        update["current_location"] = {
+            "lat": lat_f,
+            "lng": lng_f,
+            "updated_at": now.isoformat(),
+            "type": "Point",
+            "coordinates": [lng_f, lat_f],
+        }
 
     await db.driver_profiles.update_one(
         {"user_id": driver_id},

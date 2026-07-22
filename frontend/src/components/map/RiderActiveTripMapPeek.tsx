@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import { useIsFocused } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { getNexrydeMapStyleAuto, MAP_3D, isLocalMapNight } from '@/src/constants/nexrydeMap3d';
@@ -31,6 +32,8 @@ export function RiderActiveTripMapPeek({
   onPress,
 }: Props) {
   const mapRef = useRef<MapView>(null);
+  // Unmount native map when parent tab is blurred (single-map OOM policy).
+  const isFocused = useIsFocused();
   const mapStyle = getNexrydeMapStyleAuto();
   const mapNight = isLocalMapNight();
 
@@ -57,7 +60,7 @@ export function RiderActiveTripMapPeek({
   }, [trip.route_preview_coordinates, pickup, dropoff, stop]);
 
   useEffect(() => {
-    if (Platform.OS === 'web' || !mapRef.current) return;
+    if (!isFocused || Platform.OS === 'web' || !mapRef.current) return;
     const pts = [
       ...route,
       ...(pickup ? [{ latitude: pickup.lat, longitude: pickup.lng }] : []),
@@ -98,7 +101,7 @@ export function RiderActiveTripMapPeek({
       }, 420);
     }, 180);
     return () => clearTimeout(t);
-  }, [route, pickup, dropoff, stop]);
+  }, [isFocused, route, pickup, dropoff, stop]);
 
   if (Platform.OS === 'web' || (!pickup && !dropoff)) {
     return (
@@ -112,6 +115,38 @@ export function RiderActiveTripMapPeek({
   }
 
   const seed = pickup || dropoff!;
+
+  if (!isFocused) {
+    return (
+      <TouchableOpacity
+        style={[styles.wrap, { height }]}
+        onPress={onPress}
+        activeOpacity={0.94}
+        accessibilityRole="button"
+        accessibilityLabel="Open live trip map"
+      >
+        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: mapNight ? '#0B1220' : '#E2E8F0' }]} />
+        <LinearGradient
+          colors={
+            mapNight
+              ? ['rgba(6,11,20,0.12)', 'transparent', 'rgba(6,11,20,0.88)']
+              : ['rgba(248,250,252,0.15)', 'transparent', 'rgba(15,23,42,0.72)']
+          }
+          locations={[0, 0.4, 1]}
+          style={StyleSheet.absoluteFillObject}
+          pointerEvents="none"
+        />
+        <View style={styles.liveChip} pointerEvents="none">
+          <View style={styles.liveDot} />
+          <Text style={styles.liveTxt}>LIVE TRIP</Text>
+        </View>
+        <View style={styles.footer} pointerEvents="none">
+          <Text style={styles.footerTitle}>Open full live map</Text>
+          <Ionicons name="expand" size={14} color={BRAND.primary} />
+        </View>
+      </TouchableOpacity>
+    );
+  }
 
   return (
     <TouchableOpacity

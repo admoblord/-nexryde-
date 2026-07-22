@@ -6,7 +6,7 @@
  * Go-online still awaits server confirmation at tap time.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BACKEND_URL, getDriverSubscriptionStatus } from '@/src/services/api';
+import { BACKEND_URL, getDriverProfile, getDriverSubscriptionStatus } from '@/src/services/api';
 import { authedFetch } from '@/src/utils/sessionRefresh';
 import {
   peekDriverBootCache,
@@ -139,6 +139,8 @@ export function useDriverBoot({
   const trialExtendedRef = useRef(trialExtended);
   const serverConfirmedRef = useRef(false);
   const refreshWaitersRef = useRef<Array<(ok: boolean) => void>>([]);
+  /** Guards against double subscription fetches within a single boot run. */
+  const subscriptionLoadStartedRef = useRef(false);
 
   verificationStatusRef.current = verificationStatus;
   subscriptionStatusRef.current = subscriptionStatus;
@@ -196,6 +198,11 @@ export function useDriverBoot({
   }, [driverId]);
 
   const loadSubscriptionBackground = useCallback(async (locked: boolean, runId: number) => {
+    if (runId !== runIdRef.current) return;
+    // One trial/subscription fetch per boot run — profile-hydrate and onboarding
+    // paths both try to trigger it; the first wins, the rest are no-ops.
+    if (subscriptionLoadStartedRef.current) return;
+    subscriptionLoadStartedRef.current = true;
     startupLog('SUBSCRIPTION_VERIFY_START');
     const subRes = await timedStartupRequestOrNull(
       'driver_subscription_status',
@@ -360,6 +367,70 @@ export function useDriverBoot({
     [driverId, loadSubscriptionBackground, resolveRefreshWaiters],
   );
 
+  /**
+   * Boot-level verification populator — runs the SAME fetch the Profile screen uses
+   * (GET /api/drivers/{id}/profile) and writes verification into the shared display
+   * store, durable fact, and boot cache. This guarantees Home is correct WITHOUT the
+   * user ever visiting Profile, and does not depend on onboarding-status succeeding.
+   * Runs in parallel with fetchOnboardingBackground; whichever answers first wins.
+   */
+  const hydrateVerificationFromProfile = useCallback(
+    async (runId: number) => {
+      if (!driverId) return;
+      startupLog('PROFILE_FETCH_START', { source: 'useDriverBoot_profile' });
+      const res = await timedStartupRequestOrNull(
+        'driver_profile',
+        () => getDriverProfile(driverId),
+        STARTUP_REQUEST_TIMEOUT_MS,
+      );
+      if (runId !== runIdRef.current) return;
+      if (!res) {
+        startupLog('PROFILE_FETCH_FAILED', { source: 'useDriverBoot_profile' });
+        return;
+      }
+      const p = (res.data || {}) as Record<string, unknown>;
+      const vStatus = typeof p.verification_status === 'string' ? p.verification_status.trim() : '';
+      if (!vStatus) return;
+
+      startupLog('PROFILE_FETCH_END', { source: 'useDriverBoot_profile', verificationStatus: vStatus });
+      setVerificationStatus(vStatus);
+      syncDisplayStore(driverId, { verificationStatus: vStatus, displayHydrated: true });
+      await writeDriverVerificationFact(driverId, vStatus);
+
+      // Open the gate with real status if nothing painted it yet (no cache path).
+      if (!gateOpenRef.current) {
+        gateOpenRef.current = true;
+        setIsGateOpen(true);
+        setFromCache(false);
+        setError(null);
+        startupLog('RENDER_COMPLETE', { fromCache: false, verificationStatus: vStatus });
+      }
+
+      // Persist verification into the boot cache WITHOUT clobbering last-known trial counts.
+      try {
+        const prev = await readDriverBootCache(driverId);
+        await writeDriverBootCache({
+          driverId,
+          verificationStatus: vStatus,
+          subscriptionStatus: prev?.subscriptionStatus || subscriptionStatusRef.current || 'trial',
+          trialTripsCompleted: prev?.trialTripsCompleted ?? trialTripsCompletedRef.current,
+          trialTripsTarget: prev?.trialTripsTarget ?? trialTripsTargetRef.current,
+          trialExtended: prev?.trialExtended ?? trialExtendedRef.current,
+          onboardingCompleted: prev?.onboardingCompleted ?? true,
+        });
+      } catch {
+        /* non-fatal */
+      }
+
+      // Approved drivers: refresh the real trial snapshot now — do not wait on
+      // onboarding-status, which is the endpoint that was hanging.
+      if (vStatus === 'approved') {
+        void loadSubscriptionBackground(false, runId);
+      }
+    },
+    [driverId, loadSubscriptionBackground],
+  );
+
   const runBoot = useCallback(
     async (isRetry = false) => {
       const runId = ++runIdRef.current;
@@ -369,6 +440,7 @@ export function useDriverBoot({
       // Do NOT clear display verification — only entitlement confirmation resets.
       setVerificationConfirmedByServer(false);
       serverConfirmedRef.current = false;
+      subscriptionLoadStartedRef.current = false;
 
       startupLog('APP_START', { driverId, retry: isRetry, mode: 'local_fact_first' });
 
@@ -391,26 +463,44 @@ export function useDriverBoot({
       if (cached?.verificationStatus) {
         // Approved (or any known status) paints instantly — do not require onboardingCompleted.
         applyLocalSnapshot(cached, true);
+        // Persisted-first trial: refresh the real snapshot in the background so the
+        // banner shows server truth (e.g. loopy's grandfathered 20-trip config), while
+        // the cached count renders instantly and is NEVER replaced by a 0/fresh default.
+        if (cached.verificationStatus === 'approved') {
+          void loadSubscriptionBackground(false, runId);
+        }
       } else if (!gateOpenRef.current) {
         // No cache: leave verificationStatus null → brief "Checking your account…"
         openGateWithDefaults();
-        // Cap Checking UI at 5s — never spin for minutes on weak Nigerian networks.
+        // Cap Checking UI at 10s — the profile fetch is the authoritative populator;
+        // if everything fails and we truly have no cached fact, surface retry.
         setTimeout(() => {
           if (runId !== runIdRef.current) return;
           if (verificationStatusRef.current == null) {
-            startupLog('CHECKING_TIMEOUT', { afterMs: 5000 });
+            startupLog('CHECKING_TIMEOUT', { afterMs: 10000 });
             setError('Still confirming your account. Pull to retry, or check your connection.');
           }
-        }, 5000);
+        }, 10000);
       }
 
       setIsRefreshing(false);
       setRetrying(false);
 
-      // Silent background reconfirm — never blocks dashboard for known-approved.
+      // Populate the shared store from the SAME endpoint Profile uses AND the
+      // onboarding-status endpoint (for redirect/step logic), in parallel. Home is
+      // correct without ever visiting Profile; a hang on one never blocks the other.
+      void hydrateVerificationFromProfile(runId);
       void fetchOnboardingBackground(runId);
     },
-    [driverId, enabled, fetchOnboardingBackground, applyLocalSnapshot, openGateWithDefaults],
+    [
+      driverId,
+      enabled,
+      fetchOnboardingBackground,
+      hydrateVerificationFromProfile,
+      loadSubscriptionBackground,
+      applyLocalSnapshot,
+      openGateWithDefaults,
+    ],
   );
 
   useEffect(() => {

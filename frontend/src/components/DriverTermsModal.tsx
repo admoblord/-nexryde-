@@ -10,6 +10,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import {
+  SUPPORT_EMAIL,
+  SUPPORT_PHONE_DISPLAY,
+} from '@/src/constants/commercialOffers';
 
 const { width, height } = Dimensions.get('window');
 
@@ -251,9 +255,9 @@ export default function DriverTermsModal({ visible, onAccept, onDecline }: Drive
             <Text style={styles.sectionTitle}>15. CONTACT</Text>
             <Text style={styles.text}>
               For questions or concerns:{'\n'}
-              Email: admoblordgroup@gmail.com{'\n'}
-              Phone: +234 808 929 7811{'\n'}
-              Website: www.admoblordgroup.com
+              Email: {SUPPORT_EMAIL}{'\n'}
+              Phone: {SUPPORT_PHONE_DISPLAY}{'\n'}
+              In-app support: Profile → Support
             </Text>
           </View>
 

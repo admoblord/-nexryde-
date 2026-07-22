@@ -189,8 +189,9 @@ export default function PickUpCodeScreen() {
           const trip = await tripRes.json();
           const statusPayload = statusRes.ok ? await statusRes.json() : undefined;
           applyTripPayload(trip, statusPayload);
-          if (currentTrip?.id === resolvedTripId) {
-            setCurrentTrip({ ...currentTrip, ...trip });
+          const storeTrip = useAppStore.getState().currentTrip;
+          if (storeTrip?.id === resolvedTripId) {
+            setCurrentTrip({ ...storeTrip, ...trip });
           }
         }
       } catch {
@@ -200,7 +201,7 @@ export default function PickUpCodeScreen() {
         setRefreshing(false);
       }
     },
-    [riderId, tripId, paramTripId, applyTripPayload, currentTrip, setCurrentTrip],
+    [riderId, tripId, paramTripId, applyTripPayload, setCurrentTrip],
   );
 
   useEffect(() => {

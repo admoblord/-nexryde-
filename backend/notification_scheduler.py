@@ -50,6 +50,12 @@ async def scheduled_notification_loop():
         try:
             await process_due_scheduled_notifications()
             await tick_daily_slot_notifications()
+            try:
+                from services.driver_surge_notifications import broadcast_smart_surge_window
+
+                await broadcast_smart_surge_window(db)
+            except Exception:
+                logger.exception("smart surge broadcast tick failed")
         except Exception:
             logger.exception("scheduled_notification_loop tick failed")
         await asyncio.sleep(45)

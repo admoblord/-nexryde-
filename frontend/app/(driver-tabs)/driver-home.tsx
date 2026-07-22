@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useSegments, type Href } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
@@ -391,19 +392,22 @@ function mapWsRideOfferToTrip(data: Record<string, unknown>) {
 
 // Feature arrays built inside component to use translations
 
+// Per-tab crash safety net — confines any render error to this tab (never to OS home).
+export { ErrorBoundary } from '@/src/components/driver/DriverTabErrorBoundary';
+
 export default function ModernDriverHome() {
   const toast = useErrorToast();
   const router = useRouter();
   const segments = useSegments();
-  const {
-    user,
-    token,
-    currentTrip,
-    setCurrentTrip,
-    setCurrentLocation,
-    setIsOnline: setStoreIsOnline,
-    driverProfile,
-  } = useAppStore();
+  // Per-field selectors — avoid re-rendering this hot screen on every store write.
+  const user = useAppStore((s) => s.user);
+  const currentTrip = useAppStore((s) => s.currentTrip);
+  const driverProfile = useAppStore((s) => s.driverProfile);
+  const setCurrentTrip = useAppStore((s) => s.setCurrentTrip);
+  const setCurrentLocation = useAppStore((s) => s.setCurrentLocation);
+  const setStoreIsOnline = useAppStore((s) => s.setIsOnline);
+  // Only one native MapView should stay alive: tear down when this tab is blurred.
+  const isFocused = useIsFocused();
   const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
 
   useEffect(() => {
@@ -733,16 +737,23 @@ export default function ModernDriverHome() {
             missing: preflight.missing.map((m) => m.key),
           });
           stopNativeDriverExperience();
-          confirmOffline();
-          setPermissionPreflight(preflight);
-          // Revocation detected while going online — allow checklist again (Law 5).
-          markPermissionsCompleted(false);
+          // Never dump a live trip offline from a permission blip during reconnect.
+          if (!bridgeActiveRef.current) {
+            confirmOffline();
+            setPermissionPreflight(preflight);
+            markPermissionsCompleted(false);
+          }
           return;
         }
         void startNativeDriverExperience(driverId);
         sessionRefresh = setInterval(() => {
           void refreshNativeDriverSession();
         }, 60 * 1000);
+        // Cleanup may have run during preflight await — clear immediately (audit 6.4).
+        if (cancelled) {
+          clearInterval(sessionRefresh);
+          sessionRefresh = undefined;
+        }
       })();
       return () => {
         cancelled = true;
@@ -1148,9 +1159,9 @@ export default function ModernDriverHome() {
     try {
       await confirmTripPayment(tid);
       setTripCompletion((prev) => (prev ? { ...prev, paymentPending: false } : prev));
-      toast.show('Cash payment confirmed.', 'success');
+      toast.show('Payment confirmed.', 'success');
     } catch (e: unknown) {
-      toast.show(messageFromAxiosError(e, 'Could not confirm cash payment.'), 'error');
+      toast.show(messageFromAxiosError(e, 'Could not confirm payment.'), 'error');
       throw e;
     }
   }, [tripCompletion?.tripId, toast]);
@@ -1289,6 +1300,24 @@ export default function ModernDriverHome() {
         // Auto-start was the process-death path on API 34+ (MissingForegroundServiceType /
         // ForegroundServiceDidNotStartInTime).
         if (Platform.OS === 'android') {
+          // Keep server online when a live trip is already in memory (process death mid-trip).
+          const liveTrip = useAppStore.getState().currentTrip;
+          const liveStatus = String(liveTrip?.status || '').toLowerCase();
+          if (liveTrip?.id && ['accepted', 'arrived', 'ongoing'].includes(liveStatus)) {
+            driverFlowLog('GO_ONLINE_DESYNC', {
+              action: 'hydrate_keep_online_active_trip',
+              serverOnline: true,
+              tripId: liveTrip.id,
+            });
+            hydrateServerOnline(true);
+            driverOffersSocket.connect(driverId);
+            startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
+              ok: true,
+              isOnline: true,
+              skipped: 'android_active_trip',
+            });
+            return;
+          }
           driverFlowLog('GO_ONLINE_DESYNC', {
             action: 'hydrate_keep_offline_require_go_online',
             serverOnline: true,
@@ -2096,7 +2125,7 @@ export default function ModernDriverHome() {
         setAcceptingRide(false);
       }
     },
-    [incomingRide, driverId, token, clearIncomingOffer]
+    [incomingRide, driverId, clearIncomingOffer]
   );
 
   const handleAcceptIncomingAtRiderOffer = useCallback(() => {
@@ -2707,6 +2736,7 @@ export default function ModernDriverHome() {
           translucent
         />
 
+        {isFocused ? (
         <DriverLiveMapView
           driverCoords={driverCoords}
           isOnline={sessionEngaged}
@@ -2753,6 +2783,9 @@ export default function ModernDriverHome() {
           tripActionBusy={tripActionBusy}
           suppressTripDock={!!tripCompletion || completeTripConfirmOpen || driverCancelOpen}
         />
+        ) : (
+          <View style={{ flex: 1, backgroundColor: dashboardBg }} />
+        )}
 
         <DriverCompleteTripConfirmModal
           visible={completeTripConfirmOpen}
@@ -2907,7 +2940,8 @@ export default function ModernDriverHome() {
     featureHubDrawer={
       <FeatureHubDrawer visible={featureHubOpen} onClose={() => setFeatureHubOpen(false)} role="driver" />
     }
-      />
+    mapActive={isFocused}
+  />
     </DriverBootShell>
   );
 }
@@ -2931,12 +2965,15 @@ type DriverOfflineMapPreviewProps = {
   latitude: number | null;
   longitude: number | null;
   onHeatmapPress: () => void;
+  /** When false, native MapView is unmounted (blurred tab / single-map policy). */
+  mapActive?: boolean;
 };
 
 const DriverOfflineMapPreview = React.memo(function DriverOfflineMapPreview({
   latitude,
   longitude,
   onHeatmapPress,
+  mapActive = true,
 }: DriverOfflineMapPreviewProps) {
   const mapRef = useRef<MapView | null>(null);
   const didCenterOnce = useRef(false);
@@ -2944,11 +2981,21 @@ const DriverOfflineMapPreview = React.memo(function DriverOfflineMapPreview({
   const [displayCoords, setDisplayCoords] = useState<{ lat: number; lng: number } | null>(null);
   // Defer native MapView until after login transitions settle. Immediate mount + liteMode
   // under Navigation SDK / R8 was a process-death path on driver offline home.
-  const [nativeMapEnabled, setNativeMapEnabled] = useState(Platform.OS !== 'android');
+  const [nativeMapEnabled, setNativeMapEnabled] = useState(
+    () => mapActive && Platform.OS !== 'android',
+  );
   const [mapEpoch, setMapEpoch] = useState(0);
 
   useEffect(() => {
-    if (Platform.OS !== 'android') return;
+    if (!mapActive) {
+      setNativeMapEnabled(false);
+      didCenterOnce.current = false;
+      return;
+    }
+    if (Platform.OS !== 'android') {
+      setNativeMapEnabled(true);
+      return;
+    }
     let cancelled = false;
     const handle = InteractionManager.runAfterInteractions(() => {
       setTimeout(() => {
@@ -2961,7 +3008,7 @@ const DriverOfflineMapPreview = React.memo(function DriverOfflineMapPreview({
       cancelled = true;
       handle.cancel?.();
     };
-  }, []);
+  }, [mapActive]);
 
   /* Throttle marker/camera feed — layout is fixed; avoid re-render churn from GPS stream */
   useEffect(() => {
@@ -3117,6 +3164,7 @@ function DriverOfflineHome({
   onActivateTrial,
   rideRequestModal,
   featureHubDrawer,
+  mapActive = true,
 }: {
   driverCoords: { lat: number; lng: number; heading?: number } | null;
   profileImageUri: string | null;
@@ -3152,6 +3200,7 @@ function DriverOfflineHome({
   onActivateTrial: () => void;
   rideRequestModal: React.ReactNode;
   featureHubDrawer: React.ReactNode;
+  mapActive?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const tabPad = useTabBottomPad(8);
@@ -3304,6 +3353,7 @@ function DriverOfflineHome({
           latitude={mapPinLat}
           longitude={mapPinLng}
           onHeatmapPress={handleHeatmapPress}
+          mapActive={mapActive}
         />
 
         {/* Gates only — map + GO carry the rest */}

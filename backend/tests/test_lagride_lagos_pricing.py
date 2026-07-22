@@ -51,7 +51,7 @@ def test_tier1_distance_bands():
     assert lagride_tier1_rate_per_km(2.5) == 1850.0
     assert lagride_tier1_rate_per_km(2.5, "lagride_t1_sky_mall") == 4896 / 2.7
     assert lagride_tier1_rate_per_km(7.0) == 700.0
-    assert lagride_tier1_rate_per_km(20.0) == 660.0
+    assert lagride_tier1_rate_per_km(20.0) == 540.0
 
 
 def _lagos_expected_total(km: float, rate: float, mins: int, svc_m: float = 1.0, per_min: float = 80.0) -> float:
@@ -88,17 +88,17 @@ def test_sky_mall_short_trip_2_7km():
     assert lp["fare_bucket"] == "lagride_t1_0_3_km"
     assert lp["total_fare_computed"] == sky_total
     assert lp["lagos_market_multiplier"] == LAGOS_MARKET_WIDE_FARE_MULTIPLIER
-    assert "Lagos" in lp["formula"]
+    assert "Area_Rate" in lp["formula"]
     assert len(lp["implementation_checklist"]) == 10
     assert lp["implementation_checklist"][9]["step"] == 10
     assert lp.get("rider_value_summary") == LAGOS_RIDER_VALUE_SUMMARY
 
 
-def test_tier1_15_plus_citywide_660():
-    assert lagride_tier1_rate_per_km(21.65, "lagride_t1_lekki") == 660.0
-    assert lagride_tier1_rate_per_km(30.5, "lagride_t1_vi_ikoyi_banana") == 660.0
-    assert lagride_lagos_area_rate_per_km(1, 45.79, "lagride_t1_yaba") == 660.0
-    assert lagride_lagos_area_rate_per_km(1, 50.43, "lagride_t1_festac") == 660.0
+def test_tier1_15_plus_citywide_540():
+    assert lagride_tier1_rate_per_km(21.65, "lagride_t1_lekki") == 540.0
+    assert lagride_tier1_rate_per_km(30.5, "lagride_t1_vi_ikoyi_banana") == 540.0
+    assert lagride_lagos_area_rate_per_km(1, 45.79, "lagride_t1_yaba") == 540.0
+    assert lagride_lagos_area_rate_per_km(1, 50.43, "lagride_t1_festac") == 540.0
 
 
 def test_lekki_tier1_long_trip_classified():
@@ -115,31 +115,20 @@ def test_ikeja_tier2_flat():
 
 
 def test_service_multipliers_lagride_spec():
-    assert LAGRIDE_SERVICE_PRO == 1.1  # legacy constant
+    assert LAGRIDE_SERVICE_PRO == 1.0
     assert LAGRIDE_SERVICE_STANDARD == 1.0
     assert LAGRIDE_SERVICE_EV == 1.0
-    # ≤5 km: elevated short-hop ladder for drivers
-    assert lagride_lagos_service_multiplier("xl", distance_km=3.5) == 1.20
-    assert lagride_lagos_service_multiplier("comfort", distance_km=3.9) == 1.30
-    assert lagride_lagos_service_multiplier("premium", distance_km=5.0) == 1.45
-    # 5–15 km: softened mid ladder
-    assert lagride_lagos_service_multiplier("economy", distance_km=8.0) == 1.0
-    assert lagride_lagos_service_multiplier("standard", distance_km=8.0) == 1.0
-    assert lagride_lagos_service_multiplier("xl", distance_km=8.0) == 1.08
-    assert lagride_lagos_service_multiplier("comfort", distance_km=8.0) == 1.15
-    assert lagride_lagos_service_multiplier("premium", distance_km=8.0) == 1.28
-    assert lagride_lagos_service_multiplier("pro", distance_km=8.0) == 1.28
+    # All tiers flat at 1.0 while multipliers are disabled for base-price review
+    for km in (3.5, 3.9, 5.0, 8.0, 15.0, 18.0, 22.0):
+        assert lagride_lagos_service_multiplier("xl", distance_km=km) == 1.0
+        assert lagride_lagos_service_multiplier("comfort", distance_km=km) == 1.0
+        assert lagride_lagos_service_multiplier("premium", distance_km=km) == 1.0
+        assert lagride_lagos_service_multiplier("pro", distance_km=km) == 1.0
+        assert lagride_lagos_service_multiplier("economy", distance_km=km) == 1.0
+        assert lagride_lagos_service_multiplier("standard", distance_km=km) == 1.0
     assert lagride_lagos_service_multiplier("ev") == LAGRIDE_SERVICE_EV
-    # Omni/budget are not NEXRYDE vehicles → Standard
     assert lagride_lagos_service_multiplier("omni") == 1.0
     assert lagride_lagos_service_multiplier("budget") == 1.0
-    # 15+ km: softer long ladder
-    assert lagride_lagos_service_multiplier("standard", distance_km=15.0) == 1.0
-    assert lagride_lagos_service_multiplier("xl", distance_km=15.0) == 1.02
-    assert lagride_lagos_service_multiplier("comfort", distance_km=18.0) == 1.04
-    assert lagride_lagos_service_multiplier("premium", distance_km=22.0) == 1.10
-    assert lagride_lagos_service_multiplier("pro", distance_km=22.0) == 1.10
-    assert lagride_lagos_service_multiplier("omni", distance_km=22.0) == 1.0
 
 
 def test_short_hops_differ_by_km_and_time():
@@ -193,15 +182,71 @@ def test_short_hops_differ_by_km_and_time():
         min_fare=0,
         short_trip_threshold_km=5.0,
     )
-    assert comfort["service_multiplier"] == 1.30
-    assert comfort["total_fare"] == _lagos_expected_total(3.49, TIER1_RATE_3_15_KM, 8, svc_m=1.30)
+    assert comfort["service_multiplier"] == 1.0
+    assert comfort["total_fare"] == _lagos_expected_total(3.49, TIER1_RATE_3_15_KM, 8, svc_m=1.0)
 
 
 def test_surge_constants_lagride_spec():
     assert NORMAL_SURGE_LAGride == 1.0
-    assert HIGH_DEMAND_SURGE == 1.3
-    assert RAIN_SURGE_LAGride == 1.4
-    assert PEAK_SURGE_LAGride == 1.0
+    assert HIGH_DEMAND_SURGE == 1.0
+    assert RAIN_SURGE_LAGride == 1.0
+    assert PEAK_SURGE_LAGride == 1.3
+
+
+def test_lagos_smart_surge_morning_applies_1_3():
+    """WAT morning window → 1.3× on top of distance+time (no service/market multipliers)."""
+
+    class _MorningClock:
+        @staticmethod
+        def utcnow():
+            # UTC 07:00 → WAT 08:00 (inside 7–9)
+            return dt_real(2026, 5, 10, 7, 0, 0)
+
+        timedelta = timedelta
+
+    with patch.object(lagride_lagos_pricing_mod, "datetime", _MorningClock):
+        f = build_lagos_lagride_fare_breakdown(
+            distance_km=21.65,
+            duration_min=31,
+            traffic_duration_min=31,
+            service_key="economy",
+            demand_ratio=0.99,
+            is_raining=True,
+            pickup_lat=6.465,
+            pickup_lng=3.5,
+            max_multiplier=2.5,
+            cancellation_fee=300,
+            min_fare=0,
+            short_trip_threshold_km=5.0,
+        )
+    base = _lagos_expected_total(21.65, 540.0, 31)
+    assert f["surge_multiplier"] == 1.3
+    assert f["is_surge"] is True
+    assert f["total_fare"] == round(base * 1.3)
+    assert f["peak_type"] == "morning_rush"
+
+
+def test_lagos_off_peak_has_no_surge_factor():
+    """Outside windows: surge_multiplier is null and breakdown has no × surge line."""
+    f = build_lagos_lagride_fare_breakdown(
+        distance_km=10.0,
+        duration_min=20,
+        traffic_duration_min=20,
+        service_key="economy",
+        demand_ratio=0.99,
+        is_raining=True,
+        pickup_lat=6.465,
+        pickup_lng=3.5,
+        max_multiplier=2.5,
+        cancellation_fee=300,
+        min_fare=0,
+        short_trip_threshold_km=5.0,
+    )
+    assert f["is_surge"] is False
+    assert f["surge_multiplier"] is None
+    assert f["surge_factors"] == []
+    assert "surge" not in f["price_breakdown"].lower()
+    assert f["total_fare"] == _lagos_expected_total(10.0, 700.0, 20)
 
 
 def test_verification_totals_lekki_ikoyi_yaba_festac():
@@ -219,7 +264,7 @@ def test_verification_totals_lekki_ikoyi_yaba_festac():
         min_fare=0,
         short_trip_threshold_km=5.0,
     )
-    assert f["total_fare"] == _lagos_expected_total(21.65, 660.0, 31)
+    assert f["total_fare"] == _lagos_expected_total(21.65, 540.0, 31)
 
     f_i = build_lagos_lagride_fare_breakdown(
         distance_km=30.50,
@@ -235,7 +280,7 @@ def test_verification_totals_lekki_ikoyi_yaba_festac():
         min_fare=0,
         short_trip_threshold_km=5.0,
     )
-    assert f_i["total_fare"] == _lagos_expected_total(30.50, 660.0, 40)
+    assert f_i["total_fare"] == _lagos_expected_total(30.50, 540.0, 40)
 
     f_y = build_lagos_lagride_fare_breakdown(
         distance_km=45.79,
@@ -251,7 +296,7 @@ def test_verification_totals_lekki_ikoyi_yaba_festac():
         min_fare=0,
         short_trip_threshold_km=5.0,
     )
-    assert f_y["total_fare"] == _lagos_expected_total(45.79, 660.0, 63)
+    assert f_y["total_fare"] == _lagos_expected_total(45.79, 540.0, 63)
 
     f_f = build_lagos_lagride_fare_breakdown(
         distance_km=50.43,
@@ -267,13 +312,13 @@ def test_verification_totals_lekki_ikoyi_yaba_festac():
         min_fare=0,
         short_trip_threshold_km=5.0,
     )
-    assert f_f["total_fare"] == _lagos_expected_total(50.43, 660.0, 77)
+    assert f_f["total_fare"] == _lagos_expected_total(50.43, 540.0, 77)
 
 
 def test_example_5_generic_tier2_premium_18km():
-    """Tier 2 @ 18 km uses 15+ band (₦660/km) × long-trip Premium 1.10× + time."""
+    """Tier 2 @ 18 km uses 15+ band (₦540/km); Premium multiplier disabled (1.0×)."""
     m = lagride_lagos_service_multiplier("premium", distance_km=18.0)
-    assert m == 1.10
+    assert m == 1.0
     f2 = build_lagos_lagride_fare_breakdown(
         distance_km=18.0,
         duration_min=30,
@@ -290,14 +335,14 @@ def test_example_5_generic_tier2_premium_18km():
     )
     assert f2["location_zone"] == "lagride_t2_ikeja"
     assert f2["fare_bucket"] == "lagride_t2_15_plus_km"
-    assert f2["service_multiplier"] == 1.10
-    assert f2["total_fare"] == _lagos_expected_total(18.0, 660.0, 30, svc_m=m)
+    assert f2["service_multiplier"] == 1.0
+    assert f2["total_fare"] == _lagos_expected_total(18.0, 540.0, 30, svc_m=m)
 
 
 def test_example_5_peace_garden_to_ikorodu_premium_18km():
-    """Ex 5 variant: PG → Ikorodu + Premium uses long-trip soft 1.10× + time."""
+    """Ex 5 variant: PG → Ikorodu + Premium; service multiplier disabled (1.0×)."""
     m = lagride_lagos_service_multiplier("premium", distance_km=18.0)
-    assert m == 1.10
+    assert m == 1.0
     f = build_lagos_lagride_fare_breakdown(
         distance_km=18.0,
         duration_min=30,
@@ -314,7 +359,7 @@ def test_example_5_peace_garden_to_ikorodu_premium_18km():
         dropoff_lat=6.65,
         dropoff_lng=3.52,
     )
-    assert f["service_multiplier"] == 1.10
+    assert f["service_multiplier"] == 1.0
     assert f["total_fare"] == _lagos_expected_total(18.0, PEACE_GARDEN_TO_IKORODU_PER_KM, 30, svc_m=m)
 
 
@@ -535,7 +580,7 @@ def test_sangotedo_ikorodu_corridor_old_standard():
 
 
 def test_sangotedo_ikorodu_corridor_tier_multipliers():
-    """Old Standard ₦39,547; very soft ladder 1.005 / 1.01 / 1.02; no Omni tier."""
+    """Old Standard ₦39,547; tier ladder disabled — all tiers cap at Standard."""
     base_kw = dict(
         distance_km=63.64,
         duration_min=68,
@@ -557,15 +602,12 @@ def test_sangotedo_ikorodu_corridor_tier_multipliers():
     premium = build_lagos_lagride_fare_breakdown(**base_kw, service_key="premium")
 
     assert econ["total_fare"] == 39_547
-    assert xl["total_fare"] == round(39_547 * 1.005)
-    assert comfort["total_fare"] == round(39_547 * 1.01)
-    assert premium["total_fare"] == round(39_547 * 1.02)
-    assert xl["total_fare"] > econ["total_fare"]
-    assert comfort["total_fare"] > xl["total_fare"]
-    assert premium["total_fare"] > comfort["total_fare"]
-    assert xl["service_multiplier"] == 1.005
-    assert comfort["service_multiplier"] == 1.01
-    assert premium["service_multiplier"] == 1.02
+    assert xl["total_fare"] == 39_547
+    assert comfort["total_fare"] == 39_547
+    assert premium["total_fare"] == 39_547
+    assert xl["service_multiplier"] == 1.0
+    assert comfort["service_multiplier"] == 1.0
+    assert premium["service_multiplier"] == 1.0
 
     long_kw = {**base_kw, "distance_km": 76.0}
     long_econ = build_lagos_lagride_fare_breakdown(**long_kw, service_key="economy")
@@ -573,6 +615,6 @@ def test_sangotedo_ikorodu_corridor_tier_multipliers():
     long_comfort = build_lagos_lagride_fare_breakdown(**long_kw, service_key="comfort")
     long_premium = build_lagos_lagride_fare_breakdown(**long_kw, service_key="premium")
     assert long_econ["total_fare"] == 39_547
-    assert long_xl["total_fare"] == round(39_547 * 1.005)
-    assert long_comfort["total_fare"] == round(39_547 * 1.01)
-    assert long_premium["total_fare"] == round(39_547 * 1.02)
+    assert long_xl["total_fare"] == 39_547
+    assert long_comfort["total_fare"] == 39_547
+    assert long_premium["total_fare"] == 39_547

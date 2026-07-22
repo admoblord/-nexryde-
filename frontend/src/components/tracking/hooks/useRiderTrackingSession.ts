@@ -28,8 +28,9 @@ import * as Location from 'expo-location';
 import { fetchTripEta, fetchTripRoute } from '@/src/services/tripTrackingApi';
 import { DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
 import { routePolylineFromTripRecord } from '@/src/utils/routePreviewCoords';
+import { setForegroundInterval } from '@/src/utils/foregroundInterval';
 import { isValidMapCoord } from '@/src/components/tracking/map/mapUtils';
-import { normalizeTripStatus } from '@/src/utils/tripStatus';
+import { normalizeTripStatus, resolveRiderScreenStatus } from '@/src/utils/tripStatus';
 import {
   parseTripCoords,
   normalizeDriverInfo,
@@ -46,30 +47,6 @@ import {
   riderFinancialPaymentPending,
   isCashPaymentMethod,
 } from '@/src/utils/tripPaymentMethod';
-
-/**
- * Resolve the rider-facing screen status from the raw server trip.
- *
- * Uber/Bolt cash model: when the driver ends the trip it is TERMINALLY completed
- * and cash is auto-settled. The rider is never asked to confirm cash. So a cash
- * trip whose raw status is `completed` is always terminal `completed` here — even
- * if `payment_status` momentarily lags — and the rider is sent to the non-blocking
- * receipt. Only genuine wallet/transfer rides (payment still owed) map to
- * `pending_payment`. Safe-arrival / invisible-shield are surfaced separately and
- * must NEVER reopen a completed trip into a payment/active state (that was the
- * source of the looping cash-confirm sheet + booking lock).
- */
-function resolveRiderScreenStatus(
-  rawStatus: unknown,
-  paymentStatus: unknown,
-  paymentMethod: unknown,
-): ReturnType<typeof normalizeTripStatus> {
-  const raw = String(rawStatus || '').toLowerCase();
-  if (raw === 'completed' && isCashPaymentMethod(paymentMethod as string | null | undefined)) {
-    return 'completed';
-  }
-  return normalizeTripStatus(rawStatus as string | undefined, paymentStatus as string | undefined);
-}
 import type { TrackingMapModel } from '@/src/components/tracking/types';
 import type { TrackingLiveDebug } from '@/src/components/tracking/v2/TrackingLiveDebugPanel';
 import { resolveTrackingScreenPhase } from '@/src/components/tracking/v2/trackingScreenState';
@@ -483,7 +460,9 @@ export function useRiderTrackingSession() {
         data.payment_method,
       );
       const merged = mergeTripFromStatusPayload(
-        currentTrip?.id === effectiveTripId ? currentTrip : null,
+        useAppStore.getState().currentTrip?.id === effectiveTripId
+          ? useAppStore.getState().currentTrip
+          : null,
         effectiveTripId,
         riderId,
         {
@@ -554,7 +533,10 @@ export function useRiderTrackingSession() {
       setLoading(false);
       setBackgroundSyncing(false);
     }
-  }, [effectiveTripId, riderId, currentTrip, setCurrentTrip, router, navigateOnce, handleRemoteCancelled]);
+  }, [effectiveTripId, riderId, setCurrentTrip, router, navigateOnce, handleRemoteCancelled]);
+
+  const fetchStatusRef = useRef(fetchStatus);
+  fetchStatusRef.current = fetchStatus;
 
   const applyClientEta = useCallback(() => {
     if (!isRiderMapLiveTripStatus(tripStatusRef.current)) return;
@@ -719,18 +701,18 @@ export function useRiderTrackingSession() {
   useFocusEffect(
     useCallback(() => {
       if (!effectiveTripId || !riderId) return;
-      void fetchStatus();
-    }, [effectiveTripId, riderId, fetchStatus]),
+      void fetchStatusRef.current();
+    }, [effectiveTripId, riderId]),
   );
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active' || !effectiveTripId || !riderId) return;
       setLoading(false);
-      void fetchStatus();
+      void fetchStatusRef.current();
     });
     return () => sub.remove();
-  }, [effectiveTripId, riderId, fetchStatus]);
+  }, [effectiveTripId, riderId]);
 
   useEffect(() => {
     if (!loading) return;
@@ -744,18 +726,15 @@ export function useRiderTrackingSession() {
       return;
     }
     let mounted = true;
-    void (async () => {
-      if (mounted) await fetchStatus();
-    })();
     const pollMs = riderTripStatusPollIntervalMs(wsConnected, tripStatusRef.current);
-    const interval = setInterval(() => {
-      if (mounted) void fetchStatus();
+    const stop = setForegroundInterval(() => {
+      if (mounted) void fetchStatusRef.current();
     }, pollMs);
     return () => {
       mounted = false;
-      clearInterval(interval);
+      stop();
     };
-  }, [effectiveTripId, riderId, fetchStatus, wsConnected]);
+  }, [effectiveTripId, riderId, wsConnected]);
 
   useEffect(() => {
     if (!effectiveTripId || !isLivePhase) return;
@@ -799,17 +778,19 @@ export function useRiderTrackingSession() {
         if (Number.isFinite(eta.distance_km)) setDistanceRemainingKm(eta.distance_km);
       });
     };
-    pullEta();
-    applyClientEta();
-    const etaIv = setInterval(() => {
+    const stopEta = setForegroundInterval(() => {
       pullEta();
       applyClientEta();
     }, riderTripEtaFallbackPollMs(wsConnected));
-    const clientIv = setInterval(applyClientEta, RIDER_TRACKING_CLIENT_ETA_MS);
+    // Local ETA tick — pause in background (no UI visible).
+    const stopClient = setForegroundInterval(applyClientEta, RIDER_TRACKING_CLIENT_ETA_MS, {
+      runImmediately: false,
+      runOnForeground: false,
+    });
     return () => {
       cancelled = true;
-      clearInterval(etaIv);
-      clearInterval(clientIv);
+      stopEta();
+      stopClient();
     };
   }, [effectiveTripId, isLivePhase, wsConnected, tripStatus, applyClientEta]);
 
@@ -825,13 +806,20 @@ export function useRiderTrackingSession() {
   ]);
 
   useEffect(() => {
-    const storeStatus = currentTrip?.id === effectiveTripId
-      ? normalizeTripStatus(currentTrip.status, currentTrip.payment_status)
+    const trip = currentTrip?.id === effectiveTripId ? currentTrip : null;
+    const storeStatus = trip
+      ? resolveRiderScreenStatus(trip.status, trip.payment_status, trip.payment_method)
       : null;
     if (storeStatus && storeStatus !== tripStatusRef.current) {
       setTripStatus(storeStatus);
     }
-  }, [currentTrip?.id, currentTrip?.status, currentTrip?.payment_status, effectiveTripId]);
+  }, [
+    currentTrip?.id,
+    currentTrip?.status,
+    currentTrip?.payment_status,
+    currentTrip?.payment_method,
+    effectiveTripId,
+  ]);
 
   useEffect(() => {
     if (!isLivePhase) {

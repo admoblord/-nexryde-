@@ -10,7 +10,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from database import db
@@ -249,6 +249,28 @@ async def live_trips(limit: int = Query(50, le=200)):
     return {"trips": trips, "count": len(trips)}
 
 
+class ForceCompleteBody(BaseModel):
+    note: str = ""
+
+
+@admin_ops_router.post("/admin/trips/{trip_id}/force-complete")
+async def force_complete_trip(trip_id: str, request: Request, body: ForceCompleteBody = Body(default_factory=ForceCompleteBody)):
+    """Complete a stuck post-accept trip and ALWAYS free the driver's active_trip_id.
+
+    Escape hatch for audit 5.3 — a driver whose app died mid-trip must never
+    need manual database surgery. Money-safe: any wallet hold is refunded to
+    the rider; no balances are debited or credited here.
+    """
+    from stuck_trip_recovery import admin_force_complete_trip
+
+    admin = await _admin_email(request)
+    result = await admin_force_complete_trip(db, trip_id, admin_email=admin, note=body.note)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Could not force-complete trip"))
+    await _log_audit(request, "trip_force_completed", "trip", trip_id, {"note": body.note, **result})
+    return result
+
+
 @admin_ops_router.get("/admin/analytics")
 async def analytics(period: str = Query("30d", pattern="^(7d|30d|90d)$")):
     days = {"7d": 7, "30d": 30, "90d": 90}[period]
@@ -419,7 +441,15 @@ async def reject_driver_application(verification_id: str, body: RejectDriverBody
             upsert=True,
         )
     await _log_audit(request, "driver_rejected", "verification", verification_id, {"reason": body.reason})
-    return {"success": True, "message": "Driver verification rejected", "reason": body.reason}
+    notified = False
+    if user_id and getattr(body, "notify", True):
+        try:
+            from routers.auth import send_driver_verification_notification
+            await send_driver_verification_notification(user_id, "rejected", body.reason)
+            notified = True
+        except Exception as exc:  # notification must never block the admin action
+            logger.warning("Driver reject notification skipped: %s", exc)
+    return {"success": True, "message": "Driver verification rejected", "reason": body.reason, "notified": notified}
 
 
 @admin_ops_router.get("/admin/subscription-intelligence")
@@ -587,17 +617,10 @@ async def create_announcement(body: AnnouncementBody, request: Request):
 
 @admin_ops_router.get("/admin/feature-flags")
 async def feature_flags():
+    from feature_flags import FLAG_DEFAULTS
+
     doc = await db.system_config.find_one({"key": "feature_flags"}, {"_id": 0, "value": 1})
-    defaults = {
-        "work_zone": "all",
-        "favourite_driver": "all",
-        "wallet": "all",
-        "referrals": "all",
-        "promotions": "all",
-        "chat": "all",
-        "call_masking": "beta",
-    }
-    return {"flags": {**defaults, **(doc or {}).get("value", {})}}
+    return {"flags": {**FLAG_DEFAULTS, **(doc or {}).get("value", {})}}
 
 
 class FeatureFlagsBody(BaseModel):
@@ -606,11 +629,14 @@ class FeatureFlagsBody(BaseModel):
 
 @admin_ops_router.post("/admin/feature-flags")
 async def update_feature_flags(body: FeatureFlagsBody, request: Request):
+    from feature_flags import invalidate_feature_flags_cache
+
     await db.system_config.update_one(
         {"key": "feature_flags"},
         {"$set": {"key": "feature_flags", "value": body.flags, "updated_at": datetime.now(timezone.utc)}},
         upsert=True,
     )
+    invalidate_feature_flags_cache()
     await _log_audit(request, "feature_flags_updated", "system", "feature_flags", body.flags)
     return {"success": True, "flags": body.flags}
 

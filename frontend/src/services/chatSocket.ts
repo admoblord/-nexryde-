@@ -42,13 +42,15 @@ class ChatSocketManager {
     this.subscriberCount += 1;
     this.shouldStayConnected = true;
     const key = sessionKey(tripId, userId);
-    if (this.activeKey !== key) {
+    const sessionChanged = this.activeKey !== key;
+    if (sessionChanged) {
       this.tripId = tripId;
       this.userId = userId;
       this.activeKey = key;
       this.reconnectAttempts = 0;
     }
-    void this.openSocket();
+    // Idempotent: overlapping chat subscribers must not churn a healthy socket.
+    void this.openSocket({ force: sessionChanged });
   }
 
   release(): void {
@@ -58,9 +60,10 @@ class ChatSocketManager {
 
   nudgeReconnect(): void {
     if (!this.shouldStayConnected || !this.tripId || !this.userId) return;
-    if (this.ws?.readyState === WebSocket.OPEN) return;
+    const rs = this.ws?.readyState;
+    if (rs === WebSocket.OPEN || rs === WebSocket.CONNECTING) return;
     this.reconnectAttempts = 0;
-    void this.openSocket();
+    void this.openSocket({ force: true });
   }
 
   send(payload: Record<string, unknown>): boolean {
@@ -117,8 +120,12 @@ class ChatSocketManager {
     }, delay);
   }
 
-  private async openSocket() {
+  private async openSocket(opts?: { force?: boolean }) {
     if (!this.shouldStayConnected || !this.tripId || !this.userId || this.subscriberCount === 0) return;
+    const rs = this.ws?.readyState;
+    if (!opts?.force && (rs === WebSocket.OPEN || rs === WebSocket.CONNECTING)) {
+      return;
+    }
     const gen = ++this.connectGeneration;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);

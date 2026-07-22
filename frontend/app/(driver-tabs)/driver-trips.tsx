@@ -95,10 +95,14 @@ function statusBg(status: string): string {
   if (isActive(status)) return 'rgba(56,189,248,0.14)';
   return SURFACE.tile;
 }
-function statusLabel(status: string): string {
-  if (status === 'pending_payment') return 'Awaiting payment';
-  if (status === 'arrived') return 'At pickup';
-  return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
+function statusLabel(status: unknown): string {
+  // Guard: currentTrip from the persisted store can arrive with id but no status
+  // on first paint after boot — never call string methods on undefined (crash).
+  const s = typeof status === 'string' ? status : '';
+  if (!s) return 'In progress';
+  if (s === 'pending_payment') return 'Awaiting payment';
+  if (s === 'arrived') return 'At pickup';
+  return s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ');
 }
 
 function formatDate(iso: string): string {
@@ -138,6 +142,9 @@ function PulsingLiveDot() {
     </View>
   );
 }
+
+// Per-tab crash safety net — confines any render error to this tab (never to OS home).
+export { ErrorBoundary } from '@/src/components/driver/DriverTabErrorBoundary';
 
 export default function DriverTripsTab() {
   const router = useRouter();

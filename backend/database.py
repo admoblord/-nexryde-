@@ -45,11 +45,10 @@ logger = logging.getLogger('server')
 # Shared config keys
 GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
 
-# Shared business config
+# Shared business config — fee/currency only. Trial numbers live in ONE place:
+# driver_trial_policy (system_config.driver_trial_defaults → 15 trips / 14 days).
 SUBSCRIPTION_CONFIG = {
     "monthly_fee": 18000,
-    "trial_hours": 48,
-    "trial_trips": 3,
     "currency": "NGN",
     "bank_details": {
         "provider": "SquadCo",

@@ -58,12 +58,21 @@ def mock_db():
     return db
 
 
+def _enable_wallet_flag(db) -> None:
+    """Wallet flow tests must opt in — the launch default is wallet OFF."""
+    from feature_flags import invalidate_feature_flags_cache
+
+    invalidate_feature_flags_cache()
+    db.system_config.find_one = AsyncMock(return_value={"value": {"wallet": "all"}})
+
+
 @pytest.mark.asyncio
 async def test_reserve_fare_deducts_balance():
     """reserve_rider_wallet_fare should atomically deduct from wallet."""
     from wallet_ops import reserve_rider_wallet_fare
 
     db = MagicMock()
+    _enable_wallet_flag(db)
     wallet = {"user_id": "r1", "balance": 5000.0}
     db.wallets.find_one_and_update = AsyncMock(return_value={**wallet, "balance": 4600.0})
     db.wallet_holds.find_one = AsyncMock(return_value=None)

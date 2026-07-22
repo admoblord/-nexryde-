@@ -759,12 +759,18 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
         driver_user = await db.users.find_one({"id": user_id}, LEGAL_USER_PROJECTION)
         assert_user_legal_compliance(driver_user, role="driver")
 
-        # Idempotent: already online → refresh TTL and succeed (no error on double-tap).
+        # Idempotent: already online → refresh TTL + heartbeat (no error on double-tap).
+        # Must seed last_heartbeat or the 3-min idle sweep FORCE_OFFLINEs a "successful" go-online.
         if await is_driver_online(user_id):
             await refresh_driver_presence(user_id, lat=lat or None, lng=lng or None)
             await db.driver_profiles.update_one(
                 {"user_id": user_id},
-                {"$set": {"is_online": True}},
+                {
+                    "$set": {
+                        "is_online": True,
+                        "last_heartbeat": datetime.now(timezone.utc),
+                    }
+                },
             )
             return {"message": "Driver is now online", "already_online": True}
 
@@ -1303,6 +1309,11 @@ async def verify_driver_documents(
                 {"$set": {"approved_documents_snapshot_id": snapshot.get("id")}},
             )
             await send_driver_verification_notification(driver_id, "approved")
+        else:
+            # Documents submitted successfully but awaiting admin review — confirm
+            # receipt with a phone push + in-app notification so the driver knows
+            # the upload worked and is now pending approval.
+            await send_driver_verification_notification(driver_id, "pending_review")
 
         logger.info(f"Driver {driver_id}: {len(stored_docs)} documents archived status={verification_status}")
         return {
@@ -3044,6 +3055,12 @@ async def get_driver_withdrawals(driver_id: str, http_request: Request, limit: i
 @drivers_router.post("/drivers/{driver_id}/withdraw-earnings")
 async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWithdrawalRequest, http_request: Request):
     """Withdraw driver wallet earnings only after live face confirmation."""
+    from feature_flags import is_wallet_enabled
+    if not await is_wallet_enabled(db):
+        raise HTTPException(
+            status_code=403,
+            detail="Withdrawals are not needed — riders pay you directly (cash or transfer). You keep 100%.",
+        )
     # Rate-limit: 5 withdrawal attempts per hour per driver
     from security_advanced import general_limiter
     await general_limiter.check_rate_limit(http_request, f"withdraw:{driver_id}")

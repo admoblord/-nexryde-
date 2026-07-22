@@ -23,6 +23,7 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, useThemeColors } from '@/src
 import { BRAND, SURFACE } from '@/src/constants/designSystem';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useFlowLayout } from '@/src/constants/flowLayout';
+import { useWalletEnabled } from '@/src/services/clientConfig';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import {
   BACKEND_URL,
@@ -74,6 +75,9 @@ export default function BankDetailsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
+  // Launch mode: wallet off → bank details stay (riders transfer here) but
+  // in-app withdrawals/vault are hidden.
+  const walletEnabled = useWalletEnabled();
   const { userId: driverId } = useAuthedUserId();
   const { colors, isDark } = useThemeColors();
   const screenBg = isDark ? colors.background : '#F8FAFC';
@@ -389,7 +393,7 @@ export default function BankDetailsScreen() {
             keyboardShouldPersistTaps="handled"
           >
         {/* ── Quick withdraw CTA ── */}
-        {payoutReady && vaultSpendable >= 500 && (
+        {walletEnabled && payoutReady && vaultSpendable >= 500 && (
           <TouchableOpacity
             style={styles.withdrawCta}
             onPress={() => router.push('/driver/withdrawal' as any)}
@@ -551,7 +555,7 @@ export default function BankDetailsScreen() {
             </View>
 
             {/* ── SECTION 3: Earnings & Vault (collapsible) ── */}
-            {(vaultSpendable > 0 || vaultLocked > 0 || withdrawAllowed) && (
+            {walletEnabled && (vaultSpendable > 0 || vaultLocked > 0 || withdrawAllowed) && (
               <TouchableOpacity
                 style={styles.advancedToggle}
                 onPress={() => setShowAdvanced(v => !v)}

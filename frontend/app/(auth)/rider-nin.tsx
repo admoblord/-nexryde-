@@ -15,6 +15,11 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import {
+  REFERRAL_REWARD_INVITEE_NGN,
+  REFERRAL_REWARD_INVITER_NGN,
+  formatNgn,
+} from '@/src/constants/commercialOffers';
 
 const D = {
   bg: '#0D1420',
@@ -211,11 +216,12 @@ export default function RiderNINScreen() {
                       </Text>
                     </Text>
                     <Text style={styles.invitedBySub}>
-                      Complete your first ride and you both earn ₦500!
+                      Complete your first ride — you earn {formatNgn(REFERRAL_REWARD_INVITEE_NGN)}, they earn{' '}
+                      {formatNgn(REFERRAL_REWARD_INVITER_NGN)}!
                     </Text>
                   </View>
                   <View style={styles.invitedByBadge}>
-                    <Text style={styles.invitedByBadgeText}>₦500</Text>
+                    <Text style={styles.invitedByBadgeText}>{formatNgn(REFERRAL_REWARD_INVITEE_NGN)}</Text>
                   </View>
                 </LinearGradient>
               </View>

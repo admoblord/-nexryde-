@@ -9,6 +9,19 @@ from fastapi import HTTPException
 
 from wallet_trip_helpers import is_wallet_payment_method
 
+WALLET_DISABLED_DETAIL = (
+    "Wallet payments are currently unavailable. Pay your driver directly with cash "
+    "or a bank transfer to their account."
+)
+
+
+async def _reject_if_wallet_disabled(db: Any) -> None:
+    """Launch mode: fare wallet is off — no holds, no wallet-paid trips."""
+    from feature_flags import is_wallet_enabled
+
+    if not await is_wallet_enabled(db):
+        raise HTTPException(status_code=400, detail=WALLET_DISABLED_DETAIL)
+
 
 # ─── Fare hold / reserve ─────────────────────────────────────────────────────
 
@@ -24,6 +37,7 @@ async def reserve_rider_wallet_fare(
     """
     if not is_wallet_payment_method(payment_method):
         return
+    await _reject_if_wallet_disabled(db)
 
     fare = round(float(fare), 2)
     if fare < 1:
@@ -107,6 +121,7 @@ async def assert_rider_wallet_covers_fare(
     For wallet trips, prefer reserve_rider_wallet_fare which is atomic."""
     if not is_wallet_payment_method(payment_method):
         return
+    await _reject_if_wallet_disabled(db)
     fare = round(float(fare), 2)
     if fare < 1:
         raise HTTPException(status_code=400, detail="Invalid fare for wallet payment")

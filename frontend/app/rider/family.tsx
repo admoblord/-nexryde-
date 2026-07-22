@@ -76,6 +76,12 @@ export default function FamilyModeScreen() {
     return `+234${digits}`;
   };
 
+  const normalizeFamily = (data: unknown) => {
+    const raw = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
+    const members = Array.isArray(raw.members) ? raw.members : [];
+    return { ...raw, members } as NonNullable<typeof family>;
+  };
+
   const loadFamily = async () => {
     if (!riderId || !canCallAuthedApi) {
       setInitialLoading(false);
@@ -86,7 +92,7 @@ export default function FamilyModeScreen() {
       const userFamilyId = (user as { family_id?: string } | null)?.family_id;
       if (userFamilyId) {
         const res = await getFamily(userFamilyId);
-        setFamily(res.data);
+        setFamily(normalizeFamily(res.data));
       }
     } catch (error) {
       console.log('No family found or error loading:', error);
@@ -117,7 +123,7 @@ export default function FamilyModeScreen() {
       const familyId = String(res.data?.family_id || '');
       if (familyId) {
         const familyRes = await getFamily(familyId);
-        setFamily(familyRes.data);
+        setFamily(normalizeFamily(familyRes.data));
       } else {
         await loadFamily();
       }
@@ -250,6 +256,8 @@ export default function FamilyModeScreen() {
     );
   }
 
+  const members = Array.isArray(family?.members) ? family.members : [];
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -318,7 +326,7 @@ export default function FamilyModeScreen() {
                 <View style={styles.familyHeaderInfo}>
                   <Text style={styles.familyName}>{family.name}</Text>
                   <Text style={styles.familyMemberCount}>
-                    {family.members.length} of 10 members
+                    {members.length} of 10 members
                   </Text>
                 </View>
                 <View style={styles.trustScoreBadge}>
@@ -338,7 +346,7 @@ export default function FamilyModeScreen() {
             </Card>
 
             {/* Add Member Button */}
-            {family.members.length < 10 && (
+            {members.length < 10 && (
               <Button
                 title="Add Family Member"
                 onPress={() => setShowAddModal(true)}
@@ -352,7 +360,7 @@ export default function FamilyModeScreen() {
             <View style={styles.membersSection}>
               <Text style={styles.sectionTitle}>Family Members</Text>
               
-              {family.members.map((member, idx) => (
+              {members.map((member, idx) => (
                 <Card key={idx} style={styles.memberCard}>
                   <View style={styles.memberInfo}>
                     <View style={[
@@ -886,3 +894,5 @@ const styles = StyleSheet.create({
     marginTop: SPACING.md,
   },
 });
+
+export { ErrorBoundary } from '@/src/components/rider/RiderScreenErrorBoundary';

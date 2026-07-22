@@ -315,7 +315,10 @@ const timeAgoFull = (d: string) => {
 };
 
 const AVATAR_COLORS = ['#7C3AED', '#0EA5E9', '#22C55E', '#EF4444', '#F59E0B', '#EC4899', '#06B6D4'];
-const avatarColor = (name: string) => AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length];
+const avatarColor = (name: unknown) => {
+  const n = typeof name === 'string' && name.length > 0 ? name : '?';
+  return AVATAR_COLORS[n.charCodeAt(0) % AVATAR_COLORS.length];
+};
 
 // ─── Voice note button (UI-ready, haptic) ─────────────────────────────────────
 function VoiceBtn({ onSend }: { onSend: (dur: string) => void }) {
@@ -563,17 +566,20 @@ export default function DriverCommunityScreen() {
     const isMe = driverId ? item.user_id === driverId : false;
     const isAdmin = item.user_role === 'admin';
     const isAnnouncement = item.is_announcement || isAdmin;
+    const displayName = typeof item.user_name === 'string' && item.user_name.trim()
+      ? item.user_name.trim()
+      : 'Driver';
     return (
       <View style={[s.msgWrap, isMe && s.msgWrapMe]}>
         {!isMe ? (
-          <View style={[s.msgAvatar, { backgroundColor: avatarColor(item.user_name) }]}>
-            <Text style={s.msgAvatarTxt}>{item.user_name.charAt(0).toUpperCase()}</Text>
+          <View style={[s.msgAvatar, { backgroundColor: avatarColor(displayName) }]}>
+            <Text style={s.msgAvatarTxt}>{displayName.charAt(0).toUpperCase()}</Text>
           </View>
         ) : null}
         <View style={[s.msgBubble, isMe ? s.msgBubbleMe : isAnnouncement ? s.msgBubbleAdmin : s.msgBubbleOther, item.is_pinned && s.msgBubblePinned]}>
           {!isMe ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-              <Text style={[s.msgSender, { color: avatarColor(item.user_name) }]}>{item.user_name}</Text>
+              <Text style={[s.msgSender, { color: avatarColor(displayName) }]}>{displayName}</Text>
               {isAdmin ? <View style={s.adminBadge}><Text style={s.adminBadgeTxt}>ADMIN</Text></View> : null}
               {item.is_pinned ? <Ionicons name="pin" size={10} color="#F59E0B" /> : null}
             </View>

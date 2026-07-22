@@ -91,7 +91,10 @@ export default function FavoriteDriversScreen() {
   }, [riderId, canCallAuthedApi]);
 
   useEffect(() => {
-    if (!canCallAuthedApi) return;
+    if (!canCallAuthedApi) {
+      setLoading(false);
+      return;
+    }
     void loadFavoriteDrivers();
   }, [loadFavoriteDrivers, canCallAuthedApi]);
 

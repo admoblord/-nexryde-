@@ -2312,11 +2312,20 @@ async def admin_force_approve_driver(driver_id: str, request: Request):
         )
     await _log_admin_action(request, "driver_force_approved", "driver", driver_id, {"created_trial": not bool(existing_sub)})
 
+    notified = False
+    try:
+        from routers.auth import send_driver_verification_notification
+        await send_driver_verification_notification(driver_id, "approved")
+        notified = True
+    except Exception as exc:  # notification must never block the admin action
+        logger.warning("Driver force-approve notification skipped: %s", exc)
+
     return {
         "success": True,
         "message": f"Driver '{user.get('name', driver_id)}' force-approved with active trial. They can go online immediately.",
         "driver_id": driver_id,
         "approved_at": now_iso,
+        "notified": notified,
     }
 
 

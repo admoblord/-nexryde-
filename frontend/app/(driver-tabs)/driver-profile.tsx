@@ -38,6 +38,7 @@ import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { sentryTestCrash } from '@/src/utils/sentry';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useThemeColors } from '@/src/constants/theme';
+import { useWalletEnabled } from '@/src/services/clientConfig';
 import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
 
 const PROFILE_GREEN = BRAND.primary;
@@ -210,12 +211,16 @@ function ScoreBar({ label, value, color }: { label: string; value: number; color
 /* ═══════════════════════════════════════════════════════════════
    DRIVER PROFILE SCREEN
 ═══════════════════════════════════════════════════════════════ */
+// Per-tab crash safety net — confines any render error to this tab (never to OS home).
+export { ErrorBoundary } from '@/src/components/driver/DriverTabErrorBoundary';
+
 export default function DriverProfileScreen() {
   const toast = useErrorToast();
   const router = useRouter();
   const tabPad = useTabBottomPad(16);
   const flow = useFlowLayout();
   const { colors, isDark } = useThemeColors();
+  const walletEnabled = useWalletEnabled();
   const actionTileW = useMemo(
     () => Math.max(120, Math.floor((flow.width - flow.padH * 2 - 12) / 2)),
     [flow.padH, flow.width],
@@ -730,7 +735,11 @@ export default function DriverProfileScreen() {
             <ActionTile icon="list" label="Trip History" gradColors={['#5B21B6', '#7C3AED']} tileWidth={actionTileW} onPress={() => router.push(DRIVER_TRIPS_TAB_HREF as any)} />
             <ActionTile icon="car-sport" label="My Vehicle" gradColors={['#065F46', '#059669']} tileWidth={actionTileW} onPress={() => router.push('/driver/vehicle')} />
             <ActionTile icon="document-text" label="Documents" gradColors={['#7C2D12', '#EA580C']} tileWidth={actionTileW} onPress={() => router.push('/driver/documents')} />
-            <ActionTile icon="arrow-up-circle" label="Withdraw" gradColors={['#14532D', '#16A34A']} tileWidth={actionTileW} onPress={() => router.push('/driver/withdrawal')} />
+            {walletEnabled ? (
+              <ActionTile icon="arrow-up-circle" label="Withdraw" gradColors={['#14532D', '#16A34A']} tileWidth={actionTileW} onPress={() => router.push('/driver/withdrawal')} />
+            ) : (
+              <ActionTile icon="card" label="Bank details" gradColors={['#14532D', '#16A34A']} tileWidth={actionTileW} onPress={() => router.push('/driver/bank')} />
+            )}
             <ActionTile icon="analytics" label="Performance" gradColors={['#0C4A6E', BRAND.info]} tileWidth={actionTileW} onPress={() => router.push('/driver/performance')} />
           </View>
         </View>

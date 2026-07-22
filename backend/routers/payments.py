@@ -2314,6 +2314,12 @@ async def initiate_rider_wallet_checkout(
     Completes via webhook or POST /payment/wallet/verify-pending.
     """
     user_id = require_authenticated(http_request)
+    from feature_flags import is_wallet_enabled
+    if not await is_wallet_enabled(db):
+        raise HTTPException(
+            status_code=403,
+            detail="Wallet top-up is currently unavailable. Pay your driver directly with cash or bank transfer.",
+        )
     await general_limiter.check_rate_limit(http_request, f"wallet_init:{user_id}")
     verify_owner_strict(http_request, user_id)
     await _assert_wallet_user_exists(user_id)
@@ -4184,6 +4190,12 @@ async def get_wallet_transactions(user_id: str, request: Request, limit: int = 3
 @payments_router.post("/wallet/{user_id}/topup")
 async def topup_wallet_balance(user_id: str, request: dict, http_request: Request):
     """Top up wallet - ENHANCED with validation and logging"""
+    from feature_flags import is_wallet_enabled
+    if not await is_wallet_enabled(db):
+        raise HTTPException(
+            status_code=403,
+            detail="Wallet top-up is currently unavailable. Pay your driver directly with cash or bank transfer.",
+        )
     verify_owner_strict(http_request, user_id)
     amount = request.get("amount", 0)
     if not amount:

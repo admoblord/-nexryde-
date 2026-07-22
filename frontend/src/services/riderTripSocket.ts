@@ -37,11 +37,13 @@ class RiderTripSocketManager {
   acquire(riderId: string): void {
     this.subscriberCount += 1;
     this.shouldStayConnected = true;
-    if (this.riderId !== riderId) {
+    const riderChanged = this.riderId !== riderId;
+    if (riderChanged) {
       this.riderId = riderId;
       this.reconnectAttempts = 0;
     }
-    void this.openSocket();
+    // Idempotent: second subscriber (home + tracking) must not tear down a healthy socket.
+    void this.openSocket({ force: riderChanged });
   }
 
   release(): void {
@@ -54,9 +56,10 @@ class RiderTripSocketManager {
   /** Force reconnect after foreground / network restore. */
   nudgeReconnect(): void {
     if (!this.shouldStayConnected || !this.riderId || this.subscriberCount === 0) return;
-    if (this.ws?.readyState === WebSocket.OPEN) return;
+    const rs = this.ws?.readyState;
+    if (rs === WebSocket.OPEN || rs === WebSocket.CONNECTING) return;
     this.reconnectAttempts = 0;
-    void this.openSocket();
+    void this.openSocket({ force: true });
   }
 
   private emitConnection(connected: boolean) {
@@ -102,8 +105,12 @@ class RiderTripSocketManager {
     }, delay);
   }
 
-  private async openSocket() {
+  private async openSocket(opts?: { force?: boolean }) {
     if (!this.shouldStayConnected || !this.riderId || this.subscriberCount === 0) return;
+    const rs = this.ws?.readyState;
+    if (!opts?.force && (rs === WebSocket.OPEN || rs === WebSocket.CONNECTING)) {
+      return;
+    }
     const gen = ++this.connectGeneration;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);

@@ -81,10 +81,24 @@ class FakeTransactions:
         self.rows.append(dict(doc))
 
 
+class FakeSystemConfig:
+    """Wallet flow tests opt in — launch default is wallet OFF."""
+
+    async def find_one(self, query, projection=None):
+        return {"value": {"wallet": "all"}}
+
+
 class FakeDB:
     def __init__(self, users: FakeUsers, transactions: FakeTransactions) -> None:
         self.users = users
         self.transactions = transactions
+        self.system_config = FakeSystemConfig()
+
+
+def setup_function(_fn):
+    from feature_flags import invalidate_feature_flags_cache
+
+    invalidate_feature_flags_cache()
 
 
 def test_assert_wallet_skips_non_wallet():

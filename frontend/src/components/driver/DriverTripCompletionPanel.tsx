@@ -21,6 +21,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { DOCK_BLUR_INTENSITY } from '@/src/components/driver/driverDockTheme';
+import { isWalletPaymentMethod } from '@/src/utils/tripPaymentMethod';
 
 const NEON = '#22C55E';
 const winH = Dimensions.get('window').height;
@@ -358,25 +359,43 @@ export default function DriverTripCompletionPanel({
             <Text style={styles.earningsAmount}>{formatFare(payload.fare)}</Text>
             <View style={styles.earningsDivider} />
             <EarningsBreakdownGrid payload={payload} />
-            {/* Payment method / pending cash notice */}
+            {/* Payment method / pending payment notice */}
             {payload.paymentMethod ? (
               <View style={[
                 styles.paymentMethodRow,
                 payload.paymentPending && styles.paymentMethodPending,
               ]}>
                 <Ionicons
-                  name={payload.paymentMethod === 'wallet' ? 'wallet-outline' : 'cash-outline'}
+                  name={
+                    isWalletPaymentMethod(payload.paymentMethod)
+                      ? 'wallet-outline'
+                      : payload.paymentMethod === 'transfer' || payload.paymentMethod === 'bank_transfer'
+                        ? 'swap-horizontal-outline'
+                        : 'cash-outline'
+                  }
                   size={16}
                   color={payload.paymentPending ? '#F59E0B' : NEON}
                 />
                 <Text style={[styles.paymentMethodTxt, payload.paymentPending && styles.paymentMethodPendingTxt]}>
                   {payload.paymentPending
-                    ? `Cash pending — collect ₦${Math.round(payload.fare).toLocaleString()} from rider`
-                    : `Payment via ${payload.paymentMethod === 'wallet' ? 'wallet' : 'cash'} — complete`}
+                    ? isWalletPaymentMethod(payload.paymentMethod)
+                      ? 'Wallet payment pending — rider settles in app'
+                      : payload.paymentMethod === 'transfer' || payload.paymentMethod === 'bank_transfer'
+                        ? `Transfer pending — ₦${Math.round(payload.fare).toLocaleString()} to your bank account`
+                        : `Cash pending — collect ₦${Math.round(payload.fare).toLocaleString()} from rider`
+                    : `Payment via ${
+                        isWalletPaymentMethod(payload.paymentMethod)
+                          ? 'wallet'
+                          : payload.paymentMethod === 'transfer' || payload.paymentMethod === 'bank_transfer'
+                            ? 'transfer'
+                            : 'cash'
+                      } — complete`}
                 </Text>
               </View>
             ) : null}
-            {payload.paymentPending && onConfirmCash ? (
+            {/* Wallet settlement is rider-triggered (backend rejects driver confirm);
+                cash/transfer are confirmed by the driver who received the money. */}
+            {payload.paymentPending && onConfirmCash && !isWalletPaymentMethod(payload.paymentMethod) ? (
               <TouchableOpacity
                 style={[styles.cashConfirmBtn, cashBusy && { opacity: 0.65 }]}
                 disabled={cashBusy}
@@ -396,14 +415,18 @@ export default function DriverTripCompletionPanel({
                   })();
                 }}
                 accessibilityRole="button"
-                accessibilityLabel="Confirm cash collected"
+                accessibilityLabel="Confirm payment received"
               >
                 {cashBusy ? (
                   <ActivityIndicator color="#022C22" />
                 ) : (
                   <>
                     <Ionicons name="cash" size={18} color="#022C22" />
-                    <Text style={styles.cashConfirmTxt}>Cash collected</Text>
+                    <Text style={styles.cashConfirmTxt}>
+                      {payload.paymentMethod === 'transfer' || payload.paymentMethod === 'bank_transfer'
+                        ? 'Transfer received'
+                        : 'Cash collected'}
+                    </Text>
                   </>
                 )}
               </TouchableOpacity>

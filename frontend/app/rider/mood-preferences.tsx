@@ -83,7 +83,10 @@ export default function MoodPreferencesScreen() {
   const savedAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (!riderId || !canCallAuthedApi) return;
+    if (!riderId || !canCallAuthedApi) {
+      setLoading(false);
+      return;
+    }
     void (async () => {
       try {
         const headers = getAuthHeaders();

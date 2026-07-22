@@ -40,6 +40,7 @@ import {
   type WithdrawalRecord,
 } from '@/src/services/api';
 import { useFlowLayout } from '@/src/constants/flowLayout';
+import { useWalletEnabled } from '@/src/services/clientConfig';
 
 // ── Status config ────────────────────────────────────────────────────────────
 
@@ -445,6 +446,8 @@ export default function WithdrawalScreen() {
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
   const { userId: driverId } = useAuthedUserId();
+  // Launch mode: wallet off → riders pay drivers directly; nothing to withdraw.
+  const walletEnabled = useWalletEnabled();
 
   const [walletBalance, setWalletBalance] = useState(0);
   const [earningsFrozen, setEarningsFrozen] = useState(false);
@@ -630,6 +633,41 @@ export default function WithdrawalScreen() {
 
   const pendingCount = withdrawals.filter(w => w.status === 'pending_settlement' || w.status === 'processing').length;
   const goBank = () => router.push('/driver/bank');
+
+  // Launch mode: withdrawals hidden — riders pay drivers directly (cash/transfer).
+  if (!walletEnabled) {
+    return (
+      <View style={s.root}>
+        <StatusBar style="light" />
+        <View style={[s.header, { paddingTop: insets.top + 6, paddingHorizontal: flow.padH }]}>
+          <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={22} color="#fff" />
+          </TouchableOpacity>
+          <View style={{ flex: 1, alignItems: 'center' }}>
+            <Text style={s.headerTitle}>Getting Paid</Text>
+          </View>
+          <View style={s.backBtn} />
+        </View>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 12 }}>
+          <Ionicons name="cash-outline" size={44} color="#22C55E" />
+          <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700', textAlign: 'center' }}>
+            Riders pay you directly
+          </Text>
+          <Text style={{ color: '#94A3B8', fontSize: 14, textAlign: 'center', lineHeight: 20 }}>
+            Cash or a transfer straight to your account. NEXRYDE never touches your money —
+            you keep 100%, instantly. No withdrawals needed.
+          </Text>
+          <TouchableOpacity
+            style={{ marginTop: 8, backgroundColor: '#14532D', borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12 }}
+            onPress={goBank}
+            accessibilityRole="button"
+          >
+            <Text style={{ color: '#22C55E', fontWeight: '700' }}>Set up your bank account</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={s.root}>

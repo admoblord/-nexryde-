@@ -1,4 +1,9 @@
 import { apiFetch } from '@/src/utils/sessionRefresh';
+import {
+  CITY_RIDER_STANDARD_FEE_NGN,
+  ROAD_WARRIOR_LAUNCH_FEE_NGN,
+  TRIAL_TRIPS_TARGET,
+} from '@/src/constants/commercialOffers';
 
 export interface PricingData {
   city_rider: {
@@ -49,19 +54,25 @@ export type SubscriptionScreenData = {
 };
 
 const DEFAULT_PRICING: PricingData = {
-  city_rider: { current_price: 18000, current_phase: 'early', launch_slots_remaining: 450 },
-  road_warrior: { current_price: 30000, current_phase: 'early', launch_slots_remaining: 180 },
+  city_rider: { current_price: CITY_RIDER_STANDARD_FEE_NGN, current_phase: 'early', launch_slots_remaining: 450 },
+  road_warrior: {
+    current_price: ROAD_WARRIOR_LAUNCH_FEE_NGN,
+    current_phase: 'early',
+    launch_slots_remaining: 180,
+  },
 };
 
 function normalizePricing(raw: Record<string, unknown>): PricingData {
   return {
     city_rider: {
-      current_price: Number(raw.city_rider_price ?? raw.monthly_fee ?? raw.current_price ?? 18000),
+      current_price: Number(
+        raw.city_rider_price ?? raw.monthly_fee ?? raw.current_price ?? CITY_RIDER_STANDARD_FEE_NGN,
+      ),
       current_phase: String(raw.city_rider_phase ?? raw.current_phase ?? 'early'),
       launch_slots_remaining: Number(raw.city_rider_launch_slots_remaining ?? raw.launch_slots_remaining ?? 0),
     },
     road_warrior: {
-      current_price: Number(raw.road_warrior_price ?? 30000),
+      current_price: Number(raw.road_warrior_price ?? ROAD_WARRIOR_LAUNCH_FEE_NGN),
       current_phase: String(raw.road_warrior_phase ?? raw.current_phase ?? 'early'),
       launch_slots_remaining: Number(raw.road_warrior_launch_slots_remaining ?? 0),
     },
@@ -82,7 +93,7 @@ function normalizeSubscription(raw: Record<string, unknown>, pricing: PricingDat
     trial_active: Boolean(raw.trial_active || raw.status === 'trial'),
     trial_trips_completed: Number(raw.trial_trips_completed ?? 0),
     trial_trips_remaining: raw.trial_trips_remaining != null ? Number(raw.trial_trips_remaining) : undefined,
-    trial_trips_target: Number(raw.trial_trips_target ?? 15),
+    trial_trips_target: Number(raw.trial_trips_target ?? TRIAL_TRIPS_TARGET),
     trial_progress_pct: Number(raw.trial_progress_pct ?? 0),
     trial_extended: Boolean(raw.trial_extended ?? false),
     trial_extension_count: Number(raw.trial_extension_count ?? 0),

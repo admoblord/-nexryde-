@@ -265,6 +265,7 @@ export const LINE_HEIGHT = {
 };
 
 export const CURRENCY = '₦';
+/** @deprecated Prefer MONTHLY_FEE_NGN from commercialOffers.ts */
 export const SUBSCRIPTION_PRICE = 18000;
 
 export default {

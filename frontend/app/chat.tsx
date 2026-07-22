@@ -563,3 +563,5 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 18, fontWeight: '800', color: '#64748B', marginTop: 12 },
   emptyText: { fontSize: 14, color: '#94A3B8', marginTop: 4, textAlign: 'center' },
 });
+
+export { ErrorBoundary } from '@/src/components/rider/RiderScreenErrorBoundary';

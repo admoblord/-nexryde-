@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { AppState } from 'react-native';
 import { useAppStore } from '@/src/store/appStore';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
@@ -9,8 +8,10 @@ import {
   driverTripCoordinatorPollMs,
   isDriverHighPriorityPolling,
 } from '@/src/constants/driverPollingProfiles';
+import { setForegroundInterval } from '@/src/utils/foregroundInterval';
 
-export default function useActiveTripCoordinator() {
+export default function useActiveTripCoordinator(options?: { enabled?: boolean }) {
+  const enabled = options?.enabled !== false;
   const setCurrentTrip = useAppStore((s) => s.setCurrentTrip);
   const currentTrip = useAppStore((s) => s.currentTrip);
   const isOnline = useAppStore((s) => s.isOnline);
@@ -23,7 +24,7 @@ export default function useActiveTripCoordinator() {
   const pollMs = driverTripCoordinatorPollMs(highPriority);
 
   useEffect(() => {
-    if (!storeReady) return;
+    if (!enabled || !storeReady) return;
 
     if (!canCallAuthedApi || !userId) {
       // Keep a valid persisted active trip during brief auth hydration gaps.
@@ -49,19 +50,11 @@ export default function useActiveTripCoordinator() {
       }
     };
 
-    void pullActiveTrip();
-    const interval = setInterval(() => void pullActiveTrip(), pollMs);
-
-    const appStateSub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        void pullActiveTrip();
-      }
-    });
+    const stop = setForegroundInterval(() => void pullActiveTrip(), pollMs);
 
     return () => {
       mounted = false;
-      clearInterval(interval);
-      appStateSub.remove();
+      stop();
     };
-  }, [canCallAuthedApi, storeReady, userId, setCurrentTrip, pollMs, sessionPollingActive]);
+  }, [enabled, canCallAuthedApi, storeReady, userId, setCurrentTrip, pollMs, sessionPollingActive]);
 }

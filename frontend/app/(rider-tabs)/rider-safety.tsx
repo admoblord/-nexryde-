@@ -35,6 +35,7 @@ import { RiderSafetyActiveTripCard } from '@/src/components/rider/RiderSafetyAct
 import { pullAndApplyActiveTrip } from '@/src/services/activeTripSync';
 import { openShareTrip } from '@/src/utils/openShareTrip';
 import { isActiveTripStatus } from '@/src/utils/tripStatus';
+import { useWalletEnabled } from '@/src/services/clientConfig';
 
 type PoliceContact = { state: string; aliases: string[]; phone: string };
 const POLICE: PoliceContact[] = policeContacts as PoliceContact[];
@@ -183,6 +184,7 @@ function quickBg(v: (typeof QUICK)[number]['variant']) {
 
 export default function RiderSafetyScreen() {
   const router = useRouter();
+  const walletEnabled = useWalletEnabled();
   const { colors, isDark } = useThemeColors();
   const { user, currentTrip } = useAppStore();
   const { canCallAuthedApi } = useAuthedApiReady();
@@ -454,7 +456,9 @@ export default function RiderSafetyScreen() {
         {SECTIONS.map(section => (
           <View key={section.title} style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{section.title}</Text>
-            {section.rows.map(row => (
+            {section.rows
+              .filter(row => walletEnabled || row.route !== '/(rider-tabs)/rider-wallet')
+              .map(row => (
               <TouchableOpacity
                 key={row.route + row.label}
                 style={[
@@ -759,3 +763,5 @@ const styles = StyleSheet.create({
   rowDesc: { fontSize: 12, fontWeight: '600', marginTop: 2 },
 });
 
+
+export { ErrorBoundary } from '@/src/components/rider/RiderScreenErrorBoundary';

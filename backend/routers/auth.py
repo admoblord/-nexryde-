@@ -623,10 +623,16 @@ async def send_driver_verification_notification(user_id: str, status: str, reaso
 
         if status == "approved":
             message = f"🎉 Congratulations {name}! Your NEXRYDE driver account has been APPROVED. You can now start accepting rides and earning money. Welcome to the team!"
+            push_title = "You're approved to drive! 🎉"
+            push_body = "Your documents were approved. Go online now and start earning with NEXRYDE."
         elif status == "rejected":
             message = f"Hi {name}, your NEXRYDE driver verification was not approved. Reason: {reason or 'Documents did not meet requirements'}. Please re-submit your documents."
+            push_title = "Action needed on your documents"
+            push_body = f"Your verification needs attention: {reason or 'documents did not meet requirements'}. Tap to re-submit."
         else:
-            message = f"Hi {name}, your NEXRYDE driver verification is being reviewed. We'll notify you soon!"
+            message = f"Hi {name}, your NEXRYDE driver verification is being reviewed. We'll notify you as soon as it's approved!"
+            push_title = "Documents received — under review ✅"
+            push_body = "Thanks! Your documents were submitted successfully and are now under review. We'll notify you the moment you're approved."
 
         mail = (user.get("email") or "").strip().lower()
         title = "Driver Verification " + status.upper()
@@ -651,14 +657,36 @@ async def send_driver_verification_notification(user_id: str, status: str, reaso
             "id": str(uuid.uuid4()),
             "user_id": user_id,
             "type": "verification_" + status,
-            "title": title,
+            "title": push_title,
             "message": message,
             "read": False,
             "created_at": datetime.now(timezone.utc),
         }
         await db.notifications.insert_one(notification)
 
-        logger.info("Verification notification queued for %s (email=%s phone=%s): %s", name, bool(mail), bool(phone), status)
+        # Phone push notification (FCM / Expo) — mirrors the in-app alert so drivers
+        # are told immediately when documents are under review / approved / rejected.
+        pushed = False
+        try:
+            from notification_service import send_push_notification
+            pushed = await send_push_notification(
+                user_id,
+                push_title,
+                push_body,
+                data={
+                    "type": "verification_" + status,
+                    "verification_status": status,
+                    "route": "/driver/documents",
+                },
+                source="driver_verification",
+            )
+        except Exception as push_exc:
+            logger.warning("Driver verification push skipped: %s", push_exc)
+
+        logger.info(
+            "Verification notification queued for %s (email=%s phone=%s push=%s): %s",
+            name, bool(mail), bool(phone), pushed, status,
+        )
 
     except Exception as e:
         logger.error(f"Failed to send verification notification: {e}")

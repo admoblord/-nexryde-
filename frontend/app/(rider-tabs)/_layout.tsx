@@ -5,9 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '@/src/constants/theme';
 import { useLanguage } from '@/src/i18n/LanguageContext';
-import useActiveTripCoordinator from '@/src/hooks/useActiveTripCoordinator';
 import ActiveTripBar from '@/src/components/ActiveTripBar';
-import usePanicShakeGuard from '@/src/hooks/usePanicShakeGuard';
 import { BACKEND_URL } from '@/src/services/api';
 import { authedFetch } from '@/src/utils/sessionRefresh';
 import { useRequireRole } from '@/src/hooks/useRequireRole';
@@ -15,6 +13,8 @@ import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { warmTokenCache } from '@/src/lib/tokenStore';
 import { useRiderRidePhaseNavigation } from '@/src/hooks/useRiderRidePhaseNavigation';
+import { useWalletEnabled } from '@/src/services/clientConfig';
+import { setForegroundInterval } from '@/src/utils/foregroundInterval';
 import {
   buildTabScreenOptions,
   tabBadgeStyles,
@@ -49,11 +49,10 @@ export default function RiderTabLayout() {
   const { colors, isDark } = useThemeColors();
   const allowed = useRequireRole('rider');
   const hasHydrated = usePersistStoreReady();
+  const walletEnabled = useWalletEnabled();
   const { userId } = useAuthedUserId();
   const [unreadCount, setUnreadCount] = useState(0);
   const insets = useSafeAreaInsets();
-  useActiveTripCoordinator();
-  usePanicShakeGuard();
 
   useEffect(() => {
     void warmTokenCache();
@@ -88,11 +87,12 @@ export default function RiderTabLayout() {
         /* silent */
       }
     };
-    fetchUnread();
-    const iv = setInterval(fetchUnread, 30000);
+    const stop = setForegroundInterval(() => {
+      void fetchUnread();
+    }, 30000);
     return () => {
       cancelled = true;
-      clearInterval(iv);
+      stop();
     };
   }, [allowed, userId]);
 
@@ -143,6 +143,9 @@ export default function RiderTabLayout() {
         <Tabs.Screen
           name="rider-wallet"
           options={{
+            // Launch mode: fare wallet disabled — riders pay drivers directly.
+            // href: null removes the tab without deleting the screen (flag-reversible).
+            href: walletEnabled ? undefined : null,
             title: t.tabs.wallet,
             tabBarIcon: ({ color, focused }) => (
               <View style={tabIconPillStyle(focused, isDark)}>

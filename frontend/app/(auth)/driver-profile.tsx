@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { DRIVER_TRIAL_COPY } from '@/src/constants/commercialOffers';
 import { DriverOnboardingProgress } from '@/src/components/DriverOnboardingProgress';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders, formatApiDetail } from '@/src/services/api';
@@ -249,7 +250,7 @@ export default function DriverProfileScreen() {
         if (data.awaiting_approval) {
           Alert.alert(
             'Profile Saved',
-            'Your profile has been saved. Your documents are under review by the NEXRYDE team. You will be notified once approved — then your free trial begins (15 trips or 14 days from first go-online).',
+            `Your profile has been saved. Your documents are under review by the NEXRYDE team. You will be notified once approved — then your free trial begins (${DRIVER_TRIAL_COPY}).`,
             [{ text: 'Go to Dashboard', onPress: () => router.replace('/(driver-tabs)/driver-home') }],
           );
         } else {

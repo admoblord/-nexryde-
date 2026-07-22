@@ -78,8 +78,11 @@ import { getRecentLocations, cacheRecentLocation, createOfflineBooking, checkOnl
 import { authedFetch } from '@/src/utils/sessionRefresh';
 import * as Haptics from 'expo-haptics';
 import { geocodeAddressForRider } from '@/src/services/riderSavedPlaces';
+import { startSmartPickupGps, haversineMeters } from '@/src/services/smartPickupGps';
+import { useWalletEnabled } from '@/src/services/clientConfig';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useThemeColors } from '@/src/constants/theme';
+import { FIRST_RIDE_DISCOUNT_PCT } from '@/src/constants/commercialOffers';
 import { RIDER_PRIMARY_CTA_GRADIENT } from '@/src/constants/riderRideChrome';
 import { BookingBidInput } from '@/src/components/rider/BookingBidInput';
 import { BRAND, SURFACE } from '@/src/constants/designSystem';
@@ -302,6 +305,10 @@ function BookInDriveStyle() {
   const [tripDraft, setTripDraft] = useState<TripDraft>(EMPTY_TRIP_DRAFT);
   const [currentLocation, setCurrentLocation] = useState<any>(null);
   const [gpsStatus, setGpsStatus] = useState<'detecting' | 'locked' | 'error'>('detecting');
+  /** Once the rider picks a pickup manually, background GPS must never overwrite it. */
+  const manualPickupRef = useRef(false);
+  /** Last point we reverse-geocoded, so refinements only re-geocode on real movement. */
+  const lastGeocodedRef = useRef<{ lat: number; lng: number } | null>(null);
 
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [currentFare, setCurrentFare] = useState(0);
@@ -349,8 +356,10 @@ function BookInDriveStyle() {
   const [fareExplainModal, setFareExplainModal] = useState<
     'surge' | 'short' | 'breakdown' | 'positioning' | null
   >(null);
-  const [ridePaymentMethod, setRidePaymentMethod] = useState<'cash' | 'wallet'>('cash');
+  const [ridePaymentMethod, setRidePaymentMethod] = useState<'cash' | 'wallet' | 'transfer'>('cash');
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  // Launch mode: wallet off → payment options are Cash and Transfer (direct to driver).
+  const walletEnabled = useWalletEnabled();
   const [optimizedRoute, setOptimizedRoute] = useState<TrafficRoute | null>(null);
   const [routeSafety, setRouteSafety] = useState<RouteSafetyResponse | null>(null);
   const [routeSafetyLoading, setRouteSafetyLoading] = useState(false);
@@ -677,10 +686,21 @@ function BookInDriveStyle() {
     );
   };
 
-  const tripPaymentMethod = useCallback(() => (ridePaymentMethod === 'wallet' ? 'wallet' : 'cash'), [ridePaymentMethod]);
+  const tripPaymentMethod = useCallback(() => {
+    if (ridePaymentMethod === 'wallet' && walletEnabled) return 'wallet';
+    if (ridePaymentMethod === 'transfer') return 'transfer';
+    return 'cash';
+  }, [ridePaymentMethod, walletEnabled]);
+
+  // Wallet disabled: never leave a stale 'wallet' selection active.
+  useEffect(() => {
+    if (!walletEnabled && ridePaymentMethod === 'wallet') {
+      setRidePaymentMethod('cash');
+    }
+  }, [walletEnabled, ridePaymentMethod]);
 
   useEffect(() => {
-    if (!riderId) {
+    if (!riderId || !walletEnabled) {
       setWalletBalance(null);
       return;
     }
@@ -692,7 +712,7 @@ function BookInDriveStyle() {
         setWalletBalance(null);
       }
     })();
-  }, [riderId]);
+  }, [riderId, walletEnabled]);
 
   useEffect(() => {
     if (!riderId) return;
@@ -939,104 +959,57 @@ function BookInDriveStyle() {
           }
         }
 
-        const [lastRes, curRes] = await Promise.allSettled([
-          Location.getLastKnownPositionAsync({
-            maxAge: 120000,
-            requiredAccuracy: 900,
-          }),
-          Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Lowest,
-          }),
-        ]);
-
-        let latN: number | undefined;
-        let lngN: number | undefined;
-
-        if (curRes.status === 'fulfilled' && curRes.value?.coords) {
-          latN = Number(curRes.value.coords.latitude);
-          lngN = Number(curRes.value.coords.longitude);
-        }
-        if (
-          (!Number.isFinite(latN) || !Number.isFinite(lngN)) &&
-          lastRes.status === 'fulfilled' &&
-          lastRes.value?.coords
-        ) {
-          latN = Number(lastRes.value.coords.latitude);
-          lngN = Number(lastRes.value.coords.longitude);
-        }
-
-        if (!Number.isFinite(latN) || !Number.isFinite(lngN)) {
+        // SMART GPS: paint instantly from cache, stream high-accuracy fixes,
+        // converge on the rider's EXACT spot (<=15m) or best fix within 12s.
+        const geocodeFix = async (fLat: number, fLng: number, final: boolean) => {
+          const lastG = lastGeocodedRef.current;
+          const movedEnough =
+            !lastG || haversineMeters(lastG.lat, lastG.lng, fLat, fLng) > 25;
+          if (!movedEnough && !final) return;
+          lastGeocodedRef.current = { lat: fLat, lng: fLng };
+          let addr = '';
           try {
-            const loc = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.Balanced,
-            });
-            latN = Number(loc.coords.latitude);
-            lngN = Number(loc.coords.longitude);
+            addr = (await reverseGeocodeViaBackend(fLat, fLng, BACKEND_URL)) || '';
           } catch {
-            if (mounted) setGpsStatus('error');
-            return;
+            addr = '';
           }
-        }
+          if (!mounted || manualPickupRef.current) return;
+          const resolved = addr || `${fLat.toFixed(4)}, ${fLng.toFixed(4)}`;
+          setPickup(resolved);
+          setCurrentLocation({ lat: fLat, lng: fLng, address: resolved });
+        };
 
-        if (!Number.isFinite(latN) || !Number.isFinite(lngN)) {
-          if (mounted) setGpsStatus('error');
-          return;
-        }
-
-        const lat0 = latN as number;
-        const lng0 = lngN as number;
-
-        if (!mounted) return;
-
-        const addrPromise = reverseGeocodeViaBackend(lat0, lng0, BACKEND_URL);
-
-        setPickupCoords({ lat: lat0, lng: lng0 });
-        setCurrentLocation({ lat: lat0, lng: lng0, address: '' });
-        setPickup('Finding address…');
-        setGpsStatus('locked');
-
-        try {
-          const resolved = await addrPromise;
-          if (!mounted) return;
-          if (resolved) {
-            setPickup(resolved);
-            setCurrentLocation({ lat: lat0, lng: lng0, address: resolved });
-          } else {
-            const fallback = `${lat0.toFixed(4)}, ${lng0.toFixed(4)}`;
-            setPickup(fallback);
-            setCurrentLocation({ lat: lat0, lng: lng0, address: fallback });
-          }
-        } catch {
-          if (!mounted) return;
-          const fallback = `${lat0.toFixed(4)}, ${lng0.toFixed(4)}`;
-          setPickup(fallback);
-          setCurrentLocation({ lat: lat0, lng: lng0, address: fallback });
-        }
-
-        void Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
-          .then(async (loc: { coords: { latitude: number; longitude: number } }) => {
-            if (!mounted) return;
-            const nlat = Number(loc.coords.latitude);
-            const nlng = Number(loc.coords.longitude);
-            if (!Number.isFinite(nlat) || !Number.isFinite(nlng)) return;
-            setPickupCoords({ lat: nlat, lng: nlng });
+        let gotFix = false;
+        cancelSmartGps = startSmartPickupGps({
+          targetAccuracyM: 15,
+          timeoutMs: 12000,
+          onFix: (fix) => {
+            if (!mounted || manualPickupRef.current) return;
+            gotFix = true;
+            setPickupCoords({ lat: fix.lat, lng: fix.lng });
             setCurrentLocation(
               (prev: { lat: number; lng: number; address?: string } | null) =>
-                prev ? { ...prev, lat: nlat, lng: nlng } : { lat: nlat, lng: nlng, address: '' },
+                prev
+                  ? { ...prev, lat: fix.lat, lng: fix.lng }
+                  : { lat: fix.lat, lng: fix.lng, address: '' },
             );
-            const addr = await reverseGeocodeViaBackend(nlat, nlng, BACKEND_URL);
-            if (!mounted || !addr) return;
-            setPickup(addr);
-            setCurrentLocation({ lat: nlat, lng: nlng, address: addr });
-          })
-          .catch(() => {});
+            setPickup((p: string) => (p ? p : 'Finding address…'));
+            setGpsStatus('locked');
+            void geocodeFix(fix.lat, fix.lng, fix.final);
+          },
+          onError: () => {
+            if (mounted && !gotFix) setGpsStatus('error');
+          },
+        });
       } catch {
         if (mounted) setGpsStatus('error');
       }
     };
+    let cancelSmartGps: (() => void) | null = null;
     detectGPS();
     return () => {
       mounted = false;
+      cancelSmartGps?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- preset pickup intentionally tracks URL keys only once per open
   }, [
@@ -2742,7 +2715,9 @@ function BookInDriveStyle() {
                 <Ionicons name="gift-outline" size={18} color={BRAND.primary} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={s.firstRideBannerTitle}>Welcome gift — 20% off your first ride</Text>
+                <Text style={s.firstRideBannerTitle}>
+                  Welcome gift — {FIRST_RIDE_DISCOUNT_PCT}% off your first ride
+                </Text>
                 <Text style={s.firstRideBannerSub}>Applied automatically. No promo code needed.</Text>
               </View>
             </View>
@@ -2814,7 +2789,7 @@ function BookInDriveStyle() {
                   </View>
                   {isFirstRider && price > 0 && listOrig != null && listOrig > price ? (
                     <View style={s.firstRideBadge}>
-                      <Text style={s.firstRideBadgeText}>-20%</Text>
+                      <Text style={s.firstRideBadgeText}>-{FIRST_RIDE_DISCOUNT_PCT}%</Text>
                     </View>
                   ) : isSelected ? (
                     <View style={[s.inlineCatCheck, { backgroundColor: v.color }]}>
@@ -2848,7 +2823,7 @@ function BookInDriveStyle() {
                   {fareDetails?.first_ride_discount_applied ? (
                     <View style={s.fareGiftChip}>
                       <Ionicons name="gift-outline" size={12} color={BRAND.primary} />
-                      <Text style={s.fareGiftChipText}>−20%</Text>
+                      <Text style={s.fareGiftChipText}>−{FIRST_RIDE_DISCOUNT_PCT}%</Text>
                     </View>
                   ) : null}
                   <TouchableOpacity
@@ -2896,20 +2871,35 @@ function BookInDriveStyle() {
                       <Text style={s.payChipSub}>Pay driver</Text>
                     </View>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[s.payChip, ridePaymentMethod === 'wallet' && s.payChipOn]}
-                    onPress={() => setRidePaymentMethod('wallet')}
-                    accessibilityLabel="Pay with wallet"
-                    accessibilityRole="button"
-                  >
-                    <Ionicons name="wallet" size={20} color={ridePaymentMethod === 'wallet' ? COLORS.green : COLORS.dim} />
-                    <View>
-                      <Text style={[s.payChipText, ridePaymentMethod === 'wallet' && s.payChipTextOn]}>Wallet</Text>
-                      <Text style={s.payChipSub}>NEXRYDE balance</Text>
-                    </View>
-                  </TouchableOpacity>
+                  {walletEnabled ? (
+                    <TouchableOpacity
+                      style={[s.payChip, ridePaymentMethod === 'wallet' && s.payChipOn]}
+                      onPress={() => setRidePaymentMethod('wallet')}
+                      accessibilityLabel="Pay with wallet"
+                      accessibilityRole="button"
+                    >
+                      <Ionicons name="wallet" size={20} color={ridePaymentMethod === 'wallet' ? COLORS.green : COLORS.dim} />
+                      <View>
+                        <Text style={[s.payChipText, ridePaymentMethod === 'wallet' && s.payChipTextOn]}>Wallet</Text>
+                        <Text style={s.payChipSub}>NEXRYDE balance</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[s.payChip, ridePaymentMethod === 'transfer' && s.payChipOn]}
+                      onPress={() => setRidePaymentMethod('transfer')}
+                      accessibilityLabel="Pay by bank transfer to your driver"
+                      accessibilityRole="button"
+                    >
+                      <Ionicons name="swap-horizontal" size={20} color={ridePaymentMethod === 'transfer' ? COLORS.green : COLORS.dim} />
+                      <View>
+                        <Text style={[s.payChipText, ridePaymentMethod === 'transfer' && s.payChipTextOn]}>Transfer</Text>
+                        <Text style={s.payChipSub}>To driver&apos;s bank</Text>
+                      </View>
+                    </TouchableOpacity>
+                  )}
                 </View>
-                {ridePaymentMethod === 'wallet' && walletBalance != null && currentFare > 0 && walletBalance < currentFare ? (
+                {walletEnabled && ridePaymentMethod === 'wallet' && walletBalance != null && currentFare > 0 && walletBalance < currentFare ? (
                   <View style={s.walletWarnRow}>
                     <Ionicons name="warning-outline" size={14} color={COLORS.yellow} />
                     <Text style={s.walletWarnText}>
@@ -2922,7 +2912,9 @@ function BookInDriveStyle() {
                       ? walletBalance != null
                         ? `Balance ₦${walletBalance.toLocaleString()} · charged after trip`
                         : 'Loading balance…'
-                      : 'Pay your driver in cash at drop-off'}
+                      : ridePaymentMethod === 'transfer'
+                        ? "Transfer straight to your driver's account after the trip"
+                        : 'Pay your driver in cash at drop-off'}
                   </Text>
                 )}
               </View>
@@ -3344,6 +3336,7 @@ function BookInDriveStyle() {
                   if (field === 'pickup') {
                     setPickup(desc);
                     if (coords) {
+                      manualPickupRef.current = true;
                       setPickupCoords(coords);
                     } else {
                       Alert.alert(
@@ -3406,6 +3399,8 @@ function BookInDriveStyle() {
             {currentLocation && (
               <TouchableOpacity style={s.useGpsBtn} onPress={() => {
                 if (editingField === 'pickup') {
+                  // Rider chose "use my GPS" — let live refinements keep improving it.
+                  manualPickupRef.current = false;
                   setPickup(currentLocation.address);
                   setPickupCoords({ lat: currentLocation.lat, lng: currentLocation.lng });
                 } else {
@@ -4561,3 +4556,5 @@ export default function BookInDriveStyleScreen() {
     </ErrorBoundary>
   );
 }
+
+export { ErrorBoundary } from '@/src/components/rider/RiderScreenErrorBoundary';

@@ -23,6 +23,11 @@ import { useAuthFlowRouteRegistration } from '@/src/hooks/useAuthFlowRouteRegist
 import { routeAuthedUser } from '@/src/utils/routeAuthedUser';
 import { NEXRYDE_TERMS_VERSION, NEXRYDE_PRIVACY_VERSION } from '@/src/constants/legal';
 import LegalTermsAcceptFooter from '@/src/components/legal/LegalTermsAcceptFooter';
+import {
+  DRIVER_SUBSCRIPTION_BULLETS,
+  SUPPORT_EMAIL,
+  SUPPORT_PHONE_DISPLAY,
+} from '@/src/constants/commercialOffers';
 
 const DriverTermsScrollBody = React.memo(function DriverTermsScrollBody() {
   return (
@@ -37,13 +42,7 @@ const DriverTermsScrollBody = React.memo(function DriverTermsScrollBody() {
 
       <Text style={styles.sectionHeader}>2. Subscription Model</Text>
       <Text style={styles.paragraph}>
-        • Launch pricing: ₦15,000/month (first 500 drivers){'\n'}
-        • Standard pricing: ₦18,000/month (after launch){'\n'}
-        • Free trial for newly verified drivers: 15 completed trips or 14 days from first go-online (whichever comes first){'\n'}
-        • Subscribe during trial and save ₦3,000 on your first month (₦15,000){'\n'}
-        • Zero commission on rides — keep 100% of your earnings{'\n'}
-        • Subscription must be active to accept ride requests{'\n'}
-        • Payment proof must be submitted for verification
+        {DRIVER_SUBSCRIPTION_BULLETS.map((line) => `• ${line}`).join('\n')}
       </Text>
 
       <Text style={styles.sectionHeader}>3. Driver Requirements</Text>
@@ -80,7 +79,7 @@ const DriverTermsScrollBody = React.memo(function DriverTermsScrollBody() {
       <Text style={styles.sectionHeader}>6. Earnings & Payment</Text>
       <Text style={styles.paragraph}>
         • You keep 100% of ride fares{'\n'}
-        • Riders pay directly to you via cash or NEXRYDE wallet{'\n'}
+        • Riders pay you directly (cash or bank transfer) — NEXRYDE does not hold trip fares{'\n'}
         • Tips are optional and go directly to you{'\n'}
         • No hidden deductions or commissions{'\n'}
         • Weekly earnings reports available in-app
@@ -130,8 +129,8 @@ const DriverTermsScrollBody = React.memo(function DriverTermsScrollBody() {
       <Text style={styles.sectionHeader}>12. Contact & Support</Text>
       <Text style={styles.paragraph}>
         For questions or support:{'\n'}
-        • Email: admin@admoblordgroup.com{'\n'}
-        • Phone: +234 808 929 7811{'\n'}
+        • Email: {SUPPORT_EMAIL}{'\n'}
+        • Phone: {SUPPORT_PHONE_DISPLAY}{'\n'}
         • In-app chat support available 24/7{'\n'}
         • Visit: https://nexryde-backend-993913300770.us-central1.run.app/support-page
       </Text>

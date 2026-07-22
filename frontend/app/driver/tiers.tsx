@@ -11,6 +11,14 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import {
+  CITY_RIDER_LAUNCH_FEE_NGN,
+  CITY_RIDER_LAUNCH_SLOTS,
+  CITY_RIDER_STANDARD_FEE_NGN,
+  ROAD_WARRIOR_LAUNCH_FEE_NGN,
+  ROAD_WARRIOR_STANDARD_FEE_NGN,
+  formatNgn,
+} from '@/src/constants/commercialOffers';
 
 export default function SubscriptionTiersScreen() {
   const router = useRouter();
@@ -21,6 +29,11 @@ export default function SubscriptionTiersScreen() {
       params: { tier },
     });
   };
+
+  const cityLaunch = formatNgn(CITY_RIDER_LAUNCH_FEE_NGN);
+  const cityStandard = formatNgn(CITY_RIDER_STANDARD_FEE_NGN);
+  const roadLaunch = formatNgn(ROAD_WARRIOR_LAUNCH_FEE_NGN);
+  const roadStandard = formatNgn(ROAD_WARRIOR_STANDARD_FEE_NGN);
 
   return (
     <View style={styles.container}>
@@ -53,14 +66,16 @@ export default function SubscriptionTiersScreen() {
             <Text style={styles.planDesc}>Operate within any single city in Nigeria</Text>
 
             <View style={styles.priceSection}>
-              <Text style={styles.priceOld}>₦18,000</Text>
-              <Text style={styles.priceNew}>₦15,000</Text>
+              <Text style={styles.priceOld}>{cityStandard}</Text>
+              <Text style={styles.priceNew}>{cityLaunch}</Text>
               <Text style={styles.priceUnit}>/month</Text>
             </View>
 
             <View style={styles.savingsCard}>
               <Ionicons name="trending-down" size={20} color={COLORS.accentGreen} />
-              <Text style={styles.savingsText}>First 500 drivers: ₦15,000, then ₦18,000.</Text>
+              <Text style={styles.savingsText}>
+                First {CITY_RIDER_LAUNCH_SLOTS} drivers: {cityLaunch}, then {cityStandard}.
+              </Text>
             </View>
 
             <View style={styles.benefitsSection}>
@@ -108,7 +123,7 @@ export default function SubscriptionTiersScreen() {
               style={styles.subscribeButton}
               onPress={() => handleSubscribe('city_rider')}
             >
-              <Text style={styles.subscribeText}>Subscribe Now - From ₦15,000</Text>
+              <Text style={styles.subscribeText}>Subscribe Now - From {cityLaunch}</Text>
             </TouchableOpacity>
           </View>
 
@@ -133,15 +148,15 @@ export default function SubscriptionTiersScreen() {
             <Text style={styles.planDesc}>Drive ANYWHERE in Nigeria - Inter-State Unlocked!</Text>
 
             <View style={styles.priceSection}>
-              <Text style={styles.priceOld}>₦45,000</Text>
-              <Text style={[styles.priceNew, { color: '#FFD700' }]}>₦30,000</Text>
+              <Text style={styles.priceOld}>{roadStandard}</Text>
+              <Text style={[styles.priceNew, { color: '#FFD700' }]}>{roadLaunch}</Text>
               <Text style={styles.priceUnit}>/month</Text>
             </View>
 
             <View style={[styles.savingsCard, { backgroundColor: '#FFD700' + '20' }]}>
               <Ionicons name="trending-down" size={20} color="#FFD700" />
               <Text style={[styles.savingsText, { color: '#FFD700' }]}>
-                Save ₦15,000 with current introductory pricing!
+                Launch price {roadLaunch} (later phases up to {roadStandard}).
               </Text>
             </View>
 
@@ -190,7 +205,7 @@ export default function SubscriptionTiersScreen() {
                 end={{ x: 1, y: 0 }}
               >
                 <Text style={[styles.subscribeText, { color: COLORS.background }]}>
-                  Upgrade to Warrior - ₦30,000
+                  Upgrade to Warrior - {roadLaunch}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>

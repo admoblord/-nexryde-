@@ -525,6 +525,8 @@ function noteBackendFailure(reason: string): void {
 }
 
 async function pingBackend(): Promise<void> {
+  // Skip network health probes while backgrounded — sockets/FGS keep ride ops alive.
+  if (!metrics.appInForeground) return;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
   const startedAt = Date.now();
@@ -548,11 +550,27 @@ async function pingBackend(): Promise<void> {
   }
 }
 
+function syncHealthTimer(): void {
+  if (!started) return;
+  if (metrics.appInForeground) {
+    if (!healthTimer) {
+      healthTimer = setInterval(() => void pingBackend(), HEALTH_POLL_MS);
+    }
+  } else if (healthTimer) {
+    clearInterval(healthTimer);
+    healthTimer = null;
+  }
+}
+
 function onAppStateChange(next: AppStateStatus): void {
   const foreground = next === 'active';
   if (metrics.appInForeground === foreground) return;
   metrics.appInForeground = foreground;
   logNet('app_state', { foreground });
+  syncHealthTimer();
+  if (foreground) {
+    void pingBackend();
+  }
   evaluateStateMachine();
 }
 
@@ -580,8 +598,10 @@ export function startPlatformConnectionManager(): void {
     snapshot = { ...snapshot, internetReachable: reachable, updatedAt: Date.now() };
     evaluateStateMachine();
   });
-  void pingBackend();
-  healthTimer = setInterval(() => void pingBackend(), HEALTH_POLL_MS);
+  if (metrics.appInForeground) {
+    void pingBackend();
+  }
+  syncHealthTimer();
   evalTimer = setInterval(() => evaluateStateMachine(), EVAL_TICK_MS);
 }
 

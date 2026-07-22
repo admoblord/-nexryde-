@@ -338,7 +338,10 @@ export default function RiderTripsScreen() {
   }, [riderId, canCallAuthedApi]);
 
   useEffect(() => {
-    if (!canCallAuthedApi) return;
+    if (!canCallAuthedApi) {
+      setLoading(false);
+      return;
+    }
     void loadTrips();
   }, [loadTrips, canCallAuthedApi]);
 

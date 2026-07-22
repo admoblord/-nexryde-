@@ -1,10 +1,17 @@
-"""Offline unit tests: surge math, demand helper, fare thresholds (no Mongo/FastAPI import)."""
+"""Offline unit tests: smart peak-only surge, demand helper, fare thresholds."""
 
-import pytest
+from datetime import datetime
+from unittest.mock import patch
 
 from fare_config import SHORT_TRIP_KM_THRESHOLD
 from surge_demand import haversine_km
-from surge_pricing import SURGE_CONFIG, compute_max_style_surge_multiplier, compute_surge_multiplier
+from surge_pricing import (
+    SMART_SURGE_MULTIPLIER,
+    SURGE_CONFIG,
+    active_smart_surge_window,
+    compute_max_style_surge_multiplier,
+    compute_surge_multiplier,
+)
 
 
 def test_haversine_same_point():
@@ -12,7 +19,6 @@ def test_haversine_same_point():
 
 
 def test_haversine_short_hop():
-    # ~5.5 km across Lagos sample coords
     d = haversine_km(6.5244, 3.3792, 6.4800, 3.4000)
     assert 4.0 < d < 8.0
 
@@ -21,36 +27,60 @@ def test_short_trip_threshold_constant():
     assert SHORT_TRIP_KM_THRESHOLD == 5.0
 
 
-def test_surge_high_demand_raises_multiplier():
-    out = compute_surge_multiplier(demand_ratio=0.96, is_raining=False, service_max_multiplier=3.0)
-    assert out["multiplier"] >= 2.0
+def test_smart_surge_off_outside_windows():
+    with patch("surge_pricing._wat_now", return_value=datetime(2026, 7, 21, 12, 0, 0)):
+        out = compute_surge_multiplier(demand_ratio=0.99, is_raining=True, service_max_multiplier=3.0)
+    assert out["multiplier"] is None
+    assert out["effective_multiplier"] == 1.0
+    assert out["is_surge"] is False
+    assert out["factors"] == []
+    assert out["reasons"] == []
 
 
-def test_max_style_surge_peak_and_stack():
-    out = compute_max_style_surge_multiplier(
-        demand_ratio=0.0, is_raining=False, service_max_multiplier=3.0
-    )
-    assert out["multiplier"] >= 1.0
-    out_rain = compute_max_style_surge_multiplier(
-        demand_ratio=0.0, is_raining=True, service_max_multiplier=3.0
-    )
-    # Peak capped at 1.0; rain can still lift to 1.4
-    assert 1.0 <= out_rain["multiplier"] <= 1.4
-    out_hi = compute_max_style_surge_multiplier(
-        demand_ratio=0.95, is_raining=False, service_max_multiplier=3.0
-    )
-    assert out_hi["multiplier"] == 1.3
+def test_smart_surge_morning_1_3():
+    with patch("surge_pricing._wat_now", return_value=datetime(2026, 7, 21, 8, 0, 0)):
+        out = compute_max_style_surge_multiplier(
+            demand_ratio=0.0, is_raining=False, service_max_multiplier=3.0
+        )
+        active, kind, cfg = active_smart_surge_window()
+    assert active is True
+    assert kind == "morning"
+    assert out["multiplier"] == SMART_SURGE_MULTIPLIER
+    assert out["effective_multiplier"] == SMART_SURGE_MULTIPLIER
+    assert out["is_surge"] is True
+    assert out["is_peak"] is True
+    assert out["window_ends_label"] == "9:00 AM"
+    assert cfg is not None
 
 
-def test_surge_rain_factor_in_stack():
-    out = compute_surge_multiplier(demand_ratio=0.0, is_raining=True, service_max_multiplier=3.0)
-    factors = out.get("factors") or []
-    assert any("Rain" in str(f.get("label", "")) for f in factors)
-    rain_m = float(SURGE_CONFIG.get("rain_multiplier", 1.4))
-    assert out["multiplier"] <= min(3.0, float(SURGE_CONFIG.get("absolute_ceiling", 3.0)))
-    assert out["pre_cap_combined"] >= rain_m * 0.99
+def test_smart_surge_evening_1_3():
+    with patch("surge_pricing._wat_now", return_value=datetime(2026, 7, 21, 18, 30, 0)):
+        out = compute_surge_multiplier(demand_ratio=0.0, is_raining=True, service_max_multiplier=3.0)
+    assert out["multiplier"] == 1.3
+    assert "Evening" in (out.get("active_window") or "")
+
+
+def test_rain_and_demand_do_not_stack():
+    with patch("surge_pricing._wat_now", return_value=datetime(2026, 7, 21, 8, 15, 0)):
+        out = compute_max_style_surge_multiplier(
+            demand_ratio=0.99, is_raining=True, service_max_multiplier=3.0
+        )
+    assert out["multiplier"] == 1.3
+    labels = [str(f.get("label", "")) for f in (out.get("factors") or [])]
+    assert not any("Rain" in L for L in labels)
+    assert not any("demand" in L.lower() for L in labels)
 
 
 def test_service_cap_clamps_surge():
-    out = compute_surge_multiplier(demand_ratio=1.0, is_raining=True, service_max_multiplier=1.15)
-    assert out["multiplier"] <= 1.15 + 1e-6
+    with patch("surge_pricing._wat_now", return_value=datetime(2026, 7, 21, 18, 0, 0)):
+        out = compute_surge_multiplier(demand_ratio=1.0, is_raining=True, service_max_multiplier=1.15)
+    assert (out.get("effective_multiplier") or out.get("multiplier") or 0) <= 1.15 + 1e-6
+
+
+def test_peak_config_windows():
+    am = SURGE_CONFIG["peak_hours"]["morning_rush"]
+    pm = SURGE_CONFIG["peak_hours"]["evening_peak"]
+    assert am["start"] == 7 and am["end"] == 9
+    assert pm["start"] == 17 and pm["end"] == 20
+    assert am["multiplier"] == 1.3
+    assert pm["multiplier"] == 1.3

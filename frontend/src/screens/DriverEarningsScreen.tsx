@@ -40,6 +40,7 @@ import {
   fetchDriverEarningsScreenData,
   type EarningsPeriod,
 } from '@/src/services/driverEarningsScreenData';
+import { useWalletEnabled } from '@/src/services/clientConfig';
 
 // ─── Design tokens (appearance-aware) ──────────────────────────────────────
 type EarnPalette = {
@@ -105,6 +106,8 @@ function EarningsSkeleton() {
 
 export default function DriverEarningsScreen() {
   const router = useRouter();
+  // Launch mode: wallet off → earnings is a record only (riders pay drivers directly).
+  const walletEnabled = useWalletEnabled();
   const user         = useAppStore((s) => s.user);
   const subscription = useAppStore((s) => s.subscription) as any;
   const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
@@ -230,16 +233,20 @@ export default function DriverEarningsScreen() {
       <View style={[s.header, { paddingHorizontal: flow.padH }]}>
         <View>
           <Text style={s.headerTitle}>Earnings</Text>
-          <Text style={s.headerSub}>You keep 100% of every fare</Text>
+          <Text style={s.headerSub}>
+            {walletEnabled ? 'You keep 100% of every fare' : 'Riders pay you directly — you keep 100%'}
+          </Text>
         </View>
-        <TouchableOpacity
-          style={s.withdrawBtn}
-          onPress={() => router.push('/driver/withdrawal')}
-          accessibilityRole="button"
-        >
-          <Ionicons name="arrow-up-circle-outline" size={16} color={D.neon} />
-          <Text style={s.withdrawBtnTxt}>Withdraw</Text>
-        </TouchableOpacity>
+        {walletEnabled ? (
+          <TouchableOpacity
+            style={s.withdrawBtn}
+            onPress={() => router.push('/driver/withdrawal')}
+            accessibilityRole="button"
+          >
+            <Ionicons name="arrow-up-circle-outline" size={16} color={D.neon} />
+            <Text style={s.withdrawBtnTxt}>Withdraw</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       <ScrollView
@@ -269,6 +276,7 @@ export default function DriverEarningsScreen() {
 
         {data ? (
         <>
+        {walletEnabled ? (
         <TouchableOpacity
           onPress={() => router.push('/driver/withdrawal')}
           activeOpacity={0.88}
@@ -297,6 +305,7 @@ export default function DriverEarningsScreen() {
             </View>
           </LinearGradient>
         </TouchableOpacity>
+        ) : null}
 
         {/* ── Trial progress banner ───────────────────────────────────────── */}
         {isOnTrial ? (
@@ -557,16 +566,18 @@ export default function DriverEarningsScreen() {
         ) : null}
 
         {/* ── Bank & payout route ─────────────────────────────────────────── */}
-        <SectionLabel text="Payout route" />
+        <SectionLabel text={walletEnabled ? 'Payout route' : 'Getting paid'} />
         <View style={s.payoutRow}>
           <TouchableOpacity style={s.payoutCard} onPress={() => router.push('/driver/bank')} activeOpacity={0.85}>
             <View style={s.payoutIcon}>
               <Ionicons name="card-outline" size={22} color={D.blue} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={s.payoutTitle}>Bank & payout route</Text>
+              <Text style={s.payoutTitle}>{walletEnabled ? 'Bank & payout route' : 'Your bank account'}</Text>
               <Text style={s.payoutSub}>
-                {bankReady ? 'Ready to receive direct rider payments' : 'Finish setup to receive payments'}
+                {bankReady
+                  ? 'Riders can transfer fares straight to this account'
+                  : 'Add your account so riders can transfer fares to you'}
               </Text>
             </View>
             <View style={[s.payoutBadge, bankReady ? s.payoutBadgeReady : s.payoutBadgePending]}>
@@ -577,6 +588,7 @@ export default function DriverEarningsScreen() {
             <Ionicons name="chevron-forward" size={18} color={D.muted} />
           </TouchableOpacity>
 
+          {walletEnabled ? (
           <TouchableOpacity style={s.payoutCard} onPress={() => router.push('/driver/withdrawal')} activeOpacity={0.85}>
             <View style={[s.payoutIcon, { backgroundColor: `${D.neon}15` }]}>
               <Ionicons name="arrow-up-circle-outline" size={22} color={D.neon} />
@@ -591,6 +603,7 @@ export default function DriverEarningsScreen() {
             </View>
             <Ionicons name="chevron-forward" size={18} color={D.muted} />
           </TouchableOpacity>
+          ) : null}
         </View>
 
         </>

@@ -112,12 +112,12 @@ from lagride_lagos_pricing import build_lagos_lagride_fare_breakdown
 LlmChat = None
 UserMessage = None
 
-# Import Subscription Management System
-from subscription_manager import subscription_router
 from payment_reminder_system import payment_reminder_job
 
-# Import Two-Tier Subscription System (ENHANCED)
-from two_tier_subscription import two_tier_router
+# ONE trial model: driver_trial_policy. The legacy subscription_manager (24h/3-trip)
+# and two_tier_subscription (48h/0-trip) routers were retired — this shim keeps their
+# old /api/subscription paths answering from the canonical source (audit 7.1).
+from legacy_subscription_routes import legacy_subscription_router
 
 # Import Route Caching Service (API Cost Protection)
 from route_cache_service import route_cache_router
@@ -531,18 +531,8 @@ otp_store = {}
 # Fare estimate storage
 fare_estimate_store: Dict[str, Dict[str, Any]] = {}
 
-# ==================== DRIVER SUBSCRIPTION CONFIG ====================
-SUBSCRIPTION_CONFIG = {
-    "monthly_fee": 18000,  # ₦18,000 standard monthly
-    "trial_hours": 48,     # 48-hour free trial
-    "trial_trips": 3,      # or 3 trips (whichever comes first)
-    "currency": "NGN",
-    "bank_details": {
-        "provider": "SquadCo",
-        "mode": "virtual_account_only",
-        "message": "Virtual account is generated per driver. No manual company transfer account.",
-    }
-}
+# Driver subscription/trial config: single source is driver_trial_policy
+# (system_config.driver_trial_defaults) + routers/payments.SUBSCRIPTION_CONFIG.
 
 # ==================== RIDE TYPES CONFIG ====================
 RIDE_TYPES = {
@@ -556,10 +546,10 @@ RIDE_TYPES = {
 
 # ==================== PROMO/REFERRAL CONFIG ====================
 PROMO_CONFIG = {
-    "referral_bonus_referrer": 500,  # ₦500 for referrer
-    "referral_bonus_referee": 300,   # ₦300 for new user
-    "first_ride_discount": 0.2,      # 20% off first ride
-    "max_promo_discount": 0.5,       # Max 50% discount
+    "referral_bonus_referrer": 500,  # ₦500 for referrer (matches incentives.py)
+    "referral_bonus_referee": 500,   # ₦500 for new rider (matches incentives.py)
+    "first_ride_discount": 0.2,      # 20% off first ride fare
+    "max_promo_discount": 0.5,       # Max 50% discount on coded promos
 }
 
 # ==================== SUPPORTED LANGUAGES ====================
@@ -1516,7 +1506,7 @@ def calculate_fare(
         is_raining=is_raining,
         service_max_multiplier=max_multiplier,
     )
-    dynamic_multiplier = float(surge_meta["multiplier"])
+    dynamic_multiplier = float(surge_meta.get("effective_multiplier") or surge_meta.get("multiplier") or 1.0)
 
     # Step 8: final fare — short trips use ₦10 granularity (exact table feel); long trips ₦50
     total_fare = round(subtotal * dynamic_multiplier, 2)
@@ -1777,6 +1767,21 @@ async def health_check():
     return {"status": "healthy", "service": "nexryde-api", "timestamp": datetime.utcnow().isoformat()}
 
 
+@api_router.get("/config/client")
+async def client_config():
+    """Public app config read at startup. Controls launch-mode features without a rebuild.
+
+    wallet_enabled=false → cash + direct bank transfer only; no fare-wallet UI or holds.
+    """
+    from feature_flags import is_wallet_enabled
+
+    wallet_on = await is_wallet_enabled(db)
+    return {
+        "wallet_enabled": wallet_on,
+        "payment_methods": (["cash", "transfer", "wallet"] if wallet_on else ["cash", "transfer"]),
+    }
+
+
 @api_router.get("/health/ready")
 async def health_ready():
     """Readiness check: MongoDB ping + optional Redis ping."""
@@ -1960,8 +1965,7 @@ async def direct_send_otp(request: OTPRequest, http_request: Request):
 
 # ==================== ROUTER INCLUDES ====================
 app.include_router(api_router)
-app.include_router(two_tier_router)
-app.include_router(subscription_router)
+app.include_router(legacy_subscription_router)
 app.include_router(smart_mode_router)
 app.include_router(route_cache_router)
 app.include_router(route_planner_router)
@@ -2072,16 +2076,19 @@ async def _squad_webhook_dlq_autoreplay_loop():
 
 async def _driver_heartbeat_watchdog_loop():
     """
-    Every 3 minutes: auto-offline drivers whose last heartbeat is > 15 minutes old.
-    Prevents ghost-online drivers from receiving dispatch offers they can't accept.
+    Every 60s: auto-offline drivers whose last heartbeat is older than
+    IDLE_TIMEOUT_MINUTES (shared with dispatch freshness). Prevents ghost-online
+    drivers from receiving offers after the app is killed.
     Matches both datetime and legacy ISO-string heartbeat fields; clears Redis presence.
     """
+    from routers.driver_control import IDLE_TIMEOUT_MINUTES
+
     await asyncio.sleep(60)
     while True:
         try:
             from driver_presence import set_driver_offline
 
-            cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=IDLE_TIMEOUT_MINUTES)
             query = {
                 "is_online": True,
                 "$or": [
@@ -2115,7 +2122,7 @@ async def _driver_heartbeat_watchdog_loop():
                     )
         except Exception:
             logger.exception("heartbeat_watchdog_tick")
-        await asyncio.sleep(180)
+        await asyncio.sleep(60)
 
 
 async def _stranded_trip_cleanup_loop():
@@ -2171,6 +2178,26 @@ async def _stranded_trip_cleanup_loop():
             )
         except Exception:
             logger.exception("stranded_trip_cleanup_tick")
+        await asyncio.sleep(300)
+
+
+async def _stuck_active_trip_watchdog_loop():
+    """
+    Every 5 minutes: recover trips stuck AFTER driver acceptance (audit 5.3).
+    accepted/arrived past TTL → auto-cancel (wallet hold refunded);
+    ongoing past TTL → auto-complete; dangling driver active_trip_id locks cleared.
+    A driver whose app dies post-accept must auto-recover — never DB surgery.
+    """
+    await asyncio.sleep(120)
+    while True:
+        try:
+            from stuck_trip_recovery import recover_stale_active_trips
+
+            counts = await recover_stale_active_trips(db)
+            if any(counts.values()):
+                logger.info("Stuck trip recovery: %s", counts)
+        except Exception:
+            logger.exception("stuck_active_trip_watchdog_tick")
         await asyncio.sleep(300)
 
 
@@ -2340,6 +2367,7 @@ async def _deferred_startup():
         asyncio.create_task(_squad_webhook_dlq_autoreplay_loop())
         asyncio.create_task(_driver_heartbeat_watchdog_loop())
         asyncio.create_task(_stranded_trip_cleanup_loop())
+        asyncio.create_task(_stuck_active_trip_watchdog_loop())
         asyncio.create_task(_subscription_expiry_watchdog_loop())
         asyncio.create_task(_engagement_push_loop())
         logger.info(

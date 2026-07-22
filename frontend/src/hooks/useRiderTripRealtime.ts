@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BACKEND_URL } from '@/src/services/api';
 import { managedFetch } from '@/src/services/networkManager';
 import { riderTripSocket } from '@/src/services/riderTripSocket';
+import { setForegroundInterval } from '@/src/utils/foregroundInterval';
 
 export { getBackendWsBaseUrl, type RiderTripWsMessage } from '@/src/services/riderTripTypes';
 
@@ -84,11 +85,10 @@ export function useRiderTripRealtime({
       }
     };
 
-    void poll();
-    const id = setInterval(() => void poll(), 5000);
+    const stop = setForegroundInterval(() => void poll(), 5000);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      stop();
     };
   }, [enabled, riderId, connected]);
 

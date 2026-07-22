@@ -48,6 +48,7 @@ import { RIDER_TRACKING_DISPLAY_THROTTLE_MS } from '@/src/constants/tripRealtime
 import { useDevDriverMovementSim } from '@/src/components/tracking/hooks/useDevDriverMovementSim';
 import { DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
 import { getAvailableDrivers } from '@/src/services/api';
+import { setForegroundInterval } from '@/src/utils/foregroundInterval';
 import { trackVerifyPing } from '@/src/components/tracking/map/trackVerifyLog';
 import { TrackingLiveDebugPanel } from '@/src/components/tracking/v2/TrackingLiveDebugPanel';
 import {
@@ -472,11 +473,12 @@ export default function LiveTrackingScreen() {
         if (!cancelled) setNearbyDrivers([]);
       }
     };
-    void run();
-    const timer = setInterval(run, 20000);
+    const stop = setForegroundInterval(() => {
+      void run();
+    }, 20000);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      stop();
     };
   }, [isFindingPhase, mapModel.pickup?.lat, mapModel.pickup?.lng]);
 
@@ -746,14 +748,50 @@ export default function LiveTrackingScreen() {
     );
   }
 
-  // ── Skeleton while live phase loads ────────────────────────────────────────
+  // ── Escape hatch: not live after load (completed/cancelled/unknown) ─────────
+  // Previously this spun LiveTrackingSkeleton forever when phase never became live.
   if (!isLivePhase) {
+    if (loading) {
+      return (
+        <View style={styles.root}>
+          <StatusBar barStyle="light-content" backgroundColor={LIVE.bg} />
+          <LiveTrackingSkeleton />
+          {cancelSheet}
+          {routeEditSheet}
+        </View>
+      );
+    }
     return (
-      <View style={styles.root}>
+      <View style={[styles.root, { justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
         <StatusBar barStyle="light-content" backgroundColor={LIVE.bg} />
-        <LiveTrackingSkeleton />
-        {cancelSheet}
-        {routeEditSheet}
+        <Ionicons name="map-outline" size={48} color="#64748B" />
+        <Text style={{ color: '#F8FAFC', fontSize: 18, fontWeight: '800', marginTop: 16, textAlign: 'center' }}>
+          This trip isn&apos;t live
+        </Text>
+        <Text style={{ color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 8, textAlign: 'center', lineHeight: 20 }}>
+          It may have ended or been cancelled. You can open the receipt or go back home.
+        </Text>
+        <TouchableOpacity
+          style={{ marginTop: 20, backgroundColor: '#22C55E', borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12 }}
+          onPress={() => void actions.retrySync()}
+          accessibilityRole="button"
+          accessibilityLabel="Retry loading trip"
+        >
+          <Text style={{ color: '#022C22', fontWeight: '800' }}>Retry</Text>
+        </TouchableOpacity>
+        {effectiveTripId ? (
+          <TouchableOpacity
+            style={{ marginTop: 12, paddingVertical: 10 }}
+            onPress={() =>
+              router.replace({ pathname: '/rider/trip-receipt', params: { tripId: effectiveTripId } } as any)
+            }
+          >
+            <Text style={{ color: '#22C55E', fontWeight: '700' }}>View receipt</Text>
+          </TouchableOpacity>
+        ) : null}
+        <TouchableOpacity style={{ marginTop: 4, paddingVertical: 10 }} onPress={actions.onBack}>
+          <Text style={{ color: '#94A3B8', fontWeight: '600' }}>Go back</Text>
+        </TouchableOpacity>
       </View>
     );
   }

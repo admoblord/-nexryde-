@@ -39,6 +39,11 @@ import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { useThemeColors } from '@/src/constants/theme';
+import {
+  REFERRAL_REWARD_INVITER_NGN,
+  formatNgn,
+} from '@/src/constants/commercialOffers';
+import { useWalletEnabled } from '@/src/services/clientConfig';
 import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -229,6 +234,7 @@ function ScoreBar({ label, value, color }: { label: string; value: number; color
 export default function RiderProfileScreen() {
   const router = useRouter();
   const { colors } = useThemeColors();
+  const walletEnabled = useWalletEnabled();
   const tabPad = useTabBottomPad(16);
   const flow = useFlowLayout();
   const actionTileW = useMemo(
@@ -409,7 +415,7 @@ export default function RiderProfileScreen() {
     if (!referralCode) {
       Alert.alert(
         'Invite link',
-        'Your referral link is still loading. Open Wallet → Invite friends, or try again in a moment.',
+        'Your referral link is still loading. Try again in a moment.',
       );
       return;
     }
@@ -423,7 +429,7 @@ export default function RiderProfileScreen() {
 
   const shareReferralWhatsApp = () => {
     if (!referralCode) {
-      Alert.alert('Invite link', 'Open Wallet → Invite friends to see your link.');
+      Alert.alert('Invite link', 'Your invite link is still loading. Try again in a moment.');
       return;
     }
     void shareTextViaWhatsApp(buildShareMessage(referralUsername || undefined, referralCode, displayName || undefined));
@@ -664,7 +670,9 @@ export default function RiderProfileScreen() {
                   <Ionicons name="logo-whatsapp" size={22} color="#25D366" />
                   <View style={s.referralWaCopy}>
                     <Text style={s.referralWaTitle}>Invite friends</Text>
-                    <Text style={s.referralWaSub}>Share your link · earn ₦500 each</Text>
+                    <Text style={s.referralWaSub}>
+                      Share your link · earn {formatNgn(REFERRAL_REWARD_INVITER_NGN)} each
+                    </Text>
                   </View>
                   <Ionicons name="chevron-forward" size={18} color="#64748B" />
                 </LinearGradient>
@@ -682,7 +690,9 @@ export default function RiderProfileScreen() {
             <ActionTile icon="time" label="My trips" gradColors={['#5B21B6', '#7C3AED']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-trips' as any)} />
             <ActionTile icon="location" label="Saved places" gradColors={['#065F46', '#059669']} tileWidth={actionTileW} onPress={() => router.push('/rider/saved-places' as any)} />
             <ActionTile icon="heart-circle" label="Favourites" gradColors={['#9D174D', '#EC4899']} tileWidth={actionTileW} onPress={() => router.push('/rider/favorite-drivers')} />
-            <ActionTile icon="wallet" label="Wallet" gradColors={['#0369A1', '#0EA5E9']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-wallet' as any)} />
+            {walletEnabled ? (
+              <ActionTile icon="wallet" label="Wallet" gradColors={['#0369A1', '#0EA5E9']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-wallet' as any)} />
+            ) : null}
             <ActionTile icon="notifications" label="Updates" gradColors={['#7C2D12', '#EA580C']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-notifications' as any)} />
           </View>
         </View>
@@ -1411,3 +1421,5 @@ const s = StyleSheet.create({
   modalCancelBtn: { padding: 12 },
   modalCancelText: { fontSize: 14, color: BRAND.textMuted, fontWeight: '600' },
 });
+
+export { ErrorBoundary } from '@/src/components/rider/RiderScreenErrorBoundary';

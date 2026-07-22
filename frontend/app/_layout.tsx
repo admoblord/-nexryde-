@@ -11,6 +11,7 @@ import { useThemeColors } from '@/src/constants/theme';
 import { bootstrapThemeFromStorage, persistThemePreference } from '@/src/theme/appearanceTheme';
 import { ErrorBoundary } from '@/src/components/ErrorBoundary';
 import { OfflineBanner } from '@/src/components/OfflineBanner';
+import { RiderSessionEffects } from '@/src/components/rider/RiderSessionEffects';
 import { LanguageProvider } from '@/src/i18n/LanguageContext';
 import { ErrorToastProvider } from '@/src/components/shared/ErrorToast';
 import { QueryProvider } from '@/src/providers/QueryProvider';
@@ -164,6 +165,13 @@ function RootLayout() {
     void bootstrapThemeFromStorage().catch(() => {});
   }, []);
 
+  // Server feature flags (e.g. wallet on/off) — cached-first, refreshed in background.
+  useEffect(() => {
+    void import('@/src/services/clientConfig')
+      .then((m) => m.loadClientConfig())
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (!hasHydrated || !isAuthenticated || !user?.id) return;
     let cancelled = false;
@@ -270,6 +278,7 @@ function RootLayout() {
                 <ErrorToastProvider>
                 <StatusBar style={isDark ? 'light' : 'dark'} />
                 <OfflineBanner />
+                <RiderSessionEffects />
                 <Stack
                   screenOptions={{
                     headerShown: false,

@@ -22,6 +22,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 import { buildInviteUrl, buildShareMessage } from '@/src/services/referralService';
+import {
+  FIRST_RIDE_REWARD_NGN,
+  PROMO_CREDIT_MAX_FARE_COVERAGE_PCT,
+  PROMO_CREDIT_MAX_PER_RIDE_NGN,
+  REFERRAL_REWARD_INVITEE_NGN,
+  REFERRAL_REWARD_INVITER_NGN,
+  formatNgn,
+} from '@/src/constants/commercialOffers';
 import { useAppStore } from '@/src/store/appStore';
 import {
   BACKEND_URL,
@@ -50,6 +58,7 @@ import { RIDER_PRIMARY_CTA_GRADIENT } from '@/src/constants/riderRideChrome';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useThemeColors } from '@/src/constants/theme';
 import { WalletScreenSkeleton } from '@/src/components/shared/SkeletonLoader';
+import { useWalletEnabled } from '@/src/services/clientConfig';
 
 const C = {
   bg: BRAND.bgDeep,
@@ -88,6 +97,7 @@ type TopupState =
 export default function RiderWalletScreen() {
   const toast = useErrorToast();
   const { user } = useAppStore();
+  const walletEnabled = useWalletEnabled();
   const { userId: uid, canCallAuthedApi } = useAuthedUserId();
   const tabPad = useTabBottomPad(8);
   const flow = useFlowLayout();
@@ -151,7 +161,7 @@ export default function RiderWalletScreen() {
 
   // ── Data load ────────────────────────────────────────────────────────────────
   const load = useCallback(async (): Promise<number | null> => {
-    if (!uid || !canCallAuthedApi) { setLoading(false); return null; }
+    if (!walletEnabled || !uid || !canCallAuthedApi) { setLoading(false); return null; }
     try {
       const w = await getWalletMe(15);
       const bal = Number(w.data?.balance ?? 0);
@@ -169,7 +179,7 @@ export default function RiderWalletScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [uid, canCallAuthedApi]);
+  }, [uid, canCallAuthedApi, walletEnabled]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -401,7 +411,13 @@ export default function RiderWalletScreen() {
         body: JSON.stringify({ referral_code: code }),
       });
       const data = await res.json();
-      if (res.ok) { Alert.alert('Code applied! 🎉', data.message || 'Complete your first ride to earn ₦500.'); setPromoCode(''); }
+      if (res.ok) {
+        Alert.alert(
+          'Code applied! 🎉',
+          data.message || `Complete your first ride to earn ${formatNgn(FIRST_RIDE_REWARD_NGN)}.`,
+        );
+        setPromoCode('');
+      }
       else Alert.alert('Could not apply code', data.detail || 'Invalid or already-used code.');
     } catch { Alert.alert('Error', 'Could not apply code. Try again.'); }
   };
@@ -415,6 +431,28 @@ export default function RiderWalletScreen() {
     : (['#14532D', '#166534', '#15803D'] as const);
 
   // ── Render ───────────────────────────────────────────────────────────────────
+  // Launch mode: fare wallet disabled — riders pay drivers directly. This screen
+  // stays reachable via old links/redirects, so it explains the direct-pay model
+  // instead of showing top-up UI. Reversible via the server wallet flag.
+  if (!walletEnabled) {
+    return (
+      <SafeAreaView style={[s.root, { backgroundColor: colors.background }]} edges={['top']}>
+        <StatusBar barStyle={colors.statusBar} backgroundColor={colors.background} />
+        <TabBrandStrip role="rider" />
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 12 }}>
+          <Ionicons name="cash-outline" size={44} color={C.green} />
+          <Text style={{ color: colors.text, fontSize: 18, fontWeight: '700', textAlign: 'center' }}>
+            You pay your driver directly
+          </Text>
+          <Text style={{ color: colors.textMuted, fontSize: 14, textAlign: 'center', lineHeight: 20 }}>
+            Pay with cash or a bank transfer straight to your driver&apos;s account at the end of each trip.
+            No top-up needed — NEXRYDE never holds your money.
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (loading && !refreshing) {
     return (
       <SafeAreaView style={[s.root, { backgroundColor: colors.background }]} edges={['top']}>
@@ -689,10 +727,16 @@ export default function RiderWalletScreen() {
             <View style={{ flex: 1 }}>
               <Text style={[s.rewardTitle, { color: colors.text }]}>{firstRideRewardGranted ? '🎉 First Ride Bonus Earned!' : 'First Ride Bonus'}</Text>
               <Text style={[s.rewardText, { color: colors.textMuted }]}>
-                {firstRideRewardGranted ? '₦500 bonus has been added to your wallet.' : 'Complete your first ride and get ₦500 instantly.'}
+                {firstRideRewardGranted
+                  ? `${formatNgn(FIRST_RIDE_REWARD_NGN)} bonus has been added to your wallet.`
+                  : `Complete your first ride and get ${formatNgn(FIRST_RIDE_REWARD_NGN)} instantly.`}
               </Text>
             </View>
-            {!firstRideRewardGranted && <View style={s.rewardBadge}><Text style={s.rewardBadgeText}>₦500</Text></View>}
+            {!firstRideRewardGranted && (
+              <View style={s.rewardBadge}>
+                <Text style={s.rewardBadgeText}>{formatNgn(FIRST_RIDE_REWARD_NGN)}</Text>
+              </View>
+            )}
           </View>
 
           {/* Promo balance */}
@@ -704,7 +748,10 @@ export default function RiderWalletScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={[s.rewardTitle, { color: colors.text }]}>Promo Credit</Text>
                 <Text style={[s.rewardText, { color: C.greenDark, fontWeight: '800', fontSize: 18 }]}>₦{promoCreditBalance.toLocaleString()}</Text>
-                <Text style={[s.rewardText, { color: colors.textMuted, fontSize: 11, marginTop: 2 }]}>Applied automatically — max ₦500 / 40% per fare</Text>
+                <Text style={[s.rewardText, { color: colors.textMuted, fontSize: 11, marginTop: 2 }]}>
+                  Applied automatically — max {formatNgn(PROMO_CREDIT_MAX_PER_RIDE_NGN)} /{' '}
+                  {PROMO_CREDIT_MAX_FARE_COVERAGE_PCT}% per fare
+                </Text>
               </View>
             </View>
           )}
@@ -725,10 +772,13 @@ export default function RiderWalletScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={s.referralCardTitle}>Invite Friends</Text>
-                <Text style={s.referralCardSub}>You & your friend each earn ₦500 after their first ride</Text>
+                <Text style={s.referralCardSub}>
+                  You earn {formatNgn(REFERRAL_REWARD_INVITER_NGN)} · friend earns{' '}
+                  {formatNgn(REFERRAL_REWARD_INVITEE_NGN)} after their first ride
+                </Text>
               </View>
               <View style={s.referralBadgePill}>
-                <Text style={s.referralBadgeText}>₦500</Text>
+                <Text style={s.referralBadgeText}>{formatNgn(REFERRAL_REWARD_INVITER_NGN)}</Text>
               </View>
             </View>
 
@@ -1101,3 +1151,5 @@ const s = StyleSheet.create({
   overlayDots: { flexDirection: 'row', gap: 8, marginTop: 8 },
   overlayDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.green },
 });
+
+export { ErrorBoundary } from '@/src/components/rider/RiderScreenErrorBoundary';

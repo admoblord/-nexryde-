@@ -33,9 +33,12 @@ export function useRiderRidePhaseNavigation() {
     const path = segments.join('/');
     const onTracking = path.includes('tracking');
     const onSecurityCode = path.includes('security-code');
+    const pickupCodeRequired =
+      (currentTrip as { pickup_code_required?: boolean }).pickup_code_required === true;
 
     if (status === 'arrived' && prev?.status !== 'arrived') {
-      if (!onSecurityCode) {
+      // Only push the code screen when the rider actually enabled pickup codes.
+      if (pickupCodeRequired && !onSecurityCode) {
         const key = `arrived-nav-${tripId}`;
         if (navLockRef.current !== key) {
           navLockRef.current = key;

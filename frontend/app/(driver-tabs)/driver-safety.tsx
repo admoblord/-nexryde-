@@ -95,6 +95,9 @@ function toneColor(tone: SafeRow['tone']) {
   return BRAND.info;
 }
 
+// Per-tab crash safety net — confines any render error to this tab (never to OS home).
+export { ErrorBoundary } from '@/src/components/driver/DriverTabErrorBoundary';
+
 export default function DriverSafetyHubScreen() {
   const router = useRouter();
   const { colors, isDark } = useThemeColors();

@@ -1,3 +1,5 @@
+import { isCashPaymentMethod } from '@/src/utils/tripPaymentMethod';
+
 export type NormalizedTripStatus =
   | 'pending'
   | 'pending_driver_offers'
@@ -32,6 +34,25 @@ export const normalizeTripStatus = (status?: string, paymentStatus?: string): No
 
   return 'pending';
 };
+
+/**
+ * Rider UI status: cash completed trips stay terminal even if payment_status lags.
+ * Wallet/transfer still map completed+pending → pending_payment.
+ */
+export function resolveRiderScreenStatus(
+  rawStatus: unknown,
+  paymentStatus: unknown,
+  paymentMethod: unknown,
+): NormalizedTripStatus {
+  const raw = String(rawStatus || '').toLowerCase();
+  if (raw === 'completed' && isCashPaymentMethod(paymentMethod as string | null | undefined)) {
+    return 'completed';
+  }
+  return normalizeTripStatus(
+    rawStatus as string | undefined,
+    paymentStatus as string | undefined,
+  );
+}
 
 export const isActiveTripStatus = (status?: string, paymentStatus?: string): boolean => {
   const normalized = normalizeTripStatus(status, paymentStatus);

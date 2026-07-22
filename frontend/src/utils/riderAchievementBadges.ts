@@ -1,4 +1,10 @@
 /** Backend stores average of driver ratings of this rider (`users.rating` for rider role). */
+import {
+  REFERRAL_REWARD_INVITEE_NGN,
+  REFERRAL_REWARD_INVITER_NGN,
+  formatNgn,
+} from '@/src/constants/commercialOffers';
+
 export type RiderBadgeId = 'first_ride' | 'rides_100' | 'five_star_rider';
 
 export interface RiderAchievementBadgeMeta {
@@ -129,7 +135,7 @@ export function buildAchievementWhatsAppMessage(
 ): string {
   const url = (opts.inviteUrl || '').trim();
   const inviteLine = url
-    ? `Join with my invite link — we both earn ₦500 after your first ride:\n${url}`
+    ? `Join with my invite link — you earn ${formatNgn(REFERRAL_REWARD_INVITEE_NGN)} and I earn ${formatNgn(REFERRAL_REWARD_INVITER_NGN)} after your first ride:\n${url}`
     : 'Download NEXRYDE for rides in Nigeria — smart matching & fair fares.';
 
   switch (badgeId) {

@@ -11,6 +11,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Share } from 'react-native';
 import { REFERRAL_CODE_STORAGE_KEY } from '@/app/_layout';
 import { BACKEND_URL } from '@/src/services/api';
+import {
+  REFERRAL_REWARD_INVITEE_NGN,
+  REFERRAL_REWARD_INVITER_NGN,
+  formatNgn,
+} from '@/src/constants/commercialOffers';
 
 export const INVITE_BASE_URL = 'https://nexryde.app/invite';
 
@@ -33,7 +38,8 @@ export function buildShareMessage(
   const handle = username || senderName?.split(' ')[0] || 'a friend';
   return (
     `🚗 Join NEXRYDE — Nigeria's smartest ride app!\n\n` +
-    `Use ${handle}'s invite link and we BOTH earn ₦500 after your first ride:\n${url}`
+    `Use ${handle}'s invite link — you earn ${formatNgn(REFERRAL_REWARD_INVITEE_NGN)} ` +
+    `and they earn ${formatNgn(REFERRAL_REWARD_INVITER_NGN)} after your first ride:\n${url}`
   );
 }
 

@@ -119,7 +119,24 @@ export default function DocumentsScreen() {
         headers: getAuthHeaders(),
       });
       const docsData = docsRes.ok ? await docsRes.json() : {};
-      const archived: Record<string, any> = (docsData?.documents) || {};
+      // Backend returns `documents` as an ARRAY of { id, uploaded, status, ... }.
+      // Normalize to a map keyed by doc id so per-document status renders correctly.
+      const rawDocs = docsData?.documents;
+      const archived: Record<string, any> = Array.isArray(rawDocs)
+        ? rawDocs.reduce((acc: Record<string, any>, d: any) => {
+            if (d?.id) acc[d.id] = d;
+            return acc;
+          }, {})
+        : (rawDocs || {});
+
+      const normalizeStatus = (raw: any): DocStatus['status'] => {
+        const s = String(raw || '').toLowerCase();
+        if (s === 'verified' || s === 'approved') return 'verified';
+        if (s === 'expired') return 'expired';
+        if (s === 'not_submitted') return 'not_submitted';
+        // pending / pending_review / under_review / rejected → show as under review/pending
+        return 'pending';
+      };
 
       setDocuments(prev => prev.map((doc) => {
         // NIN: special case — verified if profile says so
@@ -131,9 +148,9 @@ export default function DocumentsScreen() {
         // All others: if approved → verified; if in archived with a status → use it; else not_submitted
         if (approved) return { ...doc, status: 'verified' };
         const archived_doc = archived[doc.id];
-        if (archived_doc?.status) return { ...doc, status: archived_doc.status };
-        // Check if any file was uploaded (archived has the doc key)
-        if (archived[doc.id]) return { ...doc, status: 'pending' };
+        if (archived_doc?.status) return { ...doc, status: normalizeStatus(archived_doc.status) };
+        // File uploaded (present in archive) but no explicit status → under review
+        if (archived_doc?.uploaded || archived_doc) return { ...doc, status: 'pending' };
         return doc;
       }));
     } catch {

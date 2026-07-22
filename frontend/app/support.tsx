@@ -11,6 +11,7 @@ import { getSupportContacts, reportTripIssue } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
 import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { SUPPORT_EMAIL, SUPPORT_PHONE_E164 } from '@/src/constants/commercialOffers';
 
 type PoliceContact = {
   state: string;
@@ -39,8 +40,8 @@ export default function SupportScreen() {
   const [issueCategory, setIssueCategory] = useState<'safety' | 'fare' | 'behavior' | 'route' | 'payment' | 'general'>('general');
   const [issueText, setIssueText] = useState('');
   const [reportingIssue, setReportingIssue] = useState(false);
-  const [supportPhone, setSupportPhone] = useState('+2348089297811');
-  const [supportEmail, setSupportEmail] = useState('admin@admoblordgroup.com');
+  const [supportPhone, setSupportPhone] = useState(SUPPORT_PHONE_E164);
+  const [supportEmail, setSupportEmail] = useState(SUPPORT_EMAIL);
   const [stateQuery, setStateQuery] = useState('');
   const [detectedState, setDetectedState] = useState('');
   const [searchTouched, setSearchTouched] = useState(false);

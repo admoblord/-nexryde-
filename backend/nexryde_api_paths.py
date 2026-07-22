@@ -6,6 +6,7 @@ from __future__ import annotations
 PUBLIC_PATH_PREFIXES: tuple[str, ...] = (
     "/api/auth/",
     "/api/health",
+    "/api/config/client",
     "/api/places/",
     "/docs",
     "/openapi.json",
