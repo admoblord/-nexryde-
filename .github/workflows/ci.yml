@@ -255,6 +255,12 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
 
+    # Production lives in africa-south1 (Lagos-adjacent). Override the workflow-level
+    # us-central1 defaults, which now only apply to the standby + staging jobs.
+    env:
+      REGION: africa-south1
+      ARTIFACT_REGISTRY: africa-south1-docker.pkg.dev/nexryde-app/nexryde-backend/nexryde-backend
+
     permissions:
       contents: read
       id-token: write
@@ -311,8 +317,8 @@ jobs:
           echo "PREV_REV=${PREV_REV}" >> "$GITHUB_ENV"
 
           sed -i "s|nexryde-backend:latest|nexryde-backend:prod-${SHORT_SHA}|g" \
-            backend/cloudrun.service.yaml
-          gcloud run services replace backend/cloudrun.service.yaml \
+            backend/cloudrun.africa-south1.yaml
+          gcloud run services replace backend/cloudrun.africa-south1.yaml \
             --region "$REGION"
 
           NEW_REV=$(gcloud run services describe "$SERVICE" \
@@ -365,6 +371,21 @@ jobs:
             --region "${{ env.REGION }}" \
             --to-revisions="${NEW_REV}=100"
           echo "::notice title=Deployed::Backend ${NEW_REV} promoted to 100%"
+
+      # gRPC ride-push + Kafka worker share the same image. Deploy them only after
+      # the API canary is promoted, so a canary rollback never leaves them ahead.
+      - name: Deploy gRPC ride-push + Kafka worker (africa-south1)
+        if: success()
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::8}"
+          for MANIFEST in \
+            backend/cloudrun.grpc-ridepush.yaml \
+            backend/cloudrun.kafka-worker.africa-south1.yaml; do
+            sed -i "s|nexryde-backend:latest|nexryde-backend:prod-${SHORT_SHA}|g" "$MANIFEST"
+            gcloud run services replace "$MANIFEST" --region "${{ env.REGION }}"
+          done
+          echo "::notice title=Deployed::gRPC ride-push + Kafka worker on prod-${SHORT_SHA}"
 
       - name: Rollback canary on failure
         if: failure() && env.PREV_REV != ''
