@@ -227,13 +227,14 @@ jobs:
       - name: Build & Push image (staging tag)
         run: |
           IMAGE="${{ env.ARTIFACT_REGISTRY }}:staging-${{ github.sha }}"
-          # --suppress-logs: a service-account identity (WIF) cannot stream logs from
-          # the Google-managed default logs bucket, which makes gcloud exit 1 even when
-          # the build succeeds. Suppressing log streaming still waits for and reports the
-          # real build result. Full logs remain in the Cloud Build console.
+          # A WIF service-account identity cannot stream logs from the Google-managed
+          # DEFAULT Cloud Build logs bucket, so gcloud exits 1 even when the build
+          # SUCCEEDS. Point logs at the project-owned _cloudbuild bucket (the deployer SA
+          # already uploads source there and has storage.admin), so gcloud can stream and
+          # returns the real build result.
           gcloud builds submit \
             --tag "$IMAGE" \
-            --suppress-logs \
+            --gcs-log-dir=gs://nexryde-app_cloudbuild/logs \
             ./backend
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
@@ -309,13 +310,14 @@ jobs:
           SHORT_SHA="${GITHUB_SHA::8}"
           IMAGE="${{ env.ARTIFACT_REGISTRY }}:prod-${SHORT_SHA}"
           LATEST="${{ env.ARTIFACT_REGISTRY }}:latest"
-          # --suppress-logs: a service-account identity (WIF) cannot stream logs from
-          # the Google-managed default logs bucket, which makes gcloud exit 1 even when
-          # the build succeeds. Suppressing log streaming still waits for and reports the
-          # real build result. Full logs remain in the Cloud Build console.
+          # A WIF service-account identity cannot stream logs from the Google-managed
+          # DEFAULT Cloud Build logs bucket, so gcloud exits 1 even when the build
+          # SUCCEEDS. Point logs at the project-owned _cloudbuild bucket (the deployer SA
+          # already uploads source there and has storage.admin), so gcloud can stream and
+          # returns the real build result.
           gcloud builds submit \
             --tag "$IMAGE" \
-            --suppress-logs \
+            --gcs-log-dir=gs://nexryde-app_cloudbuild/logs \
             ./backend
           # Also tag as latest for manual rollbacks
           gcloud artifacts docker tags add "$IMAGE" "$LATEST"
