@@ -49,10 +49,8 @@ export function TrackingPaymentView({
     }
   }, [paymentMethod, goToReceipt]);
 
-  // Cash is settled by the DRIVER confirming receipt — the rider only hands over
-  // the cash, so we never call confirm-payment for cash (backend rejects it).
-  // Wallet/transfer rides must be settled here, otherwise the trip stays
-  // payment_status=pending (rider never debited, driver never credited).
+  // Cash/transfer: DRIVER confirms receipt on their completion panel.
+  // Rider never calls confirm-payment for cash. Wallet/transfer (rider) settle here.
   const handlePay = React.useCallback(async () => {
     if (submitting) return;
     if (!financialPaymentPending || isCashPaymentMethod(paymentMethod)) {

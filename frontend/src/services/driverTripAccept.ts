@@ -7,6 +7,7 @@
  */
 import { apiFetch, ApiTimeoutError } from '@/src/utils/sessionRefresh';
 import {
+  ACCEPT_ACTION_MIN_TTL_SEC,
   criticalSessionFailureMessage,
   ensureCriticalSessionReady,
 } from '@/src/lib/sessionReadiness';
@@ -26,6 +27,9 @@ export type DriverAcceptTripOutcome =
   | { status: 'session_expired'; message: string }
   | { status: 'failed'; message: string; httpStatus?: number };
 
+/** Fail-fast accept — Cloud Run is warm; long waits feel like a stuck Accept button. */
+const ACCEPT_TIMEOUT_MS = 8_000;
+
 const inFlightByTrip = new Map<string, Promise<DriverAcceptTripOutcome>>();
 
 function acceptBody(params: DriverAcceptTripParams): Record<string, unknown> {
@@ -33,11 +37,12 @@ function acceptBody(params: DriverAcceptTripParams): Record<string, unknown> {
     driver_id: params.driverId,
     offer_id: params.offerId,
     proposed_fare: params.proposedFare,
+    client_event_id: `accept:${params.tripId}:${params.driverId}`,
   };
 }
 
 async function performAccept(params: DriverAcceptTripParams): Promise<DriverAcceptTripOutcome> {
-  const session = await ensureCriticalSessionReady();
+  const session = await ensureCriticalSessionReady(ACCEPT_ACTION_MIN_TTL_SEC);
   if (!session.ok) {
     return {
       status: 'session_expired',
@@ -51,6 +56,7 @@ async function performAccept(params: DriverAcceptTripParams): Promise<DriverAcce
       method: 'PUT',
       body: JSON.stringify(acceptBody(params)),
       preserveSessionOn401: true,
+      timeoutMs: ACCEPT_TIMEOUT_MS,
     });
     let data: Record<string, unknown> = {};
     try {
@@ -82,8 +88,12 @@ async function performAccept(params: DriverAcceptTripParams): Promise<DriverAcce
       if (verified.assigned && verified.trip) {
         return { status: 'reconciled', trip: verified.trip };
       }
+      // Timed out / network dropped AND server has no assignment: the accept
+      // likely never landed. Surface httpStatus 408 so the caller queues it for
+      // replay on reconnect instead of dropping the ride.
       return {
         status: 'failed',
+        httpStatus: 408,
         message: mapAcceptErrorMessage(null, 408),
       };
     }

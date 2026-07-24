@@ -174,7 +174,7 @@ jobs:
 
       - name: ESLint
         working-directory: frontend
-        run: npx eslint "src/**/*.{ts,tsx}" "app/**/*.{ts,tsx}" --max-warnings=20 || true
+        run: npx eslint "src/**/*.{ts,tsx}" "app/**/*.{ts,tsx}" --max-warnings=50
 
   # ─────────────────────────────────────────────────────────────────────────────
   # 3. Deploy to STAGING (develop branch only)
@@ -296,29 +296,85 @@ jobs:
           gcloud artifacts docker tags add "$IMAGE" "$LATEST"
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
-      - name: Deploy to Cloud Run (production) via service YAML
+      - name: Deploy canary revision (10% traffic)
+        id: canary
         run: |
-          # Patch the image tag in the service YAML and deploy
-          sed -i "s|nexryde-backend:latest|nexryde-backend:prod-${GITHUB_SHA::8}|g" \
+          set -euo pipefail
+          REGION="${{ env.REGION }}"
+          SERVICE="${{ env.CLOUD_RUN_SERVICE }}"
+          SHORT_SHA="${GITHUB_SHA::8}"
+
+          # Previous serving revision (for rollback)
+          PREV_REV=$(gcloud run services describe "$SERVICE" \
+            --region "$REGION" \
+            --format='value(status.traffic[0].revisionName)' || true)
+          echo "PREV_REV=${PREV_REV}" >> "$GITHUB_ENV"
+
+          sed -i "s|nexryde-backend:latest|nexryde-backend:prod-${SHORT_SHA}|g" \
             backend/cloudrun.service.yaml
           gcloud run services replace backend/cloudrun.service.yaml \
-            --region ${{ env.REGION }}
+            --region "$REGION"
 
-      - name: Health check (production)
+          NEW_REV=$(gcloud run services describe "$SERVICE" \
+            --region "$REGION" \
+            --format='value(status.latestReadyRevisionName)')
+          echo "NEW_REV=${NEW_REV}" >> "$GITHUB_ENV"
+
+          if [ -n "${PREV_REV}" ] && [ "${PREV_REV}" != "${NEW_REV}" ]; then
+            gcloud run services update-traffic "$SERVICE" \
+              --region "$REGION" \
+              --to-revisions="${NEW_REV}=10,${PREV_REV}=90"
+            echo "Canary: ${NEW_REV}=10% / ${PREV_REV}=90%"
+          else
+            echo "No prior revision — new revision serves 100%"
+          fi
+
+      - name: Canary health + 5xx SLO gate
         run: |
-          PROD_URL="https://nexryde-backend-993913300770.us-central1.run.app"
-          for i in 1 2 3 4 5; do
+          set -euo pipefail
+          PROD_URL="https://nexryde-backend-993913300770.africa-south1.run.app"
+          READY=0
+          for i in 1 2 3 4 5 6; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_URL/api/health/ready")
-            [ "$STATUS" = "200" ] && echo "Production healthy ✓" && exit 0
+            if [ "$STATUS" = "200" ]; then READY=1; break; fi
             echo "Attempt $i — HTTP $STATUS, retrying..."
-            sleep 15
+            sleep 10
           done
-          echo "Production health check failed" && exit 1
+          [ "$READY" = "1" ] || { echo "Canary readiness failed"; exit 1; }
 
-      - name: Notify on success
+          # Soak canary briefly, then reject promote if new revision is throwing 5xx.
+          sleep 45
+          ERR_COUNT=$(gcloud logging read \
+            "resource.type=\"cloud_run_revision\" AND resource.labels.revision_name=\"${NEW_REV}\" AND httpRequest.status>=500" \
+            --project=nexryde-app \
+            --limit=25 \
+            --freshness=10m \
+            --format="value(insertId)" 2>/dev/null | wc -l | tr -d ' ')
+          echo "Canary 5xx samples on ${NEW_REV}: ${ERR_COUNT}"
+          if [ "${ERR_COUNT}" -gt 8 ]; then
+            echo "Canary SLO failed: too many 5xx on new revision"
+            exit 1
+          fi
+          echo "Canary healthy + SLO ok ✓"
+
+      - name: Promote canary to 100%
         if: success()
         run: |
-          echo "::notice title=Deployed::Backend prod-${GITHUB_SHA::8} is live"
+          set -euo pipefail
+          gcloud run services update-traffic "${{ env.CLOUD_RUN_SERVICE }}" \
+            --region "${{ env.REGION }}" \
+            --to-revisions="${NEW_REV}=100"
+          echo "::notice title=Deployed::Backend ${NEW_REV} promoted to 100%"
+
+      - name: Rollback canary on failure
+        if: failure() && env.PREV_REV != ''
+        run: |
+          set -euo pipefail
+          echo "Rolling back to ${PREV_REV}"
+          gcloud run services update-traffic "${{ env.CLOUD_RUN_SERVICE }}" \
+            --region "${{ env.REGION }}" \
+            --to-revisions="${PREV_REV}=100"
+          echo "::error title=Rolled back::Canary failed; traffic restored to ${PREV_REV}"
 
   # ─────────────────────────────────────────────────────────────────────────────
   # 5. EAS build (production APK/AAB) — triggered only on main

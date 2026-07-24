@@ -316,7 +316,16 @@ export const useAppStore = create<AppState>()(
         } catch {
           /* non-fatal */
         }
-        
+
+        // Clear the offline action queue — otherwise queued accepts/cancels/
+        // trip-requests from THIS user would replay under the NEXT account's JWT.
+        try {
+          const { clearOfflineQueue } = await import('@/src/services/offlineMode');
+          await clearOfflineQueue();
+        } catch {
+          /* non-fatal */
+        }
+
         // Clear store state
         set({
           user: null,

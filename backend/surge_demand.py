@@ -45,7 +45,19 @@ async def estimate_area_demand_ratio_near(db: Any, lat: float, lng: float, radiu
     """
     Pending pickups vs online drivers in ~radius_km → 0–1 proxy for hybrid surge demand tiers.
     Never raises — Mongo/network/index issues must not break fare estimates.
+
+    When NEXRYDE_STREAM_SURGE=true, prefer Flink-style H3 window ratio from Redis.
     """
+    try:
+        from realtime_platform.surge_stream import get_stream_demand_ratio, stream_surge_enabled
+
+        if stream_surge_enabled():
+            stream_ratio = await get_stream_demand_ratio(float(lat), float(lng))
+            if stream_ratio is not None:
+                # Normalize stream demand/supply (≥0) into 0–1 fare tier proxy.
+                return round(min(1.0, float(stream_ratio) / 2.0), 3)
+    except Exception:
+        pass
     try:
         since = datetime.utcnow() - timedelta(minutes=45)
         trips = await db.trips.find(

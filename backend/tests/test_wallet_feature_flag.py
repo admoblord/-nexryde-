@@ -54,10 +54,47 @@ class FakeHolds:
         self.rows = []
 
     async def find_one(self, query):
+        for row in self.rows:
+            if row.get("trip_id") == query.get("trip_id") and row.get("rider_id") == query.get(
+                "rider_id"
+            ):
+                return row
         return None
 
     async def insert_one(self, doc):
         self.rows.append(doc)
+
+    async def delete_one(self, query):
+        self.rows = [
+            r
+            for r in self.rows
+            if not (
+                r.get("trip_id") == query.get("trip_id")
+                and r.get("rider_id") == query.get("rider_id")
+                and (query.get("status") is None or r.get("status") == query.get("status"))
+            )
+        ]
+
+        class R:
+            deleted_count = 1
+
+        return R()
+
+    async def update_one(self, query, update):
+        for row in self.rows:
+            if row.get("trip_id") != query.get("trip_id"):
+                continue
+            if row.get("rider_id") != query.get("rider_id"):
+                continue
+            if query.get("status") and row.get("status") != query.get("status"):
+                continue
+            row.update(update.get("$set") or {})
+            break
+
+        class R:
+            modified_count = 1
+
+        return R()
 
 
 class FakeDB:
@@ -111,7 +148,21 @@ def test_wallet_reserve_works_when_flag_enabled():
     db = FakeDB(flags={"wallet": "all"})
     asyncio.run(reserve_rider_wallet_fare(db, "r1", "t1", "wallet", 500.0))
     assert len(db.wallet_holds.rows) == 1
+    assert db.wallet_holds.rows[0]["status"] == "held"
+    assert db.wallet_holds.rows[0].get("debited") is True
     assert db.users.balance == 9_500.0
+
+
+def test_booking_and_dispatch_kill_switches_default_on():
+    from feature_flags import is_booking_enabled, is_dispatch_enabled
+
+    db = FakeDB(flags=None)
+    assert asyncio.run(is_booking_enabled(db)) is True
+    assert asyncio.run(is_dispatch_enabled(db)) is True
+    db2 = FakeDB(flags={"booking": "off", "dispatch": "kill"})
+    invalidate_feature_flags_cache()
+    assert asyncio.run(is_booking_enabled(db2)) is False
+    assert asyncio.run(is_dispatch_enabled(db2)) is False
 
 
 def test_wallet_fails_closed_when_flags_unreadable():

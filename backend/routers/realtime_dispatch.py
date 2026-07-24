@@ -118,6 +118,8 @@ class _UserSocketHub:
         self._name = name
         self._lock = asyncio.Lock()
         self._sockets: DefaultDict[str, Set[WebSocket]] = defaultdict(set)
+        # Connect/SSE/gRPC stream subscribers (Uber RAMEN multi-transport).
+        self._streams: DefaultDict[str, Set[asyncio.Queue]] = defaultdict(set)
         self._pubsub: Any = None
         self._listener_task: Optional[asyncio.Task] = None
         self._subscribed: Set[str] = set()
@@ -170,11 +172,7 @@ class _UserSocketHub:
                 await asyncio.sleep(3)
                 await self._ensure_listener()
 
-    async def connect(self, websocket: WebSocket, user_id: str) -> None:
-        await websocket.accept()
-        async with self._lock:
-            self._sockets[user_id].add(websocket)
-        # Subscribe to this user's Redis channel (idempotent).
+    async def _ensure_channel(self, user_id: str) -> None:
         if await self._ensure_listener() and self._pubsub:
             ch = self._ch(user_id)
             if ch not in self._subscribed:
@@ -183,27 +181,51 @@ class _UserSocketHub:
                     self._subscribed.add(ch)
                 except Exception as exc:
                     logger.warning("realtime_dispatch: subscribe ch=%s: %s", ch, exc)
+
+    async def _maybe_unsubscribe(self, user_id: str) -> None:
+        async with self._lock:
+            still = bool(self._sockets.get(user_id)) or bool(self._streams.get(user_id))
+        if still or not self._pubsub:
+            return
+        ch = self._ch(user_id)
+        if ch in self._subscribed:
+            try:
+                await self._pubsub.unsubscribe(ch)
+                self._subscribed.discard(ch)
+            except Exception:
+                pass
+
+    async def connect(self, websocket: WebSocket, user_id: str) -> None:
+        await websocket.accept()
+        async with self._lock:
+            self._sockets[user_id].add(websocket)
+        await self._ensure_channel(user_id)
         logger.info("realtime_ws_connect hub=%s user=%s", self._name, user_id)
 
     async def disconnect(self, websocket: WebSocket, user_id: str) -> None:
         async with self._lock:
             self._sockets[user_id].discard(websocket)
-            still_connected = bool(self._sockets.get(user_id))
-            if not still_connected:
+            if not self._sockets.get(user_id):
                 self._sockets.pop(user_id, None)
-        # Unsubscribe from Redis when no local connections remain.
-        if not still_connected and self._pubsub:
-            ch = self._ch(user_id)
-            if ch in self._subscribed:
-                try:
-                    await self._pubsub.unsubscribe(ch)
-                    self._subscribed.discard(ch)
-                except Exception:
-                    pass
+        await self._maybe_unsubscribe(user_id)
+
+    async def add_stream(self, user_id: str, queue: asyncio.Queue) -> None:
+        async with self._lock:
+            self._streams[user_id].add(queue)
+        await self._ensure_channel(user_id)
+        logger.info("realtime_stream_connect hub=%s user=%s", self._name, user_id)
+
+    async def remove_stream(self, user_id: str, queue: asyncio.Queue) -> None:
+        async with self._lock:
+            self._streams[user_id].discard(queue)
+            if not self._streams.get(user_id):
+                self._streams.pop(user_id, None)
+        await self._maybe_unsubscribe(user_id)
 
     async def _deliver_locally(self, user_id: str, message: dict) -> int:
         async with self._lock:
             targets = list(self._sockets.get(user_id, ()))
+            streams = list(self._streams.get(user_id, ()))
         sent = 0
         dead: list[WebSocket] = []
         for ws in targets:
@@ -216,6 +238,19 @@ class _UserSocketHub:
             async with self._lock:
                 for ws in dead:
                     self._sockets[user_id].discard(ws)
+        for q in streams:
+            try:
+                q.put_nowait(message)
+                sent += 1
+            except asyncio.QueueFull:
+                try:
+                    _ = q.get_nowait()
+                    q.put_nowait(message)
+                    sent += 1
+                except Exception:
+                    pass
+            except Exception:
+                pass
         return sent
 
     async def send_json(self, user_id: str, message: dict[str, Any]) -> int:
@@ -224,8 +259,8 @@ class _UserSocketHub:
         Falls back to in-process delivery when Redis is unavailable.
         """
         published = await _redis_publish(self._ch(user_id), message)
-        # Cache the latest payload so /poll can serve it on reconnect.
-        _cache_poll_message(user_id, message)
+        # Poll clients expect expanded trip_update (compact `loc` is WS-only wire).
+        await _cache_poll_message(user_id, expand_realtime_payload(message))
         if not published:
             # Redis unavailable — deliver directly to local sockets only.
             return await self._deliver_locally(user_id, message)
@@ -263,10 +298,23 @@ async def websocket_driver_offers(websocket: WebSocket, driver_id: str):
     await driver_offer_hub.connect(websocket, driver_id)
     try:
         while True:
-            # Keep connection alive; client should send periodic pings.
+            # Keep connection alive; client should send periodic pings / offer ACKs.
             data = await asyncio.wait_for(websocket.receive_text(), timeout=90)
             if _is_ws_ping(data):
                 await websocket.send_text("pong")
+                continue
+            try:
+                body = json.loads(data)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if isinstance(body, dict) and str(body.get("type", "")).lower() == "ack":
+                offer_id = str(body.get("offer_id") or body.get("id") or "").strip()
+                if offer_id:
+                    await _mark_offer_acked(driver_id, offer_id)
+                    try:
+                        await websocket.send_json({"type": "ack_ok", "offer_id": offer_id})
+                    except Exception:
+                        pass
     except (WebSocketDisconnect, asyncio.TimeoutError):
         pass
     except Exception:
@@ -295,10 +343,96 @@ async def websocket_rider_trips(websocket: WebSocket, rider_id: str):
         await rider_trip_hub.disconnect(websocket, rider_id)
 
 
+# ── Payload expand (compact loc → trip_update for poll / legacy) ──────────────
+
+def expand_realtime_payload(message: dict) -> dict:
+    """Expand Uber-style compact `loc` frames into full trip_update dicts."""
+    if not isinstance(message, dict):
+        return message
+    kind = message.get("t") or message.get("type")
+    if kind != "loc":
+        return message
+    return {
+        "type": "trip_update",
+        "trip_id": message.get("i") or message.get("trip_id"),
+        "status": message.get("st") or message.get("status"),
+        "ride_version": message.get("rv") or message.get("ride_version") or 0,
+        "state_sequence": message.get("sq") or message.get("state_sequence") or 0,
+        "driver_location": {
+            "lat": message.get("la"),
+            "lng": message.get("ln"),
+            "heading": message.get("h"),
+            "speed_kmh": message.get("s"),
+            "updated_at": message.get("ts"),
+            "eta_seconds": message.get("e"),
+            "distance_km": message.get("d"),
+        },
+        "eta_seconds": message.get("e"),
+        "distance_remaining_km": message.get("d"),
+        "distance_remaining": message.get("d"),
+        "speed_kmh": message.get("s"),
+        "timestamp": message.get("ts"),
+    }
+
+
 # ── Public push helpers (called by trips router) ──────────────────────────────
 
+async def _mark_offer_acked(driver_id: str, offer_id: str) -> None:
+    if not driver_id or not offer_id:
+        return
+    try:
+        from redis_store import store
+
+        await store.set(f"offer:ack:{driver_id}:{offer_id}", "1", ttl=120)
+    except Exception:
+        logger.debug("offer ack mark failed", exc_info=True)
+
+
+async def _offer_was_acked(driver_id: str, offer_id: str) -> bool:
+    try:
+        from redis_store import store
+
+        return bool(await store.get(f"offer:ack:{driver_id}:{offer_id}"))
+    except Exception:
+        return False
+
+
+async def _retry_offer_if_unacked(driver_id: str, offer_id: str, message: dict) -> None:
+    """Uber RAMEN-style: one re-push if device never ACKed (tunnels / brief disconnect)."""
+    try:
+        await asyncio.sleep(2.5)
+        if await _offer_was_acked(driver_id, offer_id):
+            return
+        logger.info(
+            "realtime_dispatch: offer ack miss — retry push driver=%s offer=%s",
+            driver_id,
+            offer_id,
+        )
+        await driver_offer_hub.send_json(driver_id, message)
+    except Exception:
+        logger.debug("offer ack retry failed", exc_info=True)
+
+
 async def push_driver_new_offer(driver_id: str, offer: dict) -> int:
-    return await driver_offer_hub.send_json(driver_id, {"type": "new_offer", "offer": offer})
+    offer_id = str((offer or {}).get("id") or "").strip()
+    message = {"type": "new_offer", "offer": offer, "ack_required": True}
+    sent = await driver_offer_hub.send_json(driver_id, message)
+    if offer_id:
+        asyncio.create_task(_retry_offer_if_unacked(driver_id, offer_id, message))
+    return sent
+
+
+async def push_driver_offers_withdrawn(driver_id: str, *, reason: str = "driver_offline", count: int = 0) -> int:
+    """Notify driver hub that outstanding offers were cancelled (go-offline / cooldown)."""
+    return await driver_offer_hub.send_json(
+        driver_id,
+        {
+            "type": "offers_withdrawn",
+            "reason": reason,
+            "count": int(count or 0),
+            "ack_required": False,
+        },
+    )
 
 
 async def push_rider_trip_update(rider_id: str, payload: dict) -> int:
@@ -308,17 +442,42 @@ async def push_rider_trip_update(rider_id: str, payload: dict) -> int:
 # ── Poll cache (Redis-backed, in-process fallback) ─────────────────────────────
 
 _poll_cache_local: dict[str, dict] = {}
+_POLL_CACHE_TTL_SEC = 120
 
 
-def _cache_poll_message(user_id: str, message: dict) -> None:
-    """Cache the latest push message for this user so /poll can serve it."""
+async def _cache_poll_message(user_id: str, message: dict) -> None:
+    """Cache latest push for this user — Redis so any Cloud Run instance can /poll."""
+    if not user_id or not isinstance(message, dict):
+        return
     try:
         _poll_cache_local[user_id] = message
     except Exception:
         pass
+    try:
+        from redis_store import store
+
+        await store.set(
+            f"poll:{user_id}",
+            json.dumps(message, default=str),
+            ttl=_POLL_CACHE_TTL_SEC,
+        )
+    except Exception as exc:
+        logger.warning("realtime_dispatch: poll cache write failed user=%s: %s", user_id, exc)
 
 
 async def _get_poll_message(user_id: str) -> Optional[dict]:
+    if not user_id:
+        return None
+    try:
+        from redis_store import store
+
+        raw = await store.get(f"poll:{user_id}")
+        if raw:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                return data
+    except Exception as exc:
+        logger.warning("realtime_dispatch: poll cache read failed user=%s: %s", user_id, exc)
     return _poll_cache_local.get(user_id)
 
 

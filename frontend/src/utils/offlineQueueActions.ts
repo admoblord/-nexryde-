@@ -29,15 +29,67 @@ export async function queueDriverAccept(
     driver_id: string;
     offer_id?: string;
     proposed_fare: number;
+    client_event_id?: string;
   },
 ): Promise<void> {
   await enqueue({
     id: actionId('accept'),
     url: `/api/trips/${encodeURIComponent(tripId)}/accept`,
     method: 'PUT',
-    body,
+    body: {
+      ...body,
+      client_event_id: body.client_event_id || `accept:${tripId}:${body.driver_id}`,
+    },
     queuedAt: Date.now(),
-    maxRetries: 3,
+    maxRetries: 5,
     label: 'driver_accept_trip',
+  });
+}
+
+export async function queueDriverDecline(
+  offerId: string,
+  body: { driver_id: string; client_event_id?: string },
+): Promise<void> {
+  await enqueue({
+    id: actionId('decline'),
+    url: `/api/trips/offers/${encodeURIComponent(offerId)}/decline`,
+    method: 'PUT',
+    body: {
+      ...body,
+      client_event_id: body.client_event_id || `decline:${offerId}:${body.driver_id}`,
+    },
+    queuedAt: Date.now(),
+    maxRetries: 5,
+    label: 'driver_decline_offer',
+  });
+}
+
+export async function queueDriverComplete(tripId: string): Promise<void> {
+  await enqueue({
+    id: actionId('complete'),
+    url: `/api/trips/${encodeURIComponent(tripId)}/complete`,
+    method: 'PUT',
+    body: {},
+    queuedAt: Date.now(),
+    maxRetries: 8,
+    label: 'driver_complete_trip',
+  });
+}
+
+export async function queueDriverCancel(
+  tripId: string,
+  body: { cancelled_by?: string; reason?: string; client_event_id?: string },
+): Promise<void> {
+  await enqueue({
+    id: actionId('cancel'),
+    url: `/api/trips/${encodeURIComponent(tripId)}/cancel`,
+    method: 'PUT',
+    body: {
+      ...body,
+      client_event_id: body.client_event_id || `cancel:${tripId}`,
+    },
+    queuedAt: Date.now(),
+    maxRetries: 5,
+    label: 'trip_cancel',
   });
 }

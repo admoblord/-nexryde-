@@ -41,7 +41,7 @@ const GOOGLE_MAPS_IOS_KEY =
   );
 const BACKEND_URL =
   process.env.EXPO_PUBLIC_BACKEND_URL ||
-  "https://nexryde-backend-993913300770.us-central1.run.app";
+  "https://nexryde-backend-993913300770.africa-south1.run.app";
 
 const PRIVACY_POLICY_URL = `${BACKEND_URL}/privacy-policy`;
 

@@ -7,6 +7,7 @@ Reduces Google Maps API calls by 70–90% through two-tier caching:
 Usage:
     from route_cache import get_cached_directions, log_api_call, get_api_usage_summary
 """
+from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Optional

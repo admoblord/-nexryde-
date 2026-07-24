@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,28 +32,41 @@ export default function DriverVerificationStatusScreen() {
   const [loading, setLoading] = useState(() => Boolean(driverId));
   const [status, setStatus] = useState<VerificationState>({});
 
-  const loadStatus = useCallback(async () => {
+  const loadStatus = useCallback(async (opts?: { silent?: boolean }) => {
+    // Silent = background poll (auto-advance when an admin approves) — never
+    // flip the full-screen spinner or raise blocking alerts on transient blips.
+    const silent = opts?.silent === true;
     if (!driverId) {
-      setLoading(false);
+      if (!silent) setLoading(false);
       return;
     }
     if (!canCallAuthedApi) {
-      setLoading(false);
-      Alert.alert('Session expired', 'Please sign in again to check your verification status.', [
-        { text: 'Sign in', onPress: () => router.replace('/(auth)/login') },
-      ]);
+      if (!silent) {
+        setLoading(false);
+        Alert.alert('Session expired', 'Please sign in again to check your verification status.', [
+          { text: 'Sign in', onPress: () => router.replace('/(auth)/login') },
+        ]);
+      }
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const res = await authedFetch(`${BACKEND_URL}/api/drivers/${driverId}/onboarding-status`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        Alert.alert('Could not check status', formatApiDetail(data?.detail) || 'Please try again.');
+        if (!silent) Alert.alert('Could not check status', formatApiDetail(data?.detail) || 'Please try again.');
         return;
       }
       setStatus(data);
+      // Persist the learned verification fact so Home paints the right state on
+      // its first frame (and instant-Home routing works next launch).
+      if (data?.verification_status) {
+        const { writeDriverVerificationFact } = await import('@/src/services/driverVerificationFact');
+        void writeDriverVerificationFact(driverId, String(data.verification_status));
+      }
       if (data?.completed) {
+        const { markDriverOnboardingCached } = await import('@/src/utils/sessionRouting');
+        await markDriverOnboardingCached(driverId);
         router.replace('/(driver-tabs)/driver-home');
       } else if (data?.step === 'profile') {
         router.replace({
@@ -67,9 +80,9 @@ export default function DriverVerificationStatusScreen() {
         });
       }
     } catch {
-      Alert.alert('Connection error', 'Could not check your verification status. Please try again.');
+      if (!silent) Alert.alert('Connection error', 'Could not check your verification status. Please try again.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [canCallAuthedApi, driverId, params.phone, params.name, params.email, router]);
 
@@ -87,6 +100,23 @@ export default function DriverVerificationStatusScreen() {
   }, [driverId, storeReady, canCallAuthedApi, loadStatus]);
 
   const isRejected = status.step === 'documents_rejected' || status.verification_status === 'rejected';
+
+  // Auto-poll while the driver is waiting so an admin approval advances them to
+  // Home/Profile without tapping "Refresh status". Stop once rejected (terminal
+  // until they resubmit). Also refresh the instant the app returns to foreground.
+  useEffect(() => {
+    if (!driverId || !storeReady || !canCallAuthedApi || isRejected) return;
+    const interval = setInterval(() => {
+      void loadStatus({ silent: true });
+    }, 15000);
+    const appSub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') void loadStatus({ silent: true });
+    });
+    return () => {
+      clearInterval(interval);
+      appSub.remove();
+    };
+  }, [driverId, storeReady, canCallAuthedApi, isRejected, loadStatus]);
   const title = isRejected ? 'Documents need correction' : 'Documents under review';
   const message = isRejected
     ? (status.verification?.rejection_reason || 'Your documents need correction. Please retake and resubmit the required files.')

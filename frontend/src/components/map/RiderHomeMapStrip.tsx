@@ -121,7 +121,9 @@ export function RiderHomeMapStrip({ height = 260, onPress }: Props) {
       }
     };
     void run();
-    const timer = setInterval(run, 25000);
+    // Home strip is a passive preview, not the live search map — 45s keeps it
+    // fresh without competing with the map's GPU/JS work every 25s.
+    const timer = setInterval(run, 45000);
     return () => {
       cancelled = true;
       clearInterval(timer);
@@ -178,7 +180,7 @@ export function RiderHomeMapStrip({ height = 260, onPress }: Props) {
         showsMyLocationButton={false}
         showsCompass={false}
         showsPointsOfInterest={false}
-        showsBuildings
+        showsBuildings={false}
         showsTraffic={trafficOn}
         toolbarEnabled={false}
         onMapReady={() => {

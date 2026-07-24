@@ -19,6 +19,18 @@ export const normalizeTripStatus = (status?: string, paymentStatus?: string): No
 
   if (raw === 'in_progress' || raw === 'started') return 'ongoing';
   if (raw === 'pickup') return 'arrived';
+  // Backend watchdog marks stranded/no-driver trips as terminal. Treat these as
+  // ended (not "pending") so the rider stops "finding driver" and can rebook —
+  // otherwise the finding UI spins forever and book.tsx keeps redirecting back.
+  if (
+    raw === 'expired' ||
+    raw === 'no_drivers_found' ||
+    raw === 'no_driver_found' ||
+    raw === 'timed_out' ||
+    raw === 'timeout'
+  ) {
+    return 'cancelled';
+  }
   if (
     raw === 'pending' ||
     raw === 'pending_driver_offers' ||

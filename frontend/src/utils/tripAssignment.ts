@@ -33,16 +33,20 @@ export function resolveStatusPayloadAcceptedAt(
   return null;
 }
 
-/** True only when backend has committed driver assignment (driver_id + accepted_at for accepted). */
+/**
+ * True when backend has committed driver assignment.
+ * `driver_id` on accepted/arrived/ongoing is enough — do not stall finding UI
+ * waiting for `accepted_at` if the status payload omits it.
+ */
 export function isTripAssignmentConfirmed(
   tripStatus: string,
   driverId: string | null | undefined,
-  acceptedAt: string | null | undefined,
+  _acceptedAt?: string | null | undefined,
 ): boolean {
   if (!isRiderMapLiveTripStatus(tripStatus)) return false;
   if (!driverId || !String(driverId).trim()) return false;
-  if (tripStatus === 'arrived' || tripStatus === 'ongoing') return true;
-  return Boolean(acceptedAt && String(acceptedAt).trim());
+  // accepted_at is diagnostic only; assignment is confirmed by status + driver_id.
+  return true;
 }
 
 export function isTripDriverAssigned(

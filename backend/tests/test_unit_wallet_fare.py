@@ -15,7 +15,6 @@ import pytest
 
 def test_fare_minimum_applies():
     """Fare should never fall below the minimum fare."""
-    from fare_engine import calculate_fare  # noqa: F401
     try:
         from fare_engine import calculate_fare
     except ImportError:
@@ -68,22 +67,23 @@ def _enable_wallet_flag(db) -> None:
 
 @pytest.mark.asyncio
 async def test_reserve_fare_deducts_balance():
-    """reserve_rider_wallet_fare should atomically deduct from wallet."""
+    """reserve_rider_wallet_fare should atomically deduct from users.wallet_balance."""
     from wallet_ops import reserve_rider_wallet_fare
 
     db = MagicMock()
     _enable_wallet_flag(db)
-    wallet = {"user_id": "r1", "balance": 5000.0}
-    db.wallets.find_one_and_update = AsyncMock(return_value={**wallet, "balance": 4600.0})
     db.wallet_holds.find_one = AsyncMock(return_value=None)
     db.wallet_holds.insert_one = AsyncMock()
+    db.wallet_holds.update_one = AsyncMock()
+    # Guarded deduct succeeds (balance >= fare).
+    db.users.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
 
     await reserve_rider_wallet_fare(db, "r1", "t1", "wallet", 400.0)
 
-    db.wallets.find_one_and_update.assert_called_once()
-    call_args = db.wallets.find_one_and_update.call_args
-    # Confirm deduction filter includes balance >= fare
-    assert "$gte" in str(call_args) or "balance" in str(call_args)
+    # Fare leaves the rider's users.wallet_balance behind a balance>=fare guard.
+    db.users.update_one.assert_called_once()
+    call_args = str(db.users.update_one.call_args)
+    assert "$gte" in call_args and "wallet_balance" in call_args
 
 
 @pytest.mark.asyncio
@@ -93,8 +93,13 @@ async def test_reserve_fare_insufficient_balance_raises():
     from fastapi import HTTPException
 
     db = MagicMock()
-    db.wallets.find_one_and_update = AsyncMock(return_value=None)  # returns None = insufficient
+    _enable_wallet_flag(db)
     db.wallet_holds.find_one = AsyncMock(return_value=None)
+    db.wallet_holds.insert_one = AsyncMock()
+    db.wallet_holds.delete_one = AsyncMock()
+    # Guarded deduct matches nothing → insufficient balance.
+    db.users.update_one = AsyncMock(return_value=MagicMock(modified_count=0))
+    db.users.find_one = AsyncMock(return_value={"wallet_balance": 100.0})
 
     with pytest.raises(HTTPException) as exc_info:
         await reserve_rider_wallet_fare(db, "r1", "t1", "wallet", 10000.0)
@@ -103,21 +108,22 @@ async def test_reserve_fare_insufficient_balance_raises():
 
 @pytest.mark.asyncio
 async def test_release_hold_refunds_balance():
-    """release_rider_wallet_hold should refund hold amount to wallet."""
+    """release_rider_wallet_hold should refund the hold amount to users.wallet_balance."""
     from wallet_ops import release_rider_wallet_hold
 
     db = MagicMock()
-    hold = {"trip_id": "t1", "rider_id": "r1", "amount": 500.0, "status": "reserved"}
+    hold = {"trip_id": "t1", "rider_id": "r1", "amount": 500.0, "status": "held", "debited": True}
     db.wallet_holds.find_one_and_update = AsyncMock(return_value=hold)
-    db.wallets.update_one = AsyncMock()
+    db.users.update_one = AsyncMock()
     db.transactions.insert_one = AsyncMock()
 
     await release_rider_wallet_hold(db, "r1", "t1")
 
-    # Balance should be refunded
-    db.wallets.update_one.assert_called_once()
-    inc_arg = str(db.wallets.update_one.call_args)
-    assert "500" in inc_arg or "amount" in inc_arg
+    # Balance is refunded on users.wallet_balance, and a refund ledger row is written.
+    db.users.update_one.assert_called_once()
+    inc_arg = str(db.users.update_one.call_args)
+    assert "wallet_balance" in inc_arg and "500" in inc_arg
+    db.transactions.insert_one.assert_called_once()
 
 
 @pytest.mark.asyncio

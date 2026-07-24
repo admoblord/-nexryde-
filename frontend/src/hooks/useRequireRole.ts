@@ -32,18 +32,8 @@ export function useRequireRole(expected: AppRole): boolean {
     }
   }, [hasHydrated, isAuthenticated, user?.id, role, expected, router]);
 
-  useEffect(() => {
-    if (!hasHydrated || !isAuthenticated || !user?.id) return;
-    if (expected !== 'driver' || role !== 'driver') return;
-    void import('@/src/utils/sessionRouting').then(({ markDriverOnboardingCached }) =>
-      markDriverOnboardingCached(user.id),
-    );
-  }, [hasHydrated, isAuthenticated, user?.id, role, expected]);
+  // Never mark driver onboarding complete here — unfinished drivers must stay
+  // on documents/profile until the server reports docs submitted / approved.
 
-  const allowed = hasHydrated && isAuthenticated && !!user?.id && role === expected;
-  if (allowed) {
-    console.log('[GATE_ALLOW]', { role: expected, hydrated: true });
-  }
-
-  return allowed;
+  return hasHydrated && isAuthenticated && !!user?.id && role === expected;
 }

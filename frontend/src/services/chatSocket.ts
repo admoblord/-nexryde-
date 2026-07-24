@@ -3,6 +3,7 @@
  */
 import { getBackendWsBaseUrl } from '@/src/services/riderTripTypes';
 import { getValidToken } from '@/src/lib/tokenStore';
+import { wsReconnectDelayMs } from '@/src/utils/fastConnection';
 
 export type ChatWsMessage = Record<string, unknown>;
 
@@ -58,10 +59,12 @@ class ChatSocketManager {
     if (this.subscriberCount === 0) this.disconnect();
   }
 
-  nudgeReconnect(): void {
+  nudgeReconnect(opts?: { force?: boolean }): void {
     if (!this.shouldStayConnected || !this.tripId || !this.userId) return;
     const rs = this.ws?.readyState;
-    if (rs === WebSocket.OPEN || rs === WebSocket.CONNECTING) return;
+    // force=true (long background) reopens even a socket that still reads OPEN — it
+    // is often a dead half-open link after mobile NAT/idle timeout.
+    if (!opts?.force && (rs === WebSocket.OPEN || rs === WebSocket.CONNECTING)) return;
     this.reconnectAttempts = 0;
     void this.openSocket({ force: true });
   }
@@ -112,7 +115,7 @@ class ChatSocketManager {
 
   private scheduleReconnect() {
     if (!this.shouldStayConnected || !this.tripId || !this.userId || this.subscriberCount === 0) return;
-    const delay = Math.min(30_000, 1000 * Math.pow(2, Math.min(this.reconnectAttempts, 6)));
+    const delay = wsReconnectDelayMs(this.reconnectAttempts);
     this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -145,7 +148,12 @@ class ChatSocketManager {
     }
 
     const token = await getValidToken();
-    if (!token || gen !== this.connectGeneration || !this.tripId || !this.userId) return;
+    if (gen !== this.connectGeneration || !this.tripId || !this.userId) return;
+    if (!token) {
+      // Transient token miss — schedule a backoff retry instead of dying silently.
+      this.scheduleReconnect();
+      return;
+    }
 
     const base = getBackendWsBaseUrl();
     const wsUrl = `${base}/api/ws/chat/${encodeURIComponent(this.tripId)}/${encodeURIComponent(this.userId)}?token=${encodeURIComponent(token)}`;

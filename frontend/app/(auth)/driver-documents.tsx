@@ -26,6 +26,7 @@ import { apiErrorMessage } from '@/src/utils/apiErrorMessage';
 import { useAppStore } from '@/src/store/appStore';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useThemeColors } from '@/src/constants/theme';
+import { writeDriverVerificationFact } from '@/src/services/driverVerificationFact';
 
 const MINT = '#34D399';
 const MINT_DARK = '#059669';
@@ -433,6 +434,18 @@ export default function DriverDocumentsScreen() {
         data = (await response.json()) as Record<string, unknown>;
       } catch {
         data = {};
+      }
+
+      const submittedStatus =
+        typeof data.verification_status === 'string' ? data.verification_status : '';
+      if (response.ok && submittedStatus) {
+        // Persist the verification fact the instant the server accepts the upload,
+        // so a slow/failed onboarding-status fetch on next launch can never bounce
+        // the driver back to re-upload documents they already submitted.
+        void writeDriverVerificationFact(
+          String(params.driver_id || data.driver_id || ''),
+          submittedStatus,
+        );
       }
 
       if (response.ok && data.verification_status === 'approved') {

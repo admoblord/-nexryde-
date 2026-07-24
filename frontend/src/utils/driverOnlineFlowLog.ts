@@ -6,6 +6,7 @@ import { startupLog } from '@/src/utils/driverStartupTrace';
 
 export type DriverFlowTag =
   | 'GO_ONLINE_START'
+  | 'GO_ONLINE_OPTIMISTIC_UI'
   | 'GO_ONLINE_CONFIRMED'
   | 'GO_ONLINE_FAILED'
   | 'GO_ONLINE_RESULT'

@@ -96,7 +96,7 @@ type TopupState =
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function RiderWalletScreen() {
   const toast = useErrorToast();
-  const { user } = useAppStore();
+  const user = useAppStore((s) => s.user);
   const walletEnabled = useWalletEnabled();
   const { userId: uid, canCallAuthedApi } = useAuthedUserId();
   const tabPad = useTabBottomPad(8);

@@ -3,6 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse as FJSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from typing import Set
 import os
@@ -150,6 +151,8 @@ from routers.auth import auth_router, send_otp as router_send_otp, ensure_otp_in
 from routers.bidding import bidding_router
 from routers.payments import payments_router, set_payments_shared_functions, set_payments_fare_estimate_store
 from routers.realtime_dispatch import realtime_dispatch_router
+from routers.connect_realtime import connect_realtime_router
+from realtime_platform.gateway import realtime_gateway_router
 from routers.voice import voice_router
 from enforcement_system import enforcement_router, record_violation, check_user_status
 from driver_compliance import compliance_router, start_compliance_background_tasks
@@ -1324,15 +1327,16 @@ async def get_directions_from_google(
         }
         if stop_lat is not None and stop_lng is not None:
             params["waypoints"] = f"{stop_lat},{stop_lng}"
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, params=params, timeout=10.0)
-            data = response.json()
+        from http_client import get_http_client
+
+        client = get_http_client()
+        response = await client.get(url, params=params, timeout=10.0)
+        data = response.json()
 
         if data.get("status") != "OK":
-            async with httpx.AsyncClient() as client:
-                retry_params = {k: v for k, v in params.items() if k != "departure_time"}
-                response = await client.get(url, params=retry_params, timeout=10.0)
-                data = response.json()
+            retry_params = {k: v for k, v in params.items() if k != "departure_time"}
+            response = await client.get(url, params=retry_params, timeout=10.0)
+            data = response.json()
 
         if data.get("status") == "OK":
             route = data["routes"][0]
@@ -1373,9 +1377,11 @@ async def get_directions_from_google(
             "routingPreference": "TRAFFIC_AWARE"
         }
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, headers=headers, json=body, timeout=10.0)
-            data = response.json()
+        from http_client import get_http_client
+
+        client = get_http_client()
+        response = await client.post(url, headers=headers, json=body, timeout=10.0)
+        data = response.json()
 
         if "routes" in data and len(data["routes"]) > 0:
             route = data["routes"][0]
@@ -1672,24 +1678,7 @@ async def get_active_trip(user_id: str, request: Request):
         if not trip:
             return {"active": False}
 
-        # Heal legacy cash trips stuck on payment pending (cash is collected at drop-off).
-        try:
-            from wallet_trip_helpers import is_cash_payment_method
-
-            if (
-                trip.get("status") == "completed"
-                and str(trip.get("payment_status") or "").lower() == "pending"
-                and is_cash_payment_method(trip.get("payment_method"))
-            ):
-                paid_at = datetime.now(timezone.utc)
-                await db.trips.update_one(
-                    {"id": trip["id"]},
-                    {"$set": {"payment_status": "completed", "paid_at": paid_at}},
-                )
-                trip["payment_status"] = "completed"
-                trip["paid_at"] = paid_at.isoformat()
-        except Exception:
-            pass
+        # Cash stays pending until driver confirms receipt — do not auto-heal.
 
         if trip.get("status") == "completed" and str(trip.get("payment_status") or "").lower() == "completed":
             return {"active": False}
@@ -1999,6 +1988,8 @@ app.include_router(compliance_router)
 from routers.chat import chat_router, start_call_session_cleanup_task
 app.include_router(chat_router)
 app.include_router(realtime_dispatch_router)
+app.include_router(connect_realtime_router)
+app.include_router(realtime_gateway_router)
 
 from routers.users import users_router
 app.include_router(users_router)
@@ -2142,15 +2133,21 @@ async def _stranded_trip_cleanup_loop():
             stale_statuses = [
                 "pending", "pending_driver_offers", "searching",
             ]
+            stale_filter = {
+                "status": {"$in": stale_statuses},
+                "$or": [
+                    {"created_at": {"$lt": cutoff}},
+                    {"created_at": {"$lt": cutoff_naive}},
+                    {"created_at": {"$lt": cutoff.isoformat()}},
+                ],
+            }
+            # Capture trips before expire so wallet holds can be released.
+            stale_trips = await db.trips.find(
+                stale_filter,
+                {"_id": 0, "id": 1, "rider_id": 1, "payment_method": 1},
+            ).to_list(200)
             result = await db.trips.update_many(
-                {
-                    "status": {"$in": stale_statuses},
-                    "$or": [
-                        {"created_at": {"$lt": cutoff}},
-                        {"created_at": {"$lt": cutoff_naive}},
-                        {"created_at": {"$lt": cutoff.isoformat()}},
-                    ],
-                },
+                stale_filter,
                 {
                     "$set": {
                         "status": "expired",
@@ -2161,6 +2158,19 @@ async def _stranded_trip_cleanup_loop():
             )
             if result.modified_count:
                 logger.info("Stranded trip cleanup: expired %d stuck trips", result.modified_count)
+                try:
+                    from wallet_ops import release_rider_wallet_hold
+                    from wallet_trip_helpers import is_wallet_payment_method
+
+                    for t in stale_trips:
+                        if not is_wallet_payment_method(t.get("payment_method")):
+                            continue
+                        rid = t.get("rider_id")
+                        tid = t.get("id")
+                        if rid and tid:
+                            await release_rider_wallet_hold(db, rid, tid)
+                except Exception:
+                    logger.exception("stranded_trip_hold_release")
 
             # Also close stale trip_offers
             offer_cutoff = datetime.now(timezone.utc) - timedelta(minutes=6)
@@ -2410,6 +2420,25 @@ async def seed_promo_codes():
     set_payments_fare_estimate_store(fare_estimate_store)
     asyncio.create_task(_deferred_startup())
     asyncio.create_task(_mongo_keepalive_loop())
+    # Optional native gRPC RidePush (set NEXRYDE_GRPC_PORT). HTTPS Connect-SSE is always on.
+    try:
+        from grpc_ride_push import start_grpc_ride_push_if_configured
+
+        asyncio.create_task(start_grpc_ride_push_if_configured())
+    except Exception:
+        logger.exception("grpc_ride_push startup schedule failed")
+    try:
+        from realtime_platform.outbox_worker import start_outbox_worker
+
+        start_outbox_worker()
+        try:
+            from realtime_platform.guardians_worker import start_guardians_worker
+
+            start_guardians_worker()
+        except Exception:
+            logger.exception("guardians worker start failed")
+    except Exception:
+        logger.exception("outbox worker startup failed")
 
 
 async def _mongo_keepalive_loop():
@@ -2604,6 +2633,8 @@ app.add_middleware(AuthMiddleware)
 app.add_middleware(ResponseTimingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestIdMiddleware)
+# Compress JSON payloads for mobile (Lagos cellular) — outer so responses are gzipped.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 _trusted_hosts_raw = os.environ.get("TRUSTED_HOSTS", "").strip()
 if _trusted_hosts_raw:
     _trusted_hosts = [h.strip() for h in _trusted_hosts_raw.split(",") if h.strip()]
@@ -2654,5 +2685,11 @@ async def serve_delete_account():
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    try:
+        from realtime_platform.outbox_worker import stop_outbox_worker
+
+        await stop_outbox_worker()
+    except Exception:
+        pass
     client.close()
 

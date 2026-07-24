@@ -10,9 +10,13 @@
 #   # 1. Create each secret (one-time):
 #   for SECRET in JWT_SECRET MONGODB_URI SQUAD_SECRET_KEY SQUAD_PUBLIC_KEY \
 #       SQUAD_WEBHOOK_SECRET ADMIN_PASSWORD REDIS_URL BREVO_API_KEY \
-#       GOOGLE_MAPS_API_KEY NEXRYDE_OPS_KEY ADMIN_OPS_KEY FIREBASE_SERVICE_ACCOUNT_JSON; do
+#       GOOGLE_MAPS_API_KEY NEXRYDE_OPS_KEY ADMIN_OPS_KEY SENTRY_DSN \
+#       FIREBASE_SERVICE_ACCOUNT_JSON; do
 #     gcloud secrets create $SECRET --replication-policy=automatic
 #   done
+#
+#   # Sentry (required for prod YAML — create before next deploy):
+#   echo -n "https://…@….ingest.sentry.io/…" | gcloud secrets versions add SENTRY_DSN --data-file=-
 #
 #   # 2. Populate values:
 #   echo -n "$(openssl rand -hex 32)" | gcloud secrets versions add JWT_SECRET --data-file=-
@@ -55,10 +59,9 @@ spec:
   template:
     metadata:
       annotations:
-        autoscaling.knative.dev/minScale: "1"
-        autoscaling.knative.dev/maxScale: "10"
-        # Keep one warm instance (minScale: 1) — no cold starts for go-online / matching.
-        # Idle cost savings: throttle CPU between requests; no startup CPU boost.
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "2"
+        # STANDBY — primary prod is africa-south1. Keep warm-zero for rollback only.
         run.googleapis.com/startup-cpu-boost: "false"
         run.googleapis.com/cpu-throttling: "true"
         # Private access to Memorystore Redis for rate limits, realtime fanout, and polling cache.
@@ -73,8 +76,8 @@ spec:
             - containerPort: 8080
           resources:
             limits:
-              cpu: "1"
-              memory: 512Mi
+              cpu: "2"
+              memory: 1Gi
 
           # ── All env vars in one flat list ─────────────────────────────────
           env:
@@ -84,9 +87,57 @@ spec:
             - name: DB_NAME
               value: nexryde_db
             - name: MONGO_MAX_POOL_SIZE
-              value: "25"
+              value: "40"
+            - name: NEXRYDE_REALTIME_PLATFORM
+              value: "true"
+            - name: NEXRYDE_EVENT_BUS
+              value: "kafka"
+            - name: NEXRYDE_OUTBOX_WORKER
+              value: "false"
+            # Saga replay owned by nexryde-kafka-worker
+            - name: NEXRYDE_SAGA_INLINE
+              value: "false"
+            - name: NEXRYDE_BATCH_MATCHING
+              value: "true"
+            - name: NEXRYDE_MATCH_BATCH_MS
+              value: "800"
+            - name: NEXRYDE_STREAM_SURGE
+              value: "true"
+            - name: NEXRYDE_SURGE_WINDOW_SEC
+              value: "60"
+            - name: NEXRYDE_GUARDIANS
+              value: "true"
+            - name: NEXRYDE_GUARDIAN_INTERVAL_SEC
+              value: "20"
+            - name: KAFKA_CLIENT_ID
+              value: nexryde-backend
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SASL_SSL
+            - name: KAFKA_SASL_MECHANISM
+              value: OAUTHBEARER
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              valueFrom:
+                secretKeyRef:
+                  name: KAFKA_BOOTSTRAP_SERVERS
+                  key: latest
+            - name: RT_HEARTBEAT_INTERVAL_SEC
+              value: "20"
             - name: JWT_EXPIRY_HOURS
               value: "24"
+            - name: ADMIN_SESSION_TTL_HOURS
+              value: "8"
+            - name: ADMIN_MFA_REQUIRED
+              value: "true"
+            # Emergency SMS: after creating Secret Manager TERMII_API_KEY, add:
+            #   - name: TERMII_API_KEY
+            #     valueFrom: { secretKeyRef: { name: TERMII_API_KEY, key: latest } }
+            #   - name: SMS_PROVIDER
+            #     value: "termii"
+            - name: TERMII_SENDER_ID
+              value: "NEXRYDE"
+            # Optional: comma-separated IPs (Cloud Run sees X-Forwarded-For). Empty = allow all.
+            - name: ADMIN_IP_WHITELIST
+              value: ""
             - name: ADMIN_EMAIL
               value: admin@admoblordgroup.com
             - name: CORS_ORIGINS
@@ -193,7 +244,11 @@ spec:
                 secretKeyRef:
                   name: ADMIN_OPS_KEY
                   key: latest
-            # SENTRY_DSN: add secret once Sentry project is created (P3 item)
+            - name: SENTRY_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: SENTRY_DSN
+                  key: latest
 
           volumeMounts:
             - name: firebase-service-account

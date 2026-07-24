@@ -68,13 +68,19 @@ export function DriverCarMarker({
     }),
   ).current;
 
+  // Android needs a brief view-tracking window so the custom marker bitmap
+  // actually rasterizes — but the position is driven natively by AnimatedRegion
+  // and rotation is a native prop, so we must NOT re-capture on every GPS tick
+  // (that was pinning tracksViewChanges on the whole drive = major map jank).
+  // Only re-capture on mount and when the body content can actually change
+  // (the moving/arrow state).
   const [selfCapture, setSelfCapture] = useState(ANDROID);
   useEffect(() => {
     if (!ANDROID) return;
     setSelfCapture(true);
     const t = setTimeout(() => setSelfCapture(false), 3000);
     return () => clearTimeout(t);
-  }, [lat, lng]);
+  }, [moving]);
 
   useEffect(() => {
     const glowLoop = Animated.loop(

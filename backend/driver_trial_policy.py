@@ -8,7 +8,9 @@ Per-driver overrides live on ``driver_profiles.trial_config``::
     { "trip_limit": 20, "day_limit": null }  # grandfathered (no day cap)
 
 Day clock starts at ``driver_profiles.trial_first_online_at`` (first successful go-online).
-Trial trips count **completed** trips only.
+Trial trips count **completed** trips within the trial window only (since subscription
+``trial_start_date``, else first go-online) — not an unbounded lifetime total, and not
+only trips after first-online when the trial began earlier.
 """
 from __future__ import annotations
 
@@ -145,8 +147,63 @@ async def record_first_go_online(driver_id: str) -> Optional[datetime]:
     return now
 
 
-async def count_completed_trial_trips(driver_id: str) -> int:
-    return await db.trips.count_documents({"driver_id": driver_id, "status": "completed"})
+async def count_completed_trial_trips(
+    driver_id: str,
+    *,
+    since: Optional[datetime] = None,
+) -> int:
+    """Count completed trips that count toward the free trial.
+
+    When ``since`` is set (trial start / first go-online), only trips completed
+    on or after that instant count — not the driver's lifetime total.
+    When ``since`` is None the trial clock has not started → 0.
+    """
+    if since is None:
+        return 0
+    cutoff = _naive_utc(since) if isinstance(since, datetime) else since
+    if not isinstance(cutoff, datetime):
+        return 0
+    cutoff_iso = cutoff.isoformat()
+    return await db.trips.count_documents(
+        {
+            "driver_id": driver_id,
+            "status": "completed",
+            "$or": [
+                {"completed_at": {"$gte": cutoff}},
+                {"completed_at": {"$gte": cutoff_iso}},
+                {
+                    "$and": [
+                        {"$or": [{"completed_at": {"$exists": False}}, {"completed_at": None}]},
+                        {"created_at": {"$gte": cutoff}},
+                    ]
+                },
+                {
+                    "$and": [
+                        {"$or": [{"completed_at": {"$exists": False}}, {"completed_at": None}]},
+                        {"created_at": {"$gte": cutoff_iso}},
+                    ]
+                },
+            ],
+        }
+    )
+
+
+def _trial_window_start(profile: dict, subscription: Optional[dict] = None) -> Optional[datetime]:
+    """Start of the trip-count window for the current trial.
+
+    Prefer subscription ``trial_start_date`` (when the trial record began) so
+    completed trips during the trial are not dropped if ``trial_first_online_at``
+    was stamped later. Day-cap still uses first-online separately.
+    """
+    if subscription:
+        for key in ("trial_start_date", "start_date", "created_at"):
+            parsed = _parse_dt(subscription.get(key))
+            if parsed is not None:
+                return parsed
+    first_online = _parse_dt(profile.get("trial_first_online_at"))
+    if first_online is not None:
+        return first_online
+    return None
 
 
 async def compute_trial_snapshot(driver_id: str, subscription: Optional[dict] = None) -> dict[str, Any]:
@@ -157,7 +214,8 @@ async def compute_trial_snapshot(driver_id: str, subscription: Optional[dict] = 
 
     trip_limit = int(cfg["trip_limit"])
     day_limit = cfg.get("day_limit")
-    completed = await count_completed_trial_trips(driver_id)
+    window_start = _trial_window_start(profile, subscription)
+    completed = await count_completed_trial_trips(driver_id, since=window_start)
     trips_remaining = max(0, trip_limit - completed)
 
     days_remaining: Optional[int] = None

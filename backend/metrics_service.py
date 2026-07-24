@@ -61,6 +61,10 @@ def track_ride_completed(fare_ngn: float = 0) -> None:
     inc("nexryde_revenue_ngn_total", fare_ngn)
 
 
+def track_payment_confirmed() -> None:
+    inc("nexryde_payment_completions_total")
+
+
 def track_ride_failed(reason: str = "unknown") -> None:
     inc("nexryde_ride_failures_total", labels={"reason": reason})
 
@@ -134,6 +138,23 @@ def _prometheus_text() -> str:
             lines.append(f'nexryde_circuit_breaker_open{{service="{s["name"]}"}} {open_val}')
             lines.append(f'nexryde_circuit_breaker_failures{{service="{s["name"]}"}} {s["failures"]}')
     except ImportError:
+        pass
+
+    # Realtime platform in-process counters / latencies
+    try:
+        from realtime_platform.observability import snapshot
+
+        snap = snapshot()
+        for k, v in sorted((snap.get("counters") or {}).items()):
+            safe = "".join(c if c.isalnum() or c in "_:" else "_" for c in str(k))
+            lines.append(f"nexryde_rt_counter{{name=\"{safe}\"}} {float(v)}")
+        for k, lat in sorted((snap.get("latency_ms") or {}).items()):
+            if not isinstance(lat, dict):
+                continue
+            safe = "".join(c if c.isalnum() or c in "_:" else "_" for c in str(k))
+            if lat.get("p95") is not None:
+                lines.append(f"nexryde_rt_latency_p95_ms{{name=\"{safe}\"}} {float(lat['p95'])}")
+    except Exception:
         pass
 
     return "\n".join(lines) + "\n"

@@ -101,6 +101,14 @@ export async function markDriverOnboardingCached(driverId: string): Promise<void
   }
 }
 
+export async function clearDriverOnboardingCached(driverId: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(driverOnboardedKey(driverId));
+  } catch {
+    /* non-fatal */
+  }
+}
+
 export async function clearSessionRoutingCache(userId?: string | null): Promise<void> {
   try {
     if (userId) {
@@ -164,7 +172,12 @@ export function syncAuthStatusInBackground(
         );
         if (res.ok) {
           const data = await res.json();
-          if (data?.completed) await markDriverOnboardingCached(id);
+          if (data?.completed) {
+            await markDriverOnboardingCached(id);
+          } else {
+            // Poisoned cache from older clients sent unfinished drivers to Home.
+            await clearDriverOnboardingCached(id);
+          }
           persistDriverVerificationFromRouting(id, data?.verification_status);
         }
       } catch {
@@ -213,6 +226,7 @@ export async function routeAuthedUserFirstLogin(
           return;
         }
         if (status?.step === 'documents') {
+          await clearDriverOnboardingCached(id);
           router.replace({
             pathname: '/(auth)/driver-documents',
             params: driverDocumentsRouteParams(loggedUser),
@@ -221,26 +235,41 @@ export async function routeAuthedUserFirstLogin(
         }
         if (status?.step === 'documents_rejected' || status?.step === 'documents_review') {
           if (status?.step === 'documents_rejected') {
+            await clearDriverOnboardingCached(id);
             router.replace({
               pathname: '/(auth)/driver-verification-status',
               params: driverDocumentsRouteParams(loggedUser),
             } as any);
           } else {
+            // Docs submitted — limited Home until approval (option 1).
+            await markDriverOnboardingCached(id);
             router.replace(homeRouteForRole('driver') as any);
           }
           return;
         }
         if (status?.step === 'profile') {
+          await clearDriverOnboardingCached(id);
           router.replace({
             pathname: '/(auth)/driver-profile',
             params: driverProfileRouteParams(loggedUser),
           } as any);
           return;
         }
+        // Unknown incomplete step — never dump unfinished drivers on Home.
+        await clearDriverOnboardingCached(id);
+        router.replace({
+          pathname: '/(auth)/driver-documents',
+          params: driverDocumentsRouteParams(loggedUser),
+        } as any);
+        return;
       }
       router.replace(homeRouteForRole('driver') as any);
     } catch {
-      router.replace(homeRouteForRole('driver') as any);
+      // Network blip on first login: prefer documents over a fake Home.
+      router.replace({
+        pathname: '/(auth)/driver-documents',
+        params: driverDocumentsRouteParams(loggedUser),
+      } as any);
     }
     return;
   }
@@ -310,10 +339,23 @@ export async function routeAuthedUser(
         replaceLegalTermsIfNeeded(router, 'driver');
         return;
       }
+      // Never trust onboarded cache alone — unfinished drivers must hit status routing.
+      // Instant Home only when local verification fact is approved (Uber-grade gate).
       if (await isDriverOnboardingCached(id)) {
-        routeToHomeInstant(router, role);
-        syncAuthStatusInBackground(loggedUser, resolvedToken);
-        return;
+        try {
+          const { readDriverVerificationFact } = await import(
+            '@/src/services/driverVerificationFact'
+          );
+          const fact = await readDriverVerificationFact(id);
+          if (fact?.verificationStatus === 'approved') {
+            routeToHomeInstant(router, role);
+            syncAuthStatusInBackground(loggedUser, resolvedToken);
+            return;
+          }
+        } catch {
+          /* fall through to status check */
+        }
+        await clearDriverOnboardingCached(id);
       }
     }
   }

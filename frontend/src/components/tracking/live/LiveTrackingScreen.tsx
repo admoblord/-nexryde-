@@ -528,7 +528,7 @@ export default function LiveTrackingScreen() {
     if (Platform.OS !== 'web') {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
-    const t = setTimeout(() => setMatchedBeat(null), 1500);
+    const t = setTimeout(() => setMatchedBeat(null), 700);
     return () => clearTimeout(t);
   }, [isFindingPhase, isDriverAssigned, driverName]);
 

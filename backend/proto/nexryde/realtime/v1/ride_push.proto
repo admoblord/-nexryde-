@@ -1,0 +1,38 @@
+// NexRyde RidePush — Uber RAMEN-style realtime contract.
+// Served as:
+//   1) Connect-RPC / SSE over HTTPS (HTTP/2 + HTTP/3 via Cronet on Android)
+//   2) Native gRPC (optional NEXRYDE_GRPC_PORT) for future native clients
+syntax = "proto3";
+
+package nexryde.realtime.v1;
+
+option py_generic_services = false;
+
+message SubscribeRequest {
+  string user_id = 1;
+  string role = 2;          // "driver" | "rider"
+  string access_token = 3;
+}
+
+message RideEvent {
+  string type = 1;          // new_offer | trip_update | loc | ack_ok | ping
+  string json_payload = 2;  // compact JSON body (loc / offer envelope)
+  int64 server_ms = 3;
+}
+
+message AckOfferRequest {
+  string driver_id = 1;
+  string offer_id = 2;
+  string access_token = 3;
+}
+
+message AckOfferResponse {
+  bool ok = 1;
+  string offer_id = 2;
+}
+
+service RidePush {
+  // Bidirectional Uber-style push channel (gRPC). HTTP clients use Connect SSE Subscribe.
+  rpc Subscribe(SubscribeRequest) returns (stream RideEvent);
+  rpc AckOffer(AckOfferRequest) returns (AckOfferResponse);
+}

@@ -197,13 +197,18 @@ function stateToWarnExposure(state: NetworkState): BannerExposure | null {
 
 function isRideOpsHealthy(now: number = Date.now()): boolean {
   if (snapshot.socketAlive === true) return true;
-  if (snapshot.heartbeatAlive === true) return true;
-  if (metrics.lastLocationOkAt != null && now - metrics.lastLocationOkAt < RIDE_OPS_HEALTHY_MS) {
-    return true;
-  }
+  // A recent offer or location upload proves the realtime path is actually flowing.
   if (metrics.lastOfferAt != null && now - metrics.lastOfferAt < RIDE_OPS_HEALTHY_MS) {
     return true;
   }
+  if (metrics.lastLocationOkAt != null && now - metrics.lastLocationOkAt < RIDE_OPS_HEALTHY_MS) {
+    return true;
+  }
+  // Heartbeat proves the backend is REACHABLE, not that the offer/trip socket is
+  // alive. Keep it as a false-offline guard while socket state is unknown/transient
+  // (null), but never let it mask a socket that has explicitly reported dead —
+  // otherwise a driver with a dead offers channel looks "healthy" and misses rides.
+  if (snapshot.heartbeatAlive === true && snapshot.socketAlive !== false) return true;
   return false;
 }
 
@@ -562,6 +567,11 @@ function syncHealthTimer(): void {
   }
 }
 
+let backgroundEnteredAt = 0;
+/** Past ~1 min backgrounded, mobile NAT/idle timeouts routinely leave a dead
+ *  half-open socket that still reads OPEN — force a fresh reconnect in that case. */
+const STALE_SOCKET_BG_MS = 60_000;
+
 function onAppStateChange(next: AppStateStatus): void {
   const foreground = next === 'active';
   if (metrics.appInForeground === foreground) return;
@@ -569,7 +579,21 @@ function onAppStateChange(next: AppStateStatus): void {
   logNet('app_state', { foreground });
   syncHealthTimer();
   if (foreground) {
+    const bgMs = backgroundEnteredAt ? Date.now() - backgroundEnteredAt : 0;
+    const force = bgMs >= STALE_SOCKET_BG_MS;
     void pingBackend();
+    // Wake TLS + Mongo pool before the next ride action; nudge live sockets.
+    void import('@/src/utils/warmBackend')
+      .then((m) => m.warmBackendConnection(true))
+      .catch(() => {});
+    void import('@/src/services/driverOffersSocket')
+      .then((m) => m.driverOffersSocket.nudgeReconnect({ force }))
+      .catch(() => {});
+    void import('@/src/services/riderTripSocket')
+      .then((m) => m.riderTripSocket.nudgeReconnect({ force }))
+      .catch(() => {});
+  } else {
+    backgroundEnteredAt = Date.now();
   }
   evaluateStateMachine();
 }

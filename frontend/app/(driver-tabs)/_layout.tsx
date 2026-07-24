@@ -49,7 +49,9 @@ export default function DriverTabLayout() {
   const { colors, isDark } = useThemeColors();
   const allowed = useRequireRole('driver');
   const hasHydrated = usePersistStoreReady();
-  const { isOnline: isDriverOnline } = useAppStore();
+  // Scoped selector — the tab layout only cares about online state; a
+  // whole-store subscription re-rendered all tab chrome on every store tick.
+  const isDriverOnline = useAppStore((s) => s.isOnline);
   const { userId } = useAuthedUserId();
   const [unreadCount, setUnreadCount] = useState(0);
   const insets = useSafeAreaInsets();

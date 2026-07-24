@@ -54,7 +54,10 @@ export default function ModernRiderHome() {
   const isFocused = useIsFocused();
   const { canCallAuthedApi } = useAuthedApiReady();
   const { userId: riderId } = useAuthedUserId();
-  const { user, currentTrip, setCurrentTrip } = useAppStore();
+  // Scoped selectors — avoid re-rendering Home on unrelated store changes.
+  const user = useAppStore((s) => s.user);
+  const currentTrip = useAppStore((s) => s.currentTrip);
+  const setCurrentTrip = useAppStore((s) => s.setCurrentTrip);
   const firstName =
     (user?.name && String(user.name).trim().split(/\s+/)[0]) || 'there';
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -136,12 +139,18 @@ export default function ModernRiderHome() {
     void enforceRiderVerification();
   }, [canCallAuthedApi, router, riderId, segments, user?.role, user?.terms_accepted, user?.terms_version, user?.privacy_accepted, user?.privacy_version]);
 
+  const lastHomeFocusSyncRef = useRef(0);
   useFocusEffect(
     useCallback(() => {
       if (!riderId || !canCallAuthedApi) {
         setSavedPlaces([]);
         return;
       }
+      // Tab-switch back to Home shouldn't repeat this network + storage work
+      // every time — throttle so rapid tab hopping stays snappy.
+      const now = Date.now();
+      if (now - lastHomeFocusSyncRef.current < 15000) return;
+      lastHomeFocusSyncRef.current = now;
       void loadRiderSavedPlaces(riderId).then(setSavedPlaces).catch(() => setSavedPlaces([]));
       void pullAndApplyActiveTrip(riderId);
     }, [riderId, canCallAuthedApi]),

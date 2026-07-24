@@ -284,7 +284,9 @@ def test_unverified_verify_result_never_credits(fake_db):
         )
     )
     assert res["credited"] is False
-    assert res.get("reason") == "squad_verify_not_success"
+    # An unverified Squad result must never credit; the intent is reset to pending
+    # for a later retry (reason label reflects "not confirmed yet").
+    assert res.get("reason") == "squad_not_confirmed_yet"
     user = asyncio.run(fake_db.users.find_one({"id": "u1"}))
     assert user["wallet_balance"] == 1000.0
 

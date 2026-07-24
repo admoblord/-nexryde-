@@ -33,8 +33,9 @@ def test_is_cash_payment_method():
 
 
 def test_rider_must_confirm_payment():
-    assert rider_must_confirm_payment(None) is False
-    assert rider_must_confirm_payment("cash") is False
+    # All methods leave payment pending after complete (cash = driver confirms).
+    assert rider_must_confirm_payment(None) is True
+    assert rider_must_confirm_payment("cash") is True
     assert rider_must_confirm_payment("wallet") is True
     assert rider_must_confirm_payment("transfer") is True
-    assert rider_must_confirm_payment("card") is False
+    assert rider_must_confirm_payment("card") is True

@@ -73,13 +73,28 @@ has(
 );
 has(
   'app/rider/book.tsx',
+  /startInstantPickupEngine\(/,
+  'book screen uses Instant Pickup Detection Engine',
+);
+has(
+  'app/rider/book.tsx',
+  /DETECTING_PICKUP|Detecting your pickup/,
+  'shows detecting-pickup loading copy (not raw coords)',
+);
+has(
+  'app/rider/book.tsx',
   /manualPickupRef/,
   'manual pickup selection is never overwritten by GPS',
 );
 has(
-  'app/rider/book.tsx',
-  /haversineMeters\(lastG\.lat, lastG\.lng/,
-  'reverse geocode only re-runs on real movement',
+  'src/services/instantPickupEngine.ts',
+  /PICKUP_MOVE_THRESHOLD_M\s*=\s*25/,
+  'reverse geocode only re-runs on real movement (~25m)',
+);
+has(
+  'src/services/instantPickupEngine.ts',
+  /isRawLatLngLabel/,
+  'engine rejects raw lat/lng display labels',
 );
 has(
   'app/rider/book.tsx',
@@ -90,6 +105,11 @@ missing(
   'app/rider/book.tsx',
   /Location\.Accuracy\.Lowest/,
   'low-accuracy one-shot pickup detection removed',
+);
+missing(
+  'app/rider/book.tsx',
+  /toFixed\(4\),\s*`|\$\{fLat\.toFixed/,
+  'book screen never falls back to raw lat/lng strings',
 );
 
 console.log(fails.length ? `\nFAIL (${fails.length})` : '\nPASS');

@@ -6,6 +6,12 @@ import { getAuthHeaders } from '@/src/services/api';
 import { authedFetch } from '@/src/utils/sessionRefresh';
 import { fetchWithTimeout } from '@/src/utils/fetchWithTimeout';
 import {
+  adaptiveTimeoutMs,
+  coalesceGetKey,
+  httpRetryBackoffMs,
+  withGetCoalescing,
+} from '@/src/utils/fastConnection';
+import {
   getPlatformConnectionSnapshot,
   reportPlatformConnectionSignal,
 } from '@/src/services/platformConnectionManager';
@@ -19,14 +25,12 @@ export type ManagedFetchOptions = RequestInit & {
   authed?: boolean;
   /** Skip retry on 4xx (except 408/429) */
   retryOnClientError?: boolean;
+  /** Disable GET in-flight coalescing (default: coalesce safe GETs) */
+  coalesce?: boolean;
 };
 
 const DEFAULT_TIMEOUT_MS = 12_000;
-const MAX_RETRIES = 3;
-
-function backoffMs(attempt: number): number {
-  return Math.min(30_000, 500 * Math.pow(2, attempt));
-}
+const MAX_RETRIES = 2;
 
 export async function isNetworkReachable(): Promise<boolean> {
   // Only hard OFFLINE blocks ride ops — DEGRADED / RECONNECTING stay operational.
@@ -40,17 +44,18 @@ function shouldRetry(status: number, attempt: number, max: number): boolean {
 }
 
 /**
- * Fetch with timeout + exponential backoff. Never hangs indefinitely.
+ * Fetch with adaptive timeout + fast backoff + GET coalescing. Never hangs indefinitely.
  */
 export async function managedFetch(
   url: string,
   options: ManagedFetchOptions = {},
 ): Promise<Response> {
   const {
-    timeoutMs = DEFAULT_TIMEOUT_MS,
+    timeoutMs,
     retries = MAX_RETRIES,
     authed = false,
     retryOnClientError = false,
+    coalesce = true,
     ...init
   } = options;
 
@@ -59,42 +64,53 @@ export async function managedFetch(
     throw new Error('OFFLINE');
   }
 
-  let lastError: unknown;
-  // Retries of one logical request count as a single connectivity event (report once).
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const res = authed
-        ? await authedFetch(url, { ...init, timeoutMs } as RequestInit & { timeoutMs?: number })
-        : await fetchWithTimeout(url, {
-            ...init,
-            timeoutMs,
-            headers: { ...getAuthHeaders(), ...(init.headers as Record<string, string>) },
-          });
+  const effectiveTimeout = timeoutMs ?? adaptiveTimeoutMs(DEFAULT_TIMEOUT_MS);
+  const coalesceKey =
+    coalesce && !authed ? coalesceGetKey(init.method, url) : null;
 
-      if (!res.ok) {
-        const clientErr = res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429;
-        if (clientErr && !retryOnClientError) {
-          // Not a connectivity failure — do not feed NetworkStateManager.
-          return res;
+  return withGetCoalescing(coalesceKey, async () => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const res = authed
+          ? await authedFetch(url, {
+              ...init,
+              timeoutMs: effectiveTimeout,
+            } as RequestInit & { timeoutMs?: number })
+          : await fetchWithTimeout(url, {
+              ...init,
+              timeoutMs: effectiveTimeout,
+              headers: { ...getAuthHeaders(), ...(init.headers as Record<string, string>) },
+            });
+
+        if (!res.ok) {
+          const clientErr =
+            res.status >= 400 &&
+            res.status < 500 &&
+            res.status !== 408 &&
+            res.status !== 429;
+          if (clientErr && !retryOnClientError) {
+            return res;
+          }
+          if (!shouldRetry(res.status, attempt, retries)) {
+            reportPlatformConnectionSignal('backend', false);
+            return res;
+          }
+          lastError = new Error(`HTTP ${res.status}`);
+          await sleep(httpRetryBackoffMs(attempt));
+          continue;
         }
-        if (!shouldRetry(res.status, attempt, retries)) {
-          reportPlatformConnectionSignal('backend', false);
-          return res;
-        }
-        lastError = new Error(`HTTP ${res.status}`);
-        await sleep(backoffMs(attempt));
-        continue;
+        reportPlatformConnectionSignal('backend', true);
+        return res;
+      } catch (err) {
+        lastError = err;
+        if (attempt >= retries) break;
+        await sleep(httpRetryBackoffMs(attempt));
       }
-      reportPlatformConnectionSignal('backend', true);
-      return res;
-    } catch (err) {
-      lastError = err;
-      if (attempt >= retries) break;
-      await sleep(backoffMs(attempt));
     }
-  }
-  reportPlatformConnectionSignal('backend', false);
-  throw lastError instanceof Error ? lastError : new Error('Request failed');
+    reportPlatformConnectionSignal('backend', false);
+    throw lastError instanceof Error ? lastError : new Error('Request failed');
+  });
 }
 
 export async function managedJson<T>(

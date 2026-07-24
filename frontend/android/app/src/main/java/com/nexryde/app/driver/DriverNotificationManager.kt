@@ -92,6 +92,9 @@ class DriverNotificationManager(private val context: Context) {
       .setAutoCancel(false)
       .build()
     notificationManager.notify(OFFER_NOTIFICATION_ID, notification)
+    // Do NOT startActivity here — FGS presentRideAlert owns the single launch.
+    // Double-launch stacked two excludeFromRecents activities → finish one → launcher.
+    // FSI PendingIntent above remains as the system heads-up / lock-screen path.
   }
 
   fun cancelOfferNotification() {

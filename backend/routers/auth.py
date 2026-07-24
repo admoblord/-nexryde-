@@ -606,9 +606,10 @@ async def _create_and_send_email_otp(email: str) -> None:
     await save_email_otp_record(normalized, otp_code)
 
 async def send_sms_notification(phone: str, message: str):
-    """Outbound SMS disabled. Log for support; use in-app/push for delivery."""
-    logger.debug("SMS notification skipped (no SMS provider configured): phone=%s", phone[:8] if phone else "")
-    return False
+    """Outbound SMS via Termii/Twilio (see sms_service). Falls back to no-op when unset."""
+    from sms_service import send_sms
+
+    return await send_sms(phone, message, purpose="notification")
 
 async def send_driver_verification_notification(user_id: str, status: str, reason: str = None):
     """Send notification to driver about verification status"""
@@ -629,6 +630,10 @@ async def send_driver_verification_notification(user_id: str, status: str, reaso
             message = f"Hi {name}, your NEXRYDE driver verification was not approved. Reason: {reason or 'Documents did not meet requirements'}. Please re-submit your documents."
             push_title = "Action needed on your documents"
             push_body = f"Your verification needs attention: {reason or 'documents did not meet requirements'}. Tap to re-submit."
+        elif status == "recheck_required":
+            message = f"Hi {name}, NEXRYDE needs to re-check your driver documents. Reason: {reason or 'Manual recheck requested'}. You've been taken offline — please re-submit your documents to continue driving."
+            push_title = "Document re-check required"
+            push_body = f"Your documents need a re-check: {reason or 'manual recheck requested'}. Tap to re-submit and get back online."
         else:
             message = f"Hi {name}, your NEXRYDE driver verification is being reviewed. We'll notify you as soon as it's approved!"
             push_title = "Documents received — under review ✅"

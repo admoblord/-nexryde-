@@ -5,6 +5,8 @@
 import { getBackendWsBaseUrl, type RiderTripWsMessage } from '@/src/services/riderTripTypes';
 import { getValidToken } from '@/src/lib/tokenStore';
 import { reportPlatformConnectionSignal } from '@/src/services/platformConnectionManager';
+import { wsReconnectDelayMs } from '@/src/utils/fastConnection';
+import { expandUberRealtimePayload } from '@/src/utils/uberRealtimePayload';
 
 export { getBackendWsBaseUrl, type RiderTripWsMessage } from '@/src/services/riderTripTypes';
 
@@ -54,10 +56,12 @@ class RiderTripSocketManager {
   }
 
   /** Force reconnect after foreground / network restore. */
-  nudgeReconnect(): void {
+  nudgeReconnect(opts?: { force?: boolean }): void {
     if (!this.shouldStayConnected || !this.riderId || this.subscriberCount === 0) return;
     const rs = this.ws?.readyState;
-    if (rs === WebSocket.OPEN || rs === WebSocket.CONNECTING) return;
+    // force=true (long background) reopens even a socket that still reads OPEN — it
+    // is often a dead half-open link after mobile NAT/idle timeout.
+    if (!opts?.force && (rs === WebSocket.OPEN || rs === WebSocket.CONNECTING)) return;
     this.reconnectAttempts = 0;
     void this.openSocket({ force: true });
   }
@@ -97,7 +101,7 @@ class RiderTripSocketManager {
 
   private scheduleReconnect() {
     if (!this.shouldStayConnected || !this.riderId || this.subscriberCount === 0) return;
-    const delay = Math.min(30_000, 1000 * Math.pow(2, Math.min(this.reconnectAttempts, 6)));
+    const delay = wsReconnectDelayMs(this.reconnectAttempts);
     this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -130,7 +134,12 @@ class RiderTripSocketManager {
     }
 
     const token = await getValidToken();
-    if (!token || !this.shouldStayConnected || !this.riderId || gen !== this.connectGeneration) return;
+    if (!this.shouldStayConnected || !this.riderId || gen !== this.connectGeneration) return;
+    if (!token) {
+      // Transient token miss — schedule a backoff retry instead of dying silently.
+      this.scheduleReconnect();
+      return;
+    }
 
     const wsUrl = `${getBackendWsBaseUrl()}/api/ws/rider/trips/${encodeURIComponent(this.riderId)}?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(wsUrl);
@@ -153,8 +162,8 @@ class RiderTripSocketManager {
 
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data as string) as RiderTripWsMessage;
-        if (data.type === 'trip_update') this.emitTrip(data);
+        const data = expandUberRealtimePayload(JSON.parse(event.data as string));
+        if (data?.type === 'trip_update') this.emitTrip(data);
       } catch {
         /* ignore */
       }

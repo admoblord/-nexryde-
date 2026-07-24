@@ -118,7 +118,7 @@ async def ops_center(request: Request):
     ) = await asyncio.gather(
         _safe_count(lambda: db.driver_profiles.count_documents({"is_online": True})),
         _safe_count(lambda: db.driver_profiles.count_documents({})),
-        _safe_count(lambda: db.driver_profiles.count_documents({"verification_status": "pending"})),
+        _safe_count(lambda: db.driver_profiles.count_documents({"verification_status": {"$in": ["pending", "pending_review", "under_review"]}})),
         _safe_count(lambda: db.users.count_documents({"role": "rider"})),
         _safe_count(lambda: db.trips.count_documents({"status": {"$in": ["accepted", "arrived", "ongoing"]}})),
         _safe_count(lambda: db.trips.count_documents({"status": {"$in": ["pending", "pending_driver_offers"]}})),
@@ -434,13 +434,38 @@ async def reject_driver_application(verification_id: str, body: RejectDriverBody
         }},
     )
     if user_id:
-        await db.users.update_one({"id": user_id}, {"$set": {"verification_status": "rejected"}})
+        # Clear documents_verified too — a driver who was auto-approved
+        # (documents_verified=True) and is later rejected must not keep a stale
+        # "verified documents" flag that other checks could still trust.
+        await db.users.update_one(
+            {"id": user_id},
+            {"$set": {"verification_status": "rejected", "documents_verified": False}},
+        )
         await db.driver_profiles.update_one(
             {"user_id": user_id},
-            {"$set": {"verification_status": "rejected", "rejection_reason": body.reason}},
+            {"$set": {
+                "verification_status": "rejected",
+                "documents_verified": False,
+                "rejection_reason": body.reason,
+            }},
             upsert=True,
         )
     await _log_audit(request, "driver_rejected", "verification", verification_id, {"reason": body.reason})
+    # Mirror the per-driver verification audit trail so the audit-log endpoint
+    # reflects rejections done through this (admin-panel) route as well.
+    if user_id:
+        try:
+            from routers.drivers import _append_verification_audit_event
+            await _append_verification_audit_event(
+                driver_id=user_id,
+                verification_id=verification_id,
+                action="rejected",
+                actor_type="admin",
+                actor_id=admin_email or "admin",
+                details={"reason": body.reason},
+            )
+        except Exception as exc:
+            logger.warning("Driver reject audit-trail append skipped: %s", exc)
     notified = False
     if user_id and getattr(body, "notify", True):
         try:
@@ -629,16 +654,19 @@ class FeatureFlagsBody(BaseModel):
 
 @admin_ops_router.post("/admin/feature-flags")
 async def update_feature_flags(body: FeatureFlagsBody, request: Request):
-    from feature_flags import invalidate_feature_flags_cache
+    from feature_flags import FLAG_DEFAULTS, get_feature_flags, invalidate_feature_flags_cache
 
+    # Merge patch into current flags so kill-switch toggles never wipe siblings.
+    current = await get_feature_flags(db)
+    merged = {**FLAG_DEFAULTS, **current, **(body.flags or {})}
     await db.system_config.update_one(
         {"key": "feature_flags"},
-        {"$set": {"key": "feature_flags", "value": body.flags, "updated_at": datetime.now(timezone.utc)}},
+        {"$set": {"key": "feature_flags", "value": merged, "updated_at": datetime.now(timezone.utc)}},
         upsert=True,
     )
     invalidate_feature_flags_cache()
-    await _log_audit(request, "feature_flags_updated", "system", "feature_flags", body.flags)
-    return {"success": True, "flags": body.flags}
+    await _log_audit(request, "feature_flags_updated", "system", "feature_flags", merged)
+    return {"success": True, "flags": merged}
 
 
 @admin_ops_router.get("/admin/subscriptions")

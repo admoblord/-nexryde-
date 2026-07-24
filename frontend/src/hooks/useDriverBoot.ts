@@ -14,7 +14,10 @@ import {
   writeDriverBootCache,
   type DriverBootSnapshot,
 } from '@/src/services/driverBootCache';
-import { writeDriverVerificationFact } from '@/src/services/driverVerificationFact';
+import {
+  readDriverVerificationFact,
+  writeDriverVerificationFact,
+} from '@/src/services/driverVerificationFact';
 import { useDriverDisplayStore } from '@/src/store/driverDisplayStore';
 import {
   STARTUP_GLOBAL_WATCHDOG_MS,
@@ -79,7 +82,9 @@ function resolveVerificationStatus(
 ): string {
   const v = typeof raw === 'string' ? raw.trim() : '';
   if (v) return v;
-  if (opts.locked || !opts.completed) return 'pending_review';
+  // Incomplete onboarding without a server status = docs not submitted (not "under review").
+  if (!opts.completed) return 'not_submitted';
+  if (opts.locked) return 'pending_review';
   return 'pending_review';
 }
 
@@ -191,26 +196,41 @@ export function useDriverBoot({
     setIsGateOpen(true);
     setFromCache(false);
     setError(null);
-    if (driverId) {
-      syncDisplayStore(driverId, { displayHydrated: true });
-    }
+    // Do NOT mark displayHydrated without a known status — that used to flash
+    // "Checking your account…" forever when profile sync was slow/offline.
     startupLog('RENDER_COMPLETE', { fromCache: false, verificationStatus: null });
-  }, [driverId]);
+  }, []);
 
   const loadSubscriptionBackground = useCallback(async (locked: boolean, runId: number) => {
     if (runId !== runIdRef.current) return;
-    // One trial/subscription fetch per boot run — profile-hydrate and onboarding
-    // paths both try to trigger it; the first wins, the rest are no-ops.
+    // One in-flight trial/subscription fetch at a time. Failures clear the latch
+    // so a later hydrate/retry path can recover without an app restart.
     if (subscriptionLoadStartedRef.current) return;
     subscriptionLoadStartedRef.current = true;
     startupLog('SUBSCRIPTION_VERIFY_START');
-    const subRes = await timedStartupRequestOrNull(
-      'driver_subscription_status',
-      () => getDriverSubscriptionStatus(),
-      STARTUP_REQUEST_TIMEOUT_MS,
-    );
+
+    const attemptFetch = async (attempt: number) => {
+      const subRes = await timedStartupRequestOrNull(
+        'driver_subscription_status',
+        () => getDriverSubscriptionStatus(),
+        STARTUP_REQUEST_TIMEOUT_MS,
+      );
+      if (runId !== runIdRef.current) return null;
+      if (subRes) return subRes;
+      if (attempt < 2) {
+        startupLog('SUBSCRIPTION_VERIFY_RETRY', { attempt, error: 'timeout_or_fail' });
+        await new Promise((r) => setTimeout(r, 1500));
+        if (runId !== runIdRef.current) return null;
+        return attemptFetch(attempt + 1);
+      }
+      return null;
+    };
+
+    const subRes = await attemptFetch(1);
     if (runId !== runIdRef.current) return;
     if (!subRes) {
+      // Allow a later boot path / pull-to-retry to try again.
+      subscriptionLoadStartedRef.current = false;
       startupLog('SUBSCRIPTION_VERIFY_FAILED', { error: 'timeout_or_fail' });
       return;
     }
@@ -336,9 +356,23 @@ export function useDriverBoot({
           setLockedPendingApproval(true);
           setSubscriptionStatus('locked_until_approval');
           syncDisplayStore(driverId, { subscriptionStatus: 'locked_until_approval' });
-        } else if (!wasLocallyApproved) {
-          // Don't yank a known-approved driver into onboarding mid-session on a flaky payload.
-          onRedirectRef.current?.({ step, status });
+        } else {
+          // Docs / profile / terms incomplete — never keep them on Home.
+          // Clear poisoned "onboarded" cache from older clients that marked every tab visit complete.
+          void import('@/src/utils/sessionRouting').then(({ clearDriverOnboardingCached }) =>
+            clearDriverOnboardingCached(driverId),
+          );
+          // Only skip redirect for a known-approved local fact + unexpected non-docs step
+          // (protects against flaky mid-session payloads). Always redirect for documents.
+          const mustLeaveHome =
+            step === 'documents' ||
+            step === 'profile' ||
+            step === 'terms' ||
+            step === 'documents_rejected' ||
+            !wasLocallyApproved;
+          if (mustLeaveHome) {
+            onRedirectRef.current?.({ step, status });
+          }
         }
         resolveRefreshWaiters(true);
         return;
@@ -470,17 +504,9 @@ export function useDriverBoot({
           void loadSubscriptionBackground(false, runId);
         }
       } else if (!gateOpenRef.current) {
-        // No cache: leave verificationStatus null → brief "Checking your account…"
+        // No local fact yet — open the shell without a Checking latch. Profile/onboarding
+        // hydrate in background; Home shows the map + online switch (tap validates).
         openGateWithDefaults();
-        // Cap Checking UI at 10s — the profile fetch is the authoritative populator;
-        // if everything fails and we truly have no cached fact, surface retry.
-        setTimeout(() => {
-          if (runId !== runIdRef.current) return;
-          if (verificationStatusRef.current == null) {
-            startupLog('CHECKING_TIMEOUT', { afterMs: 10000 });
-            setError('Still confirming your account. Pull to retry, or check your connection.');
-          }
-        }, 10000);
       }
 
       setIsRefreshing(false);
@@ -514,8 +540,28 @@ export function useDriverBoot({
         displayHydrated: true,
       });
     }
+    // Durable fact may live only in AsyncStorage after process death — warm it
+    // before network so approved drivers never paint a Checking latch.
+    if (driverId) {
+      void readDriverVerificationFact(driverId).then((fact) => {
+        if (!fact?.verificationStatus) return;
+        if (verificationStatusRef.current === 'approved') return;
+        if (
+          fact.verificationStatus === 'approved' ||
+          verificationStatusRef.current == null
+        ) {
+          setVerificationStatus(fact.verificationStatus);
+          syncDisplayStore(driverId, {
+            verificationStatus: fact.verificationStatus,
+            displayHydrated: true,
+            ...(fact.verificationStatus === 'approved'
+              ? { subscriptionStatus: subscriptionStatusRef.current || 'trial' }
+              : {}),
+          });
+        }
+      });
+    }
     void runBoot(false);
-
     const watchdog = setTimeout(() => {
       if (!gateOpenRef.current) {
         startupLog('STARTUP_TIMEOUT', { afterMs: STARTUP_GLOBAL_WATCHDOG_MS, phase: 'boot_gate' });

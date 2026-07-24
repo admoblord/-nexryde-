@@ -1,10 +1,20 @@
 import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 import { BACKEND_URL } from '@/src/services/api';
-import { getValidToken } from '@/src/lib/tokenStore';
+import { getCachedToken, getStoredRefreshToken, getValidToken } from '@/src/lib/tokenStore';
 
 type NativeDriverModule = {
-  startDriverService?: (driverId?: string | null, token?: string | null, backendUrl?: string | null) => void;
-  updateDriverSession?: (token?: string | null, backendUrl?: string | null) => void;
+  startDriverService?: (
+    driverId?: string | null,
+    token?: string | null,
+    backendUrl?: string | null,
+    refreshToken?: string | null,
+  ) => void;
+  updateDriverSession?: (
+    token?: string | null,
+    backendUrl?: string | null,
+    refreshToken?: string | null,
+  ) => void;
+  setActiveTripId?: (tripId?: string | null) => void;
   stopDriverService?: () => void;
   showRideAlert?: (payload: Record<string, string>) => void;
   stopRideAlert?: () => void;
@@ -23,12 +33,15 @@ export type DriverNativeAction = {
   action?:
     | 'accept_offer'
     | 'decline_offer'
+    | 'native_action_pending'
     | 'native_accept_success'
+    | 'native_accept_failed'
     | 'native_decline_success'
     | 'native_offer_expired'
     | 'open_navigation'
     | 'heartbeat_force_offline'
     | string;
+  kind?: string;
   tripId?: string;
   offerId?: string;
   fare?: string;
@@ -65,18 +78,31 @@ export function isDriverNativeExperienceAvailable(): boolean {
 
 export async function startNativeDriverExperience(driverId?: string | null): Promise<void> {
   if (!isDriverNativeExperienceAvailable()) return;
-  const token = await getValidToken().catch(() => null);
-  nativeModule?.startDriverService?.(driverId ?? null, token, BACKEND_URL);
+  const [token, refresh] = await Promise.all([
+    getValidToken().catch(() => null),
+    getStoredRefreshToken().catch(() => null),
+  ]);
+  nativeModule?.startDriverService?.(driverId ?? null, token, BACKEND_URL, refresh);
 }
 
 export async function refreshNativeDriverSession(): Promise<void> {
   if (!isDriverNativeExperienceAvailable()) return;
-  const token = await getValidToken().catch(() => null);
-  nativeModule?.updateDriverSession?.(token, BACKEND_URL);
+  const [token, refresh] = await Promise.all([
+    getValidToken().catch(() => null),
+    getStoredRefreshToken().catch(() => null),
+  ]);
+  nativeModule?.updateDriverSession?.(token, BACKEND_URL, refresh);
+}
+
+/** Tell native FGS whether a live trip is in progress (blocks mid-trip FORCE_OFFLINE teardown). */
+export function setNativeActiveTripId(tripId: string | null | undefined): void {
+  if (!isDriverNativeExperienceAvailable()) return;
+  nativeModule?.setActiveTripId?.(tripId?.trim() ? tripId.trim() : null);
 }
 
 export function stopNativeDriverExperience(): void {
   if (!isDriverNativeExperienceAvailable()) return;
+  nativeModule?.setActiveTripId?.(null);
   nativeModule?.stopRideAlert?.();
   nativeModule?.stopDriverService?.();
 }
@@ -129,15 +155,25 @@ export function requestNativeBatteryOptimizationExempt(): void {
 export function showNativeRideOfferAlert(ride: Record<string, unknown>, driverId?: string | null): void {
   if (!isDriverNativeExperienceAvailable()) return;
   const payload = normalizeOfferPayload(ride, driverId);
-  void getValidToken()
-    .catch(() => null)
-    .then((token) => {
-      nativeModule?.showRideAlert?.({
-        ...payload,
-        token: token || '',
-        backendUrl: BACKEND_URL,
+  // Ring immediately — omit blank token so native FGS keeps its existing session JWT.
+  const cached = getCachedToken() || '';
+  nativeModule?.showRideAlert?.({
+    ...payload,
+    ...(cached ? { token: cached } : {}),
+    backendUrl: BACKEND_URL,
+  });
+  if (!cached) {
+    void getValidToken()
+      .catch(() => null)
+      .then((token) => {
+        if (!token) return;
+        nativeModule?.showRideAlert?.({
+          ...payload,
+          token,
+          backendUrl: BACKEND_URL,
+        });
       });
-    });
+  }
 }
 
 export function updateNativeRideAcceptedState(trip: Record<string, unknown> | null | undefined): void {

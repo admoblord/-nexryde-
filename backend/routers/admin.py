@@ -37,7 +37,13 @@ from pii_encryption import (
     strip_sensitive_pii,
 )
 from pii_audit import log_pii_access
-from security_advanced import auth_limiter
+from security_advanced import (
+    auth_limiter,
+    check_admin_ip,
+    client_ip_from_request,
+    send_2fa_code,
+    verify_2fa_code,
+)
 
 logger = logging.getLogger('server')
 admin_router = APIRouter(prefix="/api", tags=["Admin"])
@@ -58,13 +64,20 @@ if not _admin_password:
         _sys.exit(1)
     else:
         logger.warning("ADMIN_PASSWORD not set; using a generated fallback for this %s run (set the env var)", _nexryde_env)
-ADMIN_CREDENTIALS = {_admin_email: _admin_password}
-ADMIN_SESSION_TTL_HOURS = int(os.environ.get("ADMIN_SESSION_TTL_HOURS", "72"))
+ADMIN_CREDENTIALS = {_admin_email.strip().lower(): _admin_password}
+ADMIN_SESSION_TTL_HOURS = int(os.environ.get("ADMIN_SESSION_TTL_HOURS", "8"))
 ADMIN_REVOKE_OLD_SESSIONS = os.environ.get("ADMIN_REVOKE_OLD_SESSIONS", "true").lower() == "true"
 
 
+from admin_auth_policy import admin_mfa_required, is_production_env
+
+
 def _is_production() -> bool:
-    return os.environ.get("NEXRYDE_ENV", os.environ.get("ENVIRONMENT", "production")).strip().lower() == "production"
+    return is_production_env()
+
+
+def _admin_mfa_required() -> bool:
+    return admin_mfa_required()
 
 
 def _extract_admin_token(request: Request) -> str:
@@ -100,18 +113,25 @@ async def _validate_admin_session(request: Request):
     )
 
 
+_ADMIN_PUBLIC_PATHS = frozenset({
+    "/api/admin/login",
+    "/api/admin/login/verify-2fa",
+})
+
+
 async def require_admin_access(request: Request):
     """
     Enforce admin session token for admin-only routes.
-    Public exception: /api/admin/login.
+    Public: password login + MFA verify.
     """
-    path = request.url.path
-    if path == "/api/admin/login":
+    path = (request.url.path or "").rstrip("/") or "/"
+    if path in _ADMIN_PUBLIC_PATHS:
         return
 
     # Apply strict admin auth to all admin namespace actions.
     if not (path == "/api/admin" or path.startswith("/api/admin/") or path.startswith("/api/admin-panel")):
         return
+    await check_admin_ip(request)
     await _validate_admin_session(request)
 
 
@@ -151,8 +171,63 @@ class AdminLoginRequest(BaseModel):
     password: str
 
 
+class AdminMfaVerifyRequest(BaseModel):
+    email: str
+    code: str
+
+
 class PiiRevealRequest(BaseModel):
     reason: str
+
+
+async def _issue_admin_session(http_request: Request, email_key: str) -> dict:
+    client_ip = client_ip_from_request(http_request)
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(hours=ADMIN_SESSION_TTL_HOURS)
+    token = secrets.token_urlsafe(48)
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    if ADMIN_REVOKE_OLD_SESSIONS:
+        await db.admin_sessions.update_many(
+            {"email": email_key, "revoked": {"$ne": True}},
+            {"$set": {"revoked": True, "revoked_at": now, "revocation_reason": "new_login"}},
+        )
+    await db.admin_sessions.insert_one(
+        {
+            "id": str(uuid.uuid4()),
+            "email": email_key,
+            "role": "super_admin",
+            "token_hash": token_hash,
+            "ip_address": client_ip,
+            "user_agent": http_request.headers.get("user-agent", ""),
+            "created_at": now,
+            "last_seen_at": now,
+            "expires_at": expires_at,
+            "revoked": False,
+            "mfa_verified": True,
+        }
+    )
+    await db.admin_audit_log.insert_one({
+        "admin_email": email_key,
+        "admin_role": "super_admin",
+        "action": "admin_login_success",
+        "target_type": "admin_session",
+        "target_id": token_hash[:12],
+        "details": {
+            "revoked_old_sessions": ADMIN_REVOKE_OLD_SESSIONS,
+            "mfa": _admin_mfa_required(),
+        },
+        "ip_address": client_ip,
+        "user_agent": http_request.headers.get("user-agent", ""),
+        "created_at": now,
+    })
+    return {
+        "success": True,
+        "token": token,
+        "email": email_key,
+        "role": "super_admin",
+        "expires_at": expires_at.isoformat(),
+        "mfa_required": False,
+    }
 
 
 def _normalize_reveal_reason(reason: str) -> str:
@@ -208,54 +283,39 @@ def _build_rider_search_filter(search: str) -> list[dict]:
 
 @admin_router.post("/admin/login")
 async def admin_login(request: AdminLoginRequest, http_request: Request):
-    """Admin login endpoint"""
-    client_ip = http_request.client.host if http_request.client else "unknown"
+    """Step 1: password check. In production, sends MFA code (no session yet)."""
+    await check_admin_ip(http_request)
+    client_ip = client_ip_from_request(http_request)
     email_key = request.email.strip().lower() or "unknown"
     await auth_limiter.check_rate_limit(http_request, f"admin_login_ip:{client_ip}")
     await auth_limiter.check_rate_limit(http_request, f"admin_login_email:{email_key}")
     expected_password = ADMIN_CREDENTIALS.get(email_key) or ADMIN_CREDENTIALS.get(request.email)
     if expected_password and hmac.compare_digest(expected_password, request.password):
-        now = datetime.now(timezone.utc)
-        expires_at = now + timedelta(hours=ADMIN_SESSION_TTL_HOURS)
-        token = secrets.token_urlsafe(48)
-        token_hash = hashlib.sha256(token.encode()).hexdigest()
-        if ADMIN_REVOKE_OLD_SESSIONS:
-            await db.admin_sessions.update_many(
-                {"email": email_key, "revoked": {"$ne": True}},
-                {"$set": {"revoked": True, "revoked_at": now, "revocation_reason": "new_login"}},
-            )
-        await db.admin_sessions.insert_one(
-            {
-                "id": str(uuid.uuid4()),
-                "email": email_key,
-                "role": "super_admin",
-                "token_hash": token_hash,
+        if _admin_mfa_required():
+            sent = await send_2fa_code(email_key)
+            if not sent:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Could not send verification code. Try again shortly.",
+                )
+            await db.admin_audit_log.insert_one({
+                "admin_email": email_key,
+                "admin_role": "super_admin",
+                "action": "admin_mfa_challenge_sent",
+                "target_type": "admin_login",
+                "target_id": email_key,
+                "details": {},
                 "ip_address": client_ip,
                 "user_agent": http_request.headers.get("user-agent", ""),
-                "created_at": now,
-                "last_seen_at": now,
-                "expires_at": expires_at,
-                "revoked": False,
+                "created_at": datetime.now(timezone.utc),
+            })
+            return {
+                "success": True,
+                "mfa_required": True,
+                "email": email_key,
+                "message": "Enter the verification code sent to your email.",
             }
-        )
-        await db.admin_audit_log.insert_one({
-            "admin_email": email_key,
-            "admin_role": "super_admin",
-            "action": "admin_login_success",
-            "target_type": "admin_session",
-            "target_id": token_hash[:12],
-            "details": {"revoked_old_sessions": ADMIN_REVOKE_OLD_SESSIONS},
-            "ip_address": client_ip,
-            "user_agent": http_request.headers.get("user-agent", ""),
-            "created_at": now,
-        })
-        return {
-            "success": True,
-            "token": token,
-            "email": email_key,
-            "role": "super_admin",
-            "expires_at": expires_at.isoformat(),
-        }
+        return await _issue_admin_session(http_request, email_key)
     await db.admin_audit_log.insert_one({
         "admin_email": email_key,
         "admin_role": "unknown",
@@ -268,6 +328,33 @@ async def admin_login(request: AdminLoginRequest, http_request: Request):
         "created_at": datetime.now(timezone.utc),
     })
     raise HTTPException(status_code=401, detail="Invalid credentials")
+
+
+@admin_router.post("/admin/login/verify-2fa")
+async def admin_login_verify_2fa(request: AdminMfaVerifyRequest, http_request: Request):
+    """Step 2: verify MFA code and issue admin session."""
+    await check_admin_ip(http_request)
+    client_ip = client_ip_from_request(http_request)
+    email_key = request.email.strip().lower() or "unknown"
+    await auth_limiter.check_rate_limit(http_request, f"admin_mfa_ip:{client_ip}")
+    await auth_limiter.check_rate_limit(http_request, f"admin_mfa_email:{email_key}")
+    if email_key not in ADMIN_CREDENTIALS and email_key != _admin_email.strip().lower():
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    ok = await verify_2fa_code(email_key, (request.code or "").strip())
+    if not ok:
+        await db.admin_audit_log.insert_one({
+            "admin_email": email_key,
+            "admin_role": "unknown",
+            "action": "admin_mfa_failed",
+            "target_type": "admin_login",
+            "target_id": email_key,
+            "details": {},
+            "ip_address": client_ip,
+            "user_agent": http_request.headers.get("user-agent", ""),
+            "created_at": datetime.now(timezone.utc),
+        })
+        raise HTTPException(status_code=401, detail="Invalid verification code")
+    return await _issue_admin_session(http_request, email_key)
 
 
 @admin_router.post("/admin/logout")
@@ -1916,7 +2003,7 @@ async def get_admin_dashboard():
         total_revenue = revenue_result[0]["total"] if revenue_result else 0
         
         # Get pending verifications
-        pending_verifications = await db.driver_profiles.count_documents({"verification_status": "pending"})
+        pending_verifications = await db.driver_profiles.count_documents({"verification_status": {"$in": ["pending", "pending_review", "under_review"]}})
         
         # Get pending vehicle registrations
         pending_registrations = await db.vehicle_registrations.count_documents({"status": "pending"})
@@ -2395,7 +2482,7 @@ async def get_admin_live_stats(http_request: Request):
     ) = await asyncio.gather(
         db.driver_profiles.count_documents({"is_online": True}),
         db.driver_profiles.count_documents({}),
-        db.driver_profiles.count_documents({"verification_status": "pending"}),
+        db.driver_profiles.count_documents({"verification_status": {"$in": ["pending", "pending_review", "under_review"]}}),
         db.users.count_documents({"role": "rider"}),
         db.trips.count_documents({"status": {"$in": ["accepted", "arrived", "ongoing"]}, "created_at": {"$gte": today_start}}),
         db.trips.aggregate([

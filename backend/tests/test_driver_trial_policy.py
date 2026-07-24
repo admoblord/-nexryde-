@@ -59,6 +59,60 @@ async def test_grandfather_no_day_cap():
     assert snap["trial_expired"] is False
     assert snap["trial_day_limit"] is None
     assert snap["trial_days_remaining"] is None
+    # Windowed count query must include a since filter (not lifetime).
+    query = mock_db.trips.count_documents.await_args.args[0]
+    assert query["driver_id"] == driver_id
+    assert "$or" in query
+
+
+@pytest.mark.asyncio
+async def test_trial_trips_use_subscription_start_not_later_first_online():
+    """Trips before first-online still count when trial_start_date is earlier."""
+    from driver_trial_policy import compute_trial_snapshot
+
+    driver_id = "drv_window"
+    profile = {
+        "trial_config": {"trip_limit": 20, "day_limit": None},
+        "trial_first_online_at": (datetime.now(timezone.utc) - timedelta(days=5)).isoformat(),
+    }
+    sub = {
+        "status": "trial",
+        "id": "sub_w",
+        "trial_start_date": datetime.now(timezone.utc) - timedelta(days=60),
+    }
+
+    with patch("driver_trial_policy.db") as mock_db:
+        mock_db.driver_profiles.find_one = AsyncMock(return_value=profile)
+        mock_db.system_config.find_one = AsyncMock(return_value=None)
+        mock_db.trips.count_documents = AsyncMock(return_value=6)
+
+        snap = await compute_trial_snapshot(driver_id, sub)
+
+    assert snap["trial_trips_completed"] == 6
+    assert snap["trial_trips_target"] == 20
+    query = mock_db.trips.count_documents.await_args.args[0]
+    # Cutoff must be trial_start (~60d ago), not first_online (~5d ago).
+    cutoff = query["$or"][0]["completed_at"]["$gte"]
+    assert isinstance(cutoff, datetime)
+    assert (datetime.now(timezone.utc).replace(tzinfo=None) - cutoff).days >= 50
+
+
+@pytest.mark.asyncio
+async def test_trial_trips_zero_before_window_starts():
+    from driver_trial_policy import compute_trial_snapshot
+
+    driver_id = "drv_new"
+    profile = {"trial_config": {"trip_limit": 15, "day_limit": 14}}
+
+    with patch("driver_trial_policy.db") as mock_db:
+        mock_db.driver_profiles.find_one = AsyncMock(return_value=profile)
+        mock_db.system_config.find_one = AsyncMock(return_value=None)
+        mock_db.trips.count_documents = AsyncMock(return_value=99)
+
+        snap = await compute_trial_snapshot(driver_id, {})
+
+    assert snap["trial_trips_completed"] == 0
+    mock_db.trips.count_documents.assert_not_awaited()
 
 
 @pytest.mark.asyncio

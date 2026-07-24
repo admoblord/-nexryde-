@@ -238,8 +238,17 @@ async def trigger_sos(request: SOSRequest, http_request: Request):
     )
     await db.sos_alerts.insert_one(sos.model_dump() if hasattr(sos, "model_dump") else sos.dict())
     await db.trips.update_one({"id": request.trip_id}, {"$set": {"sos_triggered": True, "sos_triggered_at": datetime.now(timezone.utc)}})
-    contacts_notified = 0
-    # SMS to emergency contacts not sent; SOS still stored and nearby drivers notified.
+    from emergency_notify import notify_emergency_contacts
+
+    contacts_notified = await notify_emergency_contacts(
+        emergency_contacts,
+        user_name=user_name,
+        role=user_role,
+        trip_id=request.trip_id,
+        lat=request.location_lat,
+        lng=request.location_lng,
+        reason="SOS",
+    )
     # NEXRYDE Shield: notify other online drivers within 2km (rider or driver SOS).
     nearby_driver_alerts = await broadcast_sos_to_nearby_nexryde_drivers(
         request.location_lat,

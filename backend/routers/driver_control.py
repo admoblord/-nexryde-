@@ -139,7 +139,13 @@ async def driver_go_offline(request: Request):
         {"user_id": driver_id},
         {"$set": {"is_online": False, "went_offline_at": now}},
     )
-    await set_driver_offline(driver_id)
+    # Realtime Presence Service — clears Redis GEO/H3 + ACK event.
+    try:
+        from realtime_platform.presence_service import set_offline as rt_set_offline
+
+        await rt_set_offline(driver_id)
+    except Exception:
+        await set_driver_offline(driver_id)
     return {"success": True, "message": "You are now offline."}
 
 
@@ -157,6 +163,10 @@ async def driver_heartbeat(request: Request):
         body = {}
     lat = body.get("lat") or body.get("latitude")
     lng = body.get("lng") or body.get("longitude")
+    network_quality = str(body.get("network_quality") or body.get("networkQuality") or "unknown")
+    device_health = body.get("device_health") or body.get("deviceHealth")
+    if device_health is not None and not isinstance(device_health, dict):
+        device_health = None
     now = datetime.now(timezone.utc)
 
     update: dict = {"last_heartbeat": now}
@@ -176,17 +186,49 @@ async def driver_heartbeat(request: Request):
             "coordinates": [lng_f, lat_f],
         }
 
-    await db.driver_profiles.update_one(
-        {"user_id": driver_id},
-        {"$set": update},
-        upsert=True,
-    )
-    profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0, "is_online": 1})
+    # Single Mongo round-trip: write heartbeat + read is_online together.
+    try:
+        from pymongo import ReturnDocument
+
+        profile = await db.driver_profiles.find_one_and_update(
+            {"user_id": driver_id},
+            {"$set": update},
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+            projection={"_id": 0, "is_online": 1},
+        )
+    except Exception:
+        await db.driver_profiles.update_one(
+            {"user_id": driver_id},
+            {"$set": update},
+            upsert=True,
+        )
+        profile = await db.driver_profiles.find_one(
+            {"user_id": driver_id}, {"_id": 0, "is_online": 1}
+        )
+    rt_hb: dict = {}
     if profile and profile.get("is_online"):
-        await set_driver_online(driver_id, lat=lat_f or 0.0, lng=lng_f or 0.0)
+        # Presence Service: refresh TTL + H3/GEO + connection score + device health.
+        try:
+            from realtime_platform.presence_service import heartbeat as rt_heartbeat
+
+            rt_hb = await rt_heartbeat(
+                driver_id,
+                lat=lat_f,
+                lng=lng_f,
+                network_quality=network_quality,
+                device_health=device_health,
+            )
+        except Exception:
+            await set_driver_online(driver_id, lat=lat_f or 0.0, lng=lng_f or 0.0)
     else:
         # Mongo offline → clear Redis/GEO so heartbeat cannot re-inflate ghost presence.
-        await set_driver_offline(driver_id)
+        try:
+            from realtime_platform.presence_service import set_offline as rt_set_offline
+
+            await rt_set_offline(driver_id)
+        except Exception:
+            await set_driver_offline(driver_id)
 
     access_ttl_sec = None
     auth_header = request.headers.get("authorization", "")
@@ -201,14 +243,22 @@ async def driver_heartbeat(request: Request):
         except Exception:
             pass
 
+    try:
+        from realtime_platform.config import get_realtime_config
+
+        hb_interval = int(get_realtime_config().heartbeat_interval_sec)
+    except Exception:
+        hb_interval = 20
     return {
         "success": True,
         "server_online": bool(profile and profile.get("is_online")),
-        "heartbeat_interval_sec": 60,
+        "heartbeat_interval_sec": hb_interval,
         "access_token_ttl_sec": access_ttl_sec,
         "session_refresh_recommended": access_ttl_sec is not None and access_ttl_sec < 300,
         # Client must force local OFFLINE when server says not online (session/TTL loss).
         "action": None if (profile and profile.get("is_online")) else "FORCE_OFFLINE",
+        "device_health": rt_hb.get("device_health") if isinstance(rt_hb, dict) else None,
+        "dispatch_eligible": rt_hb.get("dispatch_eligible") if isinstance(rt_hb, dict) else None,
     }
 
 
@@ -242,9 +292,14 @@ async def run_auto_offline_sweep():
     )
     for did in ids:
         try:
-            await set_driver_offline(did)
+            from realtime_platform.presence_service import set_offline as rt_set_offline
+
+            await rt_set_offline(did)
         except Exception:
-            logger.exception("auto_offline_sweep_presence_clear driver=%s", did)
+            try:
+                await set_driver_offline(did)
+            except Exception:
+                logger.exception("auto_offline_sweep_presence_clear driver=%s", did)
     if result.modified_count:
         logger.info(f"Auto-offline sweep: set {result.modified_count} idle drivers offline")
     return result.modified_count
@@ -283,11 +338,22 @@ async def record_ride_request_ignored(driver_id: str, trip_id: str):
             "triggered_at": now,
             "ignore_count": recent_ignores,
         })
-        # Take driver offline during cooldown.
+        # Take driver offline during cooldown + clear Redis presence/offers.
         await db.driver_profiles.update_one(
             {"user_id": driver_id},
             {"$set": {"is_online": False, "offline_reason": "ignore_cooldown"}},
         )
+        try:
+            from realtime_platform.presence_service import set_offline as rt_set_offline
+
+            await rt_set_offline(driver_id)
+        except Exception:
+            try:
+                from driver_presence import set_driver_offline
+
+                await set_driver_offline(driver_id)
+            except Exception:
+                logger.exception("ignore_cooldown presence clear failed driver=%s", driver_id)
         logger.info(f"Driver {driver_id} placed on {cooldown_minutes}-min cooldown after {recent_ignores} ignores")
         return {"cooldown_applied": True, "cooldown_minutes": cooldown_minutes, "expires_at": expires_at.isoformat()}
 

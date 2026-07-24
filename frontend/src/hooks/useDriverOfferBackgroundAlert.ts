@@ -33,7 +33,10 @@ export function useDriverOfferBackgroundAlert() {
 
     const appSub = AppState.addEventListener('change', (next) => {
       if (next === 'active') {
-        void stopDriverOfferBackgroundAlert({ stopNative: false });
+        // Fully hand the offer to the foreground JS modal: stop the native ringtone
+        // AND full-screen alert. Leaving native audio running (stopNative:false) made
+        // the native alarm loop while the JS offer modal started a second ringtone.
+        void stopDriverOfferBackgroundAlert();
       }
     });
 

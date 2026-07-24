@@ -3,6 +3,7 @@ import { BACKEND_URL } from '@/src/services/api';
 import { managedFetch } from '@/src/services/networkManager';
 import { riderTripSocket } from '@/src/services/riderTripSocket';
 import { setForegroundInterval } from '@/src/utils/foregroundInterval';
+import { expandUberRealtimePayload } from '@/src/utils/uberRealtimePayload';
 
 export { getBackendWsBaseUrl, type RiderTripWsMessage } from '@/src/services/riderTripTypes';
 
@@ -73,9 +74,10 @@ export function useRiderTripRealtime({
         });
         if (res.status === 304 || res.status === 204) return;
         if (!res.ok) return;
-        const body = (await res.json()) as { payload?: import('@/src/services/riderTripTypes').RiderTripWsMessage; etag?: string };
+        const body = (await res.json()) as { payload?: unknown; etag?: string };
         if (body.etag) pollEtagRef.current = body.etag;
-        const data = body.payload;
+        const data = expandUberRealtimePayload(body.payload) ||
+          (body.payload as import('@/src/services/riderTripTypes').RiderTripWsMessage | undefined);
         if (!data || data.type !== 'trip_update') return;
         const w = watchRef.current;
         if (w != null && w !== '' && String(data.trip_id) !== String(w)) return;

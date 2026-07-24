@@ -17,8 +17,9 @@ export function isDriverShiftSessionKeeperActive(): boolean {
 
 async function refreshShiftSessionAndNative(): Promise<void> {
   const result = await ensureCriticalSessionReady(CRITICAL_ACTION_MIN_TTL_SEC);
-  // Push fresh JWT into Android FGS so native heartbeat does not 401-stop while JS is valid.
-  if (result.ok && result.refreshed) {
+  // Always push JWT into Android FGS so native accept has a usable bearer
+  // (not only when a refresh just occurred).
+  if (result.ok && result.token) {
     const { refreshNativeDriverSession } = await import('@/src/services/driverNativeExperience');
     void refreshNativeDriverSession();
   }

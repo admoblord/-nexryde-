@@ -22,13 +22,18 @@ class DriverExperienceModule(private val reactContext: ReactApplicationContext) 
   override fun getName(): String = "DriverExperienceModule"
 
   @ReactMethod
-  fun startDriverService(driverId: String?, token: String?, backendUrl: String?) {
-    DriverForegroundService.start(reactContext, driverId, token, backendUrl)
+  fun startDriverService(driverId: String?, token: String?, backendUrl: String?, refreshToken: String?) {
+    DriverForegroundService.start(reactContext, driverId, token, backendUrl, refreshToken)
   }
 
   @ReactMethod
-  fun updateDriverSession(token: String?, backendUrl: String?) {
-    DriverForegroundService.updateSession(reactContext, token, backendUrl)
+  fun updateDriverSession(token: String?, backendUrl: String?, refreshToken: String?) {
+    DriverForegroundService.updateSession(reactContext, token, backendUrl, refreshToken = refreshToken)
+  }
+
+  @ReactMethod
+  fun setActiveTripId(tripId: String?) {
+    DriverForegroundService.setActiveTrip(reactContext, tripId)
   }
 
   @ReactMethod

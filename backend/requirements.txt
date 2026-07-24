@@ -53,6 +53,9 @@ proto-plus>=1.20.0
 # Redis (cross-instance rate limiting, WebSocket pub/sub, OTP/2FA store)
 redis[hiredis]>=5.0.0
 
+# Uber-style H3 hexagonal geo index for dispatch
+h3>=4.0.0
+
 # Error tracking
 sentry-sdk[fastapi]>=2.0.0
 
@@ -79,9 +82,5 @@ s3transfer>=0.5.0
 # OpenAI
 openai>=1.0.0
 
-# Other
-typing_extensions>=4.0.0
-annotated-types>=0.4.0
-click>=8.0.0
-rich>=12.0.0
-typer>=0.9.0
+# Optional Kafka (enable with KAFKA_BOOTSTRAP_SERVERS)
+aiokafka>=0.11.0

@@ -23,6 +23,7 @@ import { useDriverDisplayStore } from '@/src/store/driverDisplayStore';
 import {
   deleteUserAccount,
   getDriverProfile,
+  getDriverSubscriptionStatus,
   getUserTrustSummary,
   updateUser,
   BACKEND_URL,
@@ -225,13 +226,19 @@ export default function DriverProfileScreen() {
     () => Math.max(120, Math.floor((flow.width - flow.padH * 2 - 12) / 2)),
     [flow.padH, flow.width],
   );
-  const { user, logout, setUser, subscription } = useAppStore();
+  const { user, logout, setUser, subscription, setSubscription } = useAppStore();
   const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const displayVerification = useDriverDisplayStore((s) =>
     s.driverId && driverId && s.driverId === driverId ? s.verificationStatus : null,
   );
   const displaySubStatus = useDriverDisplayStore((s) =>
     s.driverId && driverId && s.driverId === driverId ? s.subscriptionStatus : null,
+  );
+  const displayTrialDone = useDriverDisplayStore((s) =>
+    s.driverId && driverId && s.driverId === driverId ? s.trialTripsCompleted : 0,
+  );
+  const displayTrialTarget = useDriverDisplayStore((s) =>
+    s.driverId && driverId && s.driverId === driverId ? s.trialTripsTarget : 0,
   );
   const setDriverDisplay = useDriverDisplayStore((s) => s.setDriverDisplay);
 
@@ -256,11 +263,12 @@ export default function DriverProfileScreen() {
   const loadDriverProfile = useCallback(async () => {
     if (!driverId || !canCallAuthedApi) return;
     try {
-      const [profileRes, vehiclesRes] = await Promise.allSettled([
+      const [profileRes, vehiclesRes, subRes] = await Promise.allSettled([
         getDriverProfile(driverId),
         fetch(`${BACKEND_URL}/api/drivers/${driverId}/vehicles`, {
           headers: getAuthHeaders(),
         }).then(r => r.json()).catch(() => ({ vehicles: [] })),
+        getDriverSubscriptionStatus(),
       ]);
       if (profileRes.status === 'fulfilled') {
         const p = (profileRes.value as any).data as any;
@@ -270,29 +278,44 @@ export default function DriverProfileScreen() {
         if (vStatus) {
           setDriverDisplay({ driverId, verificationStatus: vStatus, displayHydrated: true });
           void writeDriverVerificationFact(driverId, vStatus);
-          void (async () => {
-            try {
-              const prev = await readDriverBootCache(driverId);
-              await writeDriverBootCache({
-                driverId,
-                verificationStatus: vStatus,
-                subscriptionStatus: prev?.subscriptionStatus || displaySubStatus || 'trial',
-                trialTripsCompleted: prev?.trialTripsCompleted ?? 0,
-                trialTripsTarget: prev?.trialTripsTarget ?? 15,
-                trialExtended: prev?.trialExtended ?? false,
-                onboardingCompleted: true,
-              });
-            } catch {
-              /* non-fatal */
-            }
-          })();
         }
       }
       if (vehiclesRes.status === 'fulfilled') {
         setDriverVehicles(((vehiclesRes.value as any)?.vehicles || []) as DriverVehicle[]);
       }
+      if (subRes.status === 'fulfilled' && subRes.value?.data) {
+        const sub = subRes.value.data as Record<string, unknown>;
+        setSubscription(sub as any);
+        const tripsCompleted = Number(sub.trial_trips_completed ?? 0);
+        const tripsTarget = Number(sub.trial_trips_target ?? 0) || 20;
+        const status = String(sub.status || 'none');
+        setDriverDisplay({
+          driverId,
+          subscriptionStatus: status,
+          trialTripsCompleted: tripsCompleted,
+          trialTripsTarget: tripsTarget,
+          trialExtended: Boolean(sub.trial_extended),
+          displayHydrated: true,
+        });
+        void (async () => {
+          try {
+            const prev = await readDriverBootCache(driverId);
+            await writeDriverBootCache({
+              driverId,
+              verificationStatus: prev?.verificationStatus || displayVerification || 'approved',
+              subscriptionStatus: status,
+              trialTripsCompleted: tripsCompleted,
+              trialTripsTarget: tripsTarget,
+              trialExtended: Boolean(sub.trial_extended),
+              onboardingCompleted: prev?.onboardingCompleted ?? true,
+            });
+          } catch {
+            /* non-fatal */
+          }
+        })();
+      }
     } catch { /* non-critical */ }
-  }, [canCallAuthedApi, displaySubStatus, driverId, setDriverDisplay]);
+  }, [canCallAuthedApi, displayVerification, driverId, setDriverDisplay, setSubscription]);
 
   useEffect(() => {
     if (!canCallAuthedApi) return;
@@ -378,7 +401,9 @@ export default function DriverProfileScreen() {
   const displayName = driverFullName || user?.name || 'Driver';
   const memberYear = user?.created_at ? new Date(user.created_at).getFullYear() : '—';
   const rating = (user?.rating ?? 5).toFixed(1);
-  const trips = user?.total_trips ?? 0;
+  // Prefer live trial progress (same source as Home); user.total_trips is often unset.
+  const trips =
+    Number((subscription as any)?.trial_trips_completed ?? displayTrialDone ?? user?.total_trips ?? 0) || 0;
 
   // Same persisted source as Home — hydrate display store from durable fact/cache.
   useEffect(() => {
@@ -648,8 +673,20 @@ export default function DriverProfileScreen() {
         {/* ── SUBSCRIPTION STATUS CARD ── */}
         {(() => {
           const isOnTrial   = subStatus === 'trial' || (subscription as any)?.trial_active;
-          const trialDone   = Number((subscription as any)?.trial_trips_completed ?? (subscription as any)?.completed_trips ?? 0);
-          const trialTarget = Number((subscription as any)?.trial_trips_target ?? (subscription as any)?.trips_target ?? 15);
+          // Same numbers as Home: app-store subscription when present, else display-store boot snapshot.
+          // Never fall back to hardcoded 15 for grandfathered drivers (loopy = 20).
+          const trialDone = Number(
+            (subscription as any)?.trial_trips_completed ??
+              (subscription as any)?.completed_trips ??
+              displayTrialDone ??
+              0,
+          );
+          const trialTarget = Number(
+            (subscription as any)?.trial_trips_target ??
+              (subscription as any)?.trips_target ??
+              (displayTrialTarget > 0 ? displayTrialTarget : 0) ??
+              0,
+          ) || (displayTrialTarget > 0 ? displayTrialTarget : 20);
           const trialLeft   = Math.max(0, trialTarget - trialDone);
           const trialPct    = trialTarget > 0 ? Math.min(1, trialDone / trialTarget) : 0;
           return (

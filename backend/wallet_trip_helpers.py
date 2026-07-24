@@ -40,12 +40,9 @@ def is_cash_payment_method(payment_method: Optional[str]) -> bool:
 
 
 def rider_must_confirm_payment(payment_method: Optional[str]) -> bool:
-    """Wallet/transfer need rider confirm after trip; cash is settled in person at drop-off."""
-    if is_cash_payment_method(payment_method):
-        return False
-    if not payment_method:
-        return False
-    pm = str(payment_method).strip().lower()
-    if is_wallet_payment_method(pm):
-        return True
-    return pm in {"transfer", "bank_transfer"}
+    """True when trip complete must leave payment_status=pending.
+
+    Cash/transfer: driver confirms receipt. Wallet: rider confirms.
+    Unknown methods never auto-settle.
+    """
+    return True

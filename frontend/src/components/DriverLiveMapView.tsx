@@ -2141,7 +2141,7 @@ function DriverLiveMapViewInner({
         showsMyLocationButton={false}
         showsCompass={Boolean(activeTrip)}
         showsPointsOfInterest={false}
-        showsBuildings={Boolean(activeTrip) || Boolean(isOnline)}
+        showsBuildings={Boolean(activeTrip)}
         showsTraffic={Boolean(activeTrip)}
         showsScale={false}
         rotateEnabled={true}

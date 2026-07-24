@@ -754,7 +754,11 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
     )
 
     if is_online:
+        from feature_flags import DISPATCH_DISABLED_DETAIL, is_dispatch_enabled
         from legal_guards import LEGAL_USER_PROJECTION, assert_user_legal_compliance
+
+        if not await is_dispatch_enabled(db):
+            raise HTTPException(status_code=503, detail=DISPATCH_DISABLED_DETAIL)
 
         driver_user = await db.users.find_one({"id": user_id}, LEGAL_USER_PROJECTION)
         assert_user_legal_compliance(driver_user, role="driver")
@@ -1004,10 +1008,22 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
         profile_online_update["$set"]["last_heartbeat"] = online_at_dt
     else:
         profile_online_update["$unset"] = {"online_session_started_at": ""}
-    await db.driver_profiles.update_one({"user_id": user_id}, profile_online_update)
 
+    # Redis Presence is the realtime commit (dispatch SoT). Mongo denormalizes after.
     if is_online:
-        await set_driver_online(user_id, lat=lat, lng=lng)
+        try:
+            from realtime_platform.presence_service import set_online as rt_set_online
+
+            await rt_set_online(user_id, lat=lat or 0.0, lng=lng or 0.0)
+        except Exception:
+            await set_driver_online(user_id, lat=lat, lng=lng)
+        try:
+            from realtime_platform.event_bus import publish_presence
+
+            await publish_presence("driver_online", driver_id=user_id, lat=lat or 0.0, lng=lng or 0.0)
+        except Exception:
+            pass
+        await db.driver_profiles.update_one({"user_id": user_id}, profile_online_update)
         # Surge sync is best-effort — never block go-online on demand scans.
         try:
             import asyncio
@@ -1031,7 +1047,19 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
         except Exception as surge_exc:
             logger.warning("Surge alert task on go-online skipped for %s: %s", user_id, surge_exc)
     else:
-        await set_driver_offline(user_id)
+        try:
+            from realtime_platform.presence_service import set_offline as rt_set_offline
+
+            await rt_set_offline(user_id)
+        except Exception:
+            await set_driver_offline(user_id)
+        try:
+            from realtime_platform.event_bus import publish_presence
+
+            await publish_presence("driver_offline", driver_id=user_id)
+        except Exception:
+            pass
+        await db.driver_profiles.update_one({"user_id": user_id}, profile_online_update)
 
     return {"message": f"Driver is now {'online' if is_online else 'offline'}"}
 
@@ -1201,8 +1229,17 @@ async def verify_driver_documents(
             fraud_flags.append("cross_driver_duplicate_document_hash")
         if identical_hashes_within_submission:
             fraud_flags.append("duplicate_hash_within_submission")
-        automated_approved = not fraud_flags and all(
-            (bool(doc_files.get(key)) or (key == "nin" and nin_number_ok)) for key in required_keys
+        # KYC posture: when driver_manual_review is enabled, NO submission is
+        # auto-approved — even a clean, complete one goes to the admin review
+        # queue. Default (off) keeps fast onboarding + the fraud/dup/image checks.
+        from feature_flags import is_driver_manual_review_enabled
+        manual_review_required = await is_driver_manual_review_enabled(db)
+        automated_approved = (
+            not manual_review_required
+            and not fraud_flags
+            and all(
+                (bool(doc_files.get(key)) or (key == "nin" and nin_number_ok)) for key in required_keys
+            )
         )
         verification_status = "approved" if automated_approved else "pending_review"
         queue_status = "approved" if automated_approved else "pending"
@@ -2144,10 +2181,12 @@ async def admin_reject_verification(verification_id: str, request: Request, reas
         raise HTTPException(status_code=404, detail="Verification not found")
     await db.driver_verifications.update_one({"id": verification_id}, {"$set": {"status": "rejected", "reviewed_at": datetime.now(timezone.utc), "reviewed_by": admin_email or "admin", "rejection_reason": reason}})
     user_id_for_notif = verification.get("user_id")
-    await db.users.update_one({"id": user_id_for_notif}, {"$set": {"verification_status": "rejected"}})
+    # Clear documents_verified — never leave a rejected driver with a stale
+    # "verified" flag that downstream checks might still honour.
+    await db.users.update_one({"id": user_id_for_notif}, {"$set": {"verification_status": "rejected", "documents_verified": False}})
     await db.driver_profiles.update_one(
         {"user_id": user_id_for_notif},
-        {"$set": {"verification_status": "rejected", "rejection_reason": reason}},
+        {"$set": {"verification_status": "rejected", "documents_verified": False, "rejection_reason": reason}},
         upsert=True,
     )
     await _append_verification_audit_event(
@@ -2359,7 +2398,20 @@ async def admin_revoke_driver_verification(driver_id: str, request: Request, rea
         actor_id=admin_email or "admin",
         details={"reason": reason},
     )
-    return {"success": True, "message": "Driver moved to recheck-required and quarantined offline", "reason": reason}
+    # Tell the driver — otherwise they're silently forced offline and back into
+    # onboarding with no idea why. Non-fatal if delivery fails.
+    notified = False
+    try:
+        await send_driver_verification_notification(driver_id, "recheck_required", reason)
+        notified = True
+    except Exception as exc:
+        logger.warning("Driver recheck notification skipped: %s", exc)
+    return {
+        "success": True,
+        "message": "Driver moved to recheck-required and quarantined offline",
+        "reason": reason,
+        "notified": notified,
+    }
 
 
 @drivers_router.get("/admin/verifications/{verification_id}/audit-log")

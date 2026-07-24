@@ -152,6 +152,27 @@ export function DriverDetailsPage() {
     await act(`/documents/${docType}/review`, { action, reason }, 'Document updated');
   };
 
+  const exportJson = async () => {
+    if (!driverId) return;
+    try {
+      // Authenticated fetch → blob download. window.open() can't attach the admin
+      // bearer token (endpoint 401s), and adding ?token= would leak the token into
+      // browser history / server access logs. Fetch via api() and save locally.
+      const profile = await api<Record<string, unknown>>(
+        `/admin/drivers/${driverId}/operations-profile`,
+      );
+      const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `driver-${driverId}-operations-profile.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2_000);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to export profile');
+    }
+  };
+
   const revealNin = async () => {
     if (!driverId) return;
     const reason = prompt('Reason for revealing full NIN (required for audit):');
@@ -246,9 +267,7 @@ export function DriverDetailsPage() {
             const amount = Number(prompt('Debit amount ₦:') || 0);
             if (amount > 0) act('/wallet-adjust', { amount, direction: 'debit', reason: 'admin_debit' });
           }}>Debit Wallet</button>
-          <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => {
-            window.open(`/api/admin/drivers/${driverId}/operations-profile`, '_blank');
-          }}>Export JSON</button>
+          <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => void exportJson()}>Export JSON</button>
         </div>
       </div>
 

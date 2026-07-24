@@ -145,9 +145,18 @@ function RootLayout() {
       void import('@/src/tasks/backgroundLocationTask').catch((err) => {
         console.warn('[startup] backgroundLocationTask registration failed:', err);
       });
+      // Realtime Reliability Platform — heal + local event sync on foreground.
+      void import('@/src/realtime/bootstrapRealtime').then((m) => {
+        m.startRealtimeReliabilityClient();
+      });
     }
     const unsubOffline = initializeOfflineMode();
-    return () => unsubOffline();
+    return () => {
+      unsubOffline();
+      void import('@/src/realtime/bootstrapRealtime').then((m) => {
+        m.stopRealtimeReliabilityClient();
+      });
+    };
   }, []);
 
   useEffect(() => {

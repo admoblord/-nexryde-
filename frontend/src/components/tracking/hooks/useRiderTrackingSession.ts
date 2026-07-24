@@ -726,7 +726,7 @@ export function useRiderTrackingSession() {
       return;
     }
     let mounted = true;
-    const pollMs = riderTripStatusPollIntervalMs(wsConnected, tripStatusRef.current);
+    const pollMs = riderTripStatusPollIntervalMs(wsConnected, tripStatus);
     const stop = setForegroundInterval(() => {
       if (mounted) void fetchStatusRef.current();
     }, pollMs);
@@ -734,7 +734,7 @@ export function useRiderTrackingSession() {
       mounted = false;
       stop();
     };
-  }, [effectiveTripId, riderId, wsConnected]);
+  }, [effectiveTripId, riderId, wsConnected, tripStatus]);
 
   useEffect(() => {
     if (!effectiveTripId || !isLivePhase) return;
@@ -807,11 +807,27 @@ export function useRiderTrackingSession() {
 
   useEffect(() => {
     const trip = currentTrip?.id === effectiveTripId ? currentTrip : null;
-    const storeStatus = trip
-      ? resolveRiderScreenStatus(trip.status, trip.payment_status, trip.payment_method)
-      : null;
-    if (storeStatus && storeStatus !== tripStatusRef.current) {
-      setTripStatus(storeStatus);
+    if (!trip) return;
+    const screenStatus = resolveRiderScreenStatus(
+      trip.status,
+      trip.payment_status,
+      trip.payment_method,
+    );
+    // Same assignment guard as the poll/WS handlers: a partial store update with
+    // status='accepted' but no confirmed driver must NOT flip the rider into live
+    // tracking. Hold at pending_driver_offers until the assignment is confirmed.
+    const confirmedDriverId = resolveAssignedDriverId(
+      trip as unknown as Record<string, unknown>,
+      trip as unknown as Record<string, unknown>,
+    );
+    const acceptedAt = resolveAssignmentAcceptedAt(trip as unknown as Record<string, unknown>);
+    const uiStatus =
+      isRiderMapLiveTripStatus(screenStatus) &&
+      !isTripAssignmentConfirmed(screenStatus, confirmedDriverId, acceptedAt)
+        ? 'pending_driver_offers'
+        : screenStatus;
+    if (uiStatus !== tripStatusRef.current) {
+      setTripStatus(uiStatus);
     }
   }, [
     currentTrip?.id,
@@ -1004,38 +1020,50 @@ export function useRiderTrackingSession() {
     setCancelError(null);
     setCancellingRide(true);
     try {
-      const payload: Record<string, string> = { cancelled_by: riderId };
+      const payload: Record<string, string> = {
+        cancelled_by: riderId,
+        client_event_id: `cancel:${effectiveTripId}:${riderId}`,
+      };
       const trimmed = String(reason || '').trim();
       if (trimmed) {
         payload.reason = trimmed;
         payload.cancellation_reason = trimmed;
       }
-      const res = await managedFetch(`${BACKEND_URL}/api/trips/${effectiveTripId}/cancel`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        authed: true,
-        timeoutMs: 8_000,
-        retries: 0,
+      const { reliableCancel } = await import('@/src/realtime/criticalActions');
+      const result = await reliableCancel({
+        tripId: effectiveTripId,
+        actorId: riderId,
+        reason: trimmed || undefined,
+        cancelFn: async () => {
+          const res = await managedFetch(`${BACKEND_URL}/api/trips/${effectiveTripId}/cancel`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            authed: true,
+            timeoutMs: 8_000,
+            retries: 0,
+          });
+          let data: { detail?: string; message?: string } = {};
+          try {
+            data = await res.json();
+          } catch {
+            /* non-JSON body */
+          }
+          if (!res.ok) {
+            const detail = String(data?.detail || '');
+            if (res.status === 400 && /cannot cancel|already cancel/i.test(detail)) {
+              return;
+            }
+            throw new Error(detail || 'Unable to cancel this trip. Tap Cancel Ride to retry.');
+          }
+        },
       });
-      let data: { detail?: string; message?: string } = {};
-      try {
-        data = await res.json();
-      } catch {
-        /* non-JSON body */
-      }
-      if (!res.ok) {
-        const detail = String(data?.detail || '');
-        // Trip may already be cancelled server-side while UI still shows finding.
-        if (res.status === 400 && /cannot cancel|already cancel/i.test(detail)) {
-          clearTripDriverCache();
-          setCancelModalOpen(false);
-          setCurrentTrip(null);
-          toast.show('Trip cancelled successfully.', 'success');
-          safeReplace(router, '/(rider-tabs)/rider-home');
-          return;
-        }
-        setCancelError(detail || 'Unable to cancel this trip. Tap Cancel Ride to retry.');
+      if (result.queued) {
+        clearTripDriverCache();
+        setCancelModalOpen(false);
+        setCurrentTrip(null);
+        toast.show('Cancel saved offline — will sync when you reconnect.', 'info');
+        safeReplace(router, '/(rider-tabs)/rider-home');
         return;
       }
       breadcrumbTripCancelled(effectiveTripId, trimmed || 'unspecified', 'rider');
@@ -1049,6 +1077,15 @@ export function useRiderTrackingSession() {
         err instanceof Error && err.message
           ? err.message
           : 'Could not cancel ride. Check your connection and retry.';
+      // Trip may already be cancelled server-side while UI still shows finding.
+      if (/cannot cancel|already cancel/i.test(msg)) {
+        clearTripDriverCache();
+        setCancelModalOpen(false);
+        setCurrentTrip(null);
+        toast.show('Trip cancelled successfully.', 'success');
+        safeReplace(router, '/(rider-tabs)/rider-home');
+        return;
+      }
       setCancelError(msg);
     } finally {
       cancelInFlightRef.current = false;

@@ -52,13 +52,46 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function login(email: string, password: string) {
-  const data = await api<{ token: string; role?: string }>('/admin/login', {
+type LoginResponse = {
+  token?: string;
+  role?: string;
+  mfa_required?: boolean;
+  message?: string;
+  email?: string;
+  success?: boolean;
+};
+
+async function postPublicAdmin<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`/api${path}`, {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const detail = (err as { detail?: unknown }).detail;
+    throw new Error(typeof detail === 'string' ? detail : res.statusText || 'Request failed');
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function login(email: string, password: string): Promise<LoginResponse> {
+  const data = await postPublicAdmin<LoginResponse>('/admin/login', { email, password });
+  if (data.mfa_required) {
+    return data;
+  }
   if (!data.token) {
     throw new Error('Login failed');
+  }
+  setToken(data.token);
+  if (data.role) setRole(data.role);
+  return data;
+}
+
+export async function verifyAdminMfa(email: string, code: string): Promise<LoginResponse> {
+  const data = await postPublicAdmin<LoginResponse>('/admin/login/verify-2fa', { email, code });
+  if (!data.token) {
+    throw new Error('Verification failed');
   }
   setToken(data.token);
   if (data.role) setRole(data.role);

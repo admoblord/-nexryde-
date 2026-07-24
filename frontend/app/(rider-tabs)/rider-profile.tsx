@@ -241,7 +241,9 @@ export default function RiderProfileScreen() {
     () => Math.max(120, Math.floor((flow.width - flow.padH * 2 - 12) / 2)),
     [flow.padH, flow.width],
   );
-  const { user, logout, setUser } = useAppStore();
+  const user = useAppStore((s) => s.user);
+  const logout = useAppStore((s) => s.logout);
+  const setUser = useAppStore((s) => s.setUser);
   const { canCallAuthedApi } = useAuthedApiReady();
   const { userId } = useAuthedUserId();
 
@@ -375,7 +377,28 @@ export default function RiderProfileScreen() {
   const confirmDriverSwitch = () => {
     if (user) setUser({ ...user, role: 'driver' });
     setShowDriverModal(false);
-    Alert.alert('Switched to Driver', '', [{ text: 'OK', onPress: () => router.replace('/(driver-tabs)/driver-home') }]);
+    Alert.alert('Switched to Driver', '', [
+      {
+        text: 'OK',
+        onPress: () => {
+          void (async () => {
+            const [{ routeAuthedUser }, { getCachedToken }] = await Promise.all([
+              import('@/src/utils/sessionRouting'),
+              import('@/src/lib/tokenStore'),
+            ]);
+            const u = useAppStore.getState().user;
+            if (!u?.id) {
+              router.replace('/(driver-tabs)/driver-home');
+              return;
+            }
+            // Force status check so unfinished drivers land on documents, not Home.
+            await routeAuthedUser(router, { ...u, role: 'driver' }, getCachedToken(), {
+              forceStatusCheck: true,
+            });
+          })();
+        },
+      },
+    ]);
   };
 
   const initial = (user?.name?.[0] ?? 'R').toUpperCase();

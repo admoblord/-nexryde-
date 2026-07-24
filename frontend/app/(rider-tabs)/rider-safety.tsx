@@ -186,7 +186,8 @@ export default function RiderSafetyScreen() {
   const router = useRouter();
   const walletEnabled = useWalletEnabled();
   const { colors, isDark } = useThemeColors();
-  const { user, currentTrip } = useAppStore();
+  const user = useAppStore((s) => s.user);
+  const currentTrip = useAppStore((s) => s.currentTrip);
   const { canCallAuthedApi } = useAuthedApiReady();
   const { userId: riderId } = useAuthedUserId();
   const [activeTripId, setActiveTripId] = useState<string | null>(currentTrip?.id || null);
@@ -263,8 +264,11 @@ export default function RiderSafetyScreen() {
   useEffect(() => {
     if (!canCallAuthedApi || !riderId || !BACKEND_URL) return;
 
+    let firstLoad = true;
     const fetchActiveTrip = async () => {
-      setLoadingTrip(true);
+      // Only spinner-gate the first fetch — the 20s background poll should
+      // refresh silently instead of flashing a loader over the SOS screen.
+      if (firstLoad) setLoadingTrip(true);
       try {
         const result = await pullAndApplyActiveTrip(riderId);
         if (result.found && result.trip?.id) {
@@ -282,6 +286,7 @@ export default function RiderSafetyScreen() {
         }
       } finally {
         setLoadingTrip(false);
+        firstLoad = false;
       }
     };
 

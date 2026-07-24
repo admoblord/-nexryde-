@@ -65,6 +65,16 @@ export async function hasStoredRefreshToken(): Promise<boolean> {
   }
 }
 
+/** Read refresh token for native FGS (Android accept without JS). */
+export async function getStoredRefreshToken(): Promise<string | null> {
+  try {
+    const refresh = await SecureStore.getItemAsync(REFRESH_KEY);
+    return refresh?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function setTokens(access: string, refresh?: string | null): Promise<void> {
   accessToken = access;
   await SecureStore.setItemAsync(ACCESS_KEY, access);

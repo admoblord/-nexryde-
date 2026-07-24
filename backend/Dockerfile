@@ -18,5 +18,8 @@ COPY . .
 ENV PORT=8080
 EXPOSE 8080
 
-# Run the FastAPI application (shell expands PORT from Cloud Run or defaults to 8080)
-CMD ["sh", "-c", "exec uvicorn server:app --host 0.0.0.0 --port ${PORT:-8080}"]
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# NEXRYDE_SERVICE_ROLE=api|kafka-worker|grpc-ridepush
+CMD ["/app/entrypoint.sh"]

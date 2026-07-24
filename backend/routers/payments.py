@@ -20,6 +20,8 @@ import base64
 import httpx
 import hashlib
 import hmac
+import time
+import asyncio
 
 from squad_checkout_parse import (
     extract_squad_checkout_url,
@@ -3663,6 +3665,12 @@ def _client_google_route_plausible(straight_km: float, distance_m: float, durati
 # ==================== FARE ESTIMATE ====================
 @payments_router.post("/fare/estimate")
 async def estimate_fare(request: FareEstimateRequest, http_request: Request):
+    from auth_guard import require_authenticated
+    from security_advanced import general_limiter
+
+    actor = require_authenticated(http_request)
+    await general_limiter.check_rate_limit(http_request, f"fare_estimate:{actor}")
+
     svc = (request.service_type or "economy").strip().lower()
     if svc == "standard":
         svc = "economy"
@@ -3670,23 +3678,45 @@ async def estimate_fare(request: FareEstimateRequest, http_request: Request):
     city_norm = normalize_fare_city_key(city)
     rain_flag = bool(request.rain) if request.rain is not None else False
 
+    from realtime_platform.observability import observe_ms
+
+    t_est = time.perf_counter()
+
+    # Parallelize demand scan + Directions — demand does not need the route.
     if request.demand_ratio is not None:
         demand_effective = max(0.0, min(1.0, float(request.demand_ratio)))
         demand_source = "client"
-    else:
-        demand_effective = await estimate_area_demand_ratio_near(
-            db, float(request.pickup_lat), float(request.pickup_lng)
+        route_data = await get_directions_from_google(
+            request.pickup_lat,
+            request.pickup_lng,
+            request.dropoff_lat,
+            request.dropoff_lng,
+            stop_lat=request.stop_lat,
+            stop_lng=request.stop_lng,
         )
+    else:
         demand_source = "area_estimate"
+        demand_task = asyncio.create_task(
+            estimate_area_demand_ratio_near(
+                db, float(request.pickup_lat), float(request.pickup_lng)
+            )
+        )
+        route_task = asyncio.create_task(
+            get_directions_from_google(
+                request.pickup_lat,
+                request.pickup_lng,
+                request.dropoff_lat,
+                request.dropoff_lng,
+                stop_lat=request.stop_lat,
+                stop_lng=request.stop_lng,
+            )
+        )
+        route_data, demand_effective = await asyncio.gather(route_task, demand_task)
 
-    route_data = await get_directions_from_google(
-        request.pickup_lat,
-        request.pickup_lng,
-        request.dropoff_lat,
-        request.dropoff_lng,
-        stop_lat=request.stop_lat,
-        stop_lng=request.stop_lng,
-    )
+    try:
+        observe_ms("fare.estimate_io_ms", (time.perf_counter() - t_est) * 1000)
+    except Exception:
+        pass
 
     straight_km = calculate_distance_haversine(
         request.pickup_lat,

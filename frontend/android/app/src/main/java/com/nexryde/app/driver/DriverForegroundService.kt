@@ -53,6 +53,8 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
   private var token: String? = null
   private var backendUrl: String? = null
   private var driverId: String? = null
+  /** Non-blank while driver has accepted/arrived/ongoing trip — blocks auto FORCE_OFFLINE teardown. */
+  private var activeTripId: String? = null
   private var mediaPlayer: MediaPlayer? = null
   private var audioManager: AudioManager? = null
   private var audioFocusRequest: AudioFocusRequest? = null
@@ -79,6 +81,8 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     when (intent?.action) {
       ACTION_STOP -> {
+        // Explicit JS go-offline — always honor (clears trip flag first from JS).
+        clearActiveTripLocked()
         stopOnlineService()
         return START_NOT_STICKY
       }
@@ -90,9 +94,20 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
         }
         token = intent.getStringExtra(EXTRA_TOKEN) ?: token
         backendUrl = intent.getStringExtra(EXTRA_BACKEND_URL) ?: backendUrl
-        rideAlertManager.updateSession(driverId, token, backendUrl)
+        val refreshToken = intent.getStringExtra(EXTRA_REFRESH_TOKEN)
+        intent.getStringExtra(EXTRA_ACTIVE_TRIP_ID)?.let { setActiveTripId(it.ifBlank { null }) }
+        rideAlertManager.updateSession(driverId, token, backendUrl, refreshToken)
         updatePersistentNotification()
         return START_STICKY
+      }
+      ACTION_SET_ACTIVE_TRIP -> {
+        val tripId = intent.getStringExtra(EXTRA_ACTIVE_TRIP_ID)
+        setActiveTripId(tripId?.ifBlank { null })
+        if (isDriverServiceOnline) {
+          rideStatus = if (!activeTripId.isNullOrBlank()) "On trip — stay online" else "Listening for rides"
+          updatePersistentNotification()
+        }
+        return if (isDriverServiceOnline) START_STICKY else START_NOT_STICKY
       }
       ACTION_SHOW_OFFER -> {
         if (!isDriverServiceOnline) {
@@ -101,10 +116,18 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
           stopSelf()
           return START_NOT_STICKY
         }
-        driverId = intent.getStringExtra(EXTRA_DRIVER_ID) ?: intent.getStringExtra("driverId") ?: driverId
-        token = intent.getStringExtra(EXTRA_TOKEN) ?: token
-        backendUrl = intent.getStringExtra(EXTRA_BACKEND_URL) ?: backendUrl
-        rideAlertManager.updateSession(driverId, token, backendUrl)
+        (intent.getStringExtra(EXTRA_DRIVER_ID)?.takeIf { it.isNotBlank() }
+          ?: intent.getStringExtra("driverId")?.takeIf { it.isNotBlank() })
+          ?.let { driverId = it }
+        (intent.getStringExtra(EXTRA_TOKEN)?.takeIf { it.isNotBlank() }
+          ?: intent.getStringExtra("token")?.takeIf { it.isNotBlank() })
+          ?.let { token = it }
+        (intent.getStringExtra(EXTRA_BACKEND_URL)?.takeIf { it.isNotBlank() }
+          ?: intent.getStringExtra("backendUrl")?.takeIf { it.isNotBlank() })
+          ?.let { backendUrl = it }
+        val refresh = intent.getStringExtra(EXTRA_REFRESH_TOKEN)?.takeIf { it.isNotBlank() }
+          ?: intent.getStringExtra("refreshToken")?.takeIf { it.isNotBlank() }
+        rideAlertManager.updateSession(driverId, token, backendUrl, refresh)
         if (!promoteToForeground(requireLocation = true)) {
           return abortForegroundStart("show_offer_promote_failed")
         }
@@ -160,7 +183,16 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
     driverId = intent?.getStringExtra(EXTRA_DRIVER_ID) ?: driverId
     token = intent?.getStringExtra(EXTRA_TOKEN) ?: token
     backendUrl = intent?.getStringExtra(EXTRA_BACKEND_URL) ?: backendUrl
-    rideAlertManager.updateSession(driverId, token, backendUrl)
+    // Sticky restart / process death: intent extras may be null — restore session prefs.
+    rideAlertManager.updateSession(
+      driverId,
+      token,
+      backendUrl,
+      intent?.getStringExtra(EXTRA_REFRESH_TOKEN),
+    )
+    if (driverId.isNullOrBlank() || token.isNullOrBlank() || backendUrl.isNullOrBlank()) {
+      restoreSessionFromAlertManager()
+    }
     rideStatus = intent?.getStringExtra(EXTRA_STATUS) ?: "Listening for rides"
 
     // After startForegroundService(), Android requires a successful startForeground()
@@ -172,11 +204,54 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
       return abortForegroundStart("start_promote_failed")
     }
     isDriverServiceOnline = true
+    persistWasOnline(true)
+    restoreActiveTripFromPrefs()
     rideAlertManager.goOnline()
     startLocationUpdates()
     scheduleHeartbeat()
     scheduleLocationUpload()
+    replayPendingOfferIfFresh()
     return START_STICKY
+  }
+
+  private fun replayPendingOfferIfFresh() {
+    val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val raw = prefs.getString(PENDING_OFFER_KEY, null) ?: return
+    prefs.edit().remove(PENDING_OFFER_KEY).apply()
+    runCatching {
+      val json = JSONObject(raw)
+      val ts = json.optLong("__ts", 0L)
+      // Ride offers are ~20s TTL — never replay a stale one on a later shift.
+      if (ts <= 0L || System.currentTimeMillis() - ts > 18_000L) return@runCatching
+      val replay = Intent(this, DriverForegroundService::class.java).apply {
+        action = ACTION_SHOW_OFFER
+        val keys = json.keys()
+        while (keys.hasNext()) {
+          val k = keys.next()
+          if (k != "__ts") putExtra(k, json.optString(k))
+        }
+      }
+      startService(replay)
+    }
+  }
+
+  private fun restoreSessionFromAlertManager() {
+    // RideAlertManager.ensureSessionLoaded is private; re-hydrate via updateSession no-ops
+    // after reading prefs the same way accept/decline does.
+    val prefs = getSharedPreferences("nexryde_driver_native_session", Context.MODE_PRIVATE)
+    if (driverId.isNullOrBlank()) driverId = prefs.getString("driver_id", null)
+    if (token.isNullOrBlank()) token = prefs.getString("token", null)
+    if (backendUrl.isNullOrBlank()) backendUrl = prefs.getString("backend_url", null)
+    val refresh = prefs.getString("refresh_token", null)
+    rideAlertManager.updateSession(driverId, token, backendUrl, refresh)
+    Log.i(TAG, "session_restored_from_prefs driver=${!driverId.isNullOrBlank()} token=${!token.isNullOrBlank()}")
+  }
+
+  private fun persistWasOnline(online: Boolean) {
+    getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+      .edit()
+      .putBoolean(PREF_WAS_ONLINE, online)
+      .apply()
   }
 
   /**
@@ -264,7 +339,29 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
   }
 
   override fun onTaskRemoved(rootIntent: Intent?) {
-    // Best-effort server offline before process teardown — avoids ghost Mongo/Redis online.
+    if (refuseAutoOffline("task_removed")) {
+      // Keep FGS alive for the passenger trip; JS will reassert online when able.
+      DriverExperienceEvents.emit(
+        "heartbeat_force_offline",
+        mapOf(
+          "status" to 0,
+          "source" to "task_removed_refused_active_trip",
+          "activeTripId" to (activeTripId ?: ""),
+          "refused" to true,
+        ),
+      )
+      return
+    }
+    if (isDriverServiceOnline) {
+      // Uber/Bolt behaviour: swiping the app from recents must NOT sign an online
+      // driver off. The foreground service (and its native heartbeat/location) keep
+      // running behind the persistent notification; only an explicit Go Offline
+      // (ACTION_STOP) or a system process kill ends the shift.
+      Log.i(TAG, "task_removed_kept_online — foreground service persists")
+      super.onTaskRemoved(rootIntent)
+      return
+    }
+    // Not online (edge) → safe to tear down and clear any ghost server state.
     postServerOfflineBestEffort()
     DriverExperienceEvents.emit(
       "heartbeat_force_offline",
@@ -387,7 +484,20 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
         val status = conn.responseCode
         conn.disconnect()
         if (status == 401) {
+          val refuse = refuseAutoOffline("native_location_401")
           handler.post {
+            if (refuse) {
+              DriverExperienceEvents.emit(
+                "heartbeat_force_offline",
+                mapOf(
+                  "status" to 401,
+                  "source" to "native_location_401_refused_active_trip",
+                  "activeTripId" to (activeTripId ?: companionActiveTripId ?: ""),
+                  "refused" to true,
+                ),
+              )
+              return@post
+            }
             DriverExperienceEvents.emit("heartbeat_force_offline", mapOf("status" to 401, "source" to "native_location_401"))
             stopOnlineService()
           }
@@ -422,7 +532,20 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
         val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
         conn.disconnect()
         if (status == 401) {
+          val refuse = refuseAutoOffline("native_401")
           handler.post {
+            if (refuse) {
+              DriverExperienceEvents.emit(
+                "heartbeat_force_offline",
+                mapOf(
+                  "status" to 401,
+                  "source" to "native_401_refused_active_trip",
+                  "activeTripId" to (activeTripId ?: companionActiveTripId ?: ""),
+                  "refused" to true,
+                ),
+              )
+              return@post
+            }
             DriverExperienceEvents.emit("heartbeat_force_offline", mapOf("status" to 401, "source" to "native_401"))
             stopOnlineService()
           }
@@ -433,7 +556,23 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
           val action = payload.optString("action", "")
           val serverOnline = payload.optBoolean("server_online", true)
           if (action == "FORCE_OFFLINE" || !serverOnline) {
+            val refuse = refuseAutoOffline("native_force_offline")
             handler.post {
+              if (refuse) {
+                DriverExperienceEvents.emit(
+                  "heartbeat_force_offline",
+                  mapOf(
+                    "status" to status,
+                    "source" to "native_force_offline_refused_active_trip",
+                    "serverOnline" to serverOnline,
+                    "activeTripId" to (activeTripId ?: companionActiveTripId ?: ""),
+                    "refused" to true,
+                  ),
+                )
+                rideStatus = "On trip — reconnecting"
+                updatePersistentNotification()
+                return@post
+              }
               DriverExperienceEvents.emit(
                 "heartbeat_force_offline",
                 mapOf("status" to status, "source" to "native_force_offline", "serverOnline" to serverOnline)
@@ -459,6 +598,22 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
     overlayActionInFlight = false
     updatePersistentNotification()
     rideAlertManager.present(offer)
+    // FGS can start activities while ringtone plays — don't depend on FSI alone.
+    try {
+      val intent = Intent(this, DriverRideAlertActivity::class.java).apply {
+        addFlags(
+          Intent.FLAG_ACTIVITY_NEW_TASK or
+            Intent.FLAG_ACTIVITY_SINGLE_TOP or
+            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+            Intent.FLAG_ACTIVITY_NO_USER_ACTION,
+        )
+        offer.forEach { (key, value) -> putExtra(key, value) }
+      }
+      startActivity(intent)
+      Log.i(TAG, "fgs_started_DriverRideAlertActivity tripId=${offer["tripId"]}")
+    } catch (t: Throwable) {
+      Log.e(TAG, "fgs_start_DriverRideAlertActivity_failed: ${t.message}", t)
+    }
   }
 
   private fun launchIntent(uri: String): PendingIntent {
@@ -573,8 +728,16 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
   private fun openApp(uri: String) {
     val intent = packageManager.getLaunchIntentForPackage(packageName)
       ?: Intent(Intent.ACTION_VIEW, Uri.parse(uri)).setPackage(packageName)
-    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-    startActivity(intent)
+    intent.addFlags(
+      Intent.FLAG_ACTIVITY_NEW_TASK or
+        Intent.FLAG_ACTIVITY_SINGLE_TOP or
+        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+    )
+    try {
+      startActivity(intent)
+    } catch (_: Exception) {
+      /* best-effort — never crash FGS for launch */
+    }
   }
 
   private fun vibrateAlert() {
@@ -604,8 +767,81 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
     return fine || coarse
   }
 
+  private fun setActiveTripId(tripId: String?) {
+    activeTripId = tripId?.takeIf { it.isNotBlank() }
+    companionActiveTripId = activeTripId
+    getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+      .edit()
+      .putString(PREF_ACTIVE_TRIP_ID, activeTripId)
+      .apply()
+    Log.i(TAG, "active_trip_id=${activeTripId ?: "<cleared>"}")
+  }
+
+  private fun clearActiveTripLocked() {
+    activeTripId = null
+    companionActiveTripId = null
+    getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().remove(PREF_ACTIVE_TRIP_ID).apply()
+  }
+
+  private fun restoreActiveTripFromPrefs() {
+    if (!activeTripId.isNullOrBlank()) return
+    val stored = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(PREF_ACTIVE_TRIP_ID, null)
+    if (!stored.isNullOrBlank()) {
+      activeTripId = stored
+      companionActiveTripId = stored
+    }
+  }
+
+  /**
+   * True when a live trip is known locally (JS push or prefs).
+   * Used to refuse FORCE_OFFLINE / task-removed teardown while carrying a passenger.
+   */
+  private fun refuseAutoOffline(reason: String): Boolean {
+    restoreActiveTripFromPrefs()
+    val local = !activeTripId.isNullOrBlank() || !companionActiveTripId.isNullOrBlank()
+    if (local) {
+      Log.w(TAG, "refuse_auto_offline reason=$reason trip=${activeTripId ?: companionActiveTripId}")
+      return true
+    }
+    // Last-chance server probe when JS never pushed a trip id (process death race).
+    val probed = probeActiveTripBlocking()
+    if (probed) {
+      Log.w(TAG, "refuse_auto_offline reason=$reason via_server_probe")
+    }
+    return probed
+  }
+
+  private fun probeActiveTripBlocking(): Boolean {
+    val base = backendUrl?.trim()?.trimEnd('/') ?: return false
+    val bearer = token?.takeIf { it.isNotBlank() } ?: return false
+    val id = driverId?.takeIf { it.isNotBlank() } ?: return false
+    return runCatching {
+      val url = URL("$base/api/trips/active/${URLEncoder.encode(id, "UTF-8")}")
+      val conn = (url.openConnection() as HttpURLConnection).apply {
+        requestMethod = "GET"
+        connectTimeout = 2500
+        readTimeout = 2500
+        setRequestProperty("Authorization", "Bearer $bearer")
+      }
+      val status = conn.responseCode
+      val stream = if (status in 200..299) conn.inputStream else conn.errorStream
+      val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+      conn.disconnect()
+      if (status !in 200..299 || raw.isBlank()) return@runCatching false
+      val payload = JSONObject(raw)
+      val active = payload.optBoolean("active", false)
+      val trip = payload.optJSONObject("trip")
+      val tripId = trip?.optString("id").orEmpty()
+      val tripStatus = trip?.optString("status").orEmpty().lowercase()
+      val live = active && tripId.isNotBlank() && tripStatus in LIVE_TRIP_STATUSES
+      if (live) setActiveTripId(tripId)
+      live
+    }.getOrDefault(false)
+  }
+
   private fun stopOnlineService() {
     isDriverServiceOnline = false
+    persistWasOnline(false)
     stopAlertPlayback()
     rideAlertManager.goOffline()
     cancelAllDriverNotifications()
@@ -637,30 +873,67 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
     const val ACTION_START = "com.nexryde.app.driver.START"
     const val ACTION_STOP = "com.nexryde.app.driver.STOP"
     const val ACTION_UPDATE_SESSION = "com.nexryde.app.driver.UPDATE_SESSION"
+    const val ACTION_SET_ACTIVE_TRIP = "com.nexryde.app.driver.SET_ACTIVE_TRIP"
     const val ACTION_SHOW_OFFER = "com.nexryde.app.driver.SHOW_OFFER"
     const val ACTION_ACCEPT_OFFER = "com.nexryde.app.driver.ACCEPT_OFFER"
     const val ACTION_DECLINE_OFFER = "com.nexryde.app.driver.DECLINE_OFFER"
     const val ACTION_STOP_ALERT = "com.nexryde.app.driver.STOP_ALERT"
     const val EXTRA_DRIVER_ID = "driverId"
     const val EXTRA_TOKEN = "token"
+    const val EXTRA_REFRESH_TOKEN = "refreshToken"
     const val EXTRA_BACKEND_URL = "backendUrl"
     const val EXTRA_STATUS = "status"
+    const val EXTRA_ACTIVE_TRIP_ID = "activeTripId"
     private const val CHANNEL_DRIVER_SERVICE = "driver_service"
     private const val CHANNEL_DRIVER_OFFERS = "driver_offers_v2"
     private const val NOTIFICATION_ID = 6101
     private const val OFFER_NOTIFICATION_ID = 6102
-    private const val HEARTBEAT_INTERVAL_MS = 60_000L
+    private const val PENDING_OFFER_KEY = "pending_native_offer"
+    /** Aligned with RT_HEARTBEAT_INTERVAL_SEC (20s) for Redis presence TTL freshness. */
+    private const val HEARTBEAT_INTERVAL_MS = 20_000L
     /** Matches Expo BG task + JS idle push — rider pins must not wait on 60s heartbeat. */
     private const val LOCATION_UPLOAD_INTERVAL_MS = 10_000L
     private const val LOCATION_INTERVAL_MS = 10_000L
     private const val LOCATION_DISTANCE_M = 10f
+    private const val PREFS_NAME = "nexryde_driver_fgs"
+    private const val PREF_ACTIVE_TRIP_ID = "active_trip_id"
+    private const val PREF_WAS_ONLINE = "was_online"
+
+    /** Used by BootReceiver to restore listening after reboot if driver was online. */
+    fun shouldRestoreAfterBoot(context: Context): Boolean {
+      return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .getBoolean(PREF_WAS_ONLINE, false)
+    }
+
+    fun restoreAfterBoot(context: Context) {
+      if (!shouldRestoreAfterBoot(context)) return
+      val prefs = context.getSharedPreferences("nexryde_driver_native_session", Context.MODE_PRIVATE)
+      val driverId = prefs.getString("driver_id", null)
+      val token = prefs.getString("token", null)
+      val backend = prefs.getString("backend_url", null)
+      val refresh = prefs.getString("refresh_token", null)
+      if (driverId.isNullOrBlank() || token.isNullOrBlank() || backend.isNullOrBlank()) {
+        Log.w(TAG, "boot_restore_skipped_missing_session")
+        return
+      }
+      Log.i(TAG, "boot_restore_fgs driver=$driverId")
+      start(context, driverId, token, backend, refreshToken = refresh)
+    }
+    private val LIVE_TRIP_STATUSES = setOf("accepted", "arrived", "ongoing")
     @Volatile private var isDriverServiceOnline = false
     /** True only while the service instance exists — used to avoid startService(STOP) on cold login. */
     @Volatile private var serviceProcessAlive = false
+    @Volatile private var companionActiveTripId: String? = null
 
-    fun start(context: Context, driverId: String?, token: String?, backendUrl: String?) {
+    fun start(
+      context: Context,
+      driverId: String?,
+      token: String?,
+      backendUrl: String?,
+      refreshToken: String? = null,
+    ) {
       if (isDriverServiceOnline) {
-        updateSession(context, token, backendUrl)
+        updateSession(context, token, backendUrl, refreshToken = refreshToken)
         return
       }
       val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
@@ -674,6 +947,7 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
         putExtra(EXTRA_DRIVER_ID, driverId)
         putExtra(EXTRA_TOKEN, token)
         putExtra(EXTRA_BACKEND_URL, backendUrl)
+        putExtra(EXTRA_REFRESH_TOKEN, refreshToken)
       }
       runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
@@ -683,6 +957,7 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
 
     fun stop(context: Context) {
       isDriverServiceOnline = false
+      companionActiveTripId = null
       DriverOverlayBubbleController.hide()
       val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
       nm.cancel(OFFER_NOTIFICATION_ID)
@@ -698,17 +973,43 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
       }.onFailure { Log.e(TAG, "stop_service_failed", it) }
     }
 
-    fun updateSession(context: Context, token: String?, backendUrl: String?) {
+    fun updateSession(
+      context: Context,
+      token: String?,
+      backendUrl: String?,
+      activeTripId: String? = null,
+      refreshToken: String? = null,
+    ) {
       if (!isDriverServiceOnline) return
       context.startService(Intent(context, DriverForegroundService::class.java).apply {
         action = ACTION_UPDATE_SESSION
         putExtra(EXTRA_TOKEN, token)
         putExtra(EXTRA_BACKEND_URL, backendUrl)
+        putExtra(EXTRA_REFRESH_TOKEN, refreshToken)
+        if (activeTripId != null) putExtra(EXTRA_ACTIVE_TRIP_ID, activeTripId)
+      })
+    }
+
+    fun setActiveTrip(context: Context, tripId: String?) {
+      companionActiveTripId = tripId?.takeIf { it.isNotBlank() }
+      context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .putString(PREF_ACTIVE_TRIP_ID, companionActiveTripId)
+        .apply()
+      if (!serviceProcessAlive) return
+      context.startService(Intent(context, DriverForegroundService::class.java).apply {
+        action = ACTION_SET_ACTIVE_TRIP
+        putExtra(EXTRA_ACTIVE_TRIP_ID, companionActiveTripId ?: "")
       })
     }
 
     fun showRideAlert(context: Context, offer: Map<String, String>) {
-      if (!isDriverServiceOnline) return
+      if (!isDriverServiceOnline) {
+        // FGS not promoted yet (go-online race). Persist so the offer is replayed the
+        // instant the service comes online instead of dropping the ride.
+        persistPendingOffer(context, offer)
+        return
+      }
       createChannels(context)
       // Already in a foreground session — use startService, not startForegroundService,
       // so we never re-enter the FGS start contract for offer UI.
@@ -718,6 +1019,16 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
       }
       runCatching { context.startService(intent) }
         .onFailure { Log.e(TAG, "show_ride_alert_start_failed", it) }
+    }
+
+    private fun persistPendingOffer(context: Context, offer: Map<String, String>) {
+      runCatching {
+        val json = JSONObject()
+        offer.forEach { (k, v) -> json.put(k, v) }
+        json.put("__ts", System.currentTimeMillis())
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+          .edit().putString(PENDING_OFFER_KEY, json.toString()).apply()
+      }
     }
 
     fun stopRideAlert(context: Context) {

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '../constants/theme';
 import { DIRECTIONS_ROUTE_MIN_POINTS } from '../navigation/navUtils';
 import { NEXRYDE_MAP_STYLE } from '../constants/nexrydeMapBehavior';
+import { SAFE_PICKUP_FALLBACK, safePickupDisplay } from '../services/instantPickupEngine';
 
 interface Location {
   latitude: number;
@@ -21,6 +22,13 @@ interface MapComponentProps {
   style?: any;
 }
 
+function placeLabel(loc: Location | undefined, fallback: string): string {
+  if (!loc) return fallback;
+  const raw = String(loc.address || '').trim();
+  if (!raw) return fallback;
+  return safePickupDisplay(raw) || fallback;
+}
+
 /* ─── Web / non-native fallback ───────────────────────────────── */
 const WebPlaceholder: React.FC<MapComponentProps> = ({ pickup, dropoff, style }) => (
   <View style={[styles.placeholder, style]}>
@@ -34,10 +42,7 @@ const WebPlaceholder: React.FC<MapComponentProps> = ({ pickup, dropoff, style })
           <View style={styles.locationRow}>
             <View style={styles.pickupDot} />
             <Text style={styles.locationText} numberOfLines={1}>
-              {pickup.address ||
-                (Number.isFinite(pickup.latitude) && Number.isFinite(pickup.longitude)
-                  ? `${pickup.latitude.toFixed(4)}, ${pickup.longitude.toFixed(4)}`
-                  : 'Pickup')}
+              {placeLabel(pickup, SAFE_PICKUP_FALLBACK)}
             </Text>
           </View>
         </View>
@@ -48,10 +53,7 @@ const WebPlaceholder: React.FC<MapComponentProps> = ({ pickup, dropoff, style })
           <View style={styles.locationRow}>
             <View style={styles.destDot} />
             <Text style={styles.locationText} numberOfLines={1}>
-              {dropoff.address ||
-                (Number.isFinite(dropoff.latitude) && Number.isFinite(dropoff.longitude)
-                  ? `${dropoff.latitude.toFixed(4)}, ${dropoff.longitude.toFixed(4)}`
-                  : 'Destination')}
+              {placeLabel(dropoff, 'Destination')}
             </Text>
           </View>
         </View>
@@ -204,7 +206,7 @@ const NativeMap: React.FC<MapComponentProps> = ({
           <Marker
             coordinate={{ latitude: pickup!.latitude, longitude: pickup!.longitude }}
             title="Pickup"
-            description={pickup!.address}
+            description={placeLabel(pickup, SAFE_PICKUP_FALLBACK)}
             pinColor="#22C55E"
             tracksViewChanges={false}
           />
@@ -215,7 +217,7 @@ const NativeMap: React.FC<MapComponentProps> = ({
           <Marker
             coordinate={{ latitude: dropoff!.latitude, longitude: dropoff!.longitude }}
             title="Destination"
-            description={dropoff!.address}
+            description={placeLabel(dropoff, 'Destination')}
             pinColor="#EF4444"
             tracksViewChanges={false}
           />

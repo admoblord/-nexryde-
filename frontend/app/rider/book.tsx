@@ -78,7 +78,19 @@ import { getRecentLocations, cacheRecentLocation, createOfflineBooking, checkOnl
 import { authedFetch } from '@/src/utils/sessionRefresh';
 import * as Haptics from 'expo-haptics';
 import { geocodeAddressForRider } from '@/src/services/riderSavedPlaces';
-import { startSmartPickupGps, haversineMeters } from '@/src/services/smartPickupGps';
+import { startSmartPickupGps } from '@/src/services/smartPickupGps';
+import {
+  DETECTING_PICKUP,
+  SAFE_PICKUP_FALLBACK,
+  isDetectingPickupLabel,
+  isRawLatLngLabel,
+  preloadPickupAt,
+  resolveInstantPickup,
+  safePickupDisplay,
+  startInstantPickupEngine,
+  type InstantPickupController,
+} from '@/src/services/instantPickupEngine';
+import { AnimatedPickupLabel } from '@/src/components/rider/AnimatedPickupLabel';
 import { useWalletEnabled } from '@/src/services/clientConfig';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useThemeColors } from '@/src/constants/theme';
@@ -109,11 +121,6 @@ function stopTimeFeeLabel(fd: FareEstimateResponse | null | undefined): string |
   const fee = Number(fd.time_fee ?? 0);
   if (!Number.isFinite(fee) || fee <= 0) return null;
   return `Stop time · ${Math.round(mins)} min × ₦${Math.round(perMin)}/min = ₦${Math.round(fee).toLocaleString()}`;
-}
-
-/** True when the pickup label is still raw "lat, lng" (geocode not applied yet or failed). */
-function isRawLatLngLabel(s: string): boolean {
-  return /^\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*$/.test(String(s || '').trim());
 }
 
 const ROUTE_FIT_MAX_POINTS = 48;
@@ -180,35 +187,6 @@ function normalizeFareEstimatePayload(data: unknown): FareEstimateResponse {
       ? pvu
       : new Date(Date.now() + 600_000).toISOString();
   return { ...o, estimate_id, price_valid_until } as FareEstimateResponse;
-}
-
-async function reverseGeocodeViaBackend(
-  lat: number,
-  lng: number,
-  baseUrl: string,
-): Promise<string | null> {
-  const origin = String(baseUrl || '').replace(/\/$/, '');
-  if (!origin) return null;
-  const q = `lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}`;
-  const url = `${origin}/api/places/reverse-geocode?${q}`;
-  const once = async () => {
-    const res = await fetch(url);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return null;
-    if (String(data?.status || '').toUpperCase() !== 'OK') return null;
-    const raw = String(
-      data?.short_label || data?.formatted_address || data?.address || '',
-    ).trim();
-    if (!raw || isRawLatLngLabel(raw)) return null;
-    return raw;
-  };
-  let out = await once();
-  if (out) return out;
-  await new Promise((r) => setTimeout(r, 220));
-  out = await once();
-  if (out) return out;
-  await new Promise((r) => setTimeout(r, 550));
-  return (await once()) || null;
 }
 
 const COLORS = {
@@ -305,10 +283,11 @@ function BookInDriveStyle() {
   const [tripDraft, setTripDraft] = useState<TripDraft>(EMPTY_TRIP_DRAFT);
   const [currentLocation, setCurrentLocation] = useState<any>(null);
   const [gpsStatus, setGpsStatus] = useState<'detecting' | 'locked' | 'error'>('detecting');
+  const [pickupDetecting, setPickupDetecting] = useState(true);
   /** Once the rider picks a pickup manually, background GPS must never overwrite it. */
   const manualPickupRef = useRef(false);
-  /** Last point we reverse-geocoded, so refinements only re-geocode on real movement. */
-  const lastGeocodedRef = useRef<{ lat: number; lng: number } | null>(null);
+  /** Instant Pickup Detection Engine — continuous resolve + cache. */
+  const pickupEngineRef = useRef<InstantPickupController | null>(null);
 
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [currentFare, setCurrentFare] = useState(0);
@@ -333,6 +312,8 @@ function BookInDriveStyle() {
   /** Active trip lives on tracking — block overlapping book UI. */
   useFocusEffect(
     useCallback(() => {
+      // Prefetch TLS + Mongo pool so fare / request feel instant on Lagos cellular.
+      void import('@/src/utils/warmBackend').then((m) => m.warmBackendConnection(true));
       if (!hasActiveTrip || !currentTrip?.id) return;
       router.replace({ pathname: '/rider/tracking', params: { tripId: currentTrip.id } } as any);
     }, [hasActiveTrip, currentTrip?.id, router]),
@@ -626,11 +607,17 @@ function BookInDriveStyle() {
   };
 
   const openDestinationSearch = useCallback(() => {
+    // Preload pickup label before rider types destination (feels instant on NG networks).
+    if (pickupCoords) {
+      void preloadPickupAt(pickupCoords.lat, pickupCoords.lng);
+    } else {
+      pickupEngineRef.current?.preload();
+    }
     requestAnimationFrame(() => {
       setEditingField('destination');
       setShowLocationModal(true);
     });
-  }, []);
+  }, [pickupCoords?.lat, pickupCoords?.lng]);
 
   const openStopSearch = useCallback(() => {
     requestAnimationFrame(() => {
@@ -892,12 +879,14 @@ function BookInDriveStyle() {
       }
     };
     void run();
-    const timer = setInterval(run, 20000);
+    // 30s is plenty for a nearby-supply overlay; tripDraftRouteKey was forcing
+    // extra fetch+marker churn on every fare recalculation.
+    const timer = setInterval(run, 30000);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [pickupCoords?.lat, pickupCoords?.lng, currentLocation?.lat, currentLocation?.lng, selectedVehicle, tripDraftRouteKey]);
+  }, [pickupCoords?.lat, pickupCoords?.lng, currentLocation?.lat, currentLocation?.lng, selectedVehicle]);
 
 
   const inferCityFromCoords = (lat?: number, lng?: number) => {
@@ -910,19 +899,36 @@ function BookInDriveStyle() {
   const inferCity = (pickupText: string, destinationText: string) =>
     inferFareCitySlugFromAddress(pickupText, destinationText);
 
-  // GPS: parallel fresh + cached fix, start reverse-geocode immediately (no serial GPS wait).
+  // Instant Pickup Detection Engine: GPS → cache → reverse-geocode (never raw coords).
   useEffect(() => {
     let mounted = true;
     const presetPickupTxt = typeof params.pickup === 'string' ? params.pickup.trim() : '';
     const presetPLat = Number(params.pickupLat);
     const presetPLng = Number(params.pickupLng);
 
+    const engine = startInstantPickupEngine({
+      isManualPickup: () => manualPickupRef.current,
+      moveThresholdM: 25,
+      onUpdate: (state) => {
+        if (!mounted || manualPickupRef.current) return;
+        setPickupCoords({ lat: state.lat, lng: state.lng });
+        setCurrentLocation({ lat: state.lat, lng: state.lng, address: state.label });
+        setPickup(safePickupDisplay(state.label, state.detecting));
+        setPickupDetecting(state.detecting);
+        if (!state.detecting) setGpsStatus('locked');
+      },
+    });
+    pickupEngineRef.current = engine;
+
     const detectGPS = async () => {
       try {
         const Location = require('expo-location');
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
-          if (mounted) setGpsStatus('error');
+          if (mounted) {
+            setGpsStatus('error');
+            setPickupDetecting(false);
+          }
           return;
         }
 
@@ -930,54 +936,44 @@ function BookInDriveStyle() {
         if (presetPickupTxt && Number.isFinite(presetPLat) && Number.isFinite(presetPLng)) {
           const lat0 = presetPLat;
           const lng0 = presetPLng;
-          const addrPromise = reverseGeocodeViaBackend(lat0, lng0, BACKEND_URL);
+          const label0 = isRawLatLngLabel(presetPickupTxt)
+            ? DETECTING_PICKUP
+            : safePickupDisplay(presetPickupTxt);
           if (!mounted) return;
           setPickupCoords({ lat: lat0, lng: lng0 });
-          setCurrentLocation({ lat: lat0, lng: lng0, address: presetPickupTxt });
-          setPickup(presetPickupTxt);
+          setCurrentLocation({ lat: lat0, lng: lng0, address: label0 });
+          setPickup(label0);
+          setPickupDetecting(isDetectingPickupLabel(label0));
           setGpsStatus('locked');
           try {
-            const resolved = await addrPromise;
+            const resolved = await resolveInstantPickup(lat0, lng0);
             if (!mounted) return;
-            if (resolved) {
-              setPickup(resolved);
-              setCurrentLocation({ lat: lat0, lng: lng0, address: resolved });
-            }
+            setPickup(safePickupDisplay(resolved.label));
+            setPickupDetecting(false);
+            setCurrentLocation({ lat: lat0, lng: lng0, address: resolved.label });
           } catch {
-            /* keep presetPickupTxt */
+            if (mounted && isDetectingPickupLabel(label0)) {
+              setPickup(SAFE_PICKUP_FALLBACK);
+              setPickupDetecting(false);
+            }
           }
           return;
         }
-        if (presetPickupTxt) {
+        if (presetPickupTxt && !isRawLatLngLabel(presetPickupTxt)) {
           const g = await geocodeAddressForRider(presetPickupTxt);
           if (g && mounted) {
             setPickupCoords({ lat: g.lat, lng: g.lng });
             setCurrentLocation({ lat: g.lat, lng: g.lng, address: g.address });
-            setPickup(g.address);
+            setPickup(safePickupDisplay(g.address));
+            setPickupDetecting(false);
             setGpsStatus('locked');
+            void preloadPickupAt(g.lat, g.lng);
             return;
           }
         }
 
-        // SMART GPS: paint instantly from cache, stream high-accuracy fixes,
-        // converge on the rider's EXACT spot (<=15m) or best fix within 12s.
-        const geocodeFix = async (fLat: number, fLng: number, final: boolean) => {
-          const lastG = lastGeocodedRef.current;
-          const movedEnough =
-            !lastG || haversineMeters(lastG.lat, lastG.lng, fLat, fLng) > 25;
-          if (!movedEnough && !final) return;
-          lastGeocodedRef.current = { lat: fLat, lng: fLng };
-          let addr = '';
-          try {
-            addr = (await reverseGeocodeViaBackend(fLat, fLng, BACKEND_URL)) || '';
-          } catch {
-            addr = '';
-          }
-          if (!mounted || manualPickupRef.current) return;
-          const resolved = addr || `${fLat.toFixed(4)}, ${fLng.toFixed(4)}`;
-          setPickup(resolved);
-          setCurrentLocation({ lat: fLat, lng: fLng, address: resolved });
-        };
+        setPickup(DETECTING_PICKUP);
+        setPickupDetecting(true);
 
         let gotFix = false;
         cancelSmartGps = startSmartPickupGps({
@@ -986,23 +982,21 @@ function BookInDriveStyle() {
           onFix: (fix) => {
             if (!mounted || manualPickupRef.current) return;
             gotFix = true;
-            setPickupCoords({ lat: fix.lat, lng: fix.lng });
-            setCurrentLocation(
-              (prev: { lat: number; lng: number; address?: string } | null) =>
-                prev
-                  ? { ...prev, lat: fix.lat, lng: fix.lng }
-                  : { lat: fix.lat, lng: fix.lng, address: '' },
-            );
-            setPickup((p: string) => (p ? p : 'Finding address…'));
             setGpsStatus('locked');
-            void geocodeFix(fix.lat, fix.lng, fix.final);
+            engine.onGpsFix(fix.lat, fix.lng, { final: fix.final });
           },
           onError: () => {
-            if (mounted && !gotFix) setGpsStatus('error');
+            if (mounted && !gotFix) {
+              setGpsStatus('error');
+              setPickupDetecting(false);
+            }
           },
         });
       } catch {
-        if (mounted) setGpsStatus('error');
+        if (mounted) {
+          setGpsStatus('error');
+          setPickupDetecting(false);
+        }
       }
     };
     let cancelSmartGps: (() => void) | null = null;
@@ -1010,6 +1004,8 @@ function BookInDriveStyle() {
     return () => {
       mounted = false;
       cancelSmartGps?.();
+      engine.stop();
+      pickupEngineRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- preset pickup intentionally tracks URL keys only once per open
   }, [
@@ -1018,20 +1014,23 @@ function BookInDriveStyle() {
     params.pickupLng,
   ]);
 
-  // If pickup is still raw coordinates after lock, retry reverse geocode (cold start / rate limit).
+  // If pickup is still detecting / raw after lock, retry Instant Pickup (cold start / rate limit).
   useEffect(() => {
     if (gpsStatus !== 'locked' || !pickupCoords) return;
-    if (!isRawLatLngLabel(pickup)) return;
+    if (!isDetectingPickupLabel(pickup) && !isRawLatLngLabel(pickup)) return;
     let cancelled = false;
     const t = setTimeout(() => {
       void (async () => {
         try {
-          const addr = await reverseGeocodeViaBackend(pickupCoords.lat, pickupCoords.lng, BACKEND_URL);
-          if (cancelled || !addr) return;
-          setPickup(addr);
+          const resolved = await resolveInstantPickup(pickupCoords.lat, pickupCoords.lng, {
+            forceNetwork: true,
+          });
+          if (cancelled) return;
+          setPickup(safePickupDisplay(resolved.label));
+          setPickupDetecting(false);
           setCurrentLocation((prev: { lat: number; lng: number; address: string } | null) =>
             prev && Number(prev.lat) === pickupCoords.lat && Number(prev.lng) === pickupCoords.lng
-              ? { ...prev, address: addr }
+              ? { ...prev, address: resolved.label }
               : prev,
           );
         } catch {
@@ -1045,22 +1044,23 @@ function BookInDriveStyle() {
     };
   }, [gpsStatus, pickupCoords?.lat, pickupCoords?.lng, pickup]);
 
-  // Opening pickup search — resolve coords / “Finding address…” to a real label when modal opens or coords jump.
+  // Opening pickup search — resolve detecting / legacy labels when modal opens.
   useEffect(() => {
     if (!showLocationModal || editingField !== 'pickup' || !pickupCoords) return;
-    const needsResolve =
-      isRawLatLngLabel(pickup) || pickup === 'Finding address…';
-    if (!needsResolve) return;
+    if (!isDetectingPickupLabel(pickup) && !isRawLatLngLabel(pickup)) return;
     let cancelled = false;
     void (async () => {
-      const addr = await reverseGeocodeViaBackend(pickupCoords.lat, pickupCoords.lng, BACKEND_URL);
-      if (cancelled || !addr) return;
-      setPickup(addr);
+      const resolved = await resolveInstantPickup(pickupCoords.lat, pickupCoords.lng, {
+        forceNetwork: true,
+      });
+      if (cancelled) return;
+      setPickup(safePickupDisplay(resolved.label));
+      setPickupDetecting(false);
       setCurrentLocation((prev: { lat: number; lng: number; address: string } | null) =>
         prev &&
         Number(prev.lat) === pickupCoords.lat &&
         Number(prev.lng) === pickupCoords.lng
-          ? { ...prev, address: addr }
+          ? { ...prev, address: resolved.label }
           : prev,
       );
     })();
@@ -1093,7 +1093,13 @@ function BookInDriveStyle() {
   const resolveAddressToCoords = async (address: string) => {
     try {
       const query = encodeURIComponent(address.trim());
-      const res = await fetch(`${BACKEND_URL}/api/places/geocode-address?address=${query}`);
+      // /api/places/geocode-address requires auth — a plain fetch 401s and returns
+      // null, silently blocking manual/deep-link addresses at "Pin locations".
+      // preserveSessionOn401 so a transient token issue never logs the rider out.
+      const res = await authedFetch(
+        `${BACKEND_URL}/api/places/geocode-address?address=${query}`,
+        { method: 'GET', preserveSessionOn401: true },
+      );
       const data = await res.json().catch(() => ({}));
       const lat = Number(data?.latitude);
       const lng = Number(data?.longitude);
@@ -1704,13 +1710,17 @@ function BookInDriveStyle() {
       clearTimeout(timer);
     };
   }, [
+    // NOTE: tripDraft.distanceKm and selectedVehicle are intentionally NOT deps.
+    // - distanceKm is *written* by this effect (via applyTripDraftRoute), so
+    //   including it caused a self-triggered second full 4–5 call fan-out.
+    // - a vehicle tap already recomputes its fare via handleCalculateFare(); the
+    //   matrix prices don't change with selection, so re-running the whole
+    //   fan-out on every tap was pure waste.
     pickupCoords?.lat,
     pickupCoords?.lng,
     destinationCoords?.lat,
     destinationCoords?.lng,
     tripDraftRouteKey,
-    tripDraft.distanceKm,
-    selectedVehicle,
     availableVehicles,
     riderId,
     requestedDriverId,
@@ -1973,6 +1983,7 @@ function BookInDriveStyle() {
       const res = await authedFetch(`${BACKEND_URL}/api/trips/request?rider_id=${riderId}`, {
         method: 'POST',
         body: JSON.stringify(requestBody),
+        timeoutMs: 12_000,
       });
       const result = await res.json().catch(() => ({}));
       if (res.ok && (result.trip || result.success)) {
@@ -2384,9 +2395,12 @@ function BookInDriveStyle() {
             activeOpacity={0.85}
           >
             <View style={[s.pickupDot, { backgroundColor: COLORS.green }]} />
-            <Text style={s.pickupChipLabel} numberOfLines={1}>
-              {pickup?.trim() ? pickup : 'Pickup · GPS or search'}
-            </Text>
+            <AnimatedPickupLabel
+              label={pickup}
+              detecting={pickupDetecting || gpsStatus === 'detecting'}
+              style={s.pickupChipLabel}
+              numberOfLines={1}
+            />
             <View
               style={[
                 s.gpsMini,
@@ -2394,9 +2408,15 @@ function BookInDriveStyle() {
                 gpsStatus === 'error' && { backgroundColor: 'rgba(255,184,0,0.15)' },
               ]}
             >
-              {gpsStatus === 'detecting' && <ActivityIndicator size="small" color={COLORS.blue} />}
-              {gpsStatus === 'locked' && <Ionicons name="locate" size={14} color={COLORS.green} />}
-              {gpsStatus === 'error' && <Ionicons name="warning" size={14} color={COLORS.yellow} />}
+              {(pickupDetecting || gpsStatus === 'detecting') && (
+                <ActivityIndicator size="small" color={COLORS.blue} />
+              )}
+              {!pickupDetecting && gpsStatus === 'locked' && (
+                <Ionicons name="locate" size={14} color={COLORS.green} />
+              )}
+              {gpsStatus === 'error' && !pickupDetecting && (
+                <Ionicons name="warning" size={14} color={COLORS.yellow} />
+              )}
             </View>
           </TouchableOpacity>
         </View>
@@ -2411,9 +2431,12 @@ function BookInDriveStyle() {
             >
               <View style={s.mapBidRow}>
                 <View style={[s.mapBidDot, { backgroundColor: COLORS.green }]} />
-                <Text style={s.mapBidTxt} numberOfLines={1}>
-                  {pickup?.trim() || 'Pickup'}
-                </Text>
+                <AnimatedPickupLabel
+                  label={pickup}
+                  detecting={pickupDetecting}
+                  style={s.mapBidTxt}
+                  numberOfLines={1}
+                />
               </View>
               {stopCoords ? (
                 <>
@@ -3334,10 +3357,16 @@ function BookInDriveStyle() {
                   }
 
                   if (field === 'pickup') {
-                    setPickup(desc);
+                    setPickup(safePickupDisplay(desc));
+                    setPickupDetecting(false);
                     if (coords) {
                       manualPickupRef.current = true;
                       setPickupCoords(coords);
+                      if (isRawLatLngLabel(desc) || isDetectingPickupLabel(desc)) {
+                        void resolveInstantPickup(coords.lat, coords.lng).then((r) => {
+                          setPickup(safePickupDisplay(r.label));
+                        });
+                      }
                     } else {
                       Alert.alert(
                         'Could not pin pickup',
@@ -3401,7 +3430,7 @@ function BookInDriveStyle() {
                 if (editingField === 'pickup') {
                   // Rider chose "use my GPS" — let live refinements keep improving it.
                   manualPickupRef.current = false;
-                  setPickup(currentLocation.address);
+                  setPickup(safePickupDisplay(currentLocation.address));
                   setPickupCoords({ lat: currentLocation.lat, lng: currentLocation.lng });
                 } else {
                   setDestination(currentLocation.address);

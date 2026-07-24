@@ -17,7 +17,7 @@ const getApiUrl = () => {
     return envUrl.replace(/\/api$/, '');
   }
   // Priority 3: Production fallback (Cloud Run)
-  return 'https://nexryde-backend-993913300770.us-central1.run.app';
+  return 'https://nexryde-backend-993913300770.africa-south1.run.app';
 };
 
 const API_URL = getApiUrl();
@@ -669,18 +669,27 @@ export const getPendingTrips = (driverLat: number, driverLng: number, driverId?:
 export const getDriverTripOffers = (driverId: string) =>
   api.get(`/trips/offers/${driverId}`);
 
-export const declineTripOffer = (offerId: string, driverId: string) =>
-  api.put(`/trips/offers/${offerId}/decline`, { driver_id: driverId });
+export const declineTripOffer = (
+  offerId: string,
+  driverId: string,
+  clientEventId?: string,
+) =>
+  api.put(`/trips/offers/${offerId}/decline`, {
+    driver_id: driverId,
+    client_event_id: clientEventId || `decline:${offerId}:${driverId}`,
+  });
 
 export const acceptTrip = (
   tripId: string,
   driverId: string,
   offerId?: string,
-  proposedFare?: number
+  proposedFare?: number,
+  clientEventId?: string,
 ) =>
   api.put(`/trips/${tripId}/accept`, {
     driver_id: driverId,
     offer_id: offerId,
+    client_event_id: clientEventId || `accept:${tripId}:${driverId}`,
     ...(proposedFare != null && Number.isFinite(proposedFare)
       ? { proposed_fare: proposedFare }
       : {}),
@@ -711,8 +720,18 @@ export const updateTripRoute = (
 export const confirmTripPayment = (tripId: string) =>
   api.put(`/trips/${tripId}/confirm-payment`);
 
-export const cancelTrip = (tripId: string, cancelledBy: string) =>
-  api.put(`/trips/${tripId}/cancel`, { cancelled_by: cancelledBy });
+export const cancelTrip = (
+  tripId: string,
+  cancelledBy: string,
+  opts?: { reason?: string; clientEventId?: string },
+) =>
+  api.put(`/trips/${tripId}/cancel`, {
+    cancelled_by: cancelledBy,
+    client_event_id: opts?.clientEventId || `cancel:${tripId}:${cancelledBy}`,
+    ...(opts?.reason
+      ? { reason: opts.reason, cancellation_reason: opts.reason }
+      : {}),
+  });
 
 export const rateTrip = (tripId: string, raterId: string, rating: number, comment?: string) =>
   api.put(`/trips/${tripId}/rate?rater_id=${raterId}`, {

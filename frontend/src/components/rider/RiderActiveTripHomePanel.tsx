@@ -56,25 +56,42 @@ export function RiderActiveTripHomePanel() {
       setCancelError(null);
       setCancelling(true);
       try {
-        const payload: Record<string, string> = { cancelled_by: userId };
+        const payload: Record<string, string> = {
+          cancelled_by: userId,
+          client_event_id: `cancel:${currentTrip.id}:${userId}`,
+        };
         const trimmed = String(reason || '').trim();
         if (trimmed) {
           payload.reason = trimmed;
           payload.cancellation_reason = trimmed;
         }
-        const res = await fetch(`${BACKEND_URL}/api/trips/${currentTrip.id}/cancel`, {
-          method: 'PUT',
-          headers: getAuthHeaders(),
-          body: JSON.stringify(payload),
+        const { reliableCancel } = await import('@/src/realtime/criticalActions');
+        const result = await reliableCancel({
+          tripId: currentTrip.id,
+          actorId: userId,
+          reason: trimmed || undefined,
+          cancelFn: async () => {
+            const res = await fetch(`${BACKEND_URL}/api/trips/${currentTrip.id}/cancel`, {
+              method: 'PUT',
+              headers: getAuthHeaders(),
+              body: JSON.stringify(payload),
+            });
+            let data: { detail?: string } = {};
+            try {
+              data = await res.json();
+            } catch {
+              /* ignore */
+            }
+            if (!res.ok) {
+              throw new Error(String(data?.detail || 'Unable to cancel this request. Tap Cancel Ride to retry.'));
+            }
+          },
         });
-        let data: { detail?: string } = {};
-        try {
-          data = await res.json();
-        } catch {
-          /* ignore */
-        }
-        if (!res.ok) {
-          setCancelError(String(data?.detail || 'Unable to cancel this request. Tap Cancel Ride to retry.'));
+        if (result.queued) {
+          clearTripDriverCache();
+          setCurrentTrip(null);
+          setCancelOpen(false);
+          toast.show('Cancel saved offline — will sync when you reconnect.', 'info');
           return;
         }
         clearTripDriverCache();
@@ -82,8 +99,12 @@ export function RiderActiveTripHomePanel() {
         setCancelOpen(false);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         toast.show('Trip cancelled successfully.', 'success');
-      } catch {
-        setCancelError('Could not cancel this request. Check your connection and retry.');
+      } catch (e: unknown) {
+        const msg =
+          e instanceof Error
+            ? e.message
+            : 'Could not cancel this request. Check your connection and retry.';
+        setCancelError(msg);
       } finally {
         cancelInFlightRef.current = false;
         setCancelling(false);

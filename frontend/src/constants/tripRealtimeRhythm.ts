@@ -30,16 +30,17 @@ export function isRiderMapFirstTripStatus(tripStatus: string): boolean {
   return (RIDER_MAP_FIRST_TRIP_STATUSES as readonly string[]).includes(tripStatus);
 }
 
-/** Rider `/trips/:id/status` poll: slower while WS is healthy; faster when live + no WS. */
+/** Rider `/trips/:id/status` poll: faster while finding a driver; slower once live + WS healthy. */
 export function riderTripStatusPollIntervalMs(wsConnected: boolean, tripStatus: string): number {
-  if (isRiderMapLiveTripStatus(tripStatus)) return wsConnected ? 12000 : 4000;
-  if (wsConnected) return 20000;
-  return 5000;
+  if (isRiderMapFindingStatus(tripStatus)) return wsConnected ? 5_000 : 2_500;
+  if (isRiderMapLiveTripStatus(tripStatus)) return wsConnected ? 10_000 : 3_000;
+  if (wsConnected) return 16_000;
+  return 4_000;
 }
 
 /** Backup ETA REST poll — primary path is WebSocket `eta_seconds`. */
 export function riderTripEtaFallbackPollMs(wsConnected: boolean): number {
-  return wsConnected ? 18000 : 5000;
+  return wsConnected ? 14_000 : 4_000;
 }
 
 // Driver offer fallback intervals: see `driverPollingProfiles.ts` (`driverOffersFallbackPollIntervalMs`).
@@ -48,10 +49,10 @@ export function riderTripEtaFallbackPollMs(wsConnected: boolean): number {
 // Consumed by LiveTrackingScreen and useRiderTrackingSession.
 
 /** Throttle interval for updating displayed ETA / distance on the tracking UI (ms). */
-export const RIDER_TRACKING_DISPLAY_THROTTLE_MS = 2000;
+export const RIDER_TRACKING_DISPLAY_THROTTLE_MS = 1500;
 
 /** Throttle interval for committing rider location to backend during a trip (ms). */
-export const RIDER_TRACKING_LOCATION_THROTTLE_MS = 4000;
+export const RIDER_TRACKING_LOCATION_THROTTLE_MS = 3000;
 
 /** Duration after which a GPS fix is considered stale and triggers a warning (ms). */
 export const RIDER_TRACKING_GPS_STALE_MS = 15000;

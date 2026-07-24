@@ -1,7 +1,7 @@
 /**
  * Rider home — horizontal favourite drivers (book in one tap).
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -66,11 +66,17 @@ export function RiderFavoritesHomeStrip() {
     }
   }, [riderId, canCallAuthedApi]);
 
+  const loadedOnceRef = useRef(false);
   useFocusEffect(
     useCallback(() => {
       if (!canCallAuthedApi) return;
-      setLoading(true);
-      void load();
+      // Only show the loading spinner on first load — refresh silently on
+      // repeat tab focus so switching back to Home doesn't flash a spinner
+      // over data that's already on screen.
+      if (!loadedOnceRef.current) setLoading(true);
+      void load().finally(() => {
+        loadedOnceRef.current = true;
+      });
     }, [load, canCallAuthedApi]),
   );
 

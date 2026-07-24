@@ -78,12 +78,27 @@ export async function queueLength(): Promise<number> {
  *  - On app foreground
  *  - After login
  */
-export async function flushOfflineQueue(): Promise<{
+type FlushResult = {
   flushed: number;
   failed: number;
   discarded: number;
   flushedLabels: string[];
-}> {
+};
+
+// Single-flight guard: multiple callers (connectivity recovery, foreground,
+// login, driver-home) can trigger a flush at once. Without this, each would
+// read the same queue and replay it — double accept/complete/cancel.
+let flushInFlight: Promise<FlushResult> | null = null;
+
+export function flushOfflineQueue(): Promise<FlushResult> {
+  if (flushInFlight) return flushInFlight;
+  flushInFlight = _flushOfflineQueueInner().finally(() => {
+    flushInFlight = null;
+  });
+  return flushInFlight;
+}
+
+async function _flushOfflineQueueInner(): Promise<FlushResult> {
   const queue = await _load();
   if (queue.length === 0) return { flushed: 0, failed: 0, discarded: 0, flushedLabels: [] };
 

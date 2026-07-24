@@ -136,7 +136,11 @@ class OverlayManager(
     runCatching {
       val intent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)
         ?: Intent(Intent.ACTION_VIEW, Uri.parse("nexryde://action/open_app"))
-      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+      intent.addFlags(
+        Intent.FLAG_ACTIVITY_NEW_TASK or
+          Intent.FLAG_ACTIVITY_SINGLE_TOP or
+          Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+      )
       appContext.startActivity(intent)
     }
   }

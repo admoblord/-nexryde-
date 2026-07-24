@@ -11,10 +11,11 @@ A two-level cache means a cache-warm deployment with 500 drivers pays
 ~0 geocoding/autocomplete dollars per day for repeated queries.
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import List, Optional
 import httpx
+from http_client import get_http_client
 import os
 import json
 import hashlib
@@ -260,9 +261,9 @@ async def _geocode_search_fallback_predictions(input_text: str, components: str)
         f"?address={quote(raw)}{comp}&language=en&region=ng&key={GOOGLE_MAPS_API_KEY}"
     )
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=10.0)
-            data = response.json()
+        client = get_http_client()
+        response = await client.get(url, timeout=10.0)
+        data = response.json()
     except Exception:
         return None
     if data.get("status") != "OK" or not data.get("results"):
@@ -289,8 +290,18 @@ async def _geocode_search_fallback_predictions(input_text: str, components: str)
     return {"predictions": predictions, "status": "OK"}
 
 
+async def _require_places_auth(request: Request) -> str:
+    from auth_guard import require_authenticated
+    from security_advanced import general_limiter
+
+    actor = require_authenticated(request)
+    await general_limiter.check_rate_limit(request, f"places:{actor}")
+    return actor
+
+
 @places_router.get("/autocomplete")
 async def autocomplete_places(
+    request: Request,
     input: str = Query(..., min_length=1),
     location_bias: Optional[str] = Query(None),
     radius: Optional[int] = Query(None),
@@ -303,11 +314,15 @@ async def autocomplete_places(
 
     Pass ``sessiontoken`` from the client so autocomplete + place details bill as one session.
     """
+    await _require_places_auth(request)
     if not GOOGLE_MAPS_API_KEY:
         raise HTTPException(status_code=500, detail="Google Maps API key not configured")
     
     if len(input) < 3:
         return {"predictions": [], "status": "OK"}
+
+    import time as _time
+    t0 = _time.perf_counter()
     
     try:
         await _ensure_places_cache_indexes()
@@ -322,6 +337,12 @@ async def autocomplete_places(
             })
             cached = await _get_cache(key)
             if cached:
+                try:
+                    from realtime_platform.observability import observe_ms, incr
+                    observe_ms("places.autocomplete_ms", (_time.perf_counter() - t0) * 1000, cache="hit")
+                    incr("places.autocomplete_cache_hit")
+                except Exception:
+                    pass
                 return cached["response"]
 
         # Build location bias parameter
@@ -336,9 +357,9 @@ async def autocomplete_places(
             f"?input={safe_in}{location_params}{session_param}&key={GOOGLE_MAPS_API_KEY}"
         )
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=10.0)
-            data = response.json()
+        client = get_http_client()
+        response = await client.get(url, timeout=10.0)
+        data = response.json()
 
         if data.get("status") == "OK" and data.get("predictions"):
             predictions = []
@@ -357,6 +378,12 @@ async def autocomplete_places(
             }
             if use_cache:
                 await _set_cache(key, response_payload, ttl_seconds=300)
+            try:
+                from realtime_platform.observability import observe_ms, incr
+                observe_ms("places.autocomplete_ms", (_time.perf_counter() - t0) * 1000, cache="miss")
+                incr("places.autocomplete_cache_miss")
+            except Exception:
+                pass
             return response_payload
 
         fb = await _geocode_search_fallback_predictions(input, components or "country:ng")
@@ -387,6 +414,7 @@ async def autocomplete_places(
 
 @places_router.get("/details/{place_id}")
 async def get_place_details(
+    request: Request,
     place_id: str,
     sessiontoken: Optional[str] = Query(None),
 ):
@@ -395,6 +423,7 @@ async def get_place_details(
 
     When completing an autocomplete session, pass the same ``sessiontoken``.
     """
+    await _require_places_auth(request)
     if not GOOGLE_MAPS_API_KEY:
         raise HTTPException(status_code=500, detail="Google Maps API key not configured")
     
@@ -414,9 +443,9 @@ async def get_place_details(
             f"?place_id={place_id}&fields=geometry,formatted_address{session_param}&key={GOOGLE_MAPS_API_KEY}"
         )
         
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=10.0)
-            data = response.json()
+        client = get_http_client()
+        response = await client.get(url, timeout=10.0)
+        data = response.json()
         
         if data.get("status") == "OK" and data.get("result"):
             result = data["result"]
@@ -445,70 +474,86 @@ async def get_place_details(
 @places_router.get("/geocode")
 @places_router.get("/reverse-geocode")
 async def reverse_geocode(
+    request: Request,
     lat: float = Query(...),
-    lng: float = Query(...)
+    lng: float = Query(...),
 ):
     """
-    Reverse geocode coordinates (Google Geocoding API).
-    Also available at GET /api/places/reverse-geocode (same handler).
+    Instant Pickup reverse geocode.
+    Never returns raw coordinates as the display address.
+    Uses H3/nearby cache → Redis/Mongo → Google, with landmark→city priority labels.
     """
+    await _require_places_auth(request)
+    from instant_pickup import (
+        SAFE_FALLBACK,
+        cache_get_by_h3,
+        cache_set_h3,
+        pick_priority_label,
+        to_api_payload,
+    )
+
+    # H3 / nearby cell reuse (sub-500ms when warm)
+    h3_hit = await cache_get_by_h3(lat, lng)
+    if h3_hit:
+        return to_api_payload(h3_hit, cache="h3_hit")
+
     if not GOOGLE_MAPS_API_KEY:
-        raise HTTPException(status_code=503, detail="Google Maps API key not configured")
-    
+        # Soft degrade — never expose coordinates
+        return to_api_payload({"label": SAFE_FALLBACK, "status": "NO_KEY"}, cache="none")
+
     try:
         await _ensure_places_cache_indexes()
         key = _cache_key(
-            "reverse_geocode_v2",
+            "reverse_geocode_v3",
             {"lat": round(lat, 4), "lng": round(lng, 4)},
         )
         cached = await _get_cache(key)
-        if cached:
-            return cached["response"]
+        if cached and isinstance(cached.get("response"), dict):
+            resp = cached["response"]
+            # Migrate legacy coord-fallback payloads
+            short = str(resp.get("short_label") or resp.get("pickup_label") or "")
+            addr = str(resp.get("address") or "")
+            if short and not re.match(r"^\s*-?\d", short):
+                await cache_set_h3(lat, lng, {**resp, "label": short or addr})
+                return {**resp, "cache": "redis_or_mongo"}
+            if addr and not re.match(r"^\s*-?\d+\.\d+\s*,", addr):
+                await cache_set_h3(lat, lng, {**resp, "label": resp.get("short_label") or addr})
+                return {**resp, "cache": "redis_or_mongo"}
 
         url = (
             f"https://maps.googleapis.com/maps/api/geocode/json"
             f"?latlng={lat},{lng}&language=en&region=ng&key={GOOGLE_MAPS_API_KEY}"
         )
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=10.0)
-            data = response.json()
-        
-        if data.get("status") == "OK" and data.get("results"):
-            response_payload = _geocode_result_payload(data["results"][0])
+
+        client = get_http_client()
+        response = await client.get(url, timeout=8.0)
+        data = response.json()
+
+        results = data.get("results") or []
+        if data.get("status") == "OK" and results:
+            picked = pick_priority_label(results)
+            response_payload = to_api_payload(picked, cache="miss")
             await _set_cache(key, response_payload, ttl_seconds=3600)
+            await cache_set_h3(lat, lng, {**picked, "label": response_payload["short_label"]})
             return response_payload
 
-        err = data.get("status", "ERROR")
-        response_payload = {
-            "address": f"{lat:.6f}, {lng:.6f}",
-            "formatted_address": f"{lat:.6f}, {lng:.6f}",
-            "short_label": "",
-            "city": "",
-            "state": "",
-            "country": "",
-            "neighborhood": "",
-            "status": err,
-        }
-        await _set_cache(key, response_payload, ttl_seconds=120)
+        # Google failed — safe fallback, short TTL so retry can recover
+        response_payload = to_api_payload(
+            {"label": SAFE_FALLBACK, "status": data.get("status", "ERROR")},
+            cache="fallback",
+        )
+        await _set_cache(key, response_payload, ttl_seconds=90)
         return response_payload
-    
+
     except Exception as e:
         print(f"Error in reverse_geocode: {str(e)}")
-        return {
-            "address": f"{lat:.6f}, {lng:.6f}",
-            "formatted_address": f"{lat:.6f}, {lng:.6f}",
-            "short_label": "",
-            "city": "",
-            "state": "",
-            "country": "",
-            "neighborhood": "",
-            "status": "ERROR",
-        }
+        return to_api_payload({"label": SAFE_FALLBACK, "status": "ERROR"}, cache="error")
+
 
 
 @places_router.get("/geocode-address")
 async def geocode_address(
+    request: Request,
     address: str = Query(..., min_length=3),
     components: Optional[str] = Query("country:ng")
 ):
@@ -517,6 +562,7 @@ async def geocode_address(
     This is used as a fallback when a user types an address
     but does not explicitly tap an autocomplete prediction.
     """
+    await _require_places_auth(request)
     if not GOOGLE_MAPS_API_KEY:
         raise HTTPException(status_code=500, detail="Google Maps API key not configured")
 
@@ -533,9 +579,9 @@ async def geocode_address(
             f"?address={address}{components_param}&key={GOOGLE_MAPS_API_KEY}"
         )
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=10.0)
-            data = response.json()
+        client = get_http_client()
+        response = await client.get(url, timeout=10.0)
+        data = response.json()
 
         if data.get("status") == "OK" and data.get("results"):
             result = data["results"][0]
@@ -562,12 +608,14 @@ async def geocode_address(
 
 @places_router.get("/nearby")
 async def nearby_places(
+    request: Request,
     lat: float = Query(...),
     lng: float = Query(...),
     radius: int = Query(5000, ge=100, le=50000),
     type: str = Query("mosque"),
 ):
     """Proxy for Google Places Nearby Search — keeps API key server-side."""
+    await _require_places_auth(request)
     if not GOOGLE_MAPS_API_KEY:
         raise HTTPException(status_code=500, detail="Google Maps API key not configured")
 
@@ -585,9 +633,9 @@ async def nearby_places(
             "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
             f"?location={lat},{lng}&radius={radius}&type={type}&key={GOOGLE_MAPS_API_KEY}"
         )
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=10.0)
-            data = response.json()
+        client = get_http_client()
+        response = await client.get(url, timeout=10.0)
+        data = response.json()
 
         response_payload = {"results": data.get("results", []), "status": data.get("status", "ERROR")}
         await _set_cache(key, response_payload, ttl_seconds=300)
@@ -598,6 +646,7 @@ async def nearby_places(
 
 @places_router.get("/driving-route")
 async def driving_route(
+    request: Request,
     pickup_lat: float = Query(...),
     pickup_lng: float = Query(...),
     dropoff_lat: float = Query(...),
@@ -610,6 +659,7 @@ async def driving_route(
 
     Uses the same route cache chain as ``POST /fare/estimate`` and trip request.
     """
+    await _require_places_auth(request)
     try:
         from routers.payments import get_directions_from_google
         from routing_quality import is_directions_road_route

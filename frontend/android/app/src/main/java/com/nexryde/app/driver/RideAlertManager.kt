@@ -31,13 +31,80 @@ class RideAlertManager(
   private var countdownSeconds = 0
   private var driverId: String? = null
   private var token: String? = null
+  private var refreshToken: String? = null
   private var backendUrl: String? = null
   private var online = false
 
-  fun updateSession(driverId: String?, token: String?, backendUrl: String?) {
-    this.driverId = driverId ?: this.driverId
-    this.token = token ?: this.token
-    this.backendUrl = backendUrl ?: this.backendUrl
+  fun updateSession(
+    driverId: String?,
+    token: String?,
+    backendUrl: String?,
+    refreshToken: String? = null,
+  ) {
+    // Never overwrite a good session with blank extras from JS showRideAlert.
+    this.driverId = driverId?.takeIf { it.isNotBlank() } ?: this.driverId
+    this.token = token?.takeIf { it.isNotBlank() } ?: this.token
+    this.backendUrl = backendUrl?.takeIf { it.isNotBlank() } ?: this.backendUrl
+    this.refreshToken = refreshToken?.takeIf { it.isNotBlank() } ?: this.refreshToken
+    persistSession()
+  }
+
+  private fun persistSession() {
+    val prefs = appContext.getSharedPreferences(SESSION_PREFS, Context.MODE_PRIVATE).edit()
+    driverId?.takeIf { it.isNotBlank() }?.let { prefs.putString(PREF_DRIVER_ID, it) }
+    token?.takeIf { it.isNotBlank() }?.let { prefs.putString(PREF_TOKEN, it) }
+    refreshToken?.takeIf { it.isNotBlank() }?.let { prefs.putString(PREF_REFRESH, it) }
+    backendUrl?.takeIf { it.isNotBlank() }?.let { prefs.putString(PREF_BACKEND, it) }
+    prefs.apply()
+  }
+
+  private fun ensureSessionLoaded() {
+    if (
+      !token.isNullOrBlank() &&
+      !driverId.isNullOrBlank() &&
+      !backendUrl.isNullOrBlank() &&
+      !refreshToken.isNullOrBlank()
+    ) {
+      return
+    }
+    val prefs = appContext.getSharedPreferences(SESSION_PREFS, Context.MODE_PRIVATE)
+    if (driverId.isNullOrBlank()) driverId = prefs.getString(PREF_DRIVER_ID, null)
+    if (token.isNullOrBlank()) token = prefs.getString(PREF_TOKEN, null)
+    if (refreshToken.isNullOrBlank()) refreshToken = prefs.getString(PREF_REFRESH, null)
+    if (backendUrl.isNullOrBlank()) backendUrl = prefs.getString(PREF_BACKEND, null)
+  }
+
+  private fun refreshAccessTokenIfNeeded(): Boolean {
+    ensureSessionLoaded()
+    val refresh = refreshToken?.takeIf { it.isNotBlank() } ?: return false
+    val base = backendUrl?.trim()?.trimEnd('/') ?: return false
+    return runCatching {
+      val body = JSONObject().put("refresh_token", refresh)
+      val conn = (URL("$base/api/auth/refresh-token").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        connectTimeout = 10_000
+        readTimeout = 12_000
+        setRequestProperty("Content-Type", "application/json")
+        doOutput = true
+      }
+      OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+      val status = conn.responseCode
+      val stream = if (status in 200..299) conn.inputStream else conn.errorStream
+      val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+      conn.disconnect()
+      if (status !in 200..299) {
+        Log.w(TAG, "native_token_refresh_failed status=$status")
+        return@runCatching false
+      }
+      val json = JSONObject(text)
+      val access = json.optString("access_token").ifBlank { json.optString("token") }
+      val nextRefresh = json.optString("refresh_token")
+      if (access.isBlank()) return@runCatching false
+      token = access
+      if (nextRefresh.isNotBlank()) refreshToken = nextRefresh
+      persistSession()
+      true
+    }.getOrDefault(false)
   }
 
   fun goOnline() {
@@ -88,35 +155,48 @@ class RideAlertManager(
   fun stopAlert() {
     val active = currentOffer
     Log.i(TAG, "stop_alert tripId=${active?.tripId} offerId=${active?.offerId}")
-    if (active != null && DriverRideAlertActivity.hasActiveAlert(active.tripId, active.offerId)) {
-      Log.i(TAG, "stop_alert_ignored_active_full_screen tripId=${active.tripId} offerId=${active.offerId}")
-      return
-    }
-    Log.i(TAG, "stop_alert_preserves_full_screen_activity")
+    // Always tear down — including full-screen alert. Soft-ignore left FS ringing
+    // after JS accept, then expire→finish dumped drivers to the launcher.
+    dismissOfferSurface(
+      tripId = active?.tripId,
+      offerId = active?.offerId,
+      bringAppForward = DriverRideAlertActivity.hasActiveAlert(active?.tripId, active?.offerId),
+    )
+  }
+
+  /** Close overlay + FS alert; bring MainActivity forward before finish when FS is up. */
+  private fun dismissOfferSurface(
+    tripId: String?,
+    offerId: String?,
+    bringAppForward: Boolean,
+  ) {
     stopCountdown()
     audioManager.stop()
     notificationManager.cancelOfferNotification()
     currentOffer = null
     actionInFlight = false
+    val fsActive = DriverRideAlertActivity.hasActiveAlert(tripId, offerId)
+    if (fsActive) {
+      if (bringAppForward) openApp()
+      handler.postDelayed({
+        DriverRideAlertActivity.finishActiveAlert(tripId, offerId)
+      }, 220)
+    }
     if (online) render(stateManager.online()) else overlayManager.hide()
   }
 
   fun hide() {
     val active = currentOffer
     Log.i(TAG, "hide_alert_surface tripId=${active?.tripId} offerId=${active?.offerId}")
-    if (active != null && DriverRideAlertActivity.hasActiveAlert(active.tripId, active.offerId)) {
-      Log.i(TAG, "hide_ignored_active_full_screen tripId=${active.tripId} offerId=${active.offerId}")
-      return
-    }
-    Log.i(TAG, "hide_preserves_full_screen_activity")
     online = false
-    stopCountdown()
-    audioManager.stop()
-    notificationManager.cancelOfferNotification()
+    // Force offline must tear down FS too — soft-ignore left ringtone + stuck alert.
+    dismissOfferSurface(
+      tripId = active?.tripId,
+      offerId = active?.offerId,
+      bringAppForward = DriverRideAlertActivity.hasActiveAlert(active?.tripId, active?.offerId),
+    )
     overlayManager.hide()
     stateManager.hide()
-    currentOffer = null
-    actionInFlight = false
   }
 
   fun accept(rawOffer: Map<String, String>) {
@@ -146,11 +226,17 @@ class RideAlertManager(
   }
 
   fun markAccepting() {
+    pauseCountdown()
+    audioManager.stop()
+    notificationManager.cancelOfferNotification()
     if (!online) return
     render(stateManager.accepting())
   }
 
   fun markDeclining() {
+    pauseCountdown()
+    audioManager.stop()
+    notificationManager.cancelOfferNotification()
     if (!online) return
     render(stateManager.declining())
   }
@@ -178,18 +264,31 @@ class RideAlertManager(
   private fun acceptCurrentOffer() {
     val offer = currentOffer ?: return
     if (actionInFlight) return
+    ensureSessionLoaded()
     val tripId = offer.tripId
     val driver = driverId.orEmpty()
-    val bearer = token.orEmpty()
-    if (tripId.isBlank() || driver.isBlank() || bearer.isBlank()) {
+    var bearer = token.orEmpty()
+    if (tripId.isBlank() || driver.isBlank()) {
       Log.w(TAG, "accept_blocked_missing_session tripId=$tripId offerId=${offer.offerId} driverPresent=${driver.isNotBlank()} tokenPresent=${bearer.isNotBlank()}")
       markFailed("Open app to accept")
       DriverRideAlertActivity.markActionRetryable(tripId, offer.offerId, "Open NEXRYDE to accept, then retry.")
       return
     }
+    if (bearer.isBlank() && !refreshAccessTokenIfNeeded()) {
+      markFailed("Open app to accept")
+      DriverRideAlertActivity.markActionRetryable(tripId, offer.offerId, "Open NEXRYDE to accept, then retry.")
+      return
+    }
+    bearer = token.orEmpty()
     actionInFlight = true
     Log.i(TAG, "accept_start tripId=$tripId offerId=${offer.offerId}")
     markAccepting()
+    // Tell JS an accept HTTP is in flight so its offer countdown does not auto-decline
+    // the ride out from under this native accept.
+    DriverExperienceEvents.emit(
+      "native_action_pending",
+      mapOf("tripId" to tripId, "offerId" to offer.offerId, "kind" to "accept")
+    )
     DriverRideAlertActivity.markActionBusy(tripId, offer.offerId, "Accepting ride...")
 
     Thread {
@@ -199,36 +298,43 @@ class RideAlertManager(
           offer.offerId.takeIf { it.isNotBlank() }?.let { put("offer_id", it) }
           parseFare(offer.fare)?.let { put("proposed_fare", it) }
         }
-        putJson("/api/trips/${urlEncode(tripId)}/accept", body, bearer)
+        var response = putJson("/api/trips/${urlEncode(tripId)}/accept", body, bearer)
+        if (response.first == 401 && refreshAccessTokenIfNeeded()) {
+          bearer = token.orEmpty()
+          response = putJson("/api/trips/${urlEncode(tripId)}/accept", body, bearer)
+        }
+        response
       }
       handler.post {
         actionInFlight = false
-        val stillCurrent = currentOffer?.tripId == tripId && currentOffer?.offerId == offer.offerId
-        if (!stillCurrent) {
-          Log.i(TAG, "accept_result_ignored_after_lifecycle_end tripId=$tripId offerId=${offer.offerId}")
-          return@post
-        }
         val response = result.getOrNull()
+        // Server accept is authoritative — never drop success if UI cleared mid-flight.
         if (response != null && response.first in 200..299) {
           Log.i(TAG, "accept_success tripId=$tripId offerId=${offer.offerId} status=${response.first}")
-          DriverRideAlertActivity.finishActiveAlert(tripId, offer.offerId)
-          currentOffer = null
           markAccepted()
           DriverExperienceEvents.emit(
             "native_accept_success",
             mapOf("tripId" to tripId, "offerId" to offer.offerId, "tripJson" to response.second)
           )
-          openApp()
-        } else {
-          val message = response?.second?.takeIf { it.isNotBlank() } ?: result.exceptionOrNull()?.message ?: "Could not accept"
-          Log.w(TAG, "accept_failed tripId=$tripId offerId=${offer.offerId} status=${response?.first} message=$message")
-          markFailed("Try again")
-          DriverRideAlertActivity.markActionRetryable(tripId, offer.offerId, "Accept failed. Check connection and tap Accept again.")
-          DriverExperienceEvents.emit(
-            "native_accept_failed",
-            mapOf("tripId" to tripId, "offerId" to offer.offerId, "message" to message)
-          )
+          dismissOfferSurface(tripId, offer.offerId, bringAppForward = true)
+          return@post
         }
+        val stillCurrent = currentOffer?.tripId == tripId && currentOffer?.offerId == offer.offerId
+        if (!stillCurrent) {
+          Log.i(TAG, "accept_result_ignored_after_lifecycle_end tripId=$tripId offerId=${offer.offerId}")
+          return@post
+        }
+        val message = response?.second?.takeIf { it.isNotBlank() } ?: result.exceptionOrNull()?.message ?: "Could not accept"
+        Log.w(TAG, "accept_failed tripId=$tripId offerId=${offer.offerId} status=${response?.first} message=$message")
+        markFailed("Try again")
+        DriverRideAlertActivity.markActionRetryable(tripId, offer.offerId, "Accept failed. Check connection and tap Accept again.")
+        DriverExperienceEvents.emit(
+          "native_accept_failed",
+          mapOf("tripId" to tripId, "offerId" to offer.offerId, "message" to message)
+        )
+        // Resume expiry so a failed accept cannot leave the offer stuck forever.
+        if (countdownSeconds < 8) countdownSeconds = 8
+        startCountdown()
       }
     }.start()
   }
@@ -236,15 +342,23 @@ class RideAlertManager(
   private fun declineCurrentOffer() {
     val offer = currentOffer ?: return
     if (actionInFlight) return
+    ensureSessionLoaded()
     val offerId = offer.offerId
     val driver = driverId.orEmpty()
-    val bearer = token.orEmpty()
-    if (offerId.isBlank() || driver.isBlank() || bearer.isBlank()) {
+    var bearer = token.orEmpty()
+    if (offerId.isBlank() || driver.isBlank()) {
       Log.w(TAG, "decline_missing_session tripId=${offer.tripId} offerId=$offerId driverPresent=${driver.isNotBlank()} tokenPresent=${bearer.isNotBlank()}")
       markFailed("Try again")
       DriverRideAlertActivity.markActionRetryable(offer.tripId, offerId, "Could not decline yet. Open NEXRYDE or retry.")
       return
     }
+    // Mirror accept: refresh a blank/expired token instead of failing outright.
+    if (bearer.isBlank() && !refreshAccessTokenIfNeeded()) {
+      markFailed("Try again")
+      DriverRideAlertActivity.markActionRetryable(offer.tripId, offerId, "Could not decline yet. Open NEXRYDE or retry.")
+      return
+    }
+    bearer = token.orEmpty()
     actionInFlight = true
     Log.i(TAG, "decline_start tripId=${offer.tripId} offerId=$offerId")
     markDeclining()
@@ -253,58 +367,68 @@ class RideAlertManager(
     Thread {
       val result = runCatching {
         val body = JSONObject().apply { put("driver_id", driver) }
-        putJson("/api/trips/offers/${urlEncode(offerId)}/decline", body, bearer)
+        var response = putJson("/api/trips/offers/${urlEncode(offerId)}/decline", body, bearer)
+        if (response.first == 401 && refreshAccessTokenIfNeeded()) {
+          bearer = token.orEmpty()
+          response = putJson("/api/trips/offers/${urlEncode(offerId)}/decline", body, bearer)
+        }
+        response
       }
       handler.post {
         actionInFlight = false
-        val stillCurrent = currentOffer?.tripId == offer.tripId && currentOffer?.offerId == offerId
-        if (!stillCurrent) {
-          Log.i(TAG, "decline_result_ignored_after_lifecycle_end tripId=${offer.tripId} offerId=$offerId")
-          return@post
-        }
         val response = result.getOrNull()
         if (response != null && response.first in 200..299) {
           Log.i(TAG, "decline_complete tripId=${offer.tripId} offerId=$offerId status=${response.first}")
-          DriverRideAlertActivity.finishActiveAlert(offer.tripId, offerId)
-          currentOffer = null
           markDeclined()
           DriverExperienceEvents.emit(
             "native_decline_success",
             mapOf("tripId" to offer.tripId, "offerId" to offerId, "responseJson" to response.second)
           )
-        } else {
-          val message = response?.second?.takeIf { it.isNotBlank() } ?: result.exceptionOrNull()?.message ?: "Could not decline"
-          Log.w(TAG, "decline_failed tripId=${offer.tripId} offerId=$offerId status=${response?.first} message=$message")
-          markFailed("Try again")
-          DriverRideAlertActivity.markActionRetryable(offer.tripId, offerId, "Decline failed. Check connection and tap Decline again.")
-          DriverExperienceEvents.emit(
-            "native_decline_failed",
-            mapOf("tripId" to offer.tripId, "offerId" to offerId, "message" to message)
-          )
+          dismissOfferSurface(offer.tripId, offerId, bringAppForward = true)
+          return@post
         }
+        val stillCurrent = currentOffer?.tripId == offer.tripId && currentOffer?.offerId == offerId
+        if (!stillCurrent) {
+          Log.i(TAG, "decline_result_ignored_after_lifecycle_end tripId=${offer.tripId} offerId=$offerId")
+          return@post
+        }
+        val message = response?.second?.takeIf { it.isNotBlank() } ?: result.exceptionOrNull()?.message ?: "Could not decline"
+        Log.w(TAG, "decline_failed tripId=${offer.tripId} offerId=$offerId status=${response?.first} message=$message")
+        markFailed("Try again")
+        DriverRideAlertActivity.markActionRetryable(offer.tripId, offerId, "Decline failed. Check connection and tap Decline again.")
+        DriverExperienceEvents.emit(
+          "native_decline_failed",
+          mapOf("tripId" to offer.tripId, "offerId" to offerId, "message" to message)
+        )
       }
     }.start()
   }
 
   private fun startCountdown() {
-    stopCountdown()
+    handler.removeCallbacks(countdownRunnable)
+    if (countdownSeconds <= 0) countdownSeconds = OFFER_COUNTDOWN_SECONDS
     handler.postDelayed(countdownRunnable, 1000)
+  }
+
+  /** Stop ticks without wiping remaining seconds (accept/decline in flight). */
+  private fun pauseCountdown() {
+    handler.removeCallbacks(countdownRunnable)
   }
 
   private val countdownRunnable = object : Runnable {
     override fun run() {
+      // Accept/decline in flight — never expire/dismiss under the HTTP call.
+      if (actionInFlight) {
+        handler.postDelayed(this, 1000)
+        return
+      }
       countdownSeconds -= 1
       if (countdownSeconds <= 0) {
         val expired = currentOffer
         Log.i(TAG, "offer_timeout tripId=${expired?.tripId} offerId=${expired?.offerId}")
-        stopCountdown()
-        audioManager.stop()
-        notificationManager.cancelOfferNotification()
-        currentOffer = null
-        actionInFlight = false
-        expired?.let { DriverRideAlertActivity.finishActiveAlert(it.tripId, it.offerId) }
-        if (online) render(stateManager.online()) else overlayManager.hide()
         DriverExperienceEvents.emit("native_offer_expired", mapOf("tripId" to expired?.tripId, "offerId" to expired?.offerId))
+        // Always bring MainActivity forward — finishing FS alone drops to launcher.
+        dismissOfferSurface(expired?.tripId, expired?.offerId, bringAppForward = true)
         return
       }
       if (!online) {
@@ -354,12 +478,26 @@ class RideAlertManager(
   private fun openApp() {
     val intent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)
       ?: Intent(Intent.ACTION_VIEW, Uri.parse("nexryde://action/open_app")).setPackage(appContext.packageName)
-    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-    appContext.startActivity(intent)
+    // REORDER_TO_FRONT only — CLEAR_TOP can remount splash/root and feel like a crash.
+    intent.addFlags(
+      Intent.FLAG_ACTIVITY_NEW_TASK or
+        Intent.FLAG_ACTIVITY_SINGLE_TOP or
+        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+    )
+    try {
+      appContext.startActivity(intent)
+    } catch (e: Exception) {
+      Log.w(TAG, "openApp_failed ${e.message}")
+    }
   }
 
   companion object {
     private const val TAG = "NexrydeFullScreen"
     private const val OFFER_COUNTDOWN_SECONDS = 20
+    private const val SESSION_PREFS = "nexryde_driver_native_session"
+    private const val PREF_DRIVER_ID = "driver_id"
+    private const val PREF_TOKEN = "token"
+    private const val PREF_REFRESH = "refresh_token"
+    private const val PREF_BACKEND = "backend_url"
   }
 }

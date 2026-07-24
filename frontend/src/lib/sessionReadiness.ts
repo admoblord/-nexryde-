@@ -17,6 +17,12 @@ import {
 /** Minimum access-token TTL before we proactively rotate (Bolt/Uber headroom on 15m tokens). */
 export const CRITICAL_ACTION_MIN_TTL_SEC = 300;
 
+/**
+ * Accept / decline hot path: only refresh when the token is about to die.
+ * Avoids a SecureStore + refresh round-trip on every offer tap.
+ */
+export const ACCEPT_ACTION_MIN_TTL_SEC = 90;
+
 /** Background refresh cadence while driver shift is active. */
 export const SHIFT_SESSION_KEEPER_INTERVAL_MS = 60_000;
 
@@ -43,9 +49,14 @@ function serverValidToken(token: string | null): boolean {
 export async function ensureCriticalSessionReady(
   minTtlSec = CRITICAL_ACTION_MIN_TTL_SEC,
 ): Promise<CriticalSessionResult> {
-  await warmTokenCache();
-  let token = getCachedToken() ?? (await getValidToken());
+  // Hot path: in-memory JWT already good enough — skip SecureStore warm.
+  let token = getCachedToken();
   let ttl = token ? getAccessTokenTtlSec(token) : null;
+  if (!token || ttl == null) {
+    await warmTokenCache();
+    token = getCachedToken() ?? (await getValidToken());
+    ttl = token ? getAccessTokenTtlSec(token) : null;
+  }
   let refreshed = false;
 
   const needsRefresh = !token || ttl == null || ttl < minTtlSec;

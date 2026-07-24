@@ -95,3 +95,4 @@ backend/.env.*
 
 # Expo / Metro (never commit cache)
 frontend/.metro-cache/
+backend/.secrets/

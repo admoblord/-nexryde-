@@ -14,7 +14,9 @@ from datetime import datetime
 
 BASE_URL = os.environ.get("BACKEND_URL", "https://nexryde-backend-993913300770.us-central1.run.app")
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@admoblordgroup.com")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "nwabueze1")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+if not ADMIN_PASSWORD:
+    raise SystemExit("ADMIN_PASSWORD env var is required (no hardcoded default)")
 
 GREEN  = "\033[92m"
 RED    = "\033[91m"

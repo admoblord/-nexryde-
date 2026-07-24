@@ -29,7 +29,19 @@ import os
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "").strip()
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRY_HOURS = 168  # 7 days — prevents token expiry during onboarding
+
+
+def _jwt_expiry_hours_from_env() -> int:
+    """Honor JWT_EXPIRY_HOURS (Cloud Run sets 24). Cap 1h–168h."""
+    raw = (os.environ.get("JWT_EXPIRY_HOURS") or "24").strip()
+    try:
+        hours = int(raw)
+    except ValueError:
+        hours = 24
+    return max(1, min(hours, 168))
+
+
+JWT_EXPIRY_HOURS = _jwt_expiry_hours_from_env()
 
 if not JWT_SECRET:
     if os.environ.get("ALLOW_INSECURE_JWT_FOR_TESTS", "").lower() in ("1", "true", "yes"):
@@ -43,8 +55,13 @@ from redis_store import store as _redis_store
 request_counts: Dict[str, List[float]] = defaultdict(list)
 blocked_ips: Dict[str, float] = {}
 
-# Admin IP whitelist (optional - set in environment)
-ADMIN_IP_WHITELIST = []  # Empty = allow all IPs
+# Admin IP whitelist — comma-separated in ADMIN_IP_WHITELIST. Empty = allow all
+# (set in production for Uber-grade admin hardening).
+ADMIN_IP_WHITELIST = [
+    ip.strip()
+    for ip in (os.environ.get("ADMIN_IP_WHITELIST") or "").split(",")
+    if ip.strip()
+]
 
 security = HTTPBearer()
 
@@ -355,28 +372,33 @@ async def verify_2fa_code(email: str, code: str) -> bool:
 
 # ==================== IP WHITELISTING ====================
 
+def client_ip_from_request(request: Request) -> str:
+    """Prefer first X-Forwarded-For hop (Cloud Run), then peer IP."""
+    xff = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    if xff:
+        return xff
+    return request.client.host if request.client else "unknown"
+
+
 async def check_admin_ip(request: Request):
     """
-    Check if request IP is whitelisted for admin access
-    
-    Args:
-        request: FastAPI Request object
-    
+    Check if request IP is whitelisted for admin access.
+
     Raises:
         HTTPException: If IP not whitelisted
     """
     if not ADMIN_IP_WHITELIST:
         return True  # No whitelist = allow all
-    
-    client_ip = request.client.host
-    
+
+    client_ip = client_ip_from_request(request)
+
     if client_ip not in ADMIN_IP_WHITELIST:
-        logger.warning(f"🚨 UNAUTHORIZED ADMIN ACCESS: {client_ip}")
+        logger.warning("UNAUTHORIZED ADMIN ACCESS from ip=%s", client_ip)
         raise HTTPException(
             status_code=403,
-            detail="Admin access not allowed from your IP address"
+            detail="Admin access not allowed from your IP address",
         )
-    
+
     return True
 
 

@@ -1,0 +1,75 @@
+##############################################################################
+# NEXRYDE — Dedicated gRPC RidePush (Cloud Run HTTP/2)
+#
+# Always-on push edge closer to Lagos riders/drivers. Shares Redis hubs with
+# the API so offer/trip fanout works cross-service.
+#
+# Deploy:
+#   gcloud run services replace backend/cloudrun.grpc-ridepush.yaml \
+#     --region africa-south1
+#
+# Clients: set EXPO_PUBLIC_GRPC_RIDE_PUSH_URL to the service URL (grpcs://…).
+##############################################################################
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: nexryde-grpc-ridepush
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "20"
+        run.googleapis.com/startup-cpu-boost: "true"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/vpc-access-connector: "projects/nexryde-app/locations/africa-south1/connectors/nexryde-vpc"
+        run.googleapis.com/vpc-access-egress: "private-ranges-only"
+    spec:
+      containerConcurrency: 200
+      timeoutSeconds: 3600
+      containers:
+        - image: africa-south1-docker.pkg.dev/nexryde-app/nexryde-backend/nexryde-backend:latest
+          ports:
+            - name: h2c
+              containerPort: 8080
+          resources:
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          env:
+            - name: NEXRYDE_ENV
+              value: production
+            - name: NEXRYDE_SERVICE_ROLE
+              value: grpc-ridepush
+            - name: NEXRYDE_GRPC_PORT
+              value: "8080"
+            - name: DB_NAME
+              value: nexryde_db
+            - name: REDIS_REQUIRED
+              value: "true"
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: MONGODB_URI
+                  key: latest
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: REDIS_URL_AFRICA
+                  key: latest
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: JWT_SECRET
+                  key: latest
+          # Cloud Run: TCP allowed on startupProbe only (not liveness).
+          startupProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12

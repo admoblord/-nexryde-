@@ -6,7 +6,7 @@ Handles:
 3. Live face verification before every ride
 4. Automatic suspension for non-compliance
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone, timedelta
@@ -16,9 +16,20 @@ import asyncio
 from database import db
 from user_biometrics import get_reference_face_image
 from push_notifications import send_push_notification
+from auth_guard import verify_owner_strict
+from admin_guard import require_admin_request
 
 logger = logging.getLogger(__name__)
 compliance_router = APIRouter(prefix="/api", tags=["Driver Compliance"])
+
+
+async def _require_owner_or_admin(http_request: Request, driver_id: str) -> None:
+    """Allow the driver themselves OR an authenticated admin. Prevents leaking a
+    driver's compliance state to anyone who guesses a driver_id."""
+    auth_user_id = getattr(http_request.state, "user_id", None)
+    if auth_user_id and auth_user_id == driver_id:
+        return
+    await require_admin_request(http_request)
 
 
 # ==================== DOCUMENT EXPIRY TRACKING ====================
@@ -326,8 +337,9 @@ class MonthlyPhotoUpload(BaseModel):
 
 
 @compliance_router.post("/drivers/{driver_id}/monthly-verification")
-async def upload_monthly_verification(driver_id: str, request: MonthlyPhotoUpload):
+async def upload_monthly_verification(driver_id: str, request: MonthlyPhotoUpload, http_request: Request):
     """Upload monthly interior photo or selfie."""
+    verify_owner_strict(http_request, driver_id)
     if request.photo_type not in ("interior", "selfie"):
         raise HTTPException(status_code=400, detail="photo_type must be 'interior' or 'selfie'")
 
@@ -364,8 +376,9 @@ async def upload_monthly_verification(driver_id: str, request: MonthlyPhotoUploa
 
 
 @compliance_router.get("/drivers/{driver_id}/monthly-verification")
-async def get_monthly_verification_status(driver_id: str):
+async def get_monthly_verification_status(driver_id: str, http_request: Request):
     """Check if driver has completed monthly verification."""
+    await _require_owner_or_admin(http_request, driver_id)
     return await check_monthly_uploads(driver_id)
 
 
@@ -457,8 +470,9 @@ async def run_monthly_verification_check():
 # ==================== LIVE FACE VERIFICATION BEFORE RIDE ====================
 
 @compliance_router.post("/drivers/{driver_id}/live-face-check")
-async def live_face_verification(driver_id: str, request: MonthlyPhotoUpload):
+async def live_face_verification(driver_id: str, request: MonthlyPhotoUpload, http_request: Request):
     """Live face verification before starting a ride. Compares with stored selfie."""
+    verify_owner_strict(http_request, driver_id)
     if request.photo_type != "face":
         raise HTTPException(status_code=400, detail="photo_type must be 'face'")
 
@@ -499,8 +513,9 @@ async def live_face_verification(driver_id: str, request: MonthlyPhotoUpload):
 # ==================== COMPLIANCE STATUS ENDPOINT ====================
 
 @compliance_router.get("/drivers/{driver_id}/compliance")
-async def get_driver_compliance(driver_id: str):
+async def get_driver_compliance(driver_id: str, http_request: Request):
     """Full compliance status for a driver."""
+    await _require_owner_or_admin(http_request, driver_id)
     doc_status = await check_driver_document_expiry(driver_id)
     monthly_status = await check_monthly_uploads(driver_id)
     profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
@@ -539,14 +554,16 @@ async def get_driver_compliance(driver_id: str):
 # ==================== ADMIN: RUN BATCH JOBS ====================
 
 @compliance_router.post("/admin/compliance/run-expiry-check")
-async def admin_run_expiry_check():
+async def admin_run_expiry_check(http_request: Request):
     """Admin trigger: check all driver documents for expiry."""
+    await require_admin_request(http_request)
     return await run_expiry_check_all_drivers()
 
 
 @compliance_router.post("/admin/compliance/run-monthly-check")
-async def admin_run_monthly_check():
+async def admin_run_monthly_check(http_request: Request):
     """Admin trigger: check all drivers for monthly verification."""
+    await require_admin_request(http_request)
     return await run_monthly_verification_check()
 
 
@@ -559,8 +576,9 @@ class DocumentRenewalRequest(BaseModel):
 
 
 @compliance_router.post("/drivers/{driver_id}/renew-document")
-async def renew_document(driver_id: str, request: DocumentRenewalRequest):
+async def renew_document(driver_id: str, request: DocumentRenewalRequest, http_request: Request):
     """Driver uploads a renewed document to replace an expired one."""
+    verify_owner_strict(http_request, driver_id)
     valid_types = list(DOCUMENT_NAMES.keys())
     if request.document_type not in valid_types:
         raise HTTPException(status_code=400, detail=f"Invalid document type. Must be one of: {', '.join(valid_types)}")

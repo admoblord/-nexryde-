@@ -33,7 +33,12 @@ interface ActiveTrip {
 
 export default function ActiveTripBar() {
   const router = useRouter();
-  const { user, currentTrip, setCurrentTrip } = useAppStore();
+  // Scoped selectors: this bar is mounted on every rider tab, so subscribing to
+  // the whole store re-rendered it (and the tab chrome) on every unrelated
+  // store tick (isOnline, pendingTrips, token, driver fields, …).
+  const user = useAppStore((s) => s.user);
+  const currentTrip = useAppStore((s) => s.currentTrip);
+  const setCurrentTrip = useAppStore((s) => s.setCurrentTrip);
   const { userId, canCallAuthedApi } = useAuthedUserId();
   const [calling, setCalling] = useState(false);
   const slideAnim = useRef(new Animated.Value(100)).current;
@@ -111,19 +116,34 @@ export default function ActiveTripBar() {
   const handleCancelPending = async () => {
     if (!activeTrip?.id || !userId || !canCallAuthedApi) return;
     try {
-      const res = await fetch(`${BACKEND_URL}/api/trips/${activeTrip.id}/cancel`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ cancelled_by: userId }),
+      const { reliableCancel } = await import('@/src/realtime/criticalActions');
+      const result = await reliableCancel({
+        tripId: activeTrip.id,
+        actorId: userId,
+        cancelFn: async () => {
+          const res = await fetch(`${BACKEND_URL}/api/trips/${activeTrip.id}/cancel`, {
+            method: 'PUT',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+              cancelled_by: userId,
+              client_event_id: `cancel:${activeTrip.id}:${userId}`,
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            throw new Error(data?.detail || 'Unable to cancel request.');
+          }
+        },
       });
-      const data = await res.json();
-      if (res.ok) {
+      if (result.queued) {
         setCurrentTrip(null);
+        Alert.alert('Saved offline', 'Cancel will sync when you reconnect.');
         return;
       }
-      Alert.alert('Cannot cancel', data?.detail || 'Unable to cancel request.');
-    } catch {
-      Alert.alert('Error', 'Could not cancel this request.');
+      setCurrentTrip(null);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Could not cancel this request.';
+      Alert.alert('Cannot cancel', msg);
     }
   };
 

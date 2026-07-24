@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
+
+# Retain terminal (released/finalized) holds for audit, then let the sparse
+# `purge_at` TTL reap them. Active holds never get purge_at, so never expire.
+_HOLD_RETENTION = timedelta(days=7)
 
 from fastapi import HTTPException
 
@@ -29,10 +33,9 @@ async def reserve_rider_wallet_fare(
     db: Any, rider_id: str, trip_id: str, payment_method: str, fare: float
 ) -> None:
     """
-    Atomically reserve fare from wallet at booking time.
-    This prevents double-spend: the balance is decremented immediately and
-    restored only if the trip is cancelled.
+    Reserve fare from wallet at booking time (intent → debit → held).
 
+    Order prevents orphan debits: hold row exists before balance moves.
     Idempotent: if a hold for this trip_id already exists, silently returns.
     """
     if not is_wallet_payment_method(payment_method):
@@ -43,17 +46,38 @@ async def reserve_rider_wallet_fare(
     if fare < 1:
         raise HTTPException(status_code=400, detail="Invalid fare for wallet payment")
 
-    # Idempotency: check for existing hold
     existing_hold = await db.wallet_holds.find_one({"trip_id": trip_id, "rider_id": rider_id})
     if existing_hold:
-        return
+        if existing_hold.get("status") in {"held", "captured", "released"}:
+            return
+        # Resume a pending intent from a prior crash window.
+    else:
+        try:
+            await db.wallet_holds.insert_one(
+                {
+                    "id": str(uuid.uuid4()),
+                    "rider_id": rider_id,
+                    "trip_id": trip_id,
+                    "amount": fare,
+                    "status": "pending",
+                    "held_at": datetime.now(timezone.utc),
+                }
+            )
+        except Exception as exc:
+            # Unique trip_id race — treat as idempotent if hold now exists.
+            raced = await db.wallet_holds.find_one({"trip_id": trip_id, "rider_id": rider_id})
+            if raced:
+                return
+            raise HTTPException(status_code=500, detail="Could not reserve wallet hold") from exc
 
-    # Atomic balance deduction — only succeeds if balance >= fare
     res = await db.users.update_one(
         {"id": rider_id, "wallet_balance": {"$gte": fare}},
         {"$inc": {"wallet_balance": -fare}},
     )
     if res.modified_count == 0:
+        await db.wallet_holds.delete_one(
+            {"trip_id": trip_id, "rider_id": rider_id, "status": "pending"}
+        )
         user = await db.users.find_one({"id": rider_id}, {"wallet_balance": 1})
         bal = float((user or {}).get("wallet_balance") or 0)
         raise HTTPException(
@@ -64,16 +88,15 @@ async def reserve_rider_wallet_fare(
             ),
         )
 
-    # Record the hold so we can release on cancel or finalize on complete
-    await db.wallet_holds.insert_one(
+    await db.wallet_holds.update_one(
+        {"trip_id": trip_id, "rider_id": rider_id, "status": "pending"},
         {
-            "id": str(uuid.uuid4()),
-            "rider_id": rider_id,
-            "trip_id": trip_id,
-            "amount": fare,
-            "status": "held",
-            "held_at": datetime.now(timezone.utc),
-        }
+            "$set": {
+                "status": "held",
+                "debited": True,
+                "held_at": datetime.now(timezone.utc),
+            }
+        },
     )
 
 
@@ -82,13 +105,30 @@ async def release_rider_wallet_hold(db: Any, rider_id: str, trip_id: str) -> Non
     Restore a held fare back to the wallet when a trip is cancelled.
     Idempotent: if hold was already released or does not exist, silently returns.
     """
+    from pymongo import ReturnDocument
+
+    _now = datetime.now(timezone.utc)
     hold = await db.wallet_holds.find_one_and_update(
-        {"trip_id": trip_id, "rider_id": rider_id, "status": "held"},
-        {"$set": {"status": "released", "released_at": datetime.now(timezone.utc)}},
-        return_document=True,
+        {
+            "trip_id": trip_id,
+            "rider_id": rider_id,
+            "status": {"$in": ["held", "pending"]},
+        },
+        {
+            "$set": {
+                "status": "released",
+                "released_at": _now,
+                "purge_at": _now + _HOLD_RETENTION,
+            }
+        },
+        return_document=ReturnDocument.BEFORE,
     )
     if not hold:
         return  # already released or no hold (cash trip)
+
+    # Pending without debit must not credit (money never left the wallet).
+    if hold.get("status") == "pending" and not hold.get("debited"):
+        return
 
     amount = float(hold.get("amount", 0))
     if amount > 0:
@@ -203,9 +243,16 @@ async def apply_rider_wallet_ride_debit(db: Any, rider_id: str, trip_id: str, am
 
     # ── Step 4: If a hold existed, mark it finalized (balance already deducted)
     if hold:
+        _fin_now = datetime.now(timezone.utc)
         await db.wallet_holds.update_one(
             {"_id": hold["_id"]},
-            {"$set": {"status": "finalized", "finalized_at": datetime.now(timezone.utc)}},
+            {
+                "$set": {
+                    "status": "finalized",
+                    "finalized_at": _fin_now,
+                    "purge_at": _fin_now + _HOLD_RETENTION,
+                }
+            },
         )
         # Reconcile: if the final fare differs from the hold amount, adjust balance
         hold_amount = round(float(hold.get("amount", 0)), 2)
@@ -257,8 +304,18 @@ async def apply_driver_wallet_ride_credit(db: Any, driver_id: str, trip_id: str,
             }
         )
     except Exception as exc:
-        # DuplicateKeyError → credit already applied, safe to skip
-        if "duplicate" in str(exc).lower() or "E11000" in str(exc):
+        # DuplicateKeyError → credit already applied, safe to skip. Detect by
+        # type first (robust); the string checks are a fallback for drivers that
+        # surface the error without a typed class.
+        try:
+            from pymongo.errors import DuplicateKeyError
+        except Exception:
+            DuplicateKeyError = ()  # type: ignore[assignment]
+        if (
+            isinstance(exc, DuplicateKeyError)
+            or "duplicate" in str(exc).lower()
+            or "E11000" in str(exc)
+        ):
             return
         raise
     # Only credit balance after ledger entry is committed

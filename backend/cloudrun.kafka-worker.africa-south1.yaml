@@ -1,0 +1,101 @@
+##############################################################################
+# NEXRYDE — Prod Kafka consumer / saga replayer (Cloud Run)
+#
+# Co-locate with Managed Kafka + API VPC in africa-south1 (default).
+#
+#   ./backend/scripts/setup_managed_kafka.sh prod
+#   gcloud run services replace backend/cloudrun.kafka-worker.yaml --region africa-south1
+##############################################################################
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: nexryde-kafka-worker
+  annotations:
+    run.googleapis.com/ingress: internal
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "4"
+        run.googleapis.com/startup-cpu-boost: "true"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/vpc-access-connector: "projects/nexryde-app/locations/africa-south1/connectors/nexryde-vpc"
+        run.googleapis.com/vpc-access-egress: "private-ranges-only"
+    spec:
+      containerConcurrency: 1
+      timeoutSeconds: 3600
+      containers:
+        - image: africa-south1-docker.pkg.dev/nexryde-app/nexryde-backend/nexryde-backend:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          env:
+            - name: NEXRYDE_ENV
+              value: production
+            - name: NEXRYDE_SERVICE_ROLE
+              value: kafka-worker
+            - name: DB_NAME
+              value: nexryde_db
+            - name: NEXRYDE_REALTIME_PLATFORM
+              value: "true"
+            - name: NEXRYDE_EVENT_BUS
+              value: "kafka"
+            - name: NEXRYDE_OUTBOX_WORKER
+              value: "false"
+            - name: NEXRYDE_SAGA_INLINE
+              value: "false"
+            - name: NEXRYDE_BATCH_MATCHING
+              value: "true"
+            - name: NEXRYDE_MATCH_BATCH_MS
+              value: "800"
+            - name: NEXRYDE_STREAM_SURGE
+              value: "true"
+            - name: NEXRYDE_SURGE_WINDOW_SEC
+              value: "60"
+            - name: KAFKA_CONSUMER_GROUP
+              value: nexryde-replayer-af
+            - name: KAFKA_CLIENT_ID
+              value: nexryde-kafka-worker-af
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SASL_SSL
+            - name: KAFKA_SASL_MECHANISM
+              value: OAUTHBEARER
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              valueFrom:
+                secretKeyRef:
+                  name: KAFKA_BOOTSTRAP_SERVERS_AFRICA
+                  key: latest
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: MONGODB_URI
+                  key: latest
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: REDIS_URL_AFRICA
+                  key: latest
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: JWT_SECRET
+                  key: latest
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12

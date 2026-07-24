@@ -78,7 +78,41 @@ class FakeTransactions:
         return True
 
     async def insert_one(self, doc: dict):
+        ref = doc.get("reference")
+        if ref and any(r.get("reference") == ref for r in self.rows):
+            raise Exception("E11000 duplicate key error")
         self.rows.append(dict(doc))
+
+    async def delete_one(self, query: dict):
+        before = len(self.rows)
+        self.rows = [r for r in self.rows if not self._match(r, query)]
+        class R:
+            deleted_count = before - len(self.rows)
+
+        return R()
+
+
+class FakeHolds:
+    def __init__(self) -> None:
+        self.rows: list[dict] = []
+
+    async def find_one(self, query: dict):
+        for row in self.rows:
+            ok = True
+            for k, v in query.items():
+                if k == "status" and isinstance(v, dict) and "$in" in v:
+                    if row.get("status") not in v["$in"]:
+                        ok = False
+                        break
+                elif row.get(k) != v:
+                    ok = False
+                    break
+            if ok:
+                return dict(row)
+        return None
+
+    async def update_one(self, query, update):
+        return UpdateResult(0)
 
 
 class FakeSystemConfig:
@@ -93,6 +127,7 @@ class FakeDB:
         self.users = users
         self.transactions = transactions
         self.system_config = FakeSystemConfig()
+        self.wallet_holds = FakeHolds()
 
 
 def setup_function(_fn):

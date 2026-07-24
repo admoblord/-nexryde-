@@ -2,7 +2,7 @@
   "expo": {
     "name": "NEXRYDE",
     "slug": "nexryde",
-    "version": "1.3.35",
+    "version": "1.3.36",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "nexryde",
@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "extra": {
       "router": {},
-      "BACKEND_URL": "https://nexryde-backend-993913300770.us-central1.run.app",
+      "BACKEND_URL": "https://nexryde-backend-993913300770.africa-south1.run.app",
       "eas": {
         "projectId": "342aff56-5e09-4363-b8b6-12ab1cdec11f"
       }
@@ -21,7 +21,7 @@
       "config": {
         "googleMapsApiKey": ""
       },
-      "buildNumber": "67",
+      "buildNumber": "68",
       "associatedDomains": [
         "applinks:nexryde.app",
         "webcredentials:nexryde.app"
@@ -31,8 +31,8 @@
       "infoPlist": {
         "CFBundleDisplayName": "NEXRYDE",
         "CFBundleName": "NEXRYDE",
-        "CFBundleShortVersionString": "1.3.35",
-        "CFBundleVersion": "61",
+        "CFBundleShortVersionString": "1.3.36",
+        "CFBundleVersion": "68",
         "NSLocationWhenInUseUsageDescription": "NEXRYDE uses your location to show nearby drivers, estimate pickup times, and track your trip in real time.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "NEXRYDE uses your location in the background so drivers can share their position with riders and receive new trip requests while the app is minimised.",
         "NSLocationAlwaysUsageDescription": "NEXRYDE uses your location in the background so drivers can share their position with riders and receive new trip requests while the app is minimised.",
@@ -69,7 +69,7 @@
       }
     },
     "android": {
-      "versionCode": 216,
+      "versionCode": 233,
       "config": {
         "googleMaps": {
           "apiKey": "GOOGLE_MAPS_KEY_REDACTED"
@@ -135,6 +135,15 @@
     "plugins": [
       "./plugins/withSafeAppearanceTurboModule.js",
       "./plugins/withDriverExperiencePackage.js",
+      [
+        "expo-cronet",
+        {
+          "provider": "play-services",
+          "enableBrotli": true,
+          "enableQuic": true,
+          "enableHttp2": true
+        }
+      ],
       [
         "expo-build-properties",
         {

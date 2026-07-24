@@ -99,6 +99,13 @@ async def ensure_indexes(db):
         await db.trip_offers.create_index([("driver_id", 1), ("status", 1), ("expires_at", 1)])
         await db.trip_offers.create_index([("trip_id", 1), ("driver_id", 1)])
         await db.trip_offers.create_index([("trip_id", 1), ("status", 1)])
+
+        # Realtime Reliability Platform — durable event log + DLQ (Mongo)
+        await db.realtime_event_log.create_index("event_id", unique=True)
+        await db.realtime_event_log.create_index([("actor_id", 1), ("ack", 1), ("created_at_ms", 1)])
+        await db.realtime_event_log.create_index([("trip_id", 1), ("event_type", 1)])
+        await db.realtime_dlq.create_index([("dlq_at_ms", -1)])
+        await db.realtime_dlq.create_index("event_id", sparse=True)
         
         # Driver documents archive
         await db.driver_documents.create_index("driver_id", unique=True)
@@ -253,9 +260,17 @@ async def ensure_indexes(db):
         # Wallet holds — fare reservation at booking, released on cancel
         await db.wallet_holds.create_index([("trip_id", 1), ("rider_id", 1)], unique=True, sparse=True)
         await db.wallet_holds.create_index([("rider_id", 1), ("status", 1)])
-        # TTL: auto-purge stale holds after 48h (should have been finalized/released by then)
+        # TTL must NEVER delete an ACTIVE hold — doing so double-debits on
+        # completion (Step 5 fallback re-debits) and strands funds on cancel
+        # (release finds no hold and no-ops). Purge only TERMINAL holds: the
+        # released/finalized paths set `purge_at`; active (pending/held) rows
+        # never get it, so this sparse TTL leaves them untouched.
         try:
-            await db.wallet_holds.create_index("held_at", expireAfterSeconds=48 * 3600)
+            await db.wallet_holds.drop_index("held_at_1")
+        except Exception:
+            pass
+        try:
+            await db.wallet_holds.create_index("purge_at", expireAfterSeconds=0, sparse=True)
         except Exception:
             pass
 
@@ -277,6 +292,16 @@ async def ensure_indexes(db):
 
         # Driver active_trip_id — index for lock queries
         await db.driver_profiles.create_index("active_trip_id", sparse=True)
+
+        # Realtime platform — saga retry loop + outbox drain scan by status.
+        try:
+            await db.trip_sagas.create_index([("status", 1), ("updated_at", 1)])
+        except Exception:
+            pass
+        try:
+            await db.realtime_event_outbox.create_index([("status", 1), ("created_at", 1)])
+        except Exception:
+            pass
 
         logger.info("MongoDB indexes ensured successfully")
     except Exception as e:

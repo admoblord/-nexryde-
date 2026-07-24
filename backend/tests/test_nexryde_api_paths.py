@@ -10,6 +10,13 @@ def test_public_health_and_ws():
     assert api_path_is_public("/api/ws/chat/t/u")
 
 
+def test_fare_and_places_require_auth():
+    assert api_path_is_protected("/api/fare/estimate")
+    assert api_path_is_protected("/api/places/autocomplete")
+    assert not api_path_is_public("/api/fare/estimate")
+    assert not api_path_is_public("/api/places/autocomplete")
+
+
 def test_public_squad_and_subscription_config():
     assert api_path_is_public("/api/squad/webhook")
     assert api_path_is_public("/api/subscriptions/config")

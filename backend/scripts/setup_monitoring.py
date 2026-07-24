@@ -87,7 +87,6 @@ def create_alert_policy(display_name: str, conditions: list, severity: str, chan
         "conditions": conditions,
         "alertStrategy": {
             "autoClose": "604800s",
-            "notificationRateLimit": {"period": "300s"},
         },
         "notificationChannels": [channel],
         "severity": severity,
@@ -250,15 +249,46 @@ def main():
         channel,
     )
 
-    # 5. Uptime check
+    # 5. Uptime check (readiness)
     print("Creating uptime check...")
     create_uptime_check()
+
+    # 6. Sustained 4xx auth failures (possible attack / JWT misconfig)
+    create_alert_policy(
+        "NEXRYDE — Sustained 401/403 spike",
+        [{
+            "displayName": "Cloud Run 4xx auth class elevated",
+            "conditionThreshold": {
+                "filter": (
+                    f'resource.type="cloud_run_revision" '
+                    f'AND resource.labels.service_name="{SERVICE}" '
+                    f'AND metric.type="run.googleapis.com/request_count" '
+                    f'AND metric.labels.response_code_class="4xx"'
+                ),
+                "aggregations": [{
+                    "alignmentPeriod": "300s",
+                    "perSeriesAligner": "ALIGN_RATE",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": ["resource.label.service_name"],
+                }],
+                "comparison": "COMPARISON_GT",
+                "thresholdValue": 5.0,
+                "duration": "300s",
+                "trigger": {"count": 1},
+            },
+        }],
+        "WARNING",
+        channel,
+    )
 
     print(f"""
 ✅ Monitoring setup complete!
 
   View alerts : https://console.cloud.google.com/monitoring/alerting?project={PROJECT_ID}
   View uptime : https://console.cloud.google.com/monitoring/uptime?project={PROJECT_ID}
+
+  After creating Secret Manager secret SENTRY_DSN, redeploy so /api/health/sentry reports initialized.
+  Kill switches: POST /api/admin/feature-flags {{"booking":"off"}} or {{"dispatch":"off"}}
 """)
 
 

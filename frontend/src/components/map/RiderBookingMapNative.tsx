@@ -414,7 +414,9 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
             longitudeDelta: number;
           }) => {
             if (Number.isFinite(region.latitudeDelta)) setLatitudeDelta(region.latitudeDelta);
-            if (Number.isFinite(region.latitude)) {
+            // Skip the debug-camera state update entirely when the overlay is
+            // off — it's an extra re-render on every pan/zoom for no visible UI.
+            if (props.debugOverlay && Number.isFinite(region.latitude)) {
               setDbgCam({
                 lat: region.latitude,
                 lng: region.longitude,
@@ -550,15 +552,18 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
                 latitude: props.destinationCoords.lat,
                 longitude: props.destinationCoords.lng,
               }}
-              title="Destination"
-              description={props.destination}
-              anchor={{ x: 0.5, y: 0.5 }}
-              tracksViewChanges={Boolean(props.pulseDropoffHalo)}
-            >
-              <Animated.View style={{ transform: [{ scale: dropPulseScale }] }}>
-                <MapBookingDestinationPin />
-              </Animated.View>
-            </Marker>
+            title="Destination"
+            description={props.destination}
+            anchor={{ x: 0.5, y: 0.5 }}
+            // Pulse is a native-driven transform on the marker's own view — the
+            // bitmap content never changes, so tracking view changes here just
+            // forces continuous re-rasterization and is a major jank source.
+            tracksViewChanges={false}
+          >
+            <Animated.View style={{ transform: [{ scale: dropPulseScale }] }}>
+              <MapBookingDestinationPin />
+            </Animated.View>
+          </Marker>
           ) : null}
           {driverClusters.map((entry, idx) => {
             if (entry.kind === 'cluster') {
