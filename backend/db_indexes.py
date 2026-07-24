@@ -4,12 +4,93 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+async def _has_duplicate_values(coll, field: str) -> bool:
+    """True if two+ docs share the same non-empty `field` value (would break a
+    unique build). Conservative: any error returns True so we never try to enforce
+    uniqueness we can't verify."""
+    try:
+        cur = coll.aggregate([
+            {"$match": {field: {"$gt": ""}}},
+            {"$group": {"_id": f"${field}", "n": {"$sum": 1}}},
+            {"$match": {"n": {"$gt": 1}}},
+            {"$limit": 1},
+        ])
+        async for _ in cur:
+            return True
+    except Exception:
+        return True
+    return False
+
+
+async def _ensure_unique_if_present(coll, field: str):
+    """Enforce uniqueness of `field` ONLY among real (non-empty) values, allowing
+    unlimited null/absent/"" values.
+
+    Why not sparse+unique: registration writes `email: null` explicitly, and a
+    sparse index STILL indexes explicit nulls -- so the 2nd phone-only signup hits
+    E11000 (dup key {email: null}). The correct tool is a PARTIAL unique index
+    filtered to `{field: {$gt: ""}}` (excludes null, non-strings, and "").
+
+    Safety rules (this runs on every startup, including live prod):
+      * Never enforce uniqueness when duplicate real values already exist -- the
+        build would fail and could strand the field without an index.
+      * Leave a working NON-unique legacy index (prod's phone_1/email_1) untouched:
+        it isn't broken (app-layer already enforces uniqueness) and phone lookups
+        are login-critical -- no live rebuild churn.
+      * Fresh/empty DBs and the broken unique+sparse shape ARE migrated to the
+        correct partial-unique index.
+    """
+    desired_pfe = {field: {"$gt": ""}}
+    try:
+        info = await coll.index_information()
+    except Exception:
+        info = {}
+    existing_name, existing = None, None
+    for name, spec in info.items():
+        if name == "_id_":
+            continue
+        keys = spec.get("key") or []
+        if len(keys) == 1 and keys[0][0] == field:
+            existing_name, existing = name, spec
+            break
+    try:
+        # Already a partial unique index on this field -- nothing to do.
+        if existing and bool(existing.get("unique")) and existing.get("partialFilterExpression"):
+            return
+        if existing is None:
+            try:
+                count = await coll.estimated_document_count()
+            except Exception:
+                count = 0
+            if count == 0 or not await _has_duplicate_values(coll, field):
+                await coll.create_index(field, unique=True, partialFilterExpression=desired_pfe)
+            else:
+                logger.warning("Skip unique %s index: duplicate values present", field)
+            return
+        if bool(existing.get("unique")):
+            # Broken unique+sparse / unique-plain shape: 500s explicit nulls. Fix it.
+            if not await _has_duplicate_values(coll, field):
+                await coll.drop_index(existing_name)
+                await coll.create_index(field, unique=True, partialFilterExpression=desired_pfe)
+                logger.warning("Migrated %s index '%s' -> partial-unique", field, existing_name)
+            else:
+                logger.warning("Cannot migrate %s index '%s': duplicates present", field, existing_name)
+        else:
+            # Non-unique legacy index (prod) -- functional; leave as-is.
+            logger.info("Leaving non-unique %s index '%s' as-is (app enforces uniqueness)", field, existing_name)
+    except Exception as e:
+        logger.warning("ensure unique-if-present %s failed (non-fatal): %s", field, e)
+
+
 async def ensure_indexes(db):
     """Create indexes on frequently queried fields."""
     try:
-        # Users collection
-        await db.users.create_index("phone", unique=True, sparse=True)
-        await db.users.create_index("email", unique=True, sparse=True)
+        # Users collection -- enforce phone/email uniqueness for REAL values only, so a
+        # 2nd phone-only (email:null) or phone-less (phone:"") signup never 500s. Safe
+        # on live prod: leaves working non-unique indexes untouched, only fixes the
+        # broken unique+sparse shape or provisions fresh DBs. See helper for rationale.
+        await _ensure_unique_if_present(db.users, "phone")
+        await _ensure_unique_if_present(db.users, "email")
         await db.users.create_index("role")
         await db.users.create_index("nin_hash", sparse=True)
         await db.users.create_index("nin_last4", sparse=True)
