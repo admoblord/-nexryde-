@@ -759,15 +759,25 @@ async def _freeze_trip_fare_for_investigation(trip_id: str, reason: str) -> None
     )
 
 
-async def _notify_emergency_contacts_for_safe_arrival(trip: dict, lat: Optional[float], lng: Optional[float]) -> int:
+async def _notify_emergency_contacts_for_safe_arrival(
+    trip: dict, lat: Optional[float], lng: Optional[float]
+) -> tuple[int, int]:
+    """Returns (contacts_reached, contacts_on_file).
+
+    Both numbers matter for a safety audit: zero reached out of zero on file
+    means the rider never added anyone, while zero reached out of three means
+    delivery failed — usually no SMS provider configured. Collapsing them into
+    one count hides an outage behind an empty address book.
+    """
     from emergency_notify import notify_emergency_contacts
 
     rider = await db.users.find_one(
         {"id": trip.get("rider_id")},
         {"_id": 0, "name": 1, "emergency_contacts": 1},
     ) or {}
-    return await notify_emergency_contacts(
-        rider.get("emergency_contacts") or [],
+    contacts = rider.get("emergency_contacts") or []
+    reached = await notify_emergency_contacts(
+        contacts,
         user_name=str(rider.get("name") or "Rider"),
         role="rider",
         trip_id=str(trip.get("id") or ""),
@@ -775,6 +785,7 @@ async def _notify_emergency_contacts_for_safe_arrival(trip: dict, lat: Optional[
         lng=lng,
         reason="SAFE ARRIVAL",
     )
+    return reached, len(contacts)
 
 
 async def _maybe_process_safe_arrival_check(trip: dict) -> dict:
@@ -809,10 +820,20 @@ async def _maybe_process_safe_arrival_check(trip: dict) -> dict:
             last_point = (trip.get("actual_route") or [{}])[-1] if trip.get("actual_route") else {}
             lat = last_point.get("lat") or ((trip.get("dropoff_location") or {}).get("lat"))
             lng = last_point.get("lng") or ((trip.get("dropoff_location") or {}).get("lng"))
-            contact_count = await _notify_emergency_contacts_for_safe_arrival(trip, lat, lng)
+            contact_count, contacts_on_file = await _notify_emergency_contacts_for_safe_arrival(
+                trip, lat, lng
+            )
             updates["safe_arrival_check.emergency_notified_at"] = now.isoformat()
             updates["safe_arrival_check.emergency_contacts_notified"] = contact_count
+            updates["safe_arrival_check.emergency_contacts_on_file"] = contacts_on_file
             updates["safe_arrival_check.check_in_status"] = "emergency_notified"
+            if contacts_on_file and not contact_count:
+                logger.error(
+                    "safe_arrival escalation reached NOBODY trip=%s contacts_on_file=%s "
+                    "— SMS delivery is failing (check SMS_PROVIDER / TERMII_API_KEY)",
+                    trip.get("id"),
+                    contacts_on_file,
+                )
             await db.sos_alerts.insert_one({
                 "id": str(uuid.uuid4()),
                 "trip_id": trip.get("id"),
@@ -823,6 +844,7 @@ async def _maybe_process_safe_arrival_check(trip: dict) -> dict:
                 "status": "active",
                 "source": "safe_arrival_no_response",
                 "emergency_contacts_notified": contact_count,
+                "emergency_contacts_on_file": contacts_on_file,
                 "created_at": now.isoformat(),
             })
 

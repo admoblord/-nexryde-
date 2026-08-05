@@ -34,12 +34,14 @@ def _interval() -> float:
 async def run_all_guardians() -> dict:
     from realtime_platform.dispatch_guardian import run_dispatch_guardian
     from realtime_platform.health_manager import run_health_cycle
+    from realtime_platform.safe_arrival_guardian import run_safe_arrival_guardian
     from realtime_platform.trip_guardian import run_trip_guardian
 
     health = await run_health_cycle()
     dispatch = await run_dispatch_guardian()
     trip = await run_trip_guardian()
-    return {"health": health, "dispatch": dispatch, "trip": trip}
+    safe_arrival = await run_safe_arrival_guardian()
+    return {"health": health, "dispatch": dispatch, "trip": trip, "safe_arrival": safe_arrival}
 
 
 async def _loop() -> None:
@@ -48,10 +50,11 @@ async def _loop() -> None:
         try:
             result = await run_all_guardians()
             logger.info(
-                "guardians tick health_healed=%s dispatch_retried=%s trip_locks=%s",
+                "guardians tick health_healed=%s dispatch_retried=%s trip_locks=%s safe_arrival_escalated=%s",
                 (result.get("health") or {}).get("zombies", {}).get("healed"),
                 (result.get("dispatch") or {}).get("retried"),
                 (result.get("trip") or {}).get("orphan_locks_cleared"),
+                (result.get("safe_arrival") or {}).get("escalated"),
             )
         except asyncio.CancelledError:
             raise

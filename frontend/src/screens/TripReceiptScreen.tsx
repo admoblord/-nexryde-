@@ -5,6 +5,7 @@ import {
   Animated,
   Easing,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   Share,
@@ -30,6 +31,7 @@ import {
   addFavoriteDriver,
   removeFavoriteDriver,
   checkFavoriteDriver,
+  confirmSafeArrival,
   confirmTripPayment,
   getTripBlackBox,
   BACKEND_URL,
@@ -178,6 +180,17 @@ interface TripData {
   started_at?: string;
   stop_location?: { lat: number; lng: number; address?: string } | null;
   route_preview_coordinates?: Array<{ lat: number; lng: number }> | null;
+  safe_arrival_check?: {
+    required?: boolean;
+    confirmed_at?: string | null;
+    check_in_status?: string | null;
+  } | null;
+}
+
+/** Rider still owes a safe-arrival check-in — escalates to emergency contacts if ignored. */
+function needsSafeArrivalConfirm(trip?: TripData | null): boolean {
+  const check = trip?.safe_arrival_check;
+  return Boolean(check?.required) && !check?.confirmed_at;
 }
 
 function isPendingReceiptPayment(trip?: TripData | null): boolean {
@@ -250,6 +263,7 @@ export default function TripReceiptScreen() {
   const [selectedReacts,  setSelectedReacts]  = useState<string[]>([]);
   const [ratingComment,   setRatingComment]   = useState('');
   const [confirmingPayment, setConfirmingPayment] = useState(false);
+  const [confirmingSafeArrival, setConfirmingSafeArrival] = useState(false);
 
   const [tipNgn, setTipNgn] = useState(0);
   const [tipPickerOpen, setTipPickerOpen] = useState(false);
@@ -555,6 +569,36 @@ export default function TripReceiptScreen() {
     }
   };
 
+  const handleConfirmSafeArrival = async () => {
+    if (!trip?.id || confirmingSafeArrival) return;
+    setConfirmingSafeArrival(true);
+    try {
+      await confirmSafeArrival(trip.id);
+      setTrip((prev) =>
+        prev
+          ? {
+              ...prev,
+              safe_arrival_check: {
+                ...(prev.safe_arrival_check || {}),
+                confirmed_at: new Date().toISOString(),
+                check_in_status: 'confirmed',
+              },
+            }
+          : prev,
+      );
+      if (Platform.OS !== 'web') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (e: any) {
+      Alert.alert(
+        'Could not confirm',
+        e?.response?.data?.detail || 'We could not record your check-in. Please try again.',
+      );
+    } finally {
+      setConfirmingSafeArrival(false);
+    }
+  };
+
   const handleShareBlackBox = async () => {
     if (!blackBox) return;
     try {
@@ -736,6 +780,48 @@ export default function TripReceiptScreen() {
           <Text style={s.completeHeroTitle}>Trip completed</Text>
           <Text style={s.completeHeroSub}>Thanks for riding with NEXRYDE</Text>
         </Animated.View>
+
+        {/* Safety check-in. Left unanswered, NEXRYDE texts the rider's emergency
+            contacts — so this has to be the first thing on the receipt. */}
+        {userId === trip?.rider_id && needsSafeArrivalConfirm(trip) ? (
+          <View style={s.safeArrivalCard}>
+            <View style={s.safeArrivalHeader}>
+              <View style={s.safeArrivalIcon}>
+                <Ionicons name="shield-checkmark" size={20} color="#0B1220" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.safeArrivalTitle}>Did you arrive safely?</Text>
+                <Text style={s.safeArrivalSub}>
+                  If you don&apos;t confirm, NEXRYDE alerts your emergency contacts.
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[s.safeArrivalBtn, confirmingSafeArrival && { opacity: 0.6 }]}
+              onPress={handleConfirmSafeArrival}
+              disabled={confirmingSafeArrival}
+              activeOpacity={0.9}
+              accessibilityRole="button"
+              accessibilityLabel="Confirm I arrived safely"
+            >
+              {confirmingSafeArrival ? (
+                <ActivityIndicator color="#022C22" />
+              ) : (
+                <>
+                  <Ionicons name="checkmark-circle" size={18} color="#022C22" />
+                  <Text style={s.safeArrivalBtnTxt}>Yes, I&apos;m safe</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {userId === trip?.rider_id && trip?.safe_arrival_check?.confirmed_at ? (
+          <View style={s.safeArrivalDone}>
+            <Ionicons name="shield-checkmark" size={16} color="#22C55E" />
+            <Text style={s.safeArrivalDoneTxt}>Safe arrival confirmed</Text>
+          </View>
+        ) : null}
 
         <Animated.View style={{ opacity: headerFade, transform: [{ translateY: contentSlide }] }}>
           <View style={s.routeMapCard}>
@@ -1343,6 +1429,51 @@ function createReceiptStyles(C: ReceiptPalette) {
   },
   completeHeroTitle: { fontSize: 22, fontWeight: '900', color: C.greenBright, marginTop: 2 },
   completeHeroSub: { fontSize: 16, fontWeight: '700', color: '#4ADE80', marginTop: 4 },
+
+  safeArrivalCard: {
+    marginTop: 12,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: 'rgba(34,197,94,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.45)',
+    gap: 14,
+  },
+  safeArrivalHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  safeArrivalIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#22C55E',
+  },
+  safeArrivalTitle: { fontSize: 16, fontWeight: '900', color: '#F1F5F9' },
+  safeArrivalSub: { fontSize: 12.5, fontWeight: '600', color: '#94A3B8', lineHeight: 17, marginTop: 2 },
+  safeArrivalBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#22C55E',
+    minHeight: 50,
+  },
+  safeArrivalBtnTxt: { fontSize: 15.5, fontWeight: '900', color: '#022C22' },
+  safeArrivalDone: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(34,197,94,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.28)',
+  },
+  safeArrivalDoneTxt: { fontSize: 13, fontWeight: '800', color: '#4ADE80' },
 
   routeMapCard: {
     marginTop: 10,
