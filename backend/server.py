@@ -1678,10 +1678,20 @@ async def get_active_trip(user_id: str, request: Request):
         if not trip:
             return {"active": False}
 
-        # Cash stays pending until driver confirms receipt — do not auto-heal.
+        if trip.get("status") == "completed":
+            if str(trip.get("payment_status") or "").lower() == "completed":
+                return {"active": False}
+            # Trips completed before cash/transfer settled at completion can still
+            # be sitting on payment_status=pending, which pins the rider and driver
+            # to a finished trip forever. Settle those on read.
+            from wallet_trip_helpers import payment_status_after_completion
 
-        if trip.get("status") == "completed" and str(trip.get("payment_status") or "").lower() == "completed":
-            return {"active": False}
+            if payment_status_after_completion(trip.get("payment_method")) == "completed":
+                await db.trips.update_one(
+                    {"id": trip.get("id"), "payment_status": {"$ne": "completed"}},
+                    {"$set": {"payment_status": "completed", "paid_at": datetime.now(timezone.utc)}},
+                )
+                return {"active": False}
 
         # Attach estate_gate_access so driver trips screen sees the gate countdown
         try:

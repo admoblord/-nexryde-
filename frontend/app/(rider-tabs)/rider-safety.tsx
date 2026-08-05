@@ -275,7 +275,10 @@ export default function RiderSafetyScreen() {
           setActiveTripId(String(result.trip.id));
         } else {
           const stored = useAppStore.getState().currentTrip;
-          if (!stored?.id || !isActiveTripStatus(stored.status, stored.payment_status)) {
+          if (
+            !stored?.id ||
+            !isActiveTripStatus(stored.status, stored.payment_status, stored.payment_method ?? null)
+          ) {
             setActiveTripId(null);
           }
         }

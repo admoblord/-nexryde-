@@ -39,10 +39,26 @@ def is_cash_payment_method(payment_method: Optional[str]) -> bool:
     return pm in {"cash", "cash_payment"} or pm.startswith("cash")
 
 
+def is_transfer_payment_method(payment_method: Optional[str]) -> bool:
+    if not payment_method:
+        return False
+    return str(payment_method).strip().lower() in {"transfer", "bank_transfer"}
+
+
 def rider_must_confirm_payment(payment_method: Optional[str]) -> bool:
     """True when trip complete must leave payment_status=pending.
 
-    Cash/transfer: driver confirms receipt. Wallet: rider confirms.
-    Unknown methods never auto-settle.
+    Cash and bank transfer change hands before the driver ends the trip, so
+    completion settles them outright — a second confirmation tap only strands
+    the trip and keeps the rider pinned to it. Wallet still needs the rider to
+    authorise the in-app debit, and unknown methods have no processor to settle
+    against, so both stay pending.
     """
+    if is_cash_payment_method(payment_method) or is_transfer_payment_method(payment_method):
+        return False
     return True
+
+
+def payment_status_after_completion(payment_method: Optional[str]) -> str:
+    """payment_status a trip should carry the moment the driver ends it."""
+    return "pending" if rider_must_confirm_payment(payment_method) else "completed"

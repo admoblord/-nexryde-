@@ -23,6 +23,7 @@ interface ActiveTrip {
   id: string;
   status: string;
   payment_status?: string;
+  payment_method?: string;
   rider_id?: string;
   driver_id?: string;
   pickup_location?: any;
@@ -147,7 +148,12 @@ export default function ActiveTripBar() {
     }
   };
 
-  if (!activeTrip || !isActiveTripStatus(activeTrip.status, activeTrip.payment_status)) return null;
+  if (
+    !activeTrip ||
+    !isActiveTripStatus(activeTrip.status, activeTrip.payment_status, activeTrip.payment_method ?? null)
+  ) {
+    return null;
+  }
 
   const isRider = user?.role === 'rider';
   const otherParty = isRider ? 'Driver' : 'Rider';
@@ -171,7 +177,7 @@ export default function ActiveTripBar() {
   const hideOnRiderHome =
     user?.role === 'rider' &&
     segments.some((s) => s === 'rider-home') &&
-    isActiveTripStatus(activeTrip.status, activeTrip.payment_status);
+    isActiveTripStatus(activeTrip.status, activeTrip.payment_status, activeTrip.payment_method ?? null);
 
   if (hideDuplicateDriverStrip || hideDuplicateRiderStrip || hideOnRiderHome) return null;
 
