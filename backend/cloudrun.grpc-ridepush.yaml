@@ -22,7 +22,11 @@ spec:
   template:
     metadata:
       annotations:
-        autoscaling.knative.dev/minScale: "1"
+        # Scale to zero: no client reads EXPO_PUBLIC_GRPC_RIDE_PUSH_URL — the app
+        # talks Connect/SSE to the main API — so a warm instance here served
+        # nobody while billing 2 vCPU around the clock. Raise this again when
+        # clients are actually pointed at it.
+        autoscaling.knative.dev/minScale: "0"
         autoscaling.knative.dev/maxScale: "20"
         run.googleapis.com/startup-cpu-boost: "true"
         run.googleapis.com/cpu-throttling: "false"

@@ -17,7 +17,9 @@ spec:
   template:
     metadata:
       annotations:
-        autoscaling.knative.dev/minScale: "1"
+        # Staging does not need a warm worker overnight — the staging API is
+        # already minScale 0, so this was the only thing billing 24/7 there.
+        autoscaling.knative.dev/minScale: "0"
         autoscaling.knative.dev/maxScale: "2"
         run.googleapis.com/startup-cpu-boost: "true"
         run.googleapis.com/cpu-throttling: "false"
