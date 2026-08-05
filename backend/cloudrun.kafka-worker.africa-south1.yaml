@@ -18,7 +18,11 @@ spec:
   template:
     metadata:
       annotations:
-        autoscaling.knative.dev/minScale: "1"
+        # Scale to zero. Its loop is now driven on demand via
+        # POST /api/ops/maintenance-tick (Cloud Scheduler), so an always-on
+        # instance is no longer what makes timer work happen. Raise this back to
+        # 1 when volume justifies a dedicated warm worker.
+        autoscaling.knative.dev/minScale: "0"
         autoscaling.knative.dev/maxScale: "4"
         run.googleapis.com/startup-cpu-boost: "true"
         run.googleapis.com/cpu-throttling: "false"

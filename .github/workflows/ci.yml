@@ -84,6 +84,7 @@ jobs:
             tests/test_server_import_contract.py \
             tests/test_wallet_trip_helpers.py \
             tests/test_safe_arrival_guardian.py \
+            tests/test_maintenance_tick.py \
             -v --tb=short \
             --cov=. --cov-report=term-missing \
             2>&1 | tail -80

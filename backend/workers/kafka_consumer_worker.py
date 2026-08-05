@@ -126,23 +126,17 @@ async def _kafka_consume_loop(stop: asyncio.Event) -> None:
 
 
 async def _redis_stream_loop(stop: asyncio.Event) -> None:
-    """Fallback when Kafka is off — XREAD redis streams published by event_bus."""
-    from realtime_platform.outbox_worker import _drain_outbox, _retry_partial_sagas
+    """Drain the outbox and run timer work while this worker is alive.
+
+    Shares run_maintenance_tick with POST /api/ops/maintenance-tick so a
+    scale-to-zero deployment driven by Cloud Scheduler does exactly the same
+    work as a warm worker.
+    """
+    from realtime_platform.maintenance import run_maintenance_tick
 
     while not stop.is_set():
         try:
-            await _drain_outbox(limit=80)
-            await _retry_partial_sagas(limit=40)
-            try:
-                from realtime_platform.batched_matching import flush_match_batch_if_due
-                from realtime_platform.surge_stream import tick_windows
-                from realtime_platform.guardians_worker import run_all_guardians
-
-                await flush_match_batch_if_due()
-                await tick_windows()
-                await run_all_guardians()
-            except Exception:
-                logger.debug("batch/surge/guardians tick failed", exc_info=True)
+            await run_maintenance_tick()
         except asyncio.CancelledError:
             raise
         except Exception:

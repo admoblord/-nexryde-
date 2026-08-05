@@ -1890,6 +1890,29 @@ async def debug_test_crash(request: Request):
     )
 
 
+@api_router.post("/ops/maintenance-tick")
+async def ops_maintenance_tick(request: Request):
+    """Run one maintenance tick — for Cloud Scheduler when nothing stays warm.
+
+    Guardians, saga retries, the outbox drain and the safe-arrival escalation are
+    timer work. With minScale 0 there is no always-on process to run them, so a
+    scheduled call to this endpoint is what keeps them happening. Same tick the
+    worker loop runs.
+
+    Gated by X-NEXRYDE-OPS-KEY (wrong/missing key -> 404) — Cloud Scheduler sends
+    it as a header.
+    """
+    expected = (os.environ.get("NEXRYDE_OPS_KEY") or "").strip()
+    got = (request.headers.get("x-nexryde-ops-key") or "").strip()
+    if not expected or got != expected:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    from realtime_platform.maintenance import run_maintenance_tick
+
+    result = await run_maintenance_tick()
+    return {"ok": True, "tick": result, "revision": os.environ.get("K_REVISION", "unknown")}
+
+
 @api_router.post("/ops/migrate-driver-document-binaries")
 async def ops_migrate_driver_document_binaries(request: Request, dry_run: bool = True):
     """One-shot, idempotent migration of driver_documents binaries → private GCS.

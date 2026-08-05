@@ -19,12 +19,19 @@ spec:
   template:
     metadata:
       annotations:
-        autoscaling.knative.dev/minScale: "1"
+        # Scale to zero and bill CPU per request. A warm always-on-CPU instance
+        # cost more per month than the whole platform used to, which is not
+        # justifiable at current volume. Timer work (guardians, saga retries,
+        # safe-arrival escalation) is driven by Cloud Scheduler calling
+        # POST /api/ops/maintenance-tick instead of an idle process.
+        #
+        # Trade-off: the first request after ~15 min idle pays a cold start.
+        # startup-cpu-boost stays on to shorten it, and the app already warms
+        # the backend from the welcome/login screen (warmBackend.ts).
+        autoscaling.knative.dev/minScale: "0"
         autoscaling.knative.dev/maxScale: "10"
-        # Keep one warm instance (minScale: 1) — no cold starts for go-online / matching.
-        # Always-on CPU: WebSocket pub/sub + offer push must not starve between HTTP bursts.
         run.googleapis.com/startup-cpu-boost: "true"
-        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/cpu-throttling: "true"
         # Private access to Memorystore Redis for rate limits, realtime fanout, and polling cache.
         run.googleapis.com/vpc-access-connector: "projects/nexryde-app/locations/africa-south1/connectors/nexryde-vpc"
         run.googleapis.com/vpc-access-egress: "private-ranges-only"
@@ -61,9 +68,13 @@ spec:
               value: "redis"
             - name: NEXRYDE_OUTBOX_WORKER
               value: "false"
-            # Saga replay owned by nexryde-kafka-worker
+            # Run sagas in-request. Deferring to nexryde-kafka-worker only works
+            # while that worker is warm, and it no longer is — so trip pushes,
+            # stats and incentives would never run. Inline is also faster: the
+            # rider's "Trip Completed" push no longer waits for a worker poll.
+            # The scheduled maintenance tick still retries anything that fails.
             - name: NEXRYDE_SAGA_INLINE
-              value: "false"
+              value: "true"
             - name: NEXRYDE_BATCH_MATCHING
               value: "true"
             - name: NEXRYDE_MATCH_BATCH_MS
