@@ -44,8 +44,9 @@ spec:
               value: nexryde_db
             - name: NEXRYDE_REALTIME_PLATFORM
               value: "true"
+            # Matches the API: Redis streams, no Managed Kafka cluster.
             - name: NEXRYDE_EVENT_BUS
-              value: "kafka"
+              value: "redis"
             - name: NEXRYDE_OUTBOX_WORKER
               value: "false"
             - name: NEXRYDE_SAGA_INLINE
@@ -58,19 +59,10 @@ spec:
               value: "true"
             - name: NEXRYDE_SURGE_WINDOW_SEC
               value: "60"
-            - name: KAFKA_CONSUMER_GROUP
-              value: nexryde-replayer-af
-            - name: KAFKA_CLIENT_ID
-              value: nexryde-kafka-worker-af
-            - name: KAFKA_SECURITY_PROTOCOL
-              value: SASL_SSL
-            - name: KAFKA_SASL_MECHANISM
-              value: OAUTHBEARER
-            - name: KAFKA_BOOTSTRAP_SERVERS
-              valueFrom:
-                secretKeyRef:
-                  name: KAFKA_BOOTSTRAP_SERVERS_AFRICA
-                  key: latest
+            # KAFKA_BOOTSTRAP_SERVERS intentionally unset. main() only starts the
+            # Kafka consumer when it is present; the Redis stream loop that
+            # drains the outbox and retries sagas runs unconditionally, so trip
+            # side effects keep working without a cluster to connect to.
             - name: MONGODB_URI
               valueFrom:
                 secretKeyRef:

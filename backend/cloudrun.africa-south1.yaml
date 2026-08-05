@@ -51,8 +51,14 @@ spec:
               value: "40"
             - name: NEXRYDE_REALTIME_PLATFORM
               value: "true"
+            # Redis streams instead of Managed Kafka. The bus only carries trip
+            # events between this service and nexryde-kafka-worker, which are
+            # both already on Memorystore — a dedicated 3 vCPU Kafka cluster
+            # billed hourly bought nothing at this volume. Set back to "kafka"
+            # (and restore KAFKA_BOOTSTRAP_SERVERS below) if throughput ever
+            # justifies it.
             - name: NEXRYDE_EVENT_BUS
-              value: "kafka"
+              value: "redis"
             - name: NEXRYDE_OUTBOX_WORKER
               value: "false"
             # Saga replay owned by nexryde-kafka-worker
@@ -70,17 +76,9 @@ spec:
               value: "true"
             - name: NEXRYDE_GUARDIAN_INTERVAL_SEC
               value: "20"
-            - name: KAFKA_CLIENT_ID
-              value: nexryde-backend
-            - name: KAFKA_SECURITY_PROTOCOL
-              value: SASL_SSL
-            - name: KAFKA_SASL_MECHANISM
-              value: OAUTHBEARER
-            - name: KAFKA_BOOTSTRAP_SERVERS
-              valueFrom:
-                secretKeyRef:
-                  name: KAFKA_BOOTSTRAP_SERVERS_AFRICA
-                  key: latest
+            # KAFKA_BOOTSTRAP_SERVERS intentionally unset — event_bus falls back
+            # to Redis streams, and leaving it set would reconnect to a cluster
+            # that no longer exists.
             - name: RT_HEARTBEAT_INTERVAL_SEC
               value: "20"
             - name: JWT_EXPIRY_HOURS
