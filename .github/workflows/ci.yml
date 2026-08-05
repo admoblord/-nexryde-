@@ -411,6 +411,31 @@ jobs:
           done
           echo "::notice title=Deployed::gRPC ride-push + Kafka worker on prod-${SHORT_SHA}"
 
+      # Every deploy pushes a ~1GB image and nothing ever removed the old ones,
+      # so Artifact Registry storage grew with each release and never shrank.
+      # Keep the newest KEEP images (rollback targets) and delete the rest.
+      # Never fails the deploy — the release already succeeded by this point.
+      - name: Prune old backend images
+        if: success()
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          KEEP=10
+          STALE=$(gcloud artifacts docker images list "${{ env.ARTIFACT_REGISTRY }}" \
+            --sort-by=~CREATE_TIME --format='value(version)' 2>/dev/null | tail -n "+$((KEEP + 1))")
+          if [ -z "$STALE" ]; then
+            echo "Nothing to prune (<= ${KEEP} images)."
+            exit 0
+          fi
+          COUNT=0
+          for DIGEST in $STALE; do
+            if gcloud artifacts docker images delete \
+                 "${{ env.ARTIFACT_REGISTRY }}@${DIGEST}" --delete-tags --quiet 2>/dev/null; then
+              COUNT=$((COUNT + 1))
+            fi
+          done
+          echo "::notice title=Pruned::Deleted ${COUNT} old image(s), kept newest ${KEEP}"
+
       - name: Rollback canary on failure
         if: failure() && env.PREV_REV != ''
         run: |
