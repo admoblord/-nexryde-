@@ -81,6 +81,8 @@ jobs:
             tests/test_auth_revocation_contract.py \
             tests/test_production_redis_contract.py \
             tests/test_non_ai_authz_contract.py \
+            tests/test_server_import_contract.py \
+            tests/test_wallet_trip_helpers.py \
             -v --tb=short \
             --cov=. --cov-report=term-missing \
             2>&1 | tail -80

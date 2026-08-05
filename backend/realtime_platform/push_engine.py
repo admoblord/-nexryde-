@@ -42,7 +42,7 @@ async def _fcm_fallback(
     except Exception:
         pass
     try:
-        from server import send_push_notification  # type: ignore
+        from push_notifications import send_push_notification
 
         await send_push_notification(
             driver_id,

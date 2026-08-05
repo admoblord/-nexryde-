@@ -182,6 +182,14 @@ async def read_trip(trip_id: str) -> dict:
         mc.close()
 
 
+async def read_saga(trip_id: str, kind: str = "complete") -> dict:
+    mc = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=5000)
+    try:
+        return await mc[DB_NAME].trip_sagas.find_one({"id": f"saga:{kind}:{trip_id}"}, {"_id": 0}) or {}
+    finally:
+        mc.close()
+
+
 async def active_trip(c: httpx.AsyncClient, user_id: str, headers: dict) -> dict:
     """Trimmed to the fields under test — the raw payload is ~40 fields of noise."""
     r = await c.get(f"/api/trips/active/{user_id}", headers=headers)
@@ -287,6 +295,17 @@ async def run() -> None:
                 f"{who} is released — no active trip after completion",
                 f"{who} is still pinned to the finished trip: {res}",
             )
+
+        header("Trip 1 — completion side effects all ran")
+        saga = await read_saga(trip_id, "complete")
+        steps = saga.get("steps") or {}
+        broken = {n: s.get("error") for n, s in steps.items() if s.get("status") != "done"}
+        info(f"saga status={saga.get('status')}  steps={len(steps)}")
+        check(
+            saga.get("status") == "done",
+            "completion saga finished — stats, incentives, pushes and realtime all ran",
+            f"completion saga is {saga.get('status')}; failed steps: {broken}",
+        )
 
         header("Trip 1 — rider can go straight back to booking")
         r = await c.post(

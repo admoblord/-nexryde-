@@ -208,7 +208,7 @@ async def run_completion_saga(trip_id: str, *, trip: Optional[dict[str, Any]] = 
             await release_rider_wallet_hold(db, rid, trip_id)
 
         async def step_pushes() -> None:
-            from server import send_push_notification  # type: ignore
+            from push_notifications import send_push_notification
 
             trip_fresh = await db.trips.find_one({"id": trip_id}, {"_id": 0}) or trip
             fare_f = float(trip_fresh.get("fare") or 0)
@@ -339,7 +339,7 @@ async def run_cancel_saga(
             await _emit_rider_trip_realtime(trip_id)
 
         async def step_pushes() -> None:
-            from server import send_push_notification  # type: ignore
+            from push_notifications import send_push_notification
 
             actor = cancelled_by or trip.get("cancelled_by") or ""
             if actor == trip.get("driver_id") and trip.get("rider_id"):
