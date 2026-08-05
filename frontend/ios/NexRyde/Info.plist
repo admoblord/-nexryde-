@@ -44,6 +44,7 @@
       <string>telprompt</string>
       <string>maps</string>
       <string>comgooglemaps</string>
+      <string>waze</string>
       <string>uber</string>
       <string>whatsapp</string>
     </array>

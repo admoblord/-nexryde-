@@ -354,7 +354,13 @@ function tripToCompletionPayload(merged: Trip & Record<string, unknown>): TripCo
 }
 
 // Navigation helpers are imported from the shared utility
-import { promptExternalNavigation } from '@/src/utils/openExternalNavigation';
+import {
+  hasFullScreenInAppNavigation,
+  openExternalNavigationApp,
+  saveLastUsedNavigationApp,
+  type NavigationAppId,
+} from '@/src/utils/driverNavigationApps';
+import DriverNavigationAppSheet from '@/src/components/driver/DriverNavigationAppSheet';
 import { useThemeColors } from '@/src/constants/theme';
 
 /** Map backend `ride_offer` WebSocket payload to the trip shape used by the offer modal + accept API. */
@@ -898,6 +904,13 @@ export default function ModernDriverHome() {
   const [tripActionBusy, setTripActionBusy] = useState<string | null>(null);
   const [tripCompletion, setTripCompletion] = useState<TripCompletionPayload | null>(null);
   const [completeTripConfirmOpen, setCompleteTripConfirmOpen] = useState(false);
+  /** Destination waiting on the driver to pick a navigation app. */
+  const [navigationAppPrompt, setNavigationAppPrompt] = useState<{
+    lat: number;
+    lng: number;
+    label?: string;
+    phase?: string;
+  } | null>(null);
 
   // ─── Ride category selection ─────────────────────────────────────────────
   const CATEGORY_OPTIONS = [
@@ -987,25 +1000,45 @@ export default function ModernDriverHome() {
     [currentTrip, driverProfile],
   );
 
+  /** Ask which app should guide this leg — NEXRYDE, Google Maps, Apple Maps or Waze. */
   const launchDriverNavigation = useCallback(
     (dest: { lat: number; lng: number; label?: string; phase?: string }) => {
-      const { isGoogleNavigationEnabled } = require('@/src/constants/mapEngines') as typeof import('@/src/constants/mapEngines');
-      if (isGoogleNavigationEnabled()) {
-        guardedPush({
-          pathname: '/driver/in-app-navigation',
-          params: {
-            lat: String(dest.lat),
-            lng: String(dest.lng),
-            label: dest.label || 'Destination',
-            tripId: currentTrip?.id || '',
-            phase: dest.phase || String(currentTrip?.status || ''),
-          },
-        } as Href);
+      if (!Number.isFinite(dest.lat) || !Number.isFinite(dest.lng)) return;
+      setNavigationAppPrompt(dest);
+    },
+    [],
+  );
+
+  const handleNavigationAppSelected = useCallback(
+    (appId: NavigationAppId) => {
+      const dest = navigationAppPrompt;
+      setNavigationAppPrompt(null);
+      if (!dest) return;
+      void saveLastUsedNavigationApp(appId);
+
+      if (appId === 'in_app') {
+        if (hasFullScreenInAppNavigation()) {
+          guardedPush({
+            pathname: '/driver/in-app-navigation',
+            params: {
+              lat: String(dest.lat),
+              lng: String(dest.lng),
+              label: dest.label || 'Destination',
+              tripId: currentTrip?.id || '',
+              phase: dest.phase || String(currentTrip?.status || ''),
+            },
+          } as Href);
+          return;
+        }
+        // No full-screen SDK on this platform — the trip map already draws the
+        // route and speaks each turn, so keep the driver on it.
+        toast.show('Guidance is on your trip map — follow the turn card.', 'info');
         return;
       }
-      promptExternalNavigation(dest);
+
+      openExternalNavigationApp(appId, dest);
     },
-    [currentTrip?.id, currentTrip?.status, guardedPush],
+    [currentTrip?.id, currentTrip?.status, guardedPush, navigationAppPrompt, toast],
   );
 
   const handleTripOpenNavigation = useCallback(() => {
@@ -3044,6 +3077,13 @@ export default function ModernDriverHome() {
           confirming={tripActionBusy === 'complete'}
           onCancel={() => setCompleteTripConfirmOpen(false)}
           onConfirm={() => void performCompleteTrip()}
+        />
+
+        <DriverNavigationAppSheet
+          visible={navigationAppPrompt != null}
+          destinationLabel={navigationAppPrompt?.label}
+          onSelect={handleNavigationAppSelected}
+          onClose={() => setNavigationAppPrompt(null)}
         />
 
         <CancellationReasonModal
