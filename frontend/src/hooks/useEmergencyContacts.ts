@@ -36,29 +36,41 @@ export function useEmergencyContacts(userId?: string | null) {
 
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * The API explains exactly what went wrong — "Maximum 5 emergency contacts
+   * allowed", "This contact is already added" — in `detail`. Falling back to
+   * `e.message` would show "Request failed with status code 400" instead.
+   */
+  const messageFor = (e: any, fallback: string): string =>
+    e?.response?.data?.detail || e?.message || fallback;
+
   const createContact = useCallback(
-    async (contact: EmergencyContact) => {
-      if (!userId) return;
+    async (contact: EmergencyContact): Promise<boolean> => {
+      if (!userId) return false;
       setError(null);
       try {
         await addEmergencyContact(userId, contact);
         await refresh();
+        return true;
       } catch (e: any) {
-        setError(e?.message ?? 'Failed to add contact');
+        setError(messageFor(e, 'Could not add that contact.'));
+        return false;
       }
     },
     [refresh, userId]
   );
 
   const deleteContact = useCallback(
-    async (phone: string) => {
-      if (!userId) return;
+    async (phone: string): Promise<boolean> => {
+      if (!userId) return false;
       setError(null);
       try {
         await removeEmergencyContact(userId, phone);
         await refresh();
+        return true;
       } catch (e: any) {
-        setError(e?.message ?? 'Failed to remove contact');
+        setError(messageFor(e, 'Could not remove that contact.'));
+        return false;
       }
     },
     [refresh, userId]
