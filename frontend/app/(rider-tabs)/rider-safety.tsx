@@ -32,6 +32,7 @@ import policeContacts from '@/src/data/policeContacts';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { RiderSafetyActiveTripCard } from '@/src/components/rider/RiderSafetyActiveTripCard';
+import EmergencyContactsCard from '@/src/components/rider/EmergencyContactsCard';
 import { pullAndApplyActiveTrip } from '@/src/services/activeTripSync';
 import { openShareTrip } from '@/src/utils/openShareTrip';
 import { isActiveTripStatus } from '@/src/utils/tripStatus';
@@ -426,6 +427,9 @@ export default function RiderSafetyScreen() {
           />
         </Animated.View>
         {loadingTrip ? <ActivityIndicator size="small" color={BRAND.primary} style={{ marginBottom: SPACING.md }} /> : null}
+
+        {/* Directly under SOS — this is who "your trusted contacts" actually means. */}
+        <EmergencyContactsCard userId={riderId} />
 
         {/* Nigerian police finder */}
         <View style={styles.policeCard}>

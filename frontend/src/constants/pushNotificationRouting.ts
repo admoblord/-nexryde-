@@ -105,7 +105,6 @@ export function resolvePushNotificationRoute(
   const riderTripExtras = new Set([
     'geo_fence_explained',
     'driver_stop_reason',
-    'safe_arrival_checkin',
     'route_updated',
     'rider_route_updated',
   ]);
@@ -113,6 +112,12 @@ export function resolvePushNotificationRoute(
   // Trip-scoped
   if (tripId) {
     if (type === 'trip_completed' && role === 'rider') {
+      return { pathname: '/rider/trip-receipt', params: { tripId } };
+    }
+    // The trip is already over, and the receipt carries the check-in prompt.
+    // Routing via tracking made the rider wait for it to resolve a finished
+    // trip and bounce — and strand them with no confirm control if it did not.
+    if (type === 'safe_arrival_checkin' && role === 'rider') {
       return { pathname: '/rider/trip-receipt', params: { tripId } };
     }
     if (type === 'trip_completed' && role === 'driver') {

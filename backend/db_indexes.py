@@ -116,6 +116,18 @@ async def ensure_indexes(db):
         await db.trips.create_index([("driver_id", 1), ("completed_at", -1), ("status", 1)])
         await db.trips.create_index("preferred_driver_id", sparse=True)
         await db.trips.create_index([("status", 1), ("fare_locked_until", 1), ("created_at", -1)])
+        # Safe-arrival guardian sweeps overdue check-ins every ~20s; without this
+        # it collection-scans trips on every tick.
+        await db.trips.create_index(
+            [
+                ("safe_arrival_check.required", 1),
+                ("safe_arrival_check.confirmed_at", 1),
+                ("safe_arrival_check.emergency_notified_at", 1),
+                ("safe_arrival_check.confirm_deadline_at", 1),
+            ],
+            sparse=True,
+            name="trips_safe_arrival_overdue",
+        )
         # Idempotency: unique index prevents duplicate trips from retried requests
         await db.trips.create_index(
             [("rider_id", 1), ("idempotency_key", 1)],
