@@ -421,21 +421,25 @@ jobs:
         if: success()
         continue-on-error: true
         run: |
-          set -uo pipefail
+          # No errexit on purpose: this step probes for permissions it may not
+          # have, and every failure below is handled with an explicit message.
+          # GitHub runs `bash -e` by default, which would abort on the first
+          # failing command substitution before any of those checks ran.
+          set +e
           JOB=nexryde-maintenance-tick
           # Every 2 minutes: safe arrival gives the rider 5 minutes then escalates
           # 90s later, so the tick has to be well inside that to stay meaningful.
           SCHEDULE="*/2 * * * *"
 
           BASE_URL=$(gcloud run services describe "${{ env.CLOUD_RUN_SERVICE }}" \
-            --region "${{ env.REGION }}" --format='value(status.url)' 2>/dev/null)
-          if [ -z "$BASE_URL" ]; then
+            --region "${{ env.REGION }}" --format='value(status.url)' 2>/dev/null || true)
+          if [ -z "${BASE_URL:-}" ]; then
             echo "::warning title=Scheduler skipped::Could not resolve the Cloud Run URL."
             exit 0
           fi
 
-          OPS_KEY=$(gcloud secrets versions access latest --secret=NEXRYDE_OPS_KEY 2>/dev/null)
-          if [ -z "$OPS_KEY" ]; then
+          OPS_KEY=$(gcloud secrets versions access latest --secret=NEXRYDE_OPS_KEY 2>/dev/null || true)
+          if [ -z "${OPS_KEY:-}" ]; then
             echo "::warning title=Scheduler skipped::Cannot read NEXRYDE_OPS_KEY. Grant the deploy service account roles/secretmanager.secretAccessor on it — the endpoint 404s without the key, so a job created now would tick uselessly."
             exit 0
           fi
@@ -470,11 +474,13 @@ jobs:
         if: success()
         continue-on-error: true
         run: |
-          set -uo pipefail
+          # No errexit: a listing failure must fall through to the message below,
+          # not abort the step. GitHub runs `bash -e` by default.
+          set +e
           KEEP=10
           STALE=$(gcloud artifacts docker images list "${{ env.ARTIFACT_REGISTRY }}" \
-            --sort-by=~CREATE_TIME --format='value(version)' 2>/dev/null | tail -n "+$((KEEP + 1))")
-          if [ -z "$STALE" ]; then
+            --sort-by=~CREATE_TIME --format='value(version)' 2>/dev/null | tail -n "+$((KEEP + 1))" || true)
+          if [ -z "${STALE:-}" ]; then
             echo "Nothing to prune (<= ${KEEP} images)."
             exit 0
           fi
