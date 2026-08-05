@@ -1,4 +1,4 @@
-import { isCashPaymentMethod } from '@/src/utils/tripPaymentMethod';
+import { isCashPaymentMethod, settlesOnCompletion } from '@/src/utils/tripPaymentMethod';
 
 export type NormalizedTripStatus =
   | 'pending'
@@ -66,8 +66,20 @@ export function resolveRiderScreenStatus(
   );
 }
 
-export const isActiveTripStatus = (status?: string, paymentStatus?: string): boolean => {
+/**
+ * Cash and bank transfer settle when the driver ends the trip, so a completed
+ * one is never still "active" — even if payment_status lags behind on an older
+ * trip. Only wallet keeps a rider in the payment phase.
+ */
+export const isActiveTripStatus = (
+  status?: string,
+  paymentStatus?: string,
+  paymentMethod?: string | null,
+): boolean => {
   const normalized = normalizeTripStatus(status, paymentStatus);
+  if (normalized === 'pending_payment' && paymentMethod !== undefined) {
+    return !settlesOnCompletion(paymentMethod);
+  }
   return ['pending', 'pending_driver_offers', 'accepted', 'arrived', 'ongoing', 'pending_payment'].includes(normalized);
 };
 

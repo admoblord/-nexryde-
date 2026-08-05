@@ -18,6 +18,23 @@ export function isWalletPaymentMethod(paymentMethod?: string | null): boolean {
   );
 }
 
+export function isTransferPaymentMethod(paymentMethod?: string | null): boolean {
+  const pm = String(paymentMethod || '')
+    .trim()
+    .toLowerCase();
+  return pm === 'transfer' || pm === 'bank_transfer';
+}
+
+/**
+ * Cash and bank transfer change hands before the driver ends the trip, so
+ * completing it settles the fare outright. Wallet needs the rider to authorise
+ * the in-app debit and unknown methods have no processor, so both stay pending.
+ * Mirrors `payment_status_after_completion` on the backend.
+ */
+export function settlesOnCompletion(paymentMethod?: string | null): boolean {
+  return isCashPaymentMethod(paymentMethod) || isTransferPaymentMethod(paymentMethod);
+}
+
 /** True when trip ended but fare still needs in-app / wallet / transfer confirmation. */
 export function riderFinancialPaymentPending(
   status?: string | null,
