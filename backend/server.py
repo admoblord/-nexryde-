@@ -1848,6 +1848,30 @@ async def health_sentry():
     }
 
 
+@api_router.get("/health/push")
+async def health_push():
+    """Report whether this revision can actually send a push notification.
+
+    Firebase Admin is only validated at startup when ENGAGEMENT_LOOP_ENABLED is
+    on, so with it off a revision can run for weeks unable to push and say
+    nothing. Safe to call publicly — booleans and a path, never the credential.
+    """
+    try:
+        from notification_service import validate_firebase_admin_config
+
+        status = validate_firebase_admin_config()
+    except Exception as exc:
+        status = {"configured": False, "initialized": False, "error": str(exc)[:200]}
+    return {
+        "fcm_configured": bool(status.get("configured")),
+        "fcm_initialized": bool(status.get("initialized")),
+        "credential_path": status.get("credential_path"),
+        "engagement_loop_enabled": _ENGAGEMENT_LOOP_ENABLED,
+        "revision": os.environ.get("K_REVISION", "unknown"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @api_router.get("/debug/test-crash")
 async def debug_test_crash(request: Request):
     """Deliberate crash to PROVE an event reaches Sentry.
