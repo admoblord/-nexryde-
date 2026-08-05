@@ -65,6 +65,31 @@ async def run_maintenance_tick(*, outbox_limit: int = 80, saga_limit: int = 40) 
     await _step("surge", _surge)
     await _step("guardians", _guardians)
 
+    # With cpu-throttling on, an asyncio sleep loop only advances while the
+    # process happens to be serving a request, so anything that must run on a
+    # schedule belongs here instead. Stuck trips and zombie drivers are already
+    # covered by the guardians above; these two are not.
+    async def _trial_guardrails():
+        from driver_trial_policy import tick_online_trial_expiry
+        from trial_driver_idle_guardrail import tick_trial_driver_idle_guardrail
+
+        idled = await tick_trial_driver_idle_guardrail()
+        expired = await tick_online_trial_expiry()
+        return {"idled": idled, "trials_expired": expired}
+
+    async def _engagement():
+        import os
+
+        # Same flag the boot loop honours — never start pushing because a tick ran.
+        if (os.environ.get("ENGAGEMENT_LOOP_ENABLED") or "").strip().lower() not in ("1", "true", "yes", "on"):
+            return {"skipped": "disabled"}
+        from engagement_push_service import tick_engagement_pushes
+
+        return {"sent": await tick_engagement_pushes()}
+
+    await _step("trial_guardrails", _trial_guardrails)
+    await _step("engagement", _engagement)
+
     observe_ms("maintenance.tick_ms", (time.perf_counter() - t0) * 1000)
     incr("maintenance.tick")
     return result
