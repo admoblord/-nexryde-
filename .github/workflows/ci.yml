@@ -412,6 +412,56 @@ jobs:
           done
           echo "::notice title=Deployed::gRPC ride-push + Kafka worker on prod-${SHORT_SHA}"
 
+      # With minScale 0 there is no idle process, so the guardians, saga retries,
+      # the outbox drain and the post-trip safe-arrival escalation have nothing
+      # running them. This scheduled POST is what keeps that timer work happening.
+      # Idempotent, and never fails a release — if the deployer lacks the role it
+      # says exactly what to grant and self-heals on the next deploy.
+      - name: Ensure maintenance scheduler job
+        if: success()
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          JOB=nexryde-maintenance-tick
+          # Every 2 minutes: safe arrival gives the rider 5 minutes then escalates
+          # 90s later, so the tick has to be well inside that to stay meaningful.
+          SCHEDULE="*/2 * * * *"
+
+          BASE_URL=$(gcloud run services describe "${{ env.CLOUD_RUN_SERVICE }}" \
+            --region "${{ env.REGION }}" --format='value(status.url)' 2>/dev/null)
+          if [ -z "$BASE_URL" ]; then
+            echo "::warning title=Scheduler skipped::Could not resolve the Cloud Run URL."
+            exit 0
+          fi
+
+          OPS_KEY=$(gcloud secrets versions access latest --secret=NEXRYDE_OPS_KEY 2>/dev/null)
+          if [ -z "$OPS_KEY" ]; then
+            echo "::warning title=Scheduler skipped::Cannot read NEXRYDE_OPS_KEY. Grant the deploy service account roles/secretmanager.secretAccessor on it — the endpoint 404s without the key, so a job created now would tick uselessly."
+            exit 0
+          fi
+
+          gcloud services enable cloudscheduler.googleapis.com --quiet 2>/dev/null || true
+
+          ACTION=create
+          if gcloud scheduler jobs describe "$JOB" --location "${{ env.REGION }}" &>/dev/null; then
+            ACTION=update
+          fi
+
+          if gcloud scheduler jobs "$ACTION" http "$JOB" \
+               --location "${{ env.REGION }}" \
+               --schedule "$SCHEDULE" \
+               --time-zone "Africa/Lagos" \
+               --uri "${BASE_URL}/api/ops/maintenance-tick" \
+               --http-method POST \
+               --update-headers "X-NEXRYDE-OPS-KEY=${OPS_KEY}" \
+               --attempt-deadline 120s \
+               --max-retry-attempts 1 \
+               --quiet 2>/tmp/sched.err; then
+            echo "::notice title=Scheduler::${ACTION}d ${JOB} (${SCHEDULE}) -> ${BASE_URL}/api/ops/maintenance-tick"
+          else
+            echo "::warning title=Scheduler failed::Grant the deploy service account roles/cloudscheduler.admin, then re-run this deploy. Detail: $(head -c 300 /tmp/sched.err)"
+          fi
+
       # Every deploy pushes a ~1GB image and nothing ever removed the old ones,
       # so Artifact Registry storage grew with each release and never shrank.
       # Keep the newest KEEP images (rollback targets) and delete the rest.
