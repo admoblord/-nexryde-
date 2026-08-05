@@ -1,6 +1,0 @@
-marker=NexRydeAppearancePatch/v1
-status=verified
-source=/workspace/frontend/node_modules/react-native/React/CoreModules/RCTAppearance.mm
-patched_at=2026-08-05T09:55:11.293Z
-has_dispatch_async=true
-has_try=true
