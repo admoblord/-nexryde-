@@ -177,6 +177,7 @@ import DriverTripCompletionPanel, {
   type TripCompletionPayload,
 } from '@/src/components/driver/DriverTripCompletionPanel';
 import DriverCompleteTripConfirmModal from '@/src/components/driver/DriverCompleteTripConfirmModal';
+import { settlesOnCompletion } from '@/src/utils/tripPaymentMethod';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { TripMapErrorBoundary } from '@/src/components/TripMapErrorBoundary';
 import { DriverUberStyleOfflineHome } from '@/src/components/driver/DriverUberStyleOfflineHome';
@@ -1247,15 +1248,19 @@ export default function ModernDriverHome() {
       });
       if (result.queued) {
         // Don't leave the driver stuck in the live-driving UI (GPS/heartbeat
-        // running) for a trip they just completed. Optimistically advance to the
-        // cash-collection / payment state, mirroring the online success path.
+        // running) for a trip they just completed. Mirror what the server does
+        // on sync: cash/transfer settle outright, wallet waits for the rider.
+        const settled = settlesOnCompletion(
+          (currentTrip as { payment_method?: string }).payment_method,
+        );
         const queuedMerged = {
           ...(currentTrip || ({} as Trip)),
-          status: 'pending_payment' as const,
+          status: settled ? ('completed' as const) : ('pending_payment' as const),
+          ...(settled ? { payment_status: 'completed' } : {}),
         } as Trip & Record<string, unknown>;
         setCompleteTripConfirmOpen(false);
         setTripCompletion(tripToCompletionPayload(queuedMerged));
-        setCurrentTrip(queuedMerged as Trip);
+        setCurrentTrip(settled ? null : (queuedMerged as Trip));
         toast.show('Trip saved offline — will sync when you reconnect.', 'info');
         return;
       }

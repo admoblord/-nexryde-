@@ -18,7 +18,11 @@ export default function useActiveTripCoordinator(options?: { enabled?: boolean }
   const { storeReady, canCallAuthedApi } = useAuthedApiReady();
   const { userId } = useAuthedUserId();
 
-  const hasLiveTrip = isActiveTripStatus(currentTrip?.status, currentTrip?.payment_status);
+  const hasLiveTrip = isActiveTripStatus(
+    currentTrip?.status,
+    currentTrip?.payment_status,
+    currentTrip?.payment_method ?? null,
+  );
   const sessionPollingActive = isOnline || hasLiveTrip;
   const highPriority = isDriverHighPriorityPolling(currentTrip?.status);
   const pollMs = driverTripCoordinatorPollMs(highPriority);

@@ -49,7 +49,7 @@ from auth_guard import require_authenticated, verify_trip_participant, verify_ow
 from wallet_trip_helpers import (
     is_cash_payment_method,
     is_wallet_payment_method,
-    rider_must_confirm_payment,
+    payment_status_after_completion,
     trip_fare_amount,
 )
 from wallet_ops import (
@@ -5079,10 +5079,11 @@ async def complete_trip(trip_id: str, request: Request):
     actor_id = require_authenticated(request)
     if actor_id != trip_before.get("driver_id"):
         raise HTTPException(status_code=403, detail="Only the assigned driver can complete this trip")
-    # Uber-grade cash proof: trip ends with payment pending until the DRIVER
-    # confirms cash/transfer received (or rider confirms wallet). Never auto-settle.
+    # Cash and transfer are settled between rider and driver before the driver
+    # ends the trip, so completing it settles the fare too. Only wallet (money
+    # moves inside NEXRYDE) and unknown methods stay pending for confirmation.
     pm = trip_before.get("payment_method") or "cash"
-    payment_status_after = "pending"
+    payment_status_after = payment_status_after_completion(pm)
     completed_at = datetime.now(timezone.utc)
     fare_adj = compute_completion_fare_adjustments(trip_before, completed_at)
     shield_mode = dict(trip_before.get("invisible_shield_mode") or {})
@@ -5171,6 +5172,18 @@ async def complete_trip(trip_id: str, request: Request):
             "fare": trip.get("fare"),
         },
     )
+
+    if payment_status_after == "completed":
+        await _log_trip_event(
+            trip_id,
+            "payment_confirmed",
+            trip.get("driver_id"),
+            {
+                "payment_status": "completed",
+                "payment_method": pm,
+                "reason": "settled_on_completion",
+            },
+        )
 
     # Durable completion saga — stats, incentives, wallet, pushes, metrics, realtime.
     # Retries until confirmed; Kafka/outbox notifies other workers.
