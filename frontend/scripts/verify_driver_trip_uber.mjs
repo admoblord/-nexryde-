@@ -66,11 +66,16 @@ has(
   'offline home respects appearance',
 );
 
-// Nav: single launcher
+// Nav: single launcher that always asks which app should guide the driver
 has(
   'app/(driver-tabs)/driver-home.tsx',
-  /launchDriverNavigation[\s\S]*isGoogleNavigationEnabled[\s\S]*in-app-navigation[\s\S]*promptExternalNavigation/,
-  'nav primary launcher (in-app then external)',
+  /launchDriverNavigation[\s\S]*setNavigationAppPrompt[\s\S]*handleNavigationAppSelected[\s\S]*hasFullScreenInAppNavigation[\s\S]*in-app-navigation[\s\S]*openExternalNavigationApp/,
+  'nav launcher asks for app, then routes in-app or external',
+);
+has(
+  'app/(driver-tabs)/driver-home.tsx',
+  /<DriverNavigationAppSheet[\s\S]*onSelect=\{handleNavigationAppSelected\}/,
+  'navigation app chooser sheet rendered',
 );
 has(
   'app/(driver-tabs)/driver-home.tsx',

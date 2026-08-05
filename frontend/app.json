@@ -62,6 +62,7 @@
           "telprompt",
           "maps",
           "comgooglemaps",
+          "waze",
           "uber",
           "whatsapp"
         ],

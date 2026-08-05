@@ -85,9 +85,13 @@ else fail('Navigation flag default not true');
 if (/EXPO_PUBLIC_MAPLIBRE_ENABLED',\s*true/.test(engines)) ok('MapLibre flag defaults ON');
 else fail('MapLibre flag default not true');
 
+// hasFullScreenInAppNavigation() wraps isGoogleNavigationEnabled() for the driver flow.
 const driverHome = read('app/(driver-tabs)/driver-home.tsx') || '';
-if (driverHome.includes("/driver/in-app-navigation") && driverHome.includes('isGoogleNavigationEnabled')) {
-  ok('driver-home routes Navigate → in-app Navigation SDK');
+if (
+  driverHome.includes('/driver/in-app-navigation') &&
+  driverHome.includes('hasFullScreenInAppNavigation')
+) {
+  ok('driver-home routes Navigate → in-app Navigation SDK when the driver picks it');
 } else fail('driver-home missing in-app navigation launch');
 
 const heatmap = read('app/driver/heatmap.tsx') || '';

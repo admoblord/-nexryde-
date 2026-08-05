@@ -1,5 +1,12 @@
 import { Alert, Linking, Platform } from 'react-native';
 
+import {
+  appleMapsNavigationUrls,
+  googleMapsNavigationUrls,
+  wazeNavigationUrls,
+  type MapPlatform,
+} from '@/src/utils/navigationAppLinks';
+
 export type NavigationTarget = {
   lat: number;
   lng: number;
@@ -7,11 +14,50 @@ export type NavigationTarget = {
 };
 
 /**
- * Opens turn-by-turn navigation to the given coordinates.
+ * Open the first candidate URL the device can actually handle.
  *
- * iOS:     Apple Maps directions (turn-by-turn), falls back to Google Maps web
- * Android: Google Maps turn-by-turn via intent URL
- * Web:     Google Maps web directions
+ * `canOpenURL` needs the scheme listed in `LSApplicationQueriesSchemes` on iOS
+ * and in `<queries>` on Android. Android package visibility is not declared for
+ * map apps, so there a false negative would send every driver to the browser —
+ * we just try to open and let a missing handler throw through to the next
+ * candidate instead. Every list ends in an https URL, which always resolves.
+ */
+async function openFirstAvailableUrl(candidates: string[]): Promise<boolean> {
+  for (const url of candidates) {
+    try {
+      if (Platform.OS === 'ios' && !url.startsWith('http')) {
+        const supported = await Linking.canOpenURL(url);
+        if (!supported) continue;
+      }
+      await Linking.openURL(url);
+      return true;
+    } catch {
+      /* try the next candidate */
+    }
+  }
+  return false;
+}
+
+const currentMapPlatform = (): MapPlatform =>
+  Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web';
+
+/** Google Maps turn-by-turn: native app when installed, else Google Maps web. */
+export function openGoogleMapsNavigation(lat: number, lng: number): void {
+  void openFirstAvailableUrl(googleMapsNavigationUrls(lat, lng, currentMapPlatform()));
+}
+
+/** Apple Maps turn-by-turn (iOS only), falling back to Google Maps web. */
+export function openAppleMapsNavigation(lat: number, lng: number): void {
+  void openFirstAvailableUrl(appleMapsNavigationUrls(lat, lng));
+}
+
+export function openWazeNavigation(lat: number, lng: number): void {
+  void openFirstAvailableUrl(wazeNavigationUrls(lat, lng));
+}
+
+/**
+ * Opens turn-by-turn navigation in whichever map app the platform prefers.
+ * Prefer an explicit launcher when the driver has picked an app.
  */
 export function openGoogleNavigation(
   lat: number | null,
@@ -19,27 +65,8 @@ export function openGoogleNavigation(
   addressFallback?: string,
 ): void {
   if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
-    // iOS: Apple Maps daddr= opens turn-by-turn; fallback to Google if not available
-    const iosAppleMaps = `http://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`;
-    const googleMapsWeb = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
-    const androidGoogleNav = `google.navigation:q=${lat},${lng}&mode=d`;
-
-    const url = Platform.select({
-      ios:     iosAppleMaps,
-      android: androidGoogleNav,
-    }) ?? googleMapsWeb;
-
-    void Linking.openURL(url).catch(() => {
-      // iOS fallback: try Google Maps app, then web
-      if (Platform.OS === 'ios') {
-        const googleMapsIos = `comgooglemaps://?daddr=${lat},${lng}&directionsmode=driving`;
-        void Linking.canOpenURL(googleMapsIos).then((ok) => {
-          void Linking.openURL(ok ? googleMapsIos : googleMapsWeb);
-        });
-      } else {
-        void Linking.openURL(googleMapsWeb);
-      }
-    });
+    if (Platform.OS === 'ios') openAppleMapsNavigation(lat, lng);
+    else openGoogleMapsNavigation(lat, lng);
     return;
   }
   if (addressFallback) {
@@ -48,22 +75,23 @@ export function openGoogleNavigation(
   }
 }
 
-export function openWazeNavigation(lat: number, lng: number): void {
-  const native = `waze://?ll=${lat},${lng}&navigate=yes`;
-  const web    = `https://waze.com/ul?ll=${lat}%2C${lng}&navigate=yes`;
-  void Linking.canOpenURL(native)
-    .then((ok) => Linking.openURL(ok ? native : web))
-    .catch(() => Linking.openURL(web));
-}
-
-/** Let driver pick Google Maps / Apple Maps or Waze for turn-by-turn. */
+/**
+ * Let the driver pick an external map app for turn-by-turn.
+ *
+ * Used where there is no live trip to guide in-app (trip history, and as the
+ * fallback inside the in-app navigation screen). During a trip the driver gets
+ * the richer sheet that also offers NEXRYDE's own navigation.
+ */
 export function promptExternalNavigation(target: NavigationTarget): void {
   const { lat, lng, label } = target;
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
   const options: Parameters<typeof Alert.alert>[2] = [
-    { text: Platform.OS === 'ios' ? 'Apple Maps' : 'Google Maps', onPress: () => openGoogleNavigation(lat, lng, label) },
-    { text: 'Waze',   onPress: () => openWazeNavigation(lat, lng) },
-    { text: 'Cancel', style: 'cancel' },
+    { text: 'Google Maps', onPress: () => openGoogleMapsNavigation(lat, lng) },
+    ...(Platform.OS === 'ios'
+      ? [{ text: 'Apple Maps', onPress: () => openAppleMapsNavigation(lat, lng) }]
+      : []),
+    { text: 'Waze', onPress: () => openWazeNavigation(lat, lng) },
+    { text: 'Cancel', style: 'cancel' as const },
   ];
   Alert.alert('Navigate with', label || 'Choose navigation app', options);
 }
