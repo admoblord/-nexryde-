@@ -478,20 +478,29 @@ jobs:
           # not abort the step. GitHub runs `bash -e` by default.
           set +e
           KEEP=10
-          STALE=$(gcloud artifacts docker images list "${{ env.ARTIFACT_REGISTRY }}" \
-            --sort-by=~CREATE_TIME --format='value(version)' 2>/dev/null | tail -n "+$((KEEP + 1))" || true)
-          if [ -z "${STALE:-}" ]; then
-            echo "Nothing to prune (<= ${KEEP} images)."
-            exit 0
-          fi
-          COUNT=0
-          for DIGEST in $STALE; do
-            if gcloud artifacts docker images delete \
-                 "${{ env.ARTIFACT_REGISTRY }}@${DIGEST}" --delete-tags --quiet 2>/dev/null; then
-              COUNT=$((COUNT + 1))
+          TOTAL=0
+          # Both registries: africa-south1 is current, us-central1 holds every
+          # image pushed before the Jul 24 region move and was never pruned.
+          for REG in \
+            "${{ env.ARTIFACT_REGISTRY }}" \
+            "us-central1-docker.pkg.dev/nexryde-app/nexryde-backend/nexryde-backend"; do
+            STALE=$(gcloud artifacts docker images list "$REG" \
+              --sort-by=~CREATE_TIME --format='value(version)' 2>/dev/null | tail -n "+$((KEEP + 1))" || true)
+            if [ -z "${STALE:-}" ]; then
+              echo "$REG: nothing to prune (<= ${KEEP} images)."
+              continue
             fi
+            COUNT=0
+            for DIGEST in $STALE; do
+              if gcloud artifacts docker images delete "${REG}@${DIGEST}" \
+                   --delete-tags --quiet 2>/dev/null; then
+                COUNT=$((COUNT + 1))
+              fi
+            done
+            echo "$REG: deleted ${COUNT} old image(s)."
+            TOTAL=$((TOTAL + COUNT))
           done
-          echo "::notice title=Pruned::Deleted ${COUNT} old image(s), kept newest ${KEEP}"
+          echo "::notice title=Pruned::Deleted ${TOTAL} old image(s) across both registries, kept newest ${KEEP} each"
 
       - name: Rollback canary on failure
         if: failure() && env.PREV_REV != ''
