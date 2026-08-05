@@ -827,13 +827,30 @@ async def _maybe_process_safe_arrival_check(trip: dict) -> dict:
             updates["safe_arrival_check.emergency_contacts_notified"] = contact_count
             updates["safe_arrival_check.emergency_contacts_on_file"] = contacts_on_file
             updates["safe_arrival_check.check_in_status"] = "emergency_notified"
+
+            # Distinguish "SMS is switched off" from "SMS is on and failing".
+            # Logging an error for the deliberate case would fire on every
+            # escalation and train everyone to ignore the log.
+            from sms_service import _resolve_provider
+
+            sms_provider = _resolve_provider()
+            updates["safe_arrival_check.sms_provider"] = sms_provider
             if contacts_on_file and not contact_count:
-                logger.error(
-                    "safe_arrival escalation reached NOBODY trip=%s contacts_on_file=%s "
-                    "— SMS delivery is failing (check SMS_PROVIDER / TERMII_API_KEY)",
-                    trip.get("id"),
-                    contacts_on_file,
-                )
+                if sms_provider in ("off", ""):
+                    logger.warning(
+                        "safe_arrival escalated trip=%s but SMS is off — %s emergency contact(s) "
+                        "were not texted; the rider's second push and the SOS alert still went out",
+                        trip.get("id"),
+                        contacts_on_file,
+                    )
+                else:
+                    logger.error(
+                        "safe_arrival escalation reached NOBODY trip=%s contacts_on_file=%s "
+                        "provider=%s — SMS delivery is failing",
+                        trip.get("id"),
+                        contacts_on_file,
+                        sms_provider,
+                    )
             await db.sos_alerts.insert_one({
                 "id": str(uuid.uuid4()),
                 "trip_id": trip.get("id"),
@@ -845,6 +862,7 @@ async def _maybe_process_safe_arrival_check(trip: dict) -> dict:
                 "source": "safe_arrival_no_response",
                 "emergency_contacts_notified": contact_count,
                 "emergency_contacts_on_file": contacts_on_file,
+                "sms_provider": sms_provider,
                 "created_at": now.isoformat(),
             })
 
