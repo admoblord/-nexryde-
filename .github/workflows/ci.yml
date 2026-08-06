@@ -296,6 +296,12 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Print deploy identity
+        run: |
+          ACCOUNT=$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -1)
+          echo "Deploy SA: ${ACCOUNT:-unknown}"
+          echo "::notice title=Deploy SA::${ACCOUNT:-unknown}"
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
