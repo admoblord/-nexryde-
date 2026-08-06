@@ -433,6 +433,9 @@ jobs:
           # failing command substitution before any of those checks ran.
           set +e
           JOB=nexryde-maintenance-tick
+          # Cloud Scheduler has no africa-south1 region — run the control plane
+          # in europe-west1 while still POSTing the africa-south1 Cloud Run URL.
+          SCHEDULER_LOCATION=europe-west1
           # Every 2 minutes: safe arrival gives the rider 5 minutes then escalates
           # 90s later, so the tick has to be well inside that to stay meaningful.
           SCHEDULE="*/2 * * * *"
@@ -453,24 +456,30 @@ jobs:
           gcloud services enable cloudscheduler.googleapis.com --quiet 2>/dev/null || true
 
           ACTION=create
-          if gcloud scheduler jobs describe "$JOB" --location "${{ env.REGION }}" &>/dev/null; then
+          HEADER_FLAG=--headers
+          if gcloud scheduler jobs describe "$JOB" --location "$SCHEDULER_LOCATION" &>/dev/null; then
             ACTION=update
+            HEADER_FLAG=--update-headers
           fi
 
+          # Scrub the ops key from any error text before surfacing it.
           if gcloud scheduler jobs "$ACTION" http "$JOB" \
-               --location "${{ env.REGION }}" \
+               --location "$SCHEDULER_LOCATION" \
                --schedule "$SCHEDULE" \
                --time-zone "Africa/Lagos" \
                --uri "${BASE_URL}/api/ops/maintenance-tick" \
                --http-method POST \
-               --update-headers "X-NEXRYDE-OPS-KEY=${OPS_KEY}" \
+               "${HEADER_FLAG}=X-NEXRYDE-OPS-KEY=${OPS_KEY}" \
                --attempt-deadline 120s \
                --max-retry-attempts 1 \
-               --quiet 2>/tmp/sched.err; then
-            echo "::notice title=Scheduler::${ACTION}d ${JOB} (${SCHEDULE}) -> ${BASE_URL}/api/ops/maintenance-tick"
+               --quiet \
+               --format=none 2>/tmp/sched.err; then
+            echo "::notice title=Scheduler::${ACTION}d ${JOB} (${SCHEDULE}) @ ${SCHEDULER_LOCATION} -> ${BASE_URL}/api/ops/maintenance-tick"
           else
-            echo "::warning title=Scheduler failed::Grant the deploy service account roles/cloudscheduler.admin, then re-run this deploy. Detail: $(head -c 300 /tmp/sched.err)"
+            SAFE_ERR=$(sed -E 's/X-NEXRYDE-OPS-KEY=[^[:space:]]+/X-NEXRYDE-OPS-KEY=***REDACTED***/g' /tmp/sched.err 2>/dev/null | head -c 300)
+            echo "::warning title=Scheduler failed::Grant roles/cloudscheduler.admin if needed. Detail: ${SAFE_ERR}"
           fi
+          unset OPS_KEY
 
       # Every deploy pushes a ~1GB image and nothing ever removed the old ones,
       # so Artifact Registry storage grew with each release and never shrank.

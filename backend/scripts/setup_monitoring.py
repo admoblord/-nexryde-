@@ -225,9 +225,9 @@ def upsert_alert_policy(
         "displayName": display_name,
         "combiner": "OR",
         "conditions": conditions,
+        # notificationRateLimit is only valid for log-based policies — omit it.
         "alertStrategy": {
             "autoClose": "604800s",
-            "notificationRateLimit": {"period": "300s"},
         },
         "notificationChannels": [channel],
         "severity": severity,
@@ -298,10 +298,10 @@ def upsert_uptime_check(
         "period": period,
         "timeout": timeout,
         # Only the first contentMatchers entry is honored by the API.
-        # Match the readiness JSON field so a bare HTML 404 never counts as up.
+        # MATCHES_JSON_PATH requires content to be a JSON literal (quoted string).
         "contentMatchers": [
             {
-                "content": "ready",
+                "content": '"ready"',
                 "matcher": "MATCHES_JSON_PATH",
                 "jsonPathMatcher": {
                     "jsonPath": "$.status",
