@@ -502,6 +502,28 @@ jobs:
           done
           echo "::notice title=Pruned::Deleted ${TOTAL} old image(s) across both registries, kept newest ${KEEP} each"
 
+      # Keep Cloud Monitoring pointed at africa-south1 (not the retired us-central1
+      # standby). Idempotent upsert of uptime + alert policies. Soft-fail if the
+      # deployer SA lacks monitoring.admin — never blocks a release.
+      - name: Sync Cloud Monitoring alerts
+        if: success()
+        continue-on-error: true
+        env:
+          PROJECT_ID: nexryde-app
+          REGION: africa-south1
+          SERVICE: nexryde-backend
+          BACKEND_HOST: nexryde-backend-993913300770.africa-south1.run.app
+          ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
+        run: |
+          set +e
+          export ALERT_EMAIL="${ALERT_EMAIL:-admin@admoblordgroup.com}"
+          pip install --quiet google-auth google-auth-httplib2 requests
+          if python3 backend/scripts/setup_monitoring.py; then
+            echo "::notice title=Monitoring::Uptime + alert policies synced for africa-south1"
+          else
+            echo "::warning title=Monitoring sync failed::Grant the deploy service account roles/monitoring.admin (and notification channel access), then re-run. Alerts may still point at the old us-central1 host until then."
+          fi
+
       - name: Rollback canary on failure
         if: failure() && env.PREV_REV != ''
         run: |

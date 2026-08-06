@@ -1836,8 +1836,13 @@ async def health_sentry():
     initialized = False
     try:
         import sentry_sdk  # type: ignore
-        client = sentry_sdk.Hub.current.client
-        initialized = client is not None and client.dsn is not None
+        # sentry-sdk v2+: Hub is deprecated; get_client() is the supported API.
+        get_client = getattr(sentry_sdk, "get_client", None)
+        if callable(get_client):
+            client = get_client()
+        else:
+            client = sentry_sdk.Hub.current.client  # type: ignore[attr-defined]
+        initialized = bool(client is not None and getattr(client, "dsn", None))
     except Exception:
         initialized = False
     return {
