@@ -230,33 +230,43 @@ spec:
               mountPath: /secrets/firebase
               readOnly: true
 
+          # timeoutSeconds is set explicitly on every probe. Left unset, Cloud Run
+          # applies a 1 second timeout, which is not enough headroom for a probe
+          # that has to wait on the event loop — a brief stall was enough to fail
+          # three checks in a row and get the instance killed mid-request.
           livenessProbe:
             httpGet:
               path: /api/health
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 30
+            timeoutSeconds: 5
             failureThreshold: 3
 
-          readinessProbe:
-            httpGet:
-              path: /api/health/ready
-              port: 8080
-            periodSeconds: 30
-            failureThreshold: 3
+          # No readinessProbe on purpose. It pointed at /api/health/ready, which
+          # pings Mongo and Redis, with a 1s timeout and successThreshold 2. A
+          # dependency blip would therefore pull *every* instance out of service
+          # at once and take the whole API down instead of degrading. Liveness
+          # already restarts a genuinely dead process, and the Cloud Monitoring
+          # uptime check watches /api/health/ready from outside, which is where
+          # that signal belongs.
 
           # Probe immediately and often. initialDelaySeconds: 10 with a 5s period
           # meant a new (or scaled-out) instance sat idle for at least 10s before
           # Cloud Run would send it traffic, which showed up as the ~10s second
-          # request after every cold start. failureThreshold keeps the same 60s
-          # total allowance for a slow boot.
+          # request after every cold start. failureThreshold keeps a 60s total
+          # allowance for a slow boot.
+          #
+          # Cloud Run requires timeoutSeconds < periodSeconds here, so the period
+          # is 3s with a 2s timeout rather than the 5s used for liveness.
           startupProbe:
             httpGet:
               path: /api/health
               port: 8080
             initialDelaySeconds: 0
-            periodSeconds: 2
-            failureThreshold: 30
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 20
 
       volumes:
         - name: firebase-service-account
