@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BACKEND_URL } from '@/src/services/api';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 
 interface Prediction {
   place_id: string;
@@ -176,7 +177,13 @@ export default function LocationAutocomplete({
           url += `&location_bias=${encodeURIComponent(`${biasLat},${biasLng}`)}&radius=${r}`;
         }
 
-        const response = await fetch(url);
+        // Places proxy requires a bearer token — a bare fetch always 401s and
+        // leaves pickup/destination search empty after login.
+        const response = await authedFetch(url, {
+          method: 'GET',
+          preserveSessionOn401: true,
+          timeoutMs: 12_000,
+        });
         let data: any = {};
         try {
           data = await response.json();
