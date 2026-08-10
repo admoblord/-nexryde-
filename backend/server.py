@@ -2616,38 +2616,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-class ResponseTimingMiddleware(BaseHTTPMiddleware):
-    """Optional X-Response-Time-ms for profiling (set NEXRYDE_RESPONSE_TIME_HEADER=1)."""
-
-    async def dispatch(self, request: Request, call_next):
-        if request.method == "OPTIONS":
-            return await call_next(request)
-        t0 = time.perf_counter()
-        response = await call_next(request)
-        if os.environ.get("NEXRYDE_RESPONSE_TIME_HEADER", "").lower() in ("1", "true", "yes"):
-            response.headers["X-Response-Time-ms"] = str(int((time.perf_counter() - t0) * 1000))
-        return response
-
-
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Apply baseline security headers to every HTTP response."""
-
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        for k, v in SECURITY_HEADERS.items():
-            response.headers.setdefault(k, v)
-        return response
-
-
-class RequestIdMiddleware(BaseHTTPMiddleware):
-    """Attach a request id for traceability across logs and clients."""
-
-    async def dispatch(self, request: Request, call_next):
-        req_id = request.headers.get("x-request-id") or str(uuid.uuid4())
-        request.state.request_id = req_id
-        response = await call_next(request)
-        response.headers["X-Request-Id"] = req_id
-        return response
+from request_context import RequestContextMiddleware
 
 
 class InputSanitizationMiddleware(BaseHTTPMiddleware):
@@ -2687,9 +2656,8 @@ class InputSanitizationMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(InputSanitizationMiddleware)
 app.add_middleware(AuthMiddleware)
-app.add_middleware(ResponseTimingMiddleware)
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RequestIdMiddleware)
+# Outside AuthMiddleware so 401s still carry security headers and the request id.
+app.add_middleware(RequestContextMiddleware, security_headers=SECURITY_HEADERS)
 # Compress JSON payloads for mobile (Lagos cellular) — outer so responses are gzipped.
 app.add_middleware(GZipMiddleware, minimum_size=500)
 _trusted_hosts_raw = os.environ.get("TRUSTED_HOSTS", "").strip()

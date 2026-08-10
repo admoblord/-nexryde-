@@ -32,11 +32,33 @@ const ONBOARDING_SEEN_KEY = 'onboarding_complete';
 const riderVerifiedKey = (userId: string) => `@nexryde_rider_verified_${userId}`;
 const driverOnboardedKey = (userId: string) => `@nexryde_driver_onboarded_${userId}`;
 
-/** Resolve user for legal gate — prefer server-synced store user. */
+function userHasLegalFields(user: AuthedUserForRouting): boolean {
+  return (
+    user.terms_accepted !== undefined ||
+    user.privacy_accepted !== undefined ||
+    Boolean(user.terms_version) ||
+    Boolean(user.privacy_version)
+  );
+}
+
+/**
+ * Resolve user for the legal gate without blocking navigation when email-signin
+ * (or a saved session) already carried terms/privacy fields. A background sync
+ * still refreshes server truth; only await the network when fields are missing.
+ */
 async function resolveUserForLegalGate(
   loggedUser: AuthedUserForRouting,
 ): Promise<AuthedUserForRouting> {
   if (!loggedUser?.id) return loggedUser;
+
+  if (userHasLegalFields(loggedUser)) {
+    void syncUserLegalStatus(loggedUser.id).then((synced) => {
+      if (!synced) return;
+      // Home screens re-check via logLegalGateCheck after store merge.
+    });
+    return loggedUser;
+  }
+
   const synced = await syncUserLegalStatus(loggedUser.id);
   if (synced) {
     return { ...loggedUser, ...synced } as AuthedUserForRouting;

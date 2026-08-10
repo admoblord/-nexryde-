@@ -208,6 +208,9 @@ async def _complete_existing_user_email_login(user: dict, device_id: Optional[st
     """
     Issue JWT for an existing user (passwordless email).
     Caller must pass the user document — avoids a second DB round-trip.
+
+    Refresh-token persistence is awaited (clients may refresh immediately) but
+    uses a single insert — no warm-ping ahead of it. Retries only on stale pool.
     """
     if not user:
         raise HTTPException(status_code=500, detail="Internal error")
@@ -221,18 +224,20 @@ async def _complete_existing_user_email_login(user: dict, device_id: Optional[st
     access_token = create_access_token(uid, role)
     raw_refresh = create_refresh_token(uid, role)
     refresh_hash = _hashlib.sha256(raw_refresh.encode()).hexdigest()
+    now = datetime.now(timezone.utc)
+    refresh_doc = {
+        "token_hash": refresh_hash,
+        "user_id": uid,
+        "role": role,
+        "created_at": now.isoformat(),
+        "expires_at": (now + timedelta(days=JWT_REFRESH_EXPIRY_DAYS)).isoformat(),
+        "revoked": False,
+    }
 
     from db_resilience import with_mongo_retry
 
     await with_mongo_retry(
-        lambda: db.refresh_tokens.insert_one({
-            "token_hash": refresh_hash,
-            "user_id": uid,
-            "role": role,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "expires_at": (datetime.now(timezone.utc) + timedelta(days=JWT_REFRESH_EXPIRY_DAYS)).isoformat(),
-            "revoked": False,
-        }),
+        lambda: db.refresh_tokens.insert_one(refresh_doc),
         label="refresh_token_insert",
     )
 
@@ -1062,15 +1067,18 @@ async def google_sign_in(request: GoogleSignInRequest):
 
 @auth_router.post("/auth/email-signin")
 async def email_sign_in(request_obj: Request, request: EmailSignInRequest):
-    """Email sign-in: existing users log in directly, new users continue registration (legacy / hybrid)."""
-    from db_resilience import ensure_mongo_warm, with_mongo_retry
+    """Email sign-in (passwordless): existing users get JWTs; new users continue registration.
+
+    This is the app login path — not email OTP. A warm-pool ping before the
+    lookup used to add a full Atlas RTT on every attempt; ``with_mongo_retry``
+    already re-warms if the connection is stale.
+    """
+    from db_resilience import with_mongo_retry
 
     email = (request.email or "").strip().lower()
     await auth_limiter.check_rate_limit(request_obj, f"email_signin:{email}")
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         raise HTTPException(status_code=400, detail="Invalid email address")
-
-    await ensure_mongo_warm()
 
     user = await with_mongo_retry(
         lambda: db.users.find_one(

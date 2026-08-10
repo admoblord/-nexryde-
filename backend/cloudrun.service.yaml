@@ -255,28 +255,29 @@ spec:
               mountPath: /secrets/firebase
               readOnly: true
 
+          # timeoutSeconds must be explicit — Cloud Run otherwise applies 1s,
+          # which a brief event-loop stall can exceed, killing a healthy instance.
           livenessProbe:
             httpGet:
               path: /api/health
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 30
+            timeoutSeconds: 5
             failureThreshold: 3
 
-          readinessProbe:
-            httpGet:
-              path: /api/health/ready
-              port: 8080
-            periodSeconds: 30
-            failureThreshold: 3
+          # No readinessProbe: gating on /api/health/ready (Mongo + Redis) takes
+          # every instance out of service on a dependency blip. That check belongs
+          # in the external Cloud Monitoring uptime check.
 
           startupProbe:
             httpGet:
               path: /api/health
               port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 5
-            failureThreshold: 12
+            initialDelaySeconds: 0
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 20
 
       volumes:
         - name: firebase-service-account

@@ -19,24 +19,29 @@ spec:
   template:
     metadata:
       annotations:
-        # Scale to zero and bill CPU per request. A warm always-on-CPU instance
-        # cost more per month than the whole platform used to, which is not
-        # justifiable at current volume. Timer work (guardians, saga retries,
-        # safe-arrival escalation) is driven by Cloud Scheduler calling
-        # POST /api/ops/maintenance-tick instead of an idle process.
+        # Keep exactly one instance warm with CPU always allocated.
         #
-        # Trade-off: the first request after ~15 min idle pays a cold start.
-        # startup-cpu-boost stays on to shorten it, and the app already warms
-        # the backend from the welcome/login screen (warmBackend.ts).
-        autoscaling.knative.dev/minScale: "0"
+        # Scale-to-zero was measured against production: the first request after
+        # idle took 63s and returned 503, the next 10.8s. That is login hanging,
+        # tabs failing to load and pickup/destination search timing out — the app
+        # is unusable on the first tap. CPU throttling also added ~200-450ms to
+        # every warm request because the instance has to be woken first.
+        #
+        # Cost is controlled by halving the CPU (2 -> 1) rather than by dropping
+        # to zero instances, so one warm instance costs roughly half of the
+        # always-on config that produced the big bill, and cold starts are gone.
+        # Extra instances still only exist while there is traffic.
+        autoscaling.knative.dev/minScale: "1"
         autoscaling.knative.dev/maxScale: "10"
         run.googleapis.com/startup-cpu-boost: "true"
-        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/cpu-throttling: "false"
         # Private access to Memorystore Redis for rate limits, realtime fanout, and polling cache.
         run.googleapis.com/vpc-access-connector: "projects/nexryde-app/locations/africa-south1/connectors/nexryde-vpc"
         run.googleapis.com/vpc-access-egress: "private-ranges-only"
     spec:
-      containerConcurrency: 80
+      # 1 vCPU saturates sooner than 2, so hand off to a second instance earlier
+      # instead of queueing requests behind a busy event loop.
+      containerConcurrency: 40
       timeoutSeconds: 300
       containers:
         - image: africa-south1-docker.pkg.dev/nexryde-app/nexryde-backend/nexryde-backend:latest
@@ -44,7 +49,7 @@ spec:
             - containerPort: 8080
           resources:
             limits:
-              cpu: "2"
+              cpu: "1"
               memory: 1Gi
 
           # ── All env vars in one flat list ─────────────────────────────────
@@ -225,28 +230,43 @@ spec:
               mountPath: /secrets/firebase
               readOnly: true
 
+          # timeoutSeconds is set explicitly on every probe. Left unset, Cloud Run
+          # applies a 1 second timeout, which is not enough headroom for a probe
+          # that has to wait on the event loop — a brief stall was enough to fail
+          # three checks in a row and get the instance killed mid-request.
           livenessProbe:
             httpGet:
               path: /api/health
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 30
+            timeoutSeconds: 5
             failureThreshold: 3
 
-          readinessProbe:
-            httpGet:
-              path: /api/health/ready
-              port: 8080
-            periodSeconds: 30
-            failureThreshold: 3
+          # No readinessProbe on purpose. It pointed at /api/health/ready, which
+          # pings Mongo and Redis, with a 1s timeout and successThreshold 2. A
+          # dependency blip would therefore pull *every* instance out of service
+          # at once and take the whole API down instead of degrading. Liveness
+          # already restarts a genuinely dead process, and the Cloud Monitoring
+          # uptime check watches /api/health/ready from outside, which is where
+          # that signal belongs.
 
+          # Probe immediately and often. initialDelaySeconds: 10 with a 5s period
+          # meant a new (or scaled-out) instance sat idle for at least 10s before
+          # Cloud Run would send it traffic, which showed up as the ~10s second
+          # request after every cold start. failureThreshold keeps a 60s total
+          # allowance for a slow boot.
+          #
+          # Cloud Run requires timeoutSeconds < periodSeconds here, so the period
+          # is 3s with a 2s timeout rather than the 5s used for liveness.
           startupProbe:
             httpGet:
               path: /api/health
               port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 5
-            failureThreshold: 12
+            initialDelaySeconds: 0
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 20
 
       volumes:
         - name: firebase-service-account
