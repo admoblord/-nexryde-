@@ -103,6 +103,13 @@ export type DriverOfferAlertParams = {
   offerId?: string;
   driverId?: string | null;
   source: 'push' | 'socket' | 'poll';
+  /** Uber/inDrive full-screen fields */
+  riderName?: string;
+  pickupAddress?: string;
+  dropoffAddress?: string;
+  fare?: number | string;
+  etaMinutes?: number | string;
+  distanceKm?: number | string;
 };
 
 /**
@@ -123,12 +130,24 @@ export async function triggerDriverOfferBackgroundAlert(
 
   const prefs = await loadDriverOfferSoundPrefs();
   await ensureDriverOfferPushChannel(prefs.ringtoneId);
-  showNativeRideOfferAlert({
-    id: params.tripId,
-    offer_id: params.offerId,
-    rider_name: 'Rider',
-    pickup_address: params.body || 'New ride request',
-  }, params.driverId);
+
+  // Native full-screen Accept/Decline with rider + pickup → destination + fare.
+  showNativeRideOfferAlert(
+    {
+      id: params.tripId,
+      trip_id: params.tripId,
+      offer_id: params.offerId,
+      rider_name: params.riderName || 'Rider',
+      pickup_address: params.pickupAddress || params.body || 'Pickup location',
+      dropoff_address: params.dropoffAddress || '',
+      destination: params.dropoffAddress || '',
+      offered_fare: params.fare,
+      fare: params.fare,
+      eta_minutes: params.etaMinutes,
+      distance_to_pickup_km: params.distanceKm,
+    },
+    params.driverId,
+  );
 
   if (Platform.OS === 'android' && isDriverNativeExperienceAvailable()) {
     stopTimer = setTimeout(() => void stopDriverOfferBackgroundAlert(), ALERT_DURATION_MS);
@@ -166,6 +185,10 @@ export async function presentDriverOfferLocalNotification(params: {
   body: string;
   tripId?: string;
   offerId?: string;
+  riderName?: string;
+  pickupAddress?: string;
+  dropoffAddress?: string;
+  fare?: number | string;
 }): Promise<void> {
   if (AppState.currentState === 'active') return;
   const prefs = await loadDriverOfferSoundPrefs();
@@ -180,6 +203,11 @@ export async function presentDriverOfferLocalNotification(params: {
           type: 'ride_request',
           trip_id: params.tripId,
           offer_id: params.offerId,
+          fullscreen: 'true',
+          rider_name: params.riderName || '',
+          pickup_address: params.pickupAddress || '',
+          dropoff_address: params.dropoffAddress || '',
+          fare: params.fare != null ? String(params.fare) : '',
         },
         sound: Platform.OS === 'ios' ? iosSound : true,
         priority: Notifications.AndroidNotificationPriority.MAX,

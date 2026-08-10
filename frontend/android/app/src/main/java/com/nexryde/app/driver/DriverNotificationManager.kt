@@ -77,10 +77,19 @@ class DriverNotificationManager(private val context: Context) {
       ?: Intent(Intent.ACTION_VIEW, Uri.parse("nexryde://action/open_app")).setPackage(appContext.packageName)
     launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     val openApp = PendingIntent.getActivity(appContext, OFFER_NOTIFICATION_ID + 1, launch, pendingFlags())
+    val routeLine = if (offer.dropoff.isNotBlank()) {
+      "${offer.pickup} → ${offer.dropoff}"
+    } else {
+      offer.pickup
+    }
     val notification = NotificationCompat.Builder(appContext, CHANNEL_DRIVER_OFFERS)
       .setSmallIcon(R.mipmap.ic_launcher)
-      .setContentTitle("New NEXRYDE ride request")
-      .setContentText("${offer.pickup} · ${offer.fare}")
+      .setContentTitle("${offer.riderName} · ₦${offer.fare}")
+      .setContentText(routeLine)
+      .setStyle(
+        NotificationCompat.BigTextStyle()
+          .bigText("$routeLine\nETA ${offer.eta} · ${offer.distance} away")
+      )
       .setPriority(NotificationCompat.PRIORITY_MAX)
       .setCategory(NotificationCompat.CATEGORY_CALL)
       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

@@ -44,18 +44,61 @@ async def _fcm_fallback(
     try:
         from push_notifications import send_push_notification
 
+        # Flat string fields so a backgrounded Online driver can open the native
+        # full-screen Accept/Decline UI with rider + pickup + destination (Uber-style).
+        # Expo/FCM data values should stay string-safe.
+        pickup = trip.get("pickup_location") if isinstance(trip, dict) else None
+        dropoff = trip.get("dropoff_location") if isinstance(trip, dict) else None
+        pickup_addr = ""
+        dropoff_addr = ""
+        if isinstance(pickup, dict):
+            pickup_addr = str(pickup.get("address") or "").strip()
+        elif isinstance(pickup, str):
+            pickup_addr = pickup.strip()
+        if isinstance(dropoff, dict):
+            dropoff_addr = str(dropoff.get("address") or "").strip()
+        elif isinstance(dropoff, str):
+            dropoff_addr = dropoff.strip()
+        fare = (
+            trip.get("offered_fare")
+            if isinstance(trip, dict)
+            else None
+        )
+        if fare is None and isinstance(trip, dict):
+            fare = trip.get("fare")
+        if fare is None:
+            fare = offer.get("rider_offer_price") or offer.get("fare")
+        dist = offer.get("distance_to_pickup") or offer.get("distance_to_pickup_km")
+        eta = (
+            (trip.get("duration_mins") if isinstance(trip, dict) else None)
+            or offer.get("estimated_time_mins")
+            or offer.get("eta_minutes")
+        )
+        rider_name = str(
+            offer.get("rider_name")
+            or (trip.get("rider_name") if isinstance(trip, dict) else None)
+            or "Rider"
+        ).strip() or "Rider"
+
+        data = {
+            "type": "ride_request",
+            "trip_id": str(offer.get("trip_id") or (trip.get("id") if isinstance(trip, dict) else "") or ""),
+            "offer_id": offer_id,
+            "event_id": str(offer.get("event_id") or ""),
+            "urgent": "true",
+            "fullscreen": "true",
+            "rider_name": rider_name[:48],
+            "pickup_address": pickup_addr[:160],
+            "dropoff_address": dropoff_addr[:160],
+            "fare": str(fare) if fare is not None else "",
+            "distance_to_pickup_km": str(dist) if dist is not None else "",
+            "eta_minutes": str(eta) if eta is not None else "",
+        }
         await send_push_notification(
             driver_id,
             notif_title,
             notif_body,
-            {
-                "type": "ride_request",
-                "trip_id": offer.get("trip_id"),
-                "offer_id": offer_id,
-                "event_id": str(offer.get("event_id") or ""),
-                "urgent": True,
-                "fullscreen": True,
-            },
+            data,
         )
         incr("push.fcm_fallback")
         return True
@@ -114,7 +157,14 @@ async def deliver_offer(
         if fcm_immediate:
             fcm_ok = await _fcm_fallback(
                 driver_id,
-                {**offer, "event_id": event.event_id},
+                {
+                    **offer,
+                    "event_id": event.event_id,
+                    "rider_name": wire.get("rider_name"),
+                    "distance_to_pickup_km": wire.get("distance_to_pickup_km"),
+                    "rider_offer_price": wire.get("rider_offer_price") or wire.get("fare"),
+                    "estimated_time_mins": wire.get("estimated_time_mins") or wire.get("eta_minutes"),
+                },
                 trip or {},
                 notif_title=notif_title,
                 notif_body=notif_body,
@@ -159,7 +209,14 @@ async def deliver_offer(
         if not acked and not fcm_immediate:
             fcm_ok = await _fcm_fallback(
                 driver_id,
-                {**offer, "event_id": event.event_id},
+                {
+                    **offer,
+                    "event_id": event.event_id,
+                    "rider_name": wire.get("rider_name"),
+                    "distance_to_pickup_km": wire.get("distance_to_pickup_km"),
+                    "rider_offer_price": wire.get("rider_offer_price") or wire.get("fare"),
+                    "estimated_time_mins": wire.get("estimated_time_mins") or wire.get("eta_minutes"),
+                },
                 trip or {},
                 notif_title=notif_title,
                 notif_body=notif_body,

@@ -862,6 +862,11 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
       "offerId" to (intent.getStringExtra("offerId") ?: ""),
       "riderName" to (intent.getStringExtra("riderName") ?: "Rider"),
       "pickup" to (intent.getStringExtra("pickup") ?: "Pickup location"),
+      "dropoff" to (
+        intent.getStringExtra("dropoff")
+          ?: intent.getStringExtra("destination")
+          ?: ""
+      ),
       "fare" to (intent.getStringExtra("fare") ?: "--"),
       "eta" to (intent.getStringExtra("eta") ?: "--"),
       "distance" to (intent.getStringExtra("distance") ?: "--")

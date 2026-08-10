@@ -12,6 +12,14 @@ const TRIM_KEYS = new Set([
   'driver_id',
   'offer_id',
   'feature_id',
+  'rider_name',
+  'pickup_address',
+  'dropoff_address',
+  'destination',
+  'fare',
+  'distance_to_pickup_km',
+  'eta_minutes',
+  'fullscreen',
 ]);
 
 export function normalizeExpoPushData(

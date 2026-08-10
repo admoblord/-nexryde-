@@ -61,6 +61,7 @@ type NativeOfferPayload = {
   backendUrl?: string;
   riderName: string;
   pickup: string;
+  dropoff: string;
   fare: string;
   eta: string;
   distance: string;
@@ -199,14 +200,42 @@ function normalizeOfferPayload(ride: Record<string, unknown>, driverId?: string 
     driverId: driverId || stringValue(ride.driver_id) || undefined,
     riderName: stringValue(ride.rider_name) || 'Rider',
     pickup:
-      stringValue(ride.pickup_address) ||
-      stringValue(ride.pickup_location) ||
-      stringValue(ride.pickup) ||
+      addressValue(ride.pickup_address) ||
+      addressValue(ride.pickup_location) ||
+      addressValue(ride.pickup) ||
       'Pickup location',
-    fare: fareValue(ride.offered_fare ?? ride.fare ?? ride.price),
-    eta: etaValue(ride.eta_minutes ?? ride.pickup_eta_minutes ?? ride.eta),
-    distance: distanceValue(ride.distance_to_pickup_km ?? ride.pickup_distance_km ?? ride.distance),
+    dropoff:
+      addressValue(ride.dropoff_address) ||
+      addressValue(ride.destination) ||
+      addressValue(ride.dropoff_location) ||
+      addressValue(ride.dropoff) ||
+      addressValue(ride.destination_coordinates) ||
+      '',
+    fare: fareValue(
+      ride.offered_fare ?? ride.fare ?? ride.rider_offer_price ?? ride.price,
+    ),
+    eta: etaValue(
+      ride.eta_minutes ?? ride.estimated_time_mins ?? ride.pickup_eta_minutes ?? ride.eta,
+    ),
+    distance: distanceValue(
+      ride.distance_to_pickup_km ??
+        ride.distance_to_pickup ??
+        ride.pickup_distance_km ??
+        ride.distance,
+    ),
   };
+}
+
+function addressValue(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'object') {
+    const o = value as Record<string, unknown>;
+    const addr = o.address ?? o.formatted_address ?? o.label;
+    if (typeof addr === 'string') return addr.trim();
+  }
+  return '';
 }
 
 function stringValue(value: unknown): string {
