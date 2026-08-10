@@ -15,9 +15,9 @@ import android.graphics.Typeface
 import android.util.Log
 
 /**
- * Full-screen incoming ride surface. Android may show this only when the user
- * allows full-screen notifications for the app. It is intentionally native so it
- * can appear while React Native is backgrounded or the screen is locked.
+ * Uber/inDrive-style full-screen incoming ride surface.
+ * Shows while React Native is backgrounded or the screen is locked, with
+ * rider details, pickup → destination, fare, and Accept / Decline.
  */
 class DriverRideAlertActivity : Activity() {
   private var tripId: String = ""
@@ -84,6 +84,9 @@ class DriverRideAlertActivity : Activity() {
     Log.i(TAG, "activity_bind_intent tripId=$tripId offerId=$offerId")
     val riderName = intent.getStringExtra("riderName") ?: "Rider"
     val pickup = intent.getStringExtra("pickup") ?: "Pickup location"
+    val dropoff = intent.getStringExtra("dropoff")
+      ?: intent.getStringExtra("destination")
+      ?: ""
     val fare = intent.getStringExtra("fare") ?: "--"
     val eta = intent.getStringExtra("eta") ?: "--"
     val distance = intent.getStringExtra("distance") ?: "--"
@@ -92,6 +95,7 @@ class DriverRideAlertActivity : Activity() {
       "offerId" to offerId,
       "riderName" to riderName,
       "pickup" to pickup,
+      "dropoff" to dropoff,
       "fare" to fare,
       "eta" to eta,
       "distance" to distance
@@ -99,25 +103,56 @@ class DriverRideAlertActivity : Activity() {
 
     val root = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
-      gravity = Gravity.CENTER
-      setPadding(dp(24), dp(32), dp(24), dp(32))
+      gravity = Gravity.CENTER_HORIZONTAL
+      setPadding(dp(24), dp(40), dp(24), dp(32))
       setBackgroundColor(Color.rgb(5, 12, 24))
     }
-    fun text(value: String, size: Float, color: Int, bold: Boolean = false): TextView {
+    fun text(value: String, size: Float, color: Int, bold: Boolean = false, start: Boolean = false): TextView {
       return TextView(this).apply {
         text = value
         textSize = size
         setTextColor(color)
-        gravity = Gravity.CENTER
+        gravity = if (start) Gravity.START else Gravity.CENTER
         if (bold) typeface = Typeface.DEFAULT_BOLD
       }
     }
-    root.addView(text("nexryde", 13f, Color.rgb(34, 225, 128), true))
-    root.addView(text("Incoming ride", 28f, Color.WHITE, true))
-    root.addView(text(riderName, 22f, Color.rgb(226, 232, 240), true))
-    root.addView(text(pickup, 16f, Color.rgb(148, 163, 184)))
-    root.addView(text("₦$fare", 32f, Color.rgb(253, 230, 138), true))
+    fun spacer(h: Int): View = View(this).apply {
+      layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(h))
+    }
+
+    root.addView(text("NEXRYDE", 13f, Color.rgb(34, 225, 128), true))
+    root.addView(spacer(8))
+    root.addView(text("Incoming ride request", 26f, Color.WHITE, true))
+    root.addView(spacer(18))
+    root.addView(text(riderName, 24f, Color.rgb(226, 232, 240), true))
+    root.addView(spacer(20))
+
+    // Pickup → Destination block (Uber/inDrive style)
+    val routeCard = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding(dp(18), dp(16), dp(18), dp(16))
+      setBackgroundColor(Color.rgb(15, 23, 42))
+    }
+    routeCard.addView(text("PICKUP", 11f, Color.rgb(34, 225, 128), true, start = true))
+    routeCard.addView(text(pickup, 16f, Color.WHITE, false, start = true))
+    routeCard.addView(spacer(14))
+    if (dropoff.isNotBlank()) {
+      routeCard.addView(text("DESTINATION", 11f, Color.rgb(251, 191, 36), true, start = true))
+      routeCard.addView(text(dropoff, 16f, Color.WHITE, false, start = true))
+    } else {
+      routeCard.addView(text("DESTINATION", 11f, Color.rgb(148, 163, 184), true, start = true))
+      routeCard.addView(text("Awaiting route details", 15f, Color.rgb(148, 163, 184), false, start = true))
+    }
+    root.addView(
+      routeCard,
+      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+    )
+
+    root.addView(spacer(22))
+    root.addView(text("₦$fare", 36f, Color.rgb(253, 230, 138), true))
+    root.addView(spacer(6))
     root.addView(text("ETA $eta · $distance away", 15f, Color.rgb(203, 213, 225)))
+    root.addView(spacer(10))
     statusText = text("Waiting for your response", 14f, Color.rgb(203, 213, 225), true).also {
       root.addView(it)
     }

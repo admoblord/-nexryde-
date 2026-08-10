@@ -53,6 +53,7 @@ class OverlayRenderer(
   }
   private val riderText = label("Rider", 21f, Color.WHITE, true)
   private val pickupText = label("Pickup location", 14f, Color.rgb(203, 213, 225), false)
+  private val dropoffText = label("Destination", 14f, Color.rgb(226, 232, 240), false)
   private val fareText = label("Fare --", 20f, Color.rgb(253, 230, 138), true)
   private val etaText = label("ETA -- · -- away", 13f, Color.rgb(148, 163, 184), false)
   private val countdownText = label("15s", 12f, Color.rgb(251, 191, 36), true).apply {
@@ -90,6 +91,7 @@ class OverlayRenderer(
     card.addView(header)
     card.addView(riderText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
     card.addView(pickupText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(5) })
+    card.addView(dropoffText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
     card.addView(fareText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
     card.addView(etaText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
     val row = LinearLayout(context).apply {
@@ -109,8 +111,14 @@ class OverlayRenderer(
     val offer = state.offer
     if (offer != null) {
       riderText.text = offer.riderName
-      pickupText.text = offer.pickup
-      fareText.text = "Fare: ${offer.fare}"
+      pickupText.text = "From: ${offer.pickup}"
+      if (offer.dropoff.isNotBlank()) {
+        dropoffText.visibility = View.VISIBLE
+        dropoffText.text = "To: ${offer.dropoff}"
+      } else {
+        dropoffText.visibility = View.GONE
+      }
+      fareText.text = "Fare: ₦${offer.fare}"
       etaText.text = "ETA ${offer.eta} · ${offer.distance} away"
     }
     countdownText.text = when (state.phase) {
@@ -224,7 +232,7 @@ class OverlayRenderer(
   companion object {
     const val BUBBLE_DP = 68
     const val CARD_W_DP = 330
-    const val CARD_H_DP = 286
+    const val CARD_H_DP = 318
     private const val C_GREEN = 0xFF16A34A.toInt()
     private const val C_RED = 0xFFDC2626.toInt()
     private const val C_ORANGE = 0xFFF97316.toInt()

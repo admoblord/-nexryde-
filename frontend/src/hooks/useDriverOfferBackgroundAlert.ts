@@ -12,10 +12,25 @@ import {
   triggerDriverOfferBackgroundAlert,
 } from '@/src/services/driverOfferBackgroundAlert';
 
+function addressFrom(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (value && typeof value === 'object') {
+    const o = value as Record<string, unknown>;
+    const addr = o.address ?? o.formatted_address ?? o.label;
+    if (typeof addr === 'string' && addr.trim()) return addr.trim();
+  }
+  return '';
+}
+
+function numOrStr(value: unknown): number | string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  return undefined;
+}
+
 /**
  * Bolt/Uber-style offer alert when the driver is online but the app is not in the foreground.
- * Remote push uses the driver_offers channel (custom sound); this hook loops audio when the
- * process is still alive (background location / recent foreground).
+ * Launches native full-screen Accept/Decline with rider, pickup → destination, fare + ringtone.
  */
 export function useDriverOfferBackgroundAlert() {
   const role = useAppStore((s) => s.user?.role);
@@ -60,6 +75,18 @@ export function useDriverOfferBackgroundAlert() {
         offerId,
         driverId,
         source: 'push',
+        riderName: typeof data.rider_name === 'string' ? data.rider_name : undefined,
+        pickupAddress:
+          typeof data.pickup_address === 'string' ? data.pickup_address : undefined,
+        dropoffAddress:
+          typeof data.dropoff_address === 'string'
+            ? data.dropoff_address
+            : typeof data.destination === 'string'
+              ? data.destination
+              : undefined,
+        fare: numOrStr(data.fare ?? data.offered_fare),
+        etaMinutes: numOrStr(data.eta_minutes ?? data.estimated_time_mins),
+        distanceKm: numOrStr(data.distance_to_pickup_km ?? data.distance_km),
       });
     });
 
@@ -82,13 +109,29 @@ export function useDriverOfferBackgroundAlert() {
       const offerKey = offerId || tripId || '';
       if (!offerKey) return;
 
+      const riderName =
+        typeof offer.rider_name === 'string' && offer.rider_name.trim()
+          ? offer.rider_name.trim()
+          : 'Rider';
       const pickup =
-        typeof offer.pickup_address === 'string'
-          ? offer.pickup_address
-          : typeof offer.pickupAddress === 'string'
-            ? offer.pickupAddress
-            : 'New ride request';
-      const fareRaw = offer.fare ?? offer.estimated_fare ?? offer.rider_fare;
+        addressFrom(offer.pickup_address) ||
+        addressFrom(offer.pickup) ||
+        addressFrom(offer.pickupAddress) ||
+        addressFrom(offer.pickup_location) ||
+        'Pickup location';
+      const dropoff =
+        addressFrom(offer.dropoff_address) ||
+        addressFrom(offer.destination) ||
+        addressFrom(offer.dropoff) ||
+        addressFrom(offer.dropoff_location) ||
+        addressFrom(offer.destination_coordinates) ||
+        '';
+      const fareRaw =
+        offer.offered_fare ??
+        offer.fare ??
+        offer.rider_offer_price ??
+        offer.estimated_fare ??
+        offer.rider_fare;
       const fare =
         typeof fareRaw === 'number'
           ? fareRaw
@@ -96,6 +139,7 @@ export function useDriverOfferBackgroundAlert() {
             ? parseFloat(fareRaw)
             : NaN;
       const fareText = Number.isFinite(fare) ? ` • ₦${Math.round(fare).toLocaleString()}` : '';
+      const routeLine = dropoff ? `${pickup} → ${dropoff}` : pickup;
 
       void triggerDriverOfferBackgroundAlert({
         offerKey,
@@ -103,13 +147,25 @@ export function useDriverOfferBackgroundAlert() {
         offerId,
         driverId,
         source: 'socket',
+        riderName,
+        pickupAddress: pickup,
+        dropoffAddress: dropoff,
+        fare: Number.isFinite(fare) ? fare : fareRaw,
+        etaMinutes: numOrStr(offer.eta_minutes ?? offer.estimated_time_mins ?? offer.pickup_eta_minutes),
+        distanceKm: numOrStr(
+          offer.distance_to_pickup_km ?? offer.distance_to_pickup ?? offer.pickup_distance_km,
+        ),
       });
       if (Platform.OS !== 'android') {
         void presentDriverOfferLocalNotification({
           title: '🚗 New ride offer',
-          body: `${pickup}${fareText}`,
+          body: `${riderName}: ${routeLine}${fareText}`,
           tripId,
           offerId,
+          riderName,
+          pickupAddress: pickup,
+          dropoffAddress: dropoff,
+          fare: Number.isFinite(fare) ? fare : undefined,
         });
       }
     });

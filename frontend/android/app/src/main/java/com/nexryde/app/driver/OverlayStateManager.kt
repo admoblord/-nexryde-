@@ -15,6 +15,7 @@ data class OverlayOffer(
   val offerId: String = "",
   val riderName: String = "Rider",
   val pickup: String = "Pickup location",
+  val dropoff: String = "",
   val fare: String = "--",
   val eta: String = "--",
   val distance: String = "--"
@@ -24,6 +25,7 @@ data class OverlayOffer(
     "offerId" to offerId,
     "riderName" to riderName,
     "pickup" to pickup,
+    "dropoff" to dropoff,
     "fare" to fare,
     "eta" to eta,
     "distance" to distance
@@ -36,6 +38,9 @@ data class OverlayOffer(
         offerId = raw["offerId"].orEmpty(),
         riderName = raw["riderName"]?.takeIf { it.isNotBlank() } ?: "Rider",
         pickup = raw["pickup"]?.takeIf { it.isNotBlank() } ?: "Pickup location",
+        dropoff = raw["dropoff"]?.takeIf { it.isNotBlank() }
+          ?: raw["destination"]?.takeIf { it.isNotBlank() }
+          ?: "",
         fare = raw["fare"]?.takeIf { it.isNotBlank() } ?: "--",
         eta = raw["eta"]?.takeIf { it.isNotBlank() } ?: "--",
         distance = raw["distance"]?.takeIf { it.isNotBlank() } ?: "--"
