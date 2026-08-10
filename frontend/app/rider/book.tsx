@@ -1077,8 +1077,10 @@ function BookInDriveStyle() {
         sessionToken && sessionToken.trim().length > 0
           ? `?sessiontoken=${encodeURIComponent(sessionToken.trim())}`
           : '';
-      const res = await fetch(
+      // Place details require auth — without a bearer the pick never resolves coords.
+      const res = await authedFetch(
         `${BACKEND_URL}/api/places/details/${encodeURIComponent(id)}${sessionQ}`,
+        { method: 'GET', preserveSessionOn401: true, timeoutMs: 12_000 },
       );
       const data = await res.json().catch(() => ({}));
       const lat = Number(data?.latitude);
