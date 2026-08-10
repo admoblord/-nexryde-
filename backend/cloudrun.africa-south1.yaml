@@ -19,19 +19,15 @@ spec:
   template:
     metadata:
       annotations:
-        # Scale to zero and bill CPU per request. A warm always-on-CPU instance
-        # cost more per month than the whole platform used to, which is not
-        # justifiable at current volume. Timer work (guardians, saga retries,
-        # safe-arrival escalation) is driven by Cloud Scheduler calling
-        # POST /api/ops/maintenance-tick instead of an idle process.
-        #
-        # Trade-off: the first request after ~15 min idle pays a cold start.
-        # startup-cpu-boost stays on to shorten it, and the app already warms
-        # the backend from the welcome/login screen (warmBackend.ts).
-        autoscaling.knative.dev/minScale: "0"
+        # Keep one warm instance. minScale=0 caused uptime/503 alert storms and
+        # multi-second cold starts. Timer work still runs via Cloud Scheduler
+        # POST /api/ops/maintenance-tick (now async) plus in-process loops on
+        # the warm instance. CPU is not request-throttled so background ticks
+        # and websockets stay responsive.
+        autoscaling.knative.dev/minScale: "1"
         autoscaling.knative.dev/maxScale: "10"
         run.googleapis.com/startup-cpu-boost: "true"
-        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/cpu-throttling: "false"
         # Private access to Memorystore Redis for rate limits, realtime fanout, and polling cache.
         run.googleapis.com/vpc-access-connector: "projects/nexryde-app/locations/africa-south1/connectors/nexryde-vpc"
         run.googleapis.com/vpc-access-egress: "private-ranges-only"

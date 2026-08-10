@@ -1892,12 +1892,16 @@ async def debug_test_crash(request: Request):
 
 @api_router.post("/ops/maintenance-tick")
 async def ops_maintenance_tick(request: Request):
-    """Run one maintenance tick — for Cloud Scheduler when nothing stays warm.
+    """Accept one maintenance tick — for Cloud Scheduler when nothing stays warm.
 
     Guardians, saga retries, the outbox drain and the safe-arrival escalation are
     timer work. With minScale 0 there is no always-on process to run them, so a
     scheduled call to this endpoint is what keeps them happening. Same tick the
     worker loop runs.
+
+    The HTTP response returns immediately (accepted) and the tick runs in the
+    background. Running it inline made every scheduler hit take 7–16s and skewed
+    Cloud Run / log-based p95 latency alerts under sparse traffic.
 
     Gated by X-NEXRYDE-OPS-KEY (wrong/missing key -> 404) — Cloud Scheduler sends
     it as a header.
@@ -1909,8 +1913,18 @@ async def ops_maintenance_tick(request: Request):
 
     from realtime_platform.maintenance import run_maintenance_tick
 
-    result = await run_maintenance_tick()
-    return {"ok": True, "tick": result, "revision": os.environ.get("K_REVISION", "unknown")}
+    async def _run_tick() -> None:
+        try:
+            await run_maintenance_tick()
+        except Exception:
+            logger.exception("ops_maintenance_tick_background_failed")
+
+    asyncio.create_task(_run_tick())
+    return {
+        "ok": True,
+        "accepted": True,
+        "revision": os.environ.get("K_REVISION", "unknown"),
+    }
 
 
 @api_router.post("/ops/migrate-driver-document-binaries")

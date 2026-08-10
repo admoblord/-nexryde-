@@ -82,7 +82,26 @@ def test_ops_endpoint_requires_the_ops_key():
     src = pathlib.Path(__file__).resolve().parent.parent / "server.py"
     text = src.read_text()
     start = text.index("/ops/maintenance-tick")
-    body = text[start:start + 1400]
+    body = text[start:start + 1800]
     assert "NEXRYDE_OPS_KEY" in body
     assert "x-nexryde-ops-key" in body
     assert "status_code=404" in body
+
+
+def test_ops_endpoint_accepts_tick_in_background():
+    """Scheduler must get a fast 200; the tick must not block the HTTP response.
+
+    Inline ticks took 7–16s and kept the API p95 latency alert permanently open.
+    """
+    import pathlib
+
+    src = pathlib.Path(__file__).resolve().parent.parent / "server.py"
+    text = src.read_text()
+    start = text.index("/ops/maintenance-tick")
+    body = text[start:start + 1800]
+    assert "asyncio.create_task" in body
+    assert '"accepted": True' in body or "'accepted': True" in body
+    # Tick may be awaited only inside the background task, never as the
+    # endpoint's return path (`return {..., "tick": result}`).
+    assert '"tick": result' not in body and "'tick': result" not in body
+    assert "create_task(_run_tick())" in body
