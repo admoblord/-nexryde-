@@ -83,6 +83,7 @@ import {
   DETECTING_PICKUP,
   SAFE_PICKUP_FALLBACK,
   isDetectingPickupLabel,
+  isPlusCodeLabel,
   isRawLatLngLabel,
   preloadPickupAt,
   resolveInstantPickup,
@@ -1025,10 +1026,16 @@ function BookInDriveStyle() {
     params.pickupLng,
   ]);
 
-  // If pickup is still detecting / raw after lock, retry Instant Pickup (cold start / rate limit).
+  // If pickup is still detecting / raw / Plus Code after lock, retry Instant Pickup.
   useEffect(() => {
     if (gpsStatus !== 'locked' || !pickupCoords) return;
-    if (!isDetectingPickupLabel(pickup) && !isRawLatLngLabel(pickup)) return;
+    if (
+      !isDetectingPickupLabel(pickup) &&
+      !isRawLatLngLabel(pickup) &&
+      !isPlusCodeLabel(pickup)
+    ) {
+      return;
+    }
     let cancelled = false;
     const t = setTimeout(() => {
       void (async () => {
@@ -1058,10 +1065,16 @@ function BookInDriveStyle() {
     };
   }, [gpsStatus, pickupCoords?.lat, pickupCoords?.lng, pickup]);
 
-  // Opening pickup search — resolve detecting / legacy labels when modal opens.
+  // Opening pickup search — resolve detecting / legacy / Plus Code labels when modal opens.
   useEffect(() => {
     if (!showLocationModal || editingField !== 'pickup' || !pickupCoords) return;
-    if (!isDetectingPickupLabel(pickup) && !isRawLatLngLabel(pickup)) return;
+    if (
+      !isDetectingPickupLabel(pickup) &&
+      !isRawLatLngLabel(pickup) &&
+      !isPlusCodeLabel(pickup)
+    ) {
+      return;
+    }
     let cancelled = false;
     void (async () => {
       const resolved = await resolveInstantPickup(pickupCoords.lat, pickupCoords.lng, {
