@@ -16,7 +16,6 @@ AUTH_CONTEXT_PROJECTION: dict[str, Any] = {
     "phone": 1,
     "rating": 1,
     "total_trips": 1,
-    "wallet_balance": 1,
     "city": 1,
     "earnings_frozen": 1,
     "subscription_active": 1,
@@ -30,8 +29,10 @@ AUTH_CONTEXT_PROJECTION: dict[str, Any] = {
 }
 
 # Profile API: all user fields except multi-KB blobs (defense-in-depth post-migration).
+# wallet_balance excluded — NexRyde no longer holds customer fare funds.
 PROFILE_API_PROJECTION: dict[str, Any] = {
     **USER_BLOB_EXCLUDE_PROJECTION,
+    "wallet_balance": 0,
     "_id": 1,
 }
 

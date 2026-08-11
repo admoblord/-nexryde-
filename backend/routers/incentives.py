@@ -92,7 +92,6 @@ async def _grant_promo_credit(
     }
     await db.promo_credits.insert_one(doc)
 
-    # Also reflect in the user's wallet_balance for convenience (non-spendable promo field).
     await db.users.update_one(
         {"id": user_id},
         {"$inc": {"promo_credit_balance": grantable}},

@@ -68,7 +68,6 @@ mustInclude('app/(driver-tabs)/driver-home.tsx', ['BRAND.primary']);
 console.log('\nB4 — Rider surfaces (dark hybrid)');
 mustInclude('app/(rider-tabs)/rider-home.tsx', ['BRAND.bgDeep', 'BRAND.textPrimary']);
 mustNotInclude('app/(rider-tabs)/rider-home.tsx', ['backgroundColor: COLORS.gray50']);
-mustInclude('app/(rider-tabs)/rider-wallet.tsx', ['TabBrandStrip', 'BRAND.bgDeep']);
 
 console.log('\nB5 — Brand chrome');
 mustInclude('src/components/rider/RiderBrandChrome.tsx', ['BRAND.primary']);

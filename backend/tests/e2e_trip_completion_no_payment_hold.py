@@ -13,7 +13,7 @@ and then asserting the behaviour that used to break:
     collected" tap, no completed-but-unpaid limbo
   * neither rider nor driver is still pinned to the finished trip
   * the rider can immediately request another trip
-  * a wallet trip still waits for the rider to authorise the debit
+  * booking with payment_method=wallet is rejected (fare wallet removed)
   * a trip already stuck on pending payment heals when it is next read
 
 Usage:
@@ -335,33 +335,25 @@ async def run() -> None:
         if r.status_code not in (200, 201):
             info(f"(booking itself needs Google routing keys locally: {r.text[:140]})")
 
-        # ── Trip 2: wallet must still require the rider to authorise ─────────
-        header("Trip 2 — WALLET ride still waits for the rider (money moves in-app)")
-        mc = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=5000)
-        try:
-            await mc[DB_NAME].trips.delete_many({"rider_id": rider_id, "status": {"$ne": "completed"}})
-        finally:
-            mc.close()
-
-        wallet_trip = await seed_trip(rider_id, driver_id, "wallet")
-        resp = await drive_to_completion(c, wallet_trip, driver_id, driver_h)
-        check(
-            resp.status_code in (200, 201),
-            "driver completed the wallet trip",
-            f"wallet complete failed {resp.status_code}: {resp.text[:300]}",
+        # ── Trip 2: fare wallet booking must be rejected ────────────────────
+        header("Trip 2 — WALLET booking is rejected (cash/transfer only)")
+        r = await c.post(
+            "/api/trips/request",
+            headers=rider_h,
+            json={
+                "pickup_lat": 6.5244,
+                "pickup_lng": 3.3792,
+                "pickup_address": "E2E Pickup",
+                "dropoff_lat": 6.4541,
+                "dropoff_lng": 3.3947,
+                "dropoff_address": "E2E Dropoff",
+                "payment_method": "wallet",
+            },
         )
-        wtrip = await read_trip(wallet_trip)
-        info(f"status={wtrip.get('status')}  payment_status={wtrip.get('payment_status')}")
         check(
-            wtrip.get("payment_status") == "pending",
-            "wallet fare still pending — rider must authorise the debit",
-            f"wallet auto-settled without the rider: payment_status={wtrip.get('payment_status')}",
-        )
-        res = await active_trip(c, rider_id, rider_h)
-        check(
-            res.get("active") is True,
-            "rider still sees the wallet trip until they pay",
-            f"wallet trip dropped before payment: {res}",
+            r.status_code == 400,
+            "wallet booking rejected with 400",
+            f"wallet booking unexpectedly accepted: {r.status_code} {r.text[:200]}",
         )
 
         # ── Trip 3: a trip already stuck in the old state must heal ──────────

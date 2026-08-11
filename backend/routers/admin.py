@@ -261,6 +261,7 @@ def _sniff_document_content_type(raw: bytes, declared: str | None) -> str:
 def _sanitize_rider_for_admin(rider: dict) -> dict:
     out = strip_sensitive_pii(rider)
     out.update(public_nin_fields(rider))
+    out.pop("wallet_balance", None)
     return out
 
 
@@ -428,6 +429,7 @@ async def admin_get_riders(limit: int = 200, skip: int = 0, search: str = ""):
             "nin": 0,
             "nin_cipher": 0,
             "nin_hash": 0,
+            "wallet_balance": 0,
         }},
         {"$addFields": {
             "has_nin": {
@@ -509,17 +511,13 @@ async def admin_get_rider_identity(rider_id: str):
 
 @admin_router.get("/admin/riders/{rider_id}")
 async def admin_get_rider_profile(rider_id: str):
-    """Full rider profile for admin panel drawer — enriched with wallet + trip stats."""
+    """Full rider profile for admin panel drawer — enriched with trip stats."""
     rider = await db.users.find_one(
         {"id": rider_id, "role": "rider"},
-        {"_id": 0, "face_image": 0, "profile_image": 0},
+        {"_id": 0, "face_image": 0, "profile_image": 0, "wallet_balance": 0},
     )
     if not rider:
         raise HTTPException(status_code=404, detail="Rider not found")
-
-    # Wallet
-    wallet = await db.wallets.find_one({"user_id": rider_id}, {"_id": 0}) or {}
-    wallet_balance = wallet.get("balance", rider.get("wallet_balance", 0))
 
     # Trip stats (aggregation: counts + total spend in one pass)
     stats_pipeline = [
@@ -561,7 +559,6 @@ async def admin_get_rider_profile(rider_id: str):
             "face_verified":    rider.get("face_verified", False),
             "is_verified":      rider.get("is_verified", False),
         },
-        "wallet_balance": wallet_balance,
         "stats": {
             "total_trips": total_trips,
             "completed_trips": completed,
@@ -2282,16 +2279,6 @@ async def admin_create_test_driver(request: Request):
     }
     await db.users.insert_one(user)
 
-    # Wallet
-    await db.wallets.insert_one({
-        "id": str(_uuid.uuid4()),
-        "user_id": user_id,
-        "balance": 5000.0,
-        "currency": "NGN",
-        "transactions": [],
-        "created_at": now_iso,
-    })
-
     # Driver profile — approved
     await db.driver_profiles.insert_one({
         "id": str(_uuid.uuid4()),
@@ -2474,7 +2461,6 @@ async def get_admin_live_stats(http_request: Request):
         today_trips_docs,
         week_trips_docs,
         active_trips_count,
-        wallet_agg,
         sub_revenue_agg,
         support_open,
         support_total,
@@ -2495,9 +2481,6 @@ async def get_admin_live_stats(http_request: Request):
             {"$group": {"_id": None, "total": {"$sum": 1}, "completed": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}}, "revenue": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, "$fare", 0]}}}},
         ]).to_list(1),
         db.trips.count_documents({"status": {"$in": ["accepted", "arrived", "ongoing"]}}),
-        db.wallets.aggregate([
-            {"$group": {"_id": None, "total_balance": {"$sum": "$balance"}, "total_wallets": {"$sum": 1}, "avg_balance": {"$avg": "$balance"}}},
-        ]).to_list(1),
         db.subscriptions.aggregate([
             {"$match": {"status": {"$in": ["active", "trial"]}}},
             {"$group": {"_id": "$plan_type", "count": {"$sum": 1}, "revenue": {"$sum": "$amount_paid"}}},
@@ -2529,12 +2512,6 @@ async def get_admin_live_stats(http_request: Request):
     week_total     = int(week_row.get("total", 0))
     week_completed = int(week_row.get("completed", 0))
     week_revenue   = float(week_row.get("revenue") or 0)
-
-    # ── Wallet totals ─────────────────────────────────────────────────────────
-    w = wallet_agg[0] if wallet_agg else {}
-    wallet_total_balance = float(w.get("total_balance") or 0)
-    wallet_count         = int(w.get("total_wallets") or 0)
-    wallet_avg           = float(w.get("avg_balance") or 0)
 
     # ── Subscription revenue ─────────────────────────────────────────────────
     sub_active_count = sum(int(r.get("count", 0)) for r in sub_revenue_agg)
@@ -2578,11 +2555,6 @@ async def get_admin_live_stats(http_request: Request):
             "active":       sub_active_count,
             "total_revenue_ngn": round(sub_total_revenue, 2),
             "by_plan":      [{"plan": r.get("_id"), "count": r.get("count"), "revenue": r.get("revenue")} for r in sub_revenue_agg],
-        },
-        "wallets": {
-            "total_balance_ngn": round(wallet_total_balance, 2),
-            "wallet_count":      wallet_count,
-            "avg_balance_ngn":   round(wallet_avg, 2),
         },
         "support": {
             "open_tickets":  support_open,

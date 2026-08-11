@@ -2928,8 +2928,7 @@ async def report_sim_swap_signal(driver_id: str, request: SimSwapSignalRequest, 
 async def get_driver_withdrawals(driver_id: str, http_request: Request, limit: int = 30, skip: int = 0):
     """Return driver's withdrawal transaction history, most recent first."""
     verify_owner_strict(http_request, driver_id)
-    user = await find_user_by_id(driver_id, {"_id": 0, "wallet_balance": 1, "earnings_frozen": 1}) or {}
-    wallet_balance = round(float(user.get("wallet_balance") or 0.0), 2)
+    user = await find_user_by_id(driver_id, {"_id": 0, "earnings_frozen": 1}) or {}
     earnings_frozen = bool(user.get("earnings_frozen"))
 
     profile = await db.driver_profiles.find_one(
@@ -2964,13 +2963,11 @@ async def get_driver_withdrawals(driver_id: str, http_request: Request, limit: i
             "settlement_reason": t.get("settlement_reason"),
             "created_at": created_at,
             "settled_at": settled_at,
-            "reversed_to_wallet": bool(t.get("reversed_to_wallet")),
         })
 
     total = await db.transactions.count_documents({"user_id": driver_id, "source": "driver_withdrawal"})
     return {
         "success": True,
-        "wallet_balance": wallet_balance,
         "earnings_frozen": earnings_frozen,
         "bank_ready": bank_ready,
         "bank": {
@@ -3013,24 +3010,12 @@ async def update_driver_withdrawal_settlement(transaction_id: str, payload: With
     if payload.provider_reference:
         update_doc["provider_reference"] = payload.provider_reference.strip()
 
-    if target == "failed":
-        amount = abs(float(tx.get("amount") or 0))
-        user_id = str(tx.get("user_id") or "")
-        if amount <= 0 or not user_id:
-            raise HTTPException(status_code=400, detail="Invalid withdrawal amount/user for rollback")
-        await db.users.update_one({"id": user_id}, {"$inc": {"wallet_balance": amount}})
-        update_doc["reversed_to_wallet"] = True
-        update_doc["reversed_at"] = datetime.utcnow()
-
     await db.transactions.update_one({"id": transaction_id}, {"$set": update_doc})
 
-    user_id = str(tx.get("user_id") or "")
-    user = await db.users.find_one({"id": user_id}, {"_id": 0, "wallet_balance": 1}) if user_id else None
     return {
         "success": True,
         "transaction_id": transaction_id,
         "status": target,
-        "wallet_balance": round(float((user or {}).get("wallet_balance") or 0.0), 2),
     }
 
 
@@ -3097,13 +3082,4 @@ async def provider_withdrawal_callback(payload: WithdrawalProviderCallbackReques
         "settlement_updated_by": "provider_callback",
         "settlement_reason": (payload.reason or "").strip() or None,
     }
-    if target == "failed":
-        amount = abs(float(tx.get("amount") or 0))
-        user_id = str(tx.get("user_id") or "")
-        if amount <= 0 or not user_id:
-            raise HTTPException(status_code=400, detail="Invalid withdrawal amount/user for rollback")
-        await db.users.update_one({"id": user_id}, {"$inc": {"wallet_balance": amount}})
-        update_doc["reversed_to_wallet"] = True
-        update_doc["reversed_at"] = datetime.utcnow()
-
     await db.transactions.update_one({"id": payload.transaction_id}, {"$set": update_doc})

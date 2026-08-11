@@ -10,7 +10,7 @@ Features tested:
 - CALL FEATURE: POST /api/trip/{id}/call for both rider→driver and driver→rider
 - ACTIVE TRIP: GET /api/trips/active/{user_id} returns correct active/inactive status
 - AI FEATURES: Traffic predict, Accident risk, Coach suggestions, Driver awareness
-- WALLET: GET /api/wallet/{id}, POST /api/wallet/{id}/topup
+- WALLET REMOVED: GET/POST /api/wallet/* → 410
 - RIDER PREFERENCES: GET /api/rider/preferences/{user_id}
 - SAFETY: POST /api/sos/trigger, GET /api/safety/danger-zones, GET /api/safety/alerts
 - COMMUNITY: GET /api/community/groups, GET /api/community/events
@@ -573,23 +573,20 @@ class TestAIFeatures:
 
 
 class TestWallet:
-    """Test wallet functionality"""
+    """Customer fare wallet removed — endpoints return 410."""
 
-    def test_01_get_wallet(self):
-        """GET /api/wallet/{user_id} - Get wallet balance"""
+    def test_01_get_wallet_gone(self):
+        """GET /api/wallet/{user_id} → 410"""
         assert TEST_RIDER_TOKEN, "Rider JWT required"
         response = requests.get(
             f"{BASE_URL}/api/wallet/{TEST_RIDER_ID}",
             headers=bearer_headers(TEST_RIDER_TOKEN),
         )
-        assert response.status_code == 200, f"Get wallet failed: {response.status_code}"
-        
-        data = response.json()
-        assert "balance" in data
-        print(f"PASS: Wallet balance: ₦{data.get('balance', 0):,.0f}")
+        assert response.status_code == 410, f"Expected 410, got: {response.status_code}"
+        print("PASS: Wallet balance endpoint removed (410)")
 
-    def test_02_wallet_topup(self):
-        """POST /api/wallet/{user_id}/topup - Top up wallet"""
+    def test_02_wallet_topup_gone(self):
+        """POST /api/wallet/{user_id}/topup → 410"""
         assert TEST_RIDER_TOKEN, "Rider JWT required"
         payload = {
             "amount": 5000.0,
@@ -602,13 +599,8 @@ class TestWallet:
             json=payload,
             headers=bearer_headers(TEST_RIDER_TOKEN),
         )
-        if response.status_code == 400 and "payment_reference" in (response.text or ""):
-            pytest.skip("Wallet topup requires a Paystack-verified payment_reference on this backend")
-        assert response.status_code == 200, f"Topup failed: {response.status_code} - {response.text}"
-        
-        data = response.json()
-        assert "balance" in data or "new_balance" in data
-        print(f"PASS: Wallet topped up by ₦5,000")
+        assert response.status_code == 410, f"Expected 410, got: {response.status_code}"
+        print("PASS: Wallet top-up endpoint removed (410)")
 
 
 class TestRiderPreferences:

@@ -131,9 +131,6 @@ async def driver_operations_profile(driver_id: str):
     ).sort("created_at", -1).limit(20).to_list(20)
     active_sub = next((s for s in subscriptions if s.get("status") in ("active", "trial", "grace_period")), None)
 
-    wallet_doc = await db.wallets.find_one({"user_id": driver_id}, {"_id": 0}) or {}
-    balance = float(wallet_doc.get("balance") or user.get("wallet_balance") or 0)
-
     tx_pipeline_match = {"user_id": driver_id}
     transactions = await db.transactions.find(
         tx_pipeline_match,
@@ -141,11 +138,6 @@ async def driver_operations_profile(driver_id: str):
     ).sort("created_at", -1).limit(50).to_list(50)
 
     withdrawals = [t for t in transactions if t.get("type") == "withdrawal" or t.get("source") == "driver_withdrawal"]
-    pending_withdrawal = sum(
-        float(t.get("amount") or 0)
-        for t in withdrawals
-        if t.get("status") in ("pending", "processing")
-    )
 
     now = datetime.now(timezone.utc)
     week_start = now - timedelta(days=7)
@@ -363,12 +355,6 @@ async def driver_operations_profile(driver_id: str):
                 "zones": profile.get("work_zone_zones") or [],
                 "expires_at": profile.get("work_zone_expires_at"),
             },
-        },
-        "wallet": {
-            "balance_ngn": balance,
-            "pending_withdrawal_ngn": pending_withdrawal,
-            "transactions": transactions,
-            "withdrawals": withdrawals[:20],
         },
         "trips": {
             "completed": completed_trips,
