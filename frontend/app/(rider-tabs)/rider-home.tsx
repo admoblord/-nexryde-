@@ -46,6 +46,7 @@ import { pullAndApplyActiveTrip } from '@/src/services/activeTripSync';
 import { useRiderHasActiveTrip, useRiderActiveTripPhase } from '@/src/hooks/useRiderHasActiveTrip';
 import { riderTripStatusHeadline } from '@/src/constants/riderActiveTripDisplay';
 import type { RiderTripDisplayOpts } from '@/src/utils/tripPaymentMethod';
+import { warmLocationOnLaunch } from '@/src/services/locationWarm';
 
 export default function ModernRiderHome() {
   const router = useRouter();
@@ -101,6 +102,9 @@ export default function ModernRiderHome() {
     ]).start();
     // Request push notification permission so riders get driver alerts
     void notificationService.initialize().catch(() => {});
+    // Warm GPS on home so booking can paint last-known + reverse-geocode instantly.
+    const stopWarm = warmLocationOnLaunch();
+    return () => stopWarm();
   }, []);
 
   useEffect(() => {

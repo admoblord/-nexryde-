@@ -65,15 +65,28 @@ export function RiderHomeMapStrip({ height = 260, onPress }: Props) {
     let cancelled = false;
     (async () => {
       try {
+        // Prefer warmed / last-known so the home map never waits on a cold GPS fix.
+        const { peekQuickLocation } = await import('@/src/services/locationWarm');
+        const quick = await peekQuickLocation();
+        if (!cancelled && quick) {
+          setCoords({ lat: quick.lat, lng: quick.lng });
+          applyCamera(quick.lat, quick.lng);
+          setLocating(false);
+        }
+
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
           if (!cancelled) setLocating(false);
           return;
         }
-        const pos = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        if (cancelled) return;
+        const pos = await Promise.race([
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+        ]);
+        if (cancelled || !pos) {
+          if (!cancelled) setLocating(false);
+          return;
+        }
         const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         if (
           Number.isFinite(next.lat) &&

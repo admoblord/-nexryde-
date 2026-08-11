@@ -1,6 +1,11 @@
 // Fix for react-native-google-places-autocomplete web compatibility
 import 'react-native-get-random-values';
 
+import { enableFreeze, enableScreens } from 'react-native-screens';
+// Freeze inactive tab screens so switches stay instant (pairs with freezeOnBlur).
+enableScreens(true);
+enableFreeze(true);
+
 import * as SplashScreen from 'expo-splash-screen';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';

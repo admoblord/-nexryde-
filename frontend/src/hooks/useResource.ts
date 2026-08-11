@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { tabCacheGet, tabCacheSet } from '@/src/services/tabDataCache';
 
 interface ResourceState<T> {
   data: T | null;
@@ -14,8 +15,8 @@ type UseResourceOptions = {
 };
 
 /**
- * Stale-while-revalidate: cached value renders instantly; fetch runs in background.
- * `fetcher` should use apiFetch (10s timeout + token handling).
+ * Stale-while-revalidate: memory → AsyncStorage → network.
+ * Second visit paints instantly from memory; never blanks the UI while revalidating.
  */
 export function useResource<T>(
   key: string,
@@ -23,14 +24,25 @@ export function useResource<T>(
   opts: UseResourceOptions = { cache: true },
 ) {
   const { cache = true, enabled = true } = opts;
-  const [state, setState] = useState<ResourceState<T>>({ data: null, loading: enabled, error: null });
+  const memHit = cache ? tabCacheGet<T>(key) : null;
+  const [state, setState] = useState<ResourceState<T>>({
+    data: memHit,
+    // Only show loading skeleton when we have nothing to paint.
+    loading: enabled && !memHit,
+    error: null,
+  });
   const mounted = useRef(true);
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
 
   const load = useCallback(async () => {
     if (!enabled) return;
-    setState((s) => ({ ...s, loading: true, error: null }));
+    setState((s) => ({
+      ...s,
+      // Keep existing data visible — only spin when empty.
+      loading: s.data == null,
+      error: null,
+    }));
     const LOAD_TIMEOUT_MS = 12000;
     try {
       const data = await Promise.race([
@@ -41,7 +53,10 @@ export function useResource<T>(
       ]);
       if (!mounted.current) return;
       setState({ data, loading: false, error: null });
-      if (cache) AsyncStorage.setItem(`res:${key}`, JSON.stringify(data)).catch(() => {});
+      if (cache) {
+        tabCacheSet(key, data);
+        AsyncStorage.setItem(`res:${key}`, JSON.stringify(data)).catch(() => {});
+      }
     } catch (e) {
       if (!mounted.current) return;
       setState((s) => ({
@@ -61,12 +76,17 @@ export function useResource<T>(
       };
     }
 
-    if (cache) {
+    const warm = cache ? tabCacheGet<T>(key) : null;
+    if (warm) {
+      setState((s) => ({ ...s, data: warm, loading: false }));
+    } else if (cache) {
       AsyncStorage.getItem(`res:${key}`)
         .then((raw) => {
           if (raw && mounted.current) {
             try {
-              setState((s) => ({ ...s, data: JSON.parse(raw) as T }));
+              const parsed = JSON.parse(raw) as T;
+              tabCacheSet(key, parsed);
+              setState((s) => ({ ...s, data: parsed, loading: false }));
             } catch {
               /* ignore corrupt cache */
             }

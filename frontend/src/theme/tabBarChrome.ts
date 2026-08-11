@@ -22,6 +22,10 @@ export function buildTabScreenOptions(opts: {
   const { colors, isDark, bottomInset, hidden } = opts;
   return {
     headerShown: false as const,
+    // Keep inactive tabs frozen so switches stay instant (no remount / re-render storms).
+    freezeOnBlur: true,
+    detachInactiveScreens: true,
+    lazy: true,
     tabBarActiveTintColor: BRAND.primary,
     tabBarInactiveTintColor: colors.textMuted,
     tabBarHideOnKeyboard: true,

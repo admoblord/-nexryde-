@@ -2617,15 +2617,42 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 class ResponseTimingMiddleware(BaseHTTPMiddleware):
-    """Optional X-Response-Time-ms for profiling (set NEXRYDE_RESPONSE_TIME_HEADER=1)."""
+    """
+    Server-side latency per request.
+    Always logs slow paths; set NEXRYDE_RESPONSE_TIME_HEADER=1 for X-Response-Time-ms.
+    """
+
+    _SLOW_MS = int(os.environ.get("NEXRYDE_SLOW_REQUEST_MS", "800"))
 
     async def dispatch(self, request: Request, call_next):
         if request.method == "OPTIONS":
             return await call_next(request)
         t0 = time.perf_counter()
         response = await call_next(request)
-        if os.environ.get("NEXRYDE_RESPONSE_TIME_HEADER", "").lower() in ("1", "true", "yes"):
-            response.headers["X-Response-Time-ms"] = str(int((time.perf_counter() - t0) * 1000))
+        ms = int((time.perf_counter() - t0) * 1000)
+        path = request.url.path
+        # Always expose for client/debug; cheap header.
+        response.headers["X-Response-Time-ms"] = str(ms)
+        # Structured log for places/trips/wallet (and any slow request).
+        interesting = (
+            path.startswith("/api/places/")
+            or path.startswith("/api/trips/")
+            or path.startswith("/api/wallet")
+            or path.startswith("/api/fare/")
+            or path.startswith("/api/users/")
+            or ms >= self._SLOW_MS
+        )
+        if interesting:
+            try:
+                logging.getLogger("nexryde.latency").info(
+                    "http_latency method=%s path=%s status=%s ms=%s",
+                    request.method,
+                    path,
+                    getattr(response, "status_code", "?"),
+                    ms,
+                )
+            except Exception:
+                pass
         return response
 
 

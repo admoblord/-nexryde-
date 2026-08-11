@@ -2,14 +2,14 @@
  * Instant Pickup Detection Engine
  *
  * - Never displays raw lat/lng to riders
- * - Reverse-geocodes ASAP; prefers landmark → building → street → estate → area → city
+ * - Session cache by rounded lat/lng (4 dp) — no re-geocode on every render
  * - Local + nearby-cell cache for <500ms warm hits
- * - Refreshes when rider moves past threshold (~25m)
- * - Preloads before destination typing
+ * - Never keeps "Detecting…" when a GPS/last-known fix already exists
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { BACKEND_URL, resolveAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL } from '@/src/services/api';
 import { haversineMeters } from '@/src/services/smartPickupGps';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 
 export const DETECTING_PICKUP = 'Detecting your pickup...';
 export const SAFE_PICKUP_FALLBACK = 'Near your location';
@@ -19,7 +19,7 @@ const MAX_CACHE = 80;
 /** Reuse cached labels within this radius (meters). */
 export const PICKUP_REUSE_RADIUS_M = 30;
 /** Refresh display when rider moves this far from last resolve. */
-export const PICKUP_MOVE_THRESHOLD_M = 25;
+export const PICKUP_MOVE_THRESHOLD_M = 50;
 /** ~40m grid cells for nearby reuse without h3-js. */
 const CELL_METERS = 40;
 
@@ -53,11 +53,31 @@ type CacheEntry = {
 };
 
 let memoryCache: CacheEntry[] = [];
+/** Session geocode cache keyed by lat/lng rounded to 4 decimal places. */
+const sessionRoundCache = new Map<string, InstantPickupResult>();
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 let cacheLoaded = false;
 
+export function roundCoordKey(lat: number, lng: number): string {
+  return `${lat.toFixed(4)},${lng.toFixed(4)}`;
+}
+
 export function isRawLatLngLabel(s: string): boolean {
   return /^\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*$/.test(String(s || '').trim());
+}
+
+export function isPlusCodeLabel(s: string): boolean {
+  const head = String(s || '')
+    .trim()
+    .split(',')[0]
+    .trim();
+  if (!head || !head.includes('+')) return false;
+  return /^[23456789CFGHJMPQRVWX]{4,11}\+[23456789CFGHJMPQRVWX]{2,6}$/i.test(head);
+}
+
+export function isBadPickupLabel(s: string): boolean {
+  const t = String(s || '').trim();
+  return !t || isRawLatLngLabel(t) || isPlusCodeLabel(t);
 }
 
 export function isDetectingPickupLabel(s: string): boolean {
@@ -71,11 +91,11 @@ export function isDetectingPickupLabel(s: string): boolean {
   );
 }
 
-/** Safe UI string — never raw coordinates. */
+/** Safe UI string — never raw coordinates or Plus Codes. */
 export function safePickupDisplay(label: string | null | undefined, detecting = false): string {
   const t = String(label || '').trim();
   if (detecting || isDetectingPickupLabel(t)) return DETECTING_PICKUP;
-  if (isRawLatLngLabel(t)) return SAFE_PICKUP_FALLBACK;
+  if (isBadPickupLabel(t)) return SAFE_PICKUP_FALLBACK;
   return t;
 }
 
@@ -98,7 +118,7 @@ async function ensureCacheLoaded(): Promise<void> {
         (e) =>
           e &&
           typeof e.label === 'string' &&
-          !isRawLatLngLabel(e.label) &&
+          !isBadPickupLabel(e.label) &&
           Number.isFinite(e.lat) &&
           Number.isFinite(e.lng),
       );
@@ -125,6 +145,23 @@ function remember(entry: CacheEntry): void {
     ),
   ].slice(0, MAX_CACHE);
   schedulePersist();
+  if (!isBadPickupLabel(entry.label)) {
+    sessionRoundCache.set(roundCoordKey(entry.lat, entry.lng), {
+      label: entry.label,
+      tier: (entry.tier as PickupTier) || 'area',
+      lat: entry.lat,
+      lng: entry.lng,
+      fromCache: true,
+      latencyMs: 0,
+      status: 'CACHE',
+    });
+  }
+}
+
+function lookupSessionRound(lat: number, lng: number): InstantPickupResult | null {
+  const hit = sessionRoundCache.get(roundCoordKey(lat, lng));
+  if (!hit || isBadPickupLabel(hit.label)) return null;
+  return { ...hit, lat, lng, fromCache: true };
 }
 
 export async function lookupPickupCache(
@@ -132,6 +169,9 @@ export async function lookupPickupCache(
   lng: number,
   radiusM = PICKUP_REUSE_RADIUS_M,
 ): Promise<InstantPickupResult | null> {
+  const session = lookupSessionRound(lat, lng);
+  if (session) return session;
+
   await ensureCacheLoaded();
   const cell = geoCellKey(lat, lng);
   let best: CacheEntry | null = null;
@@ -145,7 +185,7 @@ export async function lookupPickupCache(
       }
     }
   }
-  if (!best || isRawLatLngLabel(best.label)) return null;
+  if (!best || isBadPickupLabel(best.label)) return null;
   return {
     label: best.label,
     tier: (best.tier as PickupTier) || 'area',
@@ -170,22 +210,24 @@ async function fetchReverse(
   if (!origin) return null;
   const q = `lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}`;
   const url = `${origin}/api/places/reverse-geocode?${q}`;
-  // /api/places/reverse-geocode requires auth — a plain fetch always 401s and the
-  // pickup label stays stuck on "Detecting…". Attach a valid bearer (no logout on
-  // failure; this is a best-effort label resolve).
-  const headers = await resolveAuthHeaders();
-  const res = await fetch(url, { signal, headers });
+  const res = await authedFetch(url, {
+    method: 'GET',
+    signal,
+    timeoutMs: 8_000,
+    preserveSessionOn401: true,
+  });
+  if (!res.ok) return null;
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   const label = String(
     data.pickup_label || data.short_label || data.formatted_address || data.address || '',
   ).trim();
-  if (!label || isRawLatLngLabel(label)) return null;
+  if (!label || isBadPickupLabel(label)) return null;
   const tier = String(data.tier || 'area') as PickupTier;
   return { label, tier, status: String(data.status || 'OK') };
 }
 
 /**
- * Resolve pickup label with cache → network → retry → safe fallback.
+ * Resolve pickup label with session/round cache → disk cache → network → fallback.
  * Never returns coordinates.
  */
 export async function resolveInstantPickup(
@@ -211,12 +253,11 @@ export async function resolveInstantPickup(
     if (hit) {
       return { ...hit, latencyMs: Date.now() - t0 };
     }
+  } else {
+    // Still honor exact 4-dp session hits unless forceNetwork — no, force skips
   }
 
   let lastErr: unknown = null;
-  // 2 attempts (not 3): the "Detecting…" label sits on-screen for each retry's
-  // sleep + round-trip, so trimming this bounds worst-case delay before falling
-  // back to a safe label instead of stacking up to ~1s of extra idle waits.
   for (let attempt = 0; attempt < 2; attempt++) {
     if (opts?.signal?.aborted) break;
     try {
@@ -244,11 +285,10 @@ export async function resolveInstantPickup(
       lastErr = e;
     }
     if (opts?.signal?.aborted) break;
-    await new Promise((r) => setTimeout(r, 180 + attempt * 180));
+    await new Promise((r) => setTimeout(r, 120 + attempt * 120));
   }
 
   void lastErr;
-  // Nearest-road / area soft fallback — still never coords
   return {
     label: SAFE_PICKUP_FALLBACK,
     tier: 'fallback',
@@ -261,11 +301,8 @@ export async function resolveInstantPickup(
 }
 
 export type InstantPickupController = {
-  /** Apply a new GPS fix; may refresh label if moved enough. */
   onGpsFix: (lat: number, lng: number, opts?: { final?: boolean }) => void;
-  /** Force resolve current coords (e.g. modal open). */
   refresh: () => void;
-  /** Preload for current coords before destination focus. */
   preload: () => void;
   stop: () => void;
   getSnapshot: () => {
@@ -279,7 +316,8 @@ export type InstantPickupController = {
 
 /**
  * Continuous pickup detection — call from booking screen.
- * `onUpdate` receives safe display strings only.
+ * With a GPS/last-known fix: never emit Detecting… — show cache or Near your location
+ * while reverse-geocode completes.
  */
 export function startInstantPickupEngine(handlers: {
   onUpdate: (state: {
@@ -302,14 +340,22 @@ export function startInstantPickupEngine(handlers: {
   let seq = 0;
   let abort: AbortController | null = null;
   let lastPropagated: { lat: number; lng: number } | null = null;
+  let hasGpsFix = false;
 
-  const emitDetecting = (lat: number, lng: number) => {
+  const emitPlaceholder = (lat: number, lng: number) => {
+    // Spec: never show Detecting… while a last-known / GPS position exists.
+    const label = hasGpsFix
+      ? isDetectingPickupLabel(lastLabel)
+        ? SAFE_PICKUP_FALLBACK
+        : lastLabel
+      : DETECTING_PICKUP;
+    const detecting = !hasGpsFix;
     handlers.onUpdate({
-      label: DETECTING_PICKUP,
-      detecting: true,
+      label,
+      detecting,
       lat,
       lng,
-      tier: 'detecting',
+      tier: detecting ? 'detecting' : lastTier === 'detecting' ? 'fallback' : lastTier,
       fromCache: false,
     });
   };
@@ -320,7 +366,6 @@ export function startInstantPickupEngine(handlers: {
     abort?.abort();
     abort = new AbortController();
     void (async () => {
-      // Instant paint from local cache
       if (!forceNetwork) {
         const hit = await lookupPickupCache(lat, lng);
         if (stopped || my !== seq) return;
@@ -337,10 +382,10 @@ export function startInstantPickupEngine(handlers: {
             fromCache: true,
           });
         } else {
-          emitDetecting(lat, lng);
+          emitPlaceholder(lat, lng);
         }
-      } else {
-        emitDetecting(lat, lng);
+      } else if (!hasGpsFix) {
+        emitPlaceholder(lat, lng);
       }
 
       const result = await resolveInstantPickup(lat, lng, {
@@ -366,14 +411,12 @@ export function startInstantPickupEngine(handlers: {
     onGpsFix(lat, lng, opts) {
       if (stopped || handlers.isManualPickup?.()) return;
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      hasGpsFix = true;
       current = { lat, lng };
       const moved =
         !lastResolved ||
         haversineMeters(lastResolved.lat, lastResolved.lng, lat, lng) >= moveThreshold;
       if (!moved && !opts?.final) {
-        // Not far enough to re-resolve the label (avoid flicker / network), but still
-        // propagate the fresh coords with the existing label so the booked pickup
-        // matches live GPS. Ignore sub-5m jitter to avoid pin churn.
         if (
           lastResolved &&
           (!lastPropagated ||
@@ -381,11 +424,13 @@ export function startInstantPickupEngine(handlers: {
         ) {
           lastPropagated = { lat, lng };
           handlers.onUpdate({
-            label: safePickupDisplay(lastLabel),
+            label: isDetectingPickupLabel(lastLabel)
+              ? SAFE_PICKUP_FALLBACK
+              : safePickupDisplay(lastLabel),
             detecting: false,
             lat,
             lng,
-            tier: lastTier,
+            tier: lastTier === 'detecting' ? 'fallback' : lastTier,
             fromCache: true,
           });
         }
@@ -399,7 +444,6 @@ export function startInstantPickupEngine(handlers: {
     },
     preload() {
       if (!current) return;
-      // Warm cache without forcing detecting UI if we already have a label
       void resolveInstantPickup(current.lat, current.lng);
     },
     stop() {
@@ -409,7 +453,7 @@ export function startInstantPickupEngine(handlers: {
     getSnapshot() {
       return {
         label: lastLabel,
-        detecting: isDetectingPickupLabel(lastLabel),
+        detecting: !hasGpsFix && isDetectingPickupLabel(lastLabel),
         lat: current?.lat ?? null,
         lng: current?.lng ?? null,
         tier: lastTier,

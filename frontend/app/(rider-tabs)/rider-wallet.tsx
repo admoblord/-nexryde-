@@ -44,6 +44,7 @@ import {
   WALLET_CHECKOUT_USER_ERROR,
   getAuthHeaders,
 } from '@/src/services/api';
+import { tabCacheGet, tabCacheSet } from '@/src/services/tabDataCache';
 import {
   saveWalletCheckoutSession,
   loadWalletCheckoutSession,
@@ -103,10 +104,14 @@ export default function RiderWalletScreen() {
   const flow = useFlowLayout();
   const { colors, isDark } = useThemeColors();
 
-  const [balance, setBalance] = useState(0);
+  const walletCacheKey = uid ? `rider-wallet:${uid}` : '';
+  const walletCached = uid
+    ? tabCacheGet<{ balance: number; txs: Record<string, unknown>[] }>(`rider-wallet:${uid}`)
+    : null;
+  const [balance, setBalance] = useState(() => Number(walletCached?.balance ?? 0));
   const [promoCreditBalance, setPromoCreditBalance] = useState(0);
   const [firstRideRewardGranted, setFirstRideRewardGranted] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !walletCached);
   const [refreshing, setRefreshing] = useState(false);
   const [amountStr, setAmountStr] = useState('2000');
   const [promoCode, setPromoCode] = useState('');
@@ -117,7 +122,9 @@ export default function RiderWalletScreen() {
   const [showManualCode, setShowManualCode] = useState(false);
   const [busy, setBusy] = useState<'checkout' | 'verify' | null>(null);
   const [topupState, setTopupState] = useState<TopupState>({ phase: 'idle' });
-  const [txs, setTxs] = useState<Record<string, unknown>[]>([]);
+  const [txs, setTxs] = useState<Record<string, unknown>[]>(() =>
+    Array.isArray(walletCached?.txs) ? walletCached!.txs : [],
+  );
   const [pendingMeta, setPendingMeta] = useState<{ ref: string; url: string; amount: number } | null>(null);
   const [checkoutFailed, setCheckoutFailed] = useState(false);
 
@@ -162,24 +169,32 @@ export default function RiderWalletScreen() {
   // ── Data load ────────────────────────────────────────────────────────────────
   const load = useCallback(async (): Promise<number | null> => {
     if (!walletEnabled || !uid || !canCallAuthedApi) { setLoading(false); return null; }
+    // Keep cached balance on screen while revalidating (instant tab return).
+    if (!tabCacheGet(`rider-wallet:${uid}`)) setLoading(true);
     try {
       const w = await getWalletMe(15);
       const bal = Number(w.data?.balance ?? 0);
+      const nextTxs = Array.isArray(w.data?.transactions)
+        ? (w.data.transactions as Record<string, unknown>[])
+        : [];
       setBalance(bal);
-      setTxs(Array.isArray(w.data?.transactions) ? (w.data.transactions as Record<string, unknown>[]) : []);
+      setTxs(nextTxs);
+      if (walletCacheKey) tabCacheSet(walletCacheKey, { balance: bal, txs: nextTxs });
       balanceFade.setValue(0);
       balanceScale.setValue(0.92);
       animateBalanceIn();
       return bal;
     } catch {
-      setBalance(0);
-      setTxs([]);
+      if (!tabCacheGet(`rider-wallet:${uid}`)) {
+        setBalance(0);
+        setTxs([]);
+      }
       return null;
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [uid, canCallAuthedApi, walletEnabled]);
+  }, [uid, canCallAuthedApi, walletEnabled, walletCacheKey]);
 
   useEffect(() => { load(); }, [load]);
 

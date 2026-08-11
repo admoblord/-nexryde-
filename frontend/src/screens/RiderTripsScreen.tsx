@@ -11,7 +11,7 @@
  *  - Activity insights card (rides, spend, top destination)
  *  - Pull-to-refresh
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   RefreshControl,
@@ -31,6 +31,7 @@ import { getUserTrips } from '@/src/services/api';
 import { isActiveTripStatus, normalizeTripStatus } from '@/src/utils/tripStatus';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useFlowLayout } from '@/src/constants/flowLayout';
+import { tabCacheGet, tabCacheSet } from '@/src/services/tabDataCache';
 
 type TripTab = 'upcoming' | 'completed' | 'cancelled';
 
@@ -314,35 +315,59 @@ export default function RiderTripsScreen() {
   const router = useRouter();
   const { colors, isDark } = useThemeColors();
   const { userId: riderId, canCallAuthedApi } = useAuthedUserId();
+  const tripsCacheKey = riderId ? `rider-trips:${riderId}` : '';
+  const cachedTrips = riderId ? tabCacheGet<any[]>(`rider-trips:${riderId}`) : null;
   const [activeTab, setActiveTab] = useState<TripTab>('upcoming');
-  const [loading, setLoading] = useState(true);
+  const [trips, setTrips] = useState<any[]>(() =>
+    Array.isArray(cachedTrips) ? cachedTrips : [],
+  );
+  const [loading, setLoading] = useState(() => !(Array.isArray(cachedTrips) && cachedTrips.length > 0));
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(false);
-  const [trips, setTrips] = useState<any[]>([]);
   const tabPad = useTabBottomPad(8);
   const flow   = useFlowLayout();
+  const didAutoTab = useRef(false);
+  const hasPaintedRef = useRef(Array.isArray(cachedTrips) && cachedTrips.length > 0);
 
   const loadTrips = useCallback(async (silent = false) => {
     if (!riderId || !canCallAuthedApi) { setLoading(false); return; }
     if (!silent) setLoadError(false);
+    if (!silent && !hasPaintedRef.current) setLoading(true);
     try {
       const res = await getUserTrips(riderId, 'rider');
-      setTrips(Array.isArray(res.data) ? res.data : []);
+      const next = Array.isArray(res.data) ? res.data : [];
+      setTrips(next);
+      hasPaintedRef.current = true;
+      if (tripsCacheKey) tabCacheSet(tripsCacheKey, next);
+      if (!didAutoTab.current && next.length > 0) {
+        const upcoming = next.filter((t: any) => isActiveTripStatus(t.status, t.payment_status));
+        if (upcoming.length === 0) {
+          const completed = next.filter(
+            (t: any) => normalizeTripStatus(t.status, t.payment_status) === 'completed',
+          );
+          if (completed.length > 0) {
+            setActiveTab('completed');
+            didAutoTab.current = true;
+          }
+        } else {
+          didAutoTab.current = true;
+        }
+      }
     } catch {
       setLoadError(true);
-      setTrips([]);
+      if (!hasPaintedRef.current) setTrips([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [riderId, canCallAuthedApi]);
+  }, [riderId, canCallAuthedApi, tripsCacheKey]);
 
   useEffect(() => {
     if (!canCallAuthedApi) {
       setLoading(false);
       return;
     }
-    void loadTrips();
+    void loadTrips(hasPaintedRef.current);
   }, [loadTrips, canCallAuthedApi]);
 
   const segmented = useMemo(() => {

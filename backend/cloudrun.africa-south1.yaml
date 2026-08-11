@@ -19,16 +19,11 @@ spec:
   template:
     metadata:
       annotations:
-        # Scale to zero and bill CPU per request. A warm always-on-CPU instance
-        # cost more per month than the whole platform used to, which is not
-        # justifiable at current volume. Timer work (guardians, saga retries,
-        # safe-arrival escalation) is driven by Cloud Scheduler calling
-        # POST /api/ops/maintenance-tick instead of an idle process.
-        #
-        # Trade-off: the first request after ~15 min idle pays a cold start.
-        # startup-cpu-boost stays on to shorten it, and the app already warms
-        # the backend from the welcome/login screen (warmBackend.ts).
-        autoscaling.knative.dev/minScale: "0"
+        # Keep one warm instance so tab switches / reverse-geocode never pay a
+        # cold start after idle. Timer work (guardians, saga retries,
+        # safe-arrival escalation) is still driven by Cloud Scheduler calling
+        # POST /api/ops/maintenance-tick.
+        autoscaling.knative.dev/minScale: "1"
         autoscaling.knative.dev/maxScale: "10"
         run.googleapis.com/startup-cpu-boost: "true"
         run.googleapis.com/cpu-throttling: "true"
@@ -52,6 +47,10 @@ spec:
             # Non-sensitive plain config
             - name: NEXRYDE_ENV
               value: production
+            - name: NEXRYDE_SLOW_REQUEST_MS
+              value: "800"
+            - name: NEXRYDE_RESPONSE_TIME_HEADER
+              value: "1"
             - name: DB_NAME
               value: nexryde_db
             - name: MONGO_MAX_POOL_SIZE
