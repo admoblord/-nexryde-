@@ -50,13 +50,11 @@ async function ensureForegroundLocation(): Promise<boolean> {
 
 async function ensureBackgroundLocation(): Promise<boolean> {
   if (Platform.OS === 'web') return true;
-  const fg = await Location.getForegroundPermissionsAsync();
-  if (!fg.granted) return false;
-  const current = await Location.getBackgroundPermissionsAsync();
-  if (current.granted) return true;
-  // Android 10+: must request after foreground is granted.
-  const next = await Location.requestBackgroundPermissionsAsync();
-  return next.granted;
+  // Play User Data policy: only request via the shared disclosure choke-point.
+  const { requestBackgroundLocationWithDisclosure } = await import(
+    '@/src/services/backgroundLocationDisclosure'
+  );
+  return requestBackgroundLocationWithDisclosure();
 }
 
 async function ensureNotifications(): Promise<boolean> {

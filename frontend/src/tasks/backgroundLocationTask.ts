@@ -58,11 +58,12 @@ TaskManager.defineTask(DRIVER_LOCATION_TASK, async ({ data, error }: TaskManager
  */
 export async function startDriverBackgroundLocation(): Promise<void> {
   try {
-    const { status: fg } = await Location.requestForegroundPermissionsAsync();
-    if (fg !== 'granted') return;
-
-    const { status: bg } = await Location.requestBackgroundPermissionsAsync();
-    if (bg !== 'granted') {
+    // Play policy: BACKGROUND_LOCATION only via disclosure choke-point.
+    const { requestBackgroundLocationWithDisclosure } = await import(
+      '@/src/services/backgroundLocationDisclosure'
+    );
+    const bgGranted = await requestBackgroundLocationWithDisclosure();
+    if (!bgGranted) {
       console.warn('[BG Location] Background permission not granted; foreground GPS only');
       return;
     }

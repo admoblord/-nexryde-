@@ -20,7 +20,7 @@ import { useLanguage } from '@/src/i18n/LanguageContext';
 import { useAppStore } from '@/src/store/appStore';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL } from '@/src/services/api';
 import { logLegalGateCheck, syncUserLegalStatus } from '@/src/services/legalStatusSync';
 import { replaceLegalTermsIfNeeded } from '@/src/utils/navigationRouteGuard';
 import { normalizeTripStatus, resolveRiderScreenStatus } from '@/src/utils/tripStatus';
@@ -60,8 +60,9 @@ export default function ModernRiderHome() {
   const setCurrentTrip = useAppStore((s) => s.setCurrentTrip);
   const firstName =
     (user?.name && String(user.name).trim().split(/\s+/)[0]) || 'there';
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(30)).current;
+  // Start visible — a 600ms fade made Home chips/bars feel lagged after login.
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const slideAnim = useRef(new Animated.Value(0)).current;
   const [featureHubOpen, setFeatureHubOpen] = useState(false);
   const { t } = useLanguage();
   const tabPad = useTabBottomPad(8);
@@ -95,10 +96,6 @@ export default function ModernRiderHome() {
   }, [hasActiveTrip, activeTripFade]);
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
-      Animated.spring(slideAnim, { toValue: 0, friction: 8, useNativeDriver: true }),
-    ]).start();
     // Request push notification permission so riders get driver alerts
     void notificationService.initialize().catch(() => {});
   }, []);
@@ -106,16 +103,24 @@ export default function ModernRiderHome() {
   useEffect(() => {
     const enforceRiderVerification = async () => {
       if (!canCallAuthedApi || !riderId || user?.role !== 'rider') return;
-      await syncUserLegalStatus(riderId);
+      // Paint Home first; run legal + verification in parallel (was sequential ~1.5s).
+      const { authedFetch } = await import('@/src/utils/sessionRefresh');
+      const [legalSynced, verifyRes] = await Promise.all([
+        syncUserLegalStatus(riderId),
+        authedFetch(`${BACKEND_URL}/api/users/${riderId}/rider-verification-status`, {
+          method: 'GET',
+          preserveSessionOn401: true,
+          timeoutMs: 8_000,
+        }).catch(() => null),
+      ]);
       const effectiveUser = useAppStore.getState().user ?? user;
-      if (logLegalGateCheck(effectiveUser, 'rider-home')) {
+      if (logLegalGateCheck(effectiveUser, 'rider-home') || (legalSynced && logLegalGateCheck({ ...effectiveUser, ...legalSynced }, 'rider-home'))) {
         replaceLegalTermsIfNeeded(router, 'rider', segments);
         return;
       }
       try {
-        const res = await fetch(`${BACKEND_URL}/api/users/${riderId}/rider-verification-status`, {
-          headers: getAuthHeaders(),
-        });
+        const res = verifyRes;
+        if (!res) return;
         // Auth / identity errors → re-login only when we had a token (avoid pre-hydration 401).
         if (res.status === 401 || res.status === 403) {
           router.replace('/(auth)/login');
@@ -138,6 +143,12 @@ export default function ModernRiderHome() {
     };
     void enforceRiderVerification();
   }, [canCallAuthedApi, router, riderId, segments, user?.role, user?.terms_accepted, user?.terms_version, user?.privacy_accepted, user?.privacy_version]);
+
+  // Prefetch saved places on mount so chips aren't empty on first focus.
+  useEffect(() => {
+    if (!riderId || !canCallAuthedApi) return;
+    void loadRiderSavedPlaces(riderId).then((places) => setSavedPlaces(places)).catch(() => {});
+  }, [riderId, canCallAuthedApi]);
 
   const lastHomeFocusSyncRef = useRef(0);
   useFocusEffect(

@@ -147,7 +147,7 @@ const PRIVACY_HTML = `
 <p>You may also lodge a complaint with the <strong>Nigeria Data Protection Commission (NDPC)</strong> at <a href="https://ndpc.gov.ng">ndpc.gov.ng</a>.</p>
 
 <h2>7. Location</h2>
-<p>Foreground location is required to book and track rides. Background location is required only when a driver is online. You can adjust permissions in device Settings, but disabling location will prevent booking or receiving rides.</p>
+<p>Foreground location is required to book and track rides. When a driver goes Online, NEXRYDE may collect location <strong>even when the app is closed or not in use</strong>, after an in-app prominent disclosure and the driver’s consent, so we can match nearby ride requests, share live position with riders during trips, and deliver incoming ride alerts in the background. Background collection stops when the driver goes Offline or revokes permission in system Settings. Disabling location will prevent booking or receiving rides.</p>
 
 <h2>8. Children</h2>
 <p>NEXRYDE is not for persons under 18. If we discover a minor has created an account, we will delete it immediately. Contact admin@admoblordgroup.com if you believe a minor is using NEXRYDE.</p>
