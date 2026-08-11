@@ -291,10 +291,15 @@ SHIELD_LOW_RIDER_RATING = 3.5
 SHIELD_MIN_TRIPS_FOR_FLAG = 3
 BLACK_BOX_SIGNING_SECRET = os.environ.get("NEXRYDE_BLACK_BOX_SECRET") or os.environ.get("JWT_SECRET") or "nexryde-black-box-dev"
 SPEED_SPIKE_LIMIT_KMH = 100.0
+# Off: haversine speed from noisy GPS jumps false-triggers "Speed Spike Alert"
+# pushes/violations. Re-enable only with device speed + accuracy gating.
+ENABLE_SPEED_SPIKE_WARNINGS = False
 SAFE_ARRIVAL_CONFIRM_MINUTES = 5
 SAFE_ARRIVAL_CALL_RESPONSE_SECONDS = 90
 GPS_SPOOF_SPEED_KMH = 180.0
 GPS_SPOOF_JUMP_KM = 2.0
+# Off: single GPS teleport / multipath spike was suspending drivers as "spoofing".
+ENABLE_GPS_SPOOF_SPIKE_WARNINGS = False
 
 
 def _driver_location_snapshot_for_trip(
@@ -4215,7 +4220,11 @@ async def _update_trip_location_impl(trip_id: str, request: LocationUpdate, http
         if not stationary_since:
             stationary_since = now.isoformat()
 
-    if status in {"accepted", "ongoing"} and actual_route:
+    if (
+        ENABLE_GPS_SPOOF_SPIKE_WARNINGS
+        and status in {"accepted", "ongoing"}
+        and actual_route
+    ):
         impossible_jump = moved_km >= GPS_SPOOF_JUMP_KM
         impossible_speed = current_speed_kmh >= GPS_SPOOF_SPEED_KMH
         if impossible_jump or impossible_speed:
@@ -4366,7 +4375,11 @@ async def _update_trip_location_impl(trip_id: str, request: LocationUpdate, http
     if moved_km >= GUARDIAN_MIN_MOVEMENT_KM and guardian_alert:
         guardian_alert = None
 
-    if status == "ongoing" and current_speed_kmh > SPEED_SPIKE_LIMIT_KMH:
+    if (
+        ENABLE_SPEED_SPIKE_WARNINGS
+        and status == "ongoing"
+        and current_speed_kmh > SPEED_SPIKE_LIMIT_KMH
+    ):
         last_speed_spike = _parse_iso_dt((trip.get("speed_spike_alert") or {}).get("triggered_at"))
         can_trigger_speed_spike = not last_speed_spike or (now - last_speed_spike).total_seconds() >= 60
         if can_trigger_speed_spike:
