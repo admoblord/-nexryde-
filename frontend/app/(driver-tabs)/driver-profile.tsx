@@ -245,35 +245,31 @@ export default function DriverProfileScreen() {
   const [profileImage, setProfileImage] = useState<string | null>(user?.profile_image || null);
   const [showSwitchModal, setShowSwitchModal] = useState(false);
   const [driverCity, setDriverCity] = useState('');
-  const [driverFullName, setDriverFullName] = useState('');
+  // Paint name from session immediately — profile network fills city/vehicles.
+  const [driverFullName, setDriverFullName] = useState(user?.name || '');
   const [driverVehicles, setDriverVehicles] = useState<DriverVehicle[]>([]);
   const [trustSummary, setTrustSummary] = useState<any>(null);
   const [loadingTrust, setLoadingTrust] = useState(false);
 
-  const avatarScale = useRef(new Animated.Value(0.85)).current;
-  const fadeIn = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.parallel([
-      Animated.spring(avatarScale, { toValue: 1, friction: 6, tension: 120, useNativeDriver: true }),
-      Animated.timing(fadeIn, { toValue: 1, duration: 500, useNativeDriver: true }),
-    ]).start();
-  }, []);
+  const avatarScale = useRef(new Animated.Value(1)).current;
+  const fadeIn = useRef(new Animated.Value(1)).current;
 
   const loadDriverProfile = useCallback(async () => {
     if (!driverId || !canCallAuthedApi) return;
+    setLoadingTrust(true);
     try {
-      const [profileRes, vehiclesRes, subRes] = await Promise.allSettled([
+      const [profileRes, vehiclesRes, subRes, trustRes] = await Promise.allSettled([
         getDriverProfile(driverId),
         fetch(`${BACKEND_URL}/api/drivers/${driverId}/vehicles`, {
           headers: getAuthHeaders(),
         }).then(r => r.json()).catch(() => ({ vehicles: [] })),
         getDriverSubscriptionStatus(),
+        getUserTrustSummary(driverId),
       ]);
       if (profileRes.status === 'fulfilled') {
         const p = (profileRes.value as any).data as any;
         setDriverCity(p?.city || '');
-        setDriverFullName(p?.full_name || '');
+        setDriverFullName(p?.full_name || user?.name || '');
         const vStatus = typeof p?.verification_status === 'string' ? p.verification_status : '';
         if (vStatus) {
           setDriverDisplay({ driverId, verificationStatus: vStatus, displayHydrated: true });
@@ -314,28 +310,17 @@ export default function DriverProfileScreen() {
           }
         })();
       }
+      if (trustRes.status === 'fulfilled') {
+        setTrustSummary((trustRes.value as any).data);
+      }
     } catch { /* non-critical */ }
-  }, [canCallAuthedApi, displayVerification, driverId, setDriverDisplay, setSubscription]);
+    finally { setLoadingTrust(false); }
+  }, [canCallAuthedApi, displayVerification, driverId, setDriverDisplay, setSubscription, user?.name]);
 
   useEffect(() => {
     if (!canCallAuthedApi) return;
     void loadDriverProfile();
   }, [loadDriverProfile, canCallAuthedApi]);
-
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      if (!driverId || !canCallAuthedApi) return;
-      setLoadingTrust(true);
-      try {
-        const res = await getUserTrustSummary(driverId);
-        if (mounted) setTrustSummary(res.data);
-      } catch { /* non-critical */ }
-      finally { if (mounted) setLoadingTrust(false); }
-    };
-    void load();
-    return () => { mounted = false; };
-  }, [canCallAuthedApi, driverId]);
 
   const saveProfileImage = async (uri: string) => {
     setProfileImage(uri);

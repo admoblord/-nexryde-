@@ -101,8 +101,10 @@ export default function FeatureNotificationsScreen({ role }: Props) {
   const flow = useFlowLayout();
 
   const [tab, setTab] = useState<NotifTab>('activity');
-  const [loading, setLoading] = useState(true);
+  // Don't gate the whole tab on network — paint chrome immediately, fill list in place.
+  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [listHydrating, setListHydrating] = useState(true);
 
   // Feature announcements
   const [rows, setRows] = useState<FeatureAnnouncement[]>([]);
@@ -148,6 +150,7 @@ export default function FeatureNotificationsScreen({ role }: Props) {
       ]);
     } finally {
       setLoading(false);
+      setListHydrating(false);
       setRefreshing(false);
     }
   }, [loadFeatures, loadBackendNotifs]);
@@ -155,11 +158,16 @@ export default function FeatureNotificationsScreen({ role }: Props) {
   useEffect(() => {
     if (!canCallAuthedApi) {
       setLoading(false);
+      setListHydrating(false);
       return;
     }
+    setListHydrating(true);
     void load();
     // Absolute failsafe — never leave the tab spinning forever on weak networks.
-    const failsafe = setTimeout(() => setLoading(false), 15000);
+    const failsafe = setTimeout(() => {
+      setLoading(false);
+      setListHydrating(false);
+    }, 15000);
     return () => clearTimeout(failsafe);
   }, [load, canCallAuthedApi]);
 
@@ -340,11 +348,19 @@ export default function FeatureNotificationsScreen({ role }: Props) {
                     },
                   ]}
                 >
-                  <Ionicons name="notifications-off-outline" size={32} color={colors.textMuted} />
-                  <Text style={[styles.emptyTitle, { color: colors.text }]}>All caught up</Text>
-                  <Text style={[styles.emptyText, { color: colors.textMuted }]}>
-                    Trip updates, payments, and account alerts land here.
+                  {listHydrating ? (
+                    <ActivityIndicator color={BRAND.primary} />
+                  ) : (
+                    <Ionicons name="notifications-off-outline" size={32} color={colors.textMuted} />
+                  )}
+                  <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                    {listHydrating ? 'Loading…' : 'All caught up'}
                   </Text>
+                  {!listHydrating ? (
+                    <Text style={[styles.emptyText, { color: colors.textMuted }]}>
+                      Trip updates, payments, and account alerts land here.
+                    </Text>
+                  ) : null}
                 </View>
               ) : (
                 backendNotifs.map((notif) => {

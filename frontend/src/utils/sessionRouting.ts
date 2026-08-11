@@ -346,6 +346,11 @@ export async function routeAuthedUser(
         return;
       }
     } else if (role === 'driver') {
+<<<<<<< HEAD
+=======
+      // Instant Home when local verification fact is approved (Uber-grade gate).
+      // Peek memory first; only hit AsyncStorage when cold. Never await legal network first.
+>>>>>>> 1adbbb0e (fix(driver): make tabs, online/offline, and profile feel instant)
       if (needsLegalRedirect(loggedUser, 'routeAuthedUser:driver-local')) {
         const legalUser = await resolveUserForLegalGate(loggedUser);
         if (needsLegalRedirect(legalUser, 'routeAuthedUser:driver')) {
@@ -353,14 +358,19 @@ export async function routeAuthedUser(
           return;
         }
       }
-      // Never trust onboarded cache alone — unfinished drivers must hit status routing.
-      // Instant Home only when local verification fact is approved (Uber-grade gate).
       if (await isDriverOnboardingCached(id)) {
         try {
-          const { readDriverVerificationFact } = await import(
-            '@/src/services/driverVerificationFact'
-          );
-          const fact = await readDriverVerificationFact(id);
+          const {
+            peekDriverVerificationFact,
+            readDriverVerificationFact,
+          } = await import('@/src/services/driverVerificationFact');
+          const { peekDriverBootCache } = await import('@/src/services/driverBootCache');
+          const peeked =
+            peekDriverVerificationFact(id)?.verificationStatus === 'approved' ||
+            peekDriverBootCache(id)?.verificationStatus === 'approved';
+          const fact = peeked
+            ? { verificationStatus: 'approved' as const }
+            : await readDriverVerificationFact(id);
           if (fact?.verificationStatus === 'approved') {
             routeToHomeInstant(router, role);
             void syncUserLegalStatus(id).then((synced) => {
