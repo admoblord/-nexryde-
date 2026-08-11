@@ -273,7 +273,8 @@ function BookInDriveStyle() {
     () => ({
       bg: colors.background,
       sheet: colors.background,
-      mapBg: isDark ? '#0D1420' : '#EAF4EF',
+      // Booking map always uses Bolt light basemap (#EEF3E8 landscape).
+      mapBg: '#EEF3E8',
       statusBar: colors.statusBar,
       text: colors.text,
       muted: colors.textMuted,
@@ -372,6 +373,7 @@ function BookInDriveStyle() {
     lng: number;
     status?: string;
     vehicle?: string;
+    heading?: number | null;
   }>>([]);
   const [scheduledRides, setScheduledRides] = useState<Array<{
     id: string;
@@ -961,14 +963,20 @@ function BookInDriveStyle() {
         if (cancelled) return;
         setNearbyDrivers(
           rows
-            .map((d: any) => ({
-              driver_id: String(d.driver_id || ''),
-              name: String(d.name || 'Driver'),
-              lat: Number(d.current_location?.lat),
-              lng: Number(d.current_location?.lng),
-              status: d.is_online ? 'online' : 'offline',
-              vehicle: d.vehicle_model || d.vehicle_type || 'Car',
-            }))
+            .map((d: any) => {
+              const headingRaw = Number(
+                d.heading ?? d.current_location?.heading ?? d.bearing ?? d.current_location?.bearing,
+              );
+              return {
+                driver_id: String(d.driver_id || ''),
+                name: String(d.name || 'Driver'),
+                lat: Number(d.current_location?.lat),
+                lng: Number(d.current_location?.lng),
+                status: d.is_online ? 'online' : 'offline',
+                vehicle: d.vehicle_model || d.vehicle_type || 'Car',
+                heading: Number.isFinite(headingRaw) ? headingRaw : null,
+              };
+            })
             .filter((d: any) => Number.isFinite(d.lat) && Number.isFinite(d.lng))
             .slice(0, 25),
         );
@@ -2242,18 +2250,15 @@ function BookInDriveStyle() {
   const collapsedRouteTitle = routeReady
     ? `${truncateRouteLabel(pickup || 'Pickup')} → ${truncateRouteLabel(destination || 'Dropoff')}`
     : '';
-  const pickupMapBadge =
+  const pickupBadgeTitle = routeReady ? 'Pickup' : undefined;
+  const pickupBadgeSubtitle =
     routeReady && bookingRouteEtaMin != null
-      ? `Pickup / ${Math.max(1, Math.round(bookingRouteEtaMin))} min`
+      ? `${Math.max(1, Math.round(bookingRouteEtaMin))} min`
       : routeReady
-        ? 'Pickup'
+        ? null
         : null;
-  const dropoffMapBadge =
-    routeReady && arriveByClockLabel
-      ? `Dropoff / ${arriveByClockLabel}`
-      : routeReady
-        ? 'Dropoff'
-        : null;
+  const dropoffBadgeTitle = routeReady ? 'Dropoff' : undefined;
+  const dropoffBadgeSubtitle = routeReady ? arriveByClockLabel : null;
   const tripOptionsSummary = [
     ridePreferences.length > 0 ? `${ridePreferences.length} mood` : null,
     includeGateCode && estateGateCode.trim() ? 'gate code' : null,
@@ -2520,8 +2525,11 @@ function BookInDriveStyle() {
               pulseDropoffHalo={Boolean(destinationCoords && !bookingSheetScrolled)}
               searchMode={false}
               matchLocked={false}
-              pickupBadge={pickupMapBadge}
-              dropoffBadge={dropoffMapBadge}
+              isDark={false}
+              pickupBadgeTitle={pickupBadgeTitle}
+              pickupBadgeSubtitle={pickupBadgeSubtitle}
+              dropoffBadgeTitle={dropoffBadgeTitle}
+              dropoffBadgeSubtitle={dropoffBadgeSubtitle}
               nearbyDrivers={nearbyDrivers}
               demandRatio={
                 fareDetails?.demand_ratio != null && Number.isFinite(Number(fareDetails.demand_ratio))
@@ -2534,7 +2542,8 @@ function BookInDriveStyle() {
                   ? Number(fareDetails.surge_multiplier)
                   : null
               }
-              showDemandOverlay
+              showDemandOverlay={false}
+              controlsBottom={24}
             />
           )
         ) : (

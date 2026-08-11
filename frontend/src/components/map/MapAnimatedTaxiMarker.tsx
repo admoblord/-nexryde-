@@ -1,80 +1,92 @@
-import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, StyleSheet, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { MAP } from '@/src/constants/nexrydeMapBehavior';
+/**
+ * Top-down car marker — rotates smoothly to heading (no snap).
+ */
+import React, { useEffect, useRef, useState } from 'react';
+import { Easing, Image, StyleSheet, View } from 'react-native';
 
 type Props = {
   size?: number;
   searchMode?: boolean;
+  /** Degrees clockwise from north; when omitted, faces north. */
+  heading?: number | null;
 };
 
-/** Yellow taxi marker with gentle float animation (booking / request). */
-export function MapAnimatedTaxiMarker({ size = 32, searchMode }: Props) {
-  const float = useRef(new Animated.Value(0)).current;
+const CAR_SRC = require('../../../assets/images/map/car-top.png');
+
+/** Shortest-path heading lerp (degrees). */
+function lerpHeading(from: number, to: number, t: number): number {
+  const delta = ((((to - from) % 360) + 540) % 360) - 180;
+  return (from + delta * t + 360) % 360;
+}
+
+export function MapAnimatedTaxiMarker({ size = 36, heading = null }: Props) {
+  const [displayHeading, setDisplayHeading] = useState(() =>
+    typeof heading === 'number' && Number.isFinite(heading) ? ((heading % 360) + 360) % 360 : 0,
+  );
+  const fromRef = useRef(displayHeading);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(float, {
-          toValue: 1,
-          duration: 1000,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(float, {
-          toValue: 0,
-          duration: 1000,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [float]);
+    if (typeof heading !== 'number' || !Number.isFinite(heading)) return;
+    const target = ((heading % 360) + 360) % 360;
+    const from = fromRef.current;
+    let delta = ((((target - from) % 360) + 540) % 360) - 180;
+    if (Math.abs(delta) < 0.5) {
+      fromRef.current = target;
+      setDisplayHeading(target);
+      return;
+    }
+    const start = Date.now();
+    const duration = Math.min(700, Math.max(280, Math.abs(delta) * 4));
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
 
-  const box = size;
-  const icon = Math.round(size * 0.44);
+    const tick = () => {
+      const t = Math.min(1, (Date.now() - start) / duration);
+      const eased = Easing.out(Easing.cubic)(t);
+      const next = lerpHeading(from, target, eased);
+      fromRef.current = next;
+      setDisplayHeading(next);
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        fromRef.current = target;
+        setDisplayHeading(target);
+        rafRef.current = null;
+      }
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [heading]);
+
+  const w = size;
+  const h = Math.round(size * 1.85);
 
   return (
-    <Animated.View
-      style={{
-        transform: [
-          {
-            translateY: float.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0, -4],
-            }),
-          },
-        ],
-      }}
-    >
-      <View
-        style={[
-          styles.taxi,
-          {
-            width: box,
-            height: box,
-            borderRadius: box / 2,
-            backgroundColor: searchMode ? MAP.driverTaxi : 'rgba(250,204,21,0.92)',
-          },
-        ]}
-      >
-        <Ionicons name="car-sport" size={icon} color={searchMode ? '#0F1419' : '#422006'} />
+    <View style={{ width: w + 8, height: h + 8, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ transform: [{ rotate: `${displayHeading}deg` }] }}>
+        <Image
+          source={CAR_SRC}
+          style={{ width: w, height: h }}
+          resizeMode="contain"
+          accessibilityLabel="Driver vehicle"
+        />
       </View>
-    </Animated.View>
+      <View style={styles.shadow} pointerEvents="none" />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  taxi: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.85)',
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 4,
-    elevation: 4,
+  shadow: {
+    position: 'absolute',
+    bottom: 2,
+    width: 18,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(15,23,42,0.18)',
   },
 });
+
+export default MapAnimatedTaxiMarker;

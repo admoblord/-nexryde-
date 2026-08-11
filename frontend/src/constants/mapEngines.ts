@@ -55,6 +55,30 @@ export function getMapboxAccessToken(): string {
   return envString('EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN');
 }
 
+/**
+ * Google Cloud Map ID for cloud-styled maps (preferred over JSON customMapStyle).
+ * Set EXPO_PUBLIC_GOOGLE_MAP_ID_ANDROID / _IOS (or shared EXPO_PUBLIC_GOOGLE_MAP_ID).
+ */
+export function getGoogleMapIdForPlatform(os: string = Platform.OS): string {
+  if (os === 'android') {
+    return (
+      envString('EXPO_PUBLIC_GOOGLE_MAP_ID_ANDROID') ||
+      envString('EXPO_PUBLIC_GOOGLE_MAP_ID') ||
+      envString('googleMapIdAndroid') ||
+      envString('googleMapId')
+    );
+  }
+  if (os === 'ios') {
+    return (
+      envString('EXPO_PUBLIC_GOOGLE_MAP_ID_IOS') ||
+      envString('EXPO_PUBLIC_GOOGLE_MAP_ID') ||
+      envString('googleMapIdIos') ||
+      envString('googleMapId')
+    );
+  }
+  return envString('EXPO_PUBLIC_GOOGLE_MAP_ID') || envString('googleMapId');
+}
+
 export const MAP_ENGINE = {
   display: 'google-maps' as const,
   navigation: 'google-navigation-sdk' as const,
