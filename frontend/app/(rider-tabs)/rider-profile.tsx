@@ -461,12 +461,21 @@ export default function RiderProfileScreen() {
     void shareTextViaWhatsApp(buildShareMessage(referralUsername || undefined, referralCode, displayName || undefined));
   };
 
+  // Never spin forever — if persist is slow / user briefly null, show a retry shell.
   if (!user) {
     return (
       <SafeAreaView style={[s.root, { backgroundColor: colors.background }]} edges={['top']}>
         <StatusBar barStyle={colors.statusBar} backgroundColor={colors.background} />
         <TabBrandStrip role="rider" />
-        <ProfileScreenSkeleton />
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 }}>
+          <ProfileScreenSkeleton />
+          <TouchableOpacity
+            onPress={() => router.replace('/(auth)/login' as any)}
+            style={{ marginTop: 8, paddingHorizontal: 16, paddingVertical: 10 }}
+          >
+            <Text style={{ color: colors.textMuted, fontWeight: '700' }}>Sign in again</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     );
   }

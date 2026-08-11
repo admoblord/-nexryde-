@@ -926,6 +926,7 @@ function BookInDriveStyle() {
         if (status !== 'granted') {
           if (mounted) {
             setGpsStatus('error');
+            setPickup(SAFE_PICKUP_FALLBACK);
             setPickupDetecting(false);
           }
           return;
@@ -987,13 +988,24 @@ function BookInDriveStyle() {
           onError: () => {
             if (mounted && !gotFix) {
               setGpsStatus('error');
+              setPickup(SAFE_PICKUP_FALLBACK);
               setPickupDetecting(false);
             }
           },
         });
+        // Hard failsafe — never leave Detecting… if GPS/network stalls.
+        setTimeout(() => {
+          if (!mounted || gotFix || manualPickupRef.current) return;
+          setPickup((prev) =>
+            isDetectingPickupLabel(prev) ? SAFE_PICKUP_FALLBACK : prev,
+          );
+          setPickupDetecting(false);
+          setGpsStatus((s) => (s === 'detecting' ? 'error' : s));
+        }, 14000);
       } catch {
         if (mounted) {
           setGpsStatus('error');
+          setPickup(SAFE_PICKUP_FALLBACK);
           setPickupDetecting(false);
         }
       }
@@ -1033,7 +1045,10 @@ function BookInDriveStyle() {
               : prev,
           );
         } catch {
-          /* ignore */
+          if (!cancelled) {
+            setPickup(SAFE_PICKUP_FALLBACK);
+            setPickupDetecting(false);
+          }
         }
       })();
     }, 220);

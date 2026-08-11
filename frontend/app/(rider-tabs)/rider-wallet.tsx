@@ -42,8 +42,8 @@ import {
   formatApiDetail,
   isWalletCheckoutInitOk,
   WALLET_CHECKOUT_USER_ERROR,
-  getAuthHeaders,
 } from '@/src/services/api';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 import {
   saveWalletCheckoutSession,
   loadWalletCheckoutSession,
@@ -188,12 +188,12 @@ export default function RiderWalletScreen() {
     let cancelled = false;
     const loadIncentives = async () => {
       try {
-        const hdr = await getAuthHeaders();
+        const opts = { method: 'GET' as const, timeoutMs: 12_000, preserveSessionOn401: true };
         const [refRes, creditRes, firstRideRes, statsRes] = await Promise.allSettled([
-          fetch(`${BACKEND_URL}/api/incentives/referral-code`, { headers: hdr }),
-          fetch(`${BACKEND_URL}/api/incentives/my-credits`, { headers: hdr }),
-          fetch(`${BACKEND_URL}/api/incentives/first-ride-status`, { headers: hdr }),
-          fetch(`${BACKEND_URL}/api/incentives/referral-stats`, { headers: hdr }),
+          authedFetch(`${BACKEND_URL}/api/incentives/referral-code`, opts),
+          authedFetch(`${BACKEND_URL}/api/incentives/my-credits`, opts),
+          authedFetch(`${BACKEND_URL}/api/incentives/first-ride-status`, opts),
+          authedFetch(`${BACKEND_URL}/api/incentives/referral-stats`, opts),
         ]);
         if (refRes.status === 'fulfilled' && refRes.value.ok) {
           const data = await refRes.value.json();
@@ -405,9 +405,11 @@ export default function RiderWalletScreen() {
     const code = promoCode.trim().toUpperCase();
     if (!code) { Alert.alert('Referral code', 'Enter a referral code first.'); return; }
     try {
-      const hdr = await getAuthHeaders();
-      const res = await fetch(`${BACKEND_URL}/api/incentives/apply-referral-code`, {
-        method: 'POST', headers: { ...hdr, 'Content-Type': 'application/json' },
+      const res = await authedFetch(`${BACKEND_URL}/api/incentives/apply-referral-code`, {
+        method: 'POST',
+        timeoutMs: 12_000,
+        preserveSessionOn401: true,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ referral_code: code }),
       });
       const data = await res.json();

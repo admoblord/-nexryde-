@@ -8,8 +8,9 @@
  * - Preloads before destination typing
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { BACKEND_URL, resolveAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL } from '@/src/services/api';
 import { haversineMeters } from '@/src/services/smartPickupGps';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 
 export const DETECTING_PICKUP = 'Detecting your pickup...';
 export const SAFE_PICKUP_FALLBACK = 'Near your location';
@@ -170,11 +171,15 @@ async function fetchReverse(
   if (!origin) return null;
   const q = `lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}`;
   const url = `${origin}/api/places/reverse-geocode?${q}`;
-  // /api/places/reverse-geocode requires auth — a plain fetch always 401s and the
-  // pickup label stays stuck on "Detecting…". Attach a valid bearer (no logout on
-  // failure; this is a best-effort label resolve).
-  const headers = await resolveAuthHeaders();
-  const res = await fetch(url, { signal, headers });
+  // Must use authedFetch: places require auth, and bare fetch can hang forever
+  // (no timeout) leaving "Detecting your pickup…" stuck on screen.
+  const res = await authedFetch(url, {
+    method: 'GET',
+    signal,
+    timeoutMs: 8_000,
+    preserveSessionOn401: true,
+  });
+  if (!res.ok) return null;
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   const label = String(
     data.pickup_label || data.short_label || data.formatted_address || data.address || '',
