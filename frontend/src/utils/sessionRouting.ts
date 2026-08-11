@@ -265,7 +265,21 @@ export async function routeAuthedUserFirstLogin(
       }
       router.replace(homeRouteForRole('driver') as any);
     } catch {
-      // Network blip on first login: prefer documents over a fake Home.
+      // Network blip: never dump a locally-approved driver back into document upload.
+      try {
+        const { readDriverVerificationFact } = await import(
+          '@/src/services/driverVerificationFact'
+        );
+        const fact = await readDriverVerificationFact(id);
+        if (fact?.verificationStatus === 'approved') {
+          await markDriverOnboardingCached(id);
+          router.replace(homeRouteForRole('driver') as any);
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
+      // Unknown / unfinished driver: prefer documents over a fake Home.
       router.replace({
         pathname: '/(auth)/driver-documents',
         params: driverDocumentsRouteParams(loggedUser),

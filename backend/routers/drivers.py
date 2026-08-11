@@ -14,7 +14,12 @@ import asyncio
 import hashlib
 
 from database import db
-from pii_encryption import encrypt_pii_value, nin_storage_fields, resolve_nin_plaintext
+from pii_encryption import (
+    encrypt_pii_value,
+    has_nin_on_file,
+    nin_storage_fields,
+    resolve_nin_plaintext,
+)
 from user_biometrics import get_reference_face_image, has_stored_face
 from user_lookup import find_user_by_id, QUERY_MAX_TIME_MS
 from surge_pricing import SURGE_CONFIG
@@ -392,18 +397,21 @@ async def get_driver_profile(user_id: str, request: Request):
         if isinstance(profile.get(heavy), str) and len(profile[heavy]) > 5000:
             profile[heavy] = ""
 
-    # Derive nin_verified: driver has a NIN number AND their documents were approved.
+    # Derive nin_verified: NIN on file (cipher/hash/last4 or legacy plaintext) + approved.
+    # Plaintext is cleared after PII encryption — do not require nin/nin_number.
     nin_raw = resolve_nin_plaintext(profile) or str(profile.get("nin_number") or "").strip() or None
+    nin_present = has_nin_on_file(profile) or bool(nin_raw)
     is_approved = profile.get("verification_status") == "approved"
-    nin_verified = bool(nin_raw) and is_approved
+    nin_verified = bool(nin_present) and is_approved
     profile["nin_verified"] = nin_verified
+    profile["has_nin"] = bool(nin_present)
 
     # Derive document statuses so the UI can reflect the real state.
     license_ok = is_approved and bool(profile.get("license_uploaded") or profile.get("drivers_license"))
     passport_ok = is_approved and bool(profile.get("passport_photo"))
     insurance_ok = is_approved and bool(profile.get("insurance"))
     profile["document_statuses"] = {
-        "nin": "verified" if nin_verified else ("submitted" if nin_raw else "not_submitted"),
+        "nin": "verified" if nin_verified else ("submitted" if nin_present else "not_submitted"),
         "drivers_license": "verified" if license_ok else ("pending" if is_approved else "not_submitted"),
         "passport_photo": "verified" if passport_ok else ("pending" if is_approved else "not_submitted"),
         "insurance": "verified" if insurance_ok else ("pending" if is_approved else "not_submitted"),
@@ -427,7 +435,7 @@ async def get_driver_profile(user_id: str, request: Request):
 
     # driverProfileComplete flag: front-end can use this to skip onboarding.
     profile["driver_profile_complete"] = bool(
-        nin_verified
+        nin_present
         and is_approved
         and len(vehicles) > 0
         and profile.get("profile_completed")
@@ -1435,6 +1443,9 @@ async def get_driver_onboarding_status(driver_id: str, request: Request):
                 "vehicles": 1,
                 "nin_number": 1,
                 "nin": 1,
+                "nin_hash": 1,
+                "nin_last4": 1,
+                "nin_cipher": 1,
             },
             max_time_ms=QUERY_MAX_TIME_MS,
         )
@@ -1445,7 +1456,7 @@ async def get_driver_onboarding_status(driver_id: str, request: Request):
         _vehicles_fast = profile.get("vehicles") or (
             [{}] if profile.get("vehicle_model") else []
         )
-        _nin_fast = str(profile.get("nin_number") or profile.get("nin") or "").strip()
+        _nin_fast = has_nin_on_file(profile)
         _fast_complete = bool(
             _nin_fast
             and profile.get("documents_verified")
@@ -1525,8 +1536,7 @@ async def get_driver_onboarding_status(driver_id: str, request: Request):
         vehicles = profile.get("vehicles") or []
         if not vehicles and profile.get("vehicle_model"):
             vehicles = [{}]  # synthesise from flat fields — at least one exists
-        nin_raw = str(profile.get("nin_number") or profile.get("nin") or "").strip()
-        nin_ok = bool(nin_raw)
+        nin_ok = has_nin_on_file(profile)
         driver_profile_complete = bool(
             nin_ok
             and profile.get("documents_verified")

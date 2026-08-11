@@ -139,10 +139,20 @@ export default function DocumentsScreen() {
       };
 
       setDocuments(prev => prev.map((doc) => {
-        // NIN: special case — verified if profile says so
+        // NIN: special case — verified if profile says so.
+        // After PII encryption, plaintext nin/nin_number are cleared; trust hash/last4/has_nin.
         if (doc.id === 'nin') {
           if (ninOk) return { ...doc, status: 'verified', detail: 'Identity confirmed' };
-          const hasNin = Boolean(profile?.nin_number || profile?.nin);
+          const hasNin = Boolean(
+            profile?.has_nin ||
+              profile?.nin_number ||
+              profile?.nin ||
+              profile?.nin_last4 ||
+              profile?.nin_hash,
+          );
+          if (approved && hasNin) {
+            return { ...doc, status: 'verified', detail: 'Identity confirmed' };
+          }
           return { ...doc, status: hasNin ? 'pending' : 'not_submitted' };
         }
         // All others: if approved → verified; if in archived with a status → use it; else not_submitted
