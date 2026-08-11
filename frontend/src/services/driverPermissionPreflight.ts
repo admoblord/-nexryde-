@@ -50,8 +50,7 @@ async function ensureForegroundLocation(): Promise<boolean> {
 
 async function ensureBackgroundLocation(): Promise<boolean> {
   if (Platform.OS === 'web') return true;
-  // Play User Data policy: only request BACKGROUND_LOCATION via the shared
-  // disclosure choke-point (never call requestBackgroundPermissionsAsync here).
+  // Play User Data policy: only request via the shared disclosure choke-point.
   const { requestBackgroundLocationWithDisclosure } = await import(
     '@/src/services/backgroundLocationDisclosure'
   );
