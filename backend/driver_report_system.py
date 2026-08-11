@@ -287,15 +287,16 @@ class DriverReportSystem:
                   f"At 10 points, your account will be temporarily suspended. " \
                   f"Please maintain professional behavior with all riders."
         
-        await self.db.notifications.insert_one({
-            "user_id": driver_id,
-            "type": "safety_warning",
-            "title": "Safety Warning",
-            "message": message,
-            "created_at": datetime.utcnow(),
-            "read": False,
-            "priority": "high"
-        })
+        from user_inbox_notifications import insert_user_notification
+
+        await insert_user_notification(
+            user_id=driver_id,
+            type="safety_warning",
+            title="Safety Warning",
+            message=message,
+            created_at=datetime.utcnow(),
+            priority="high",
+        )
     
     async def notify_driver_of_report(self, driver_id: str, category: str, severity: str):
         """Notify driver that they've been reported"""
@@ -303,15 +304,16 @@ class DriverReportSystem:
                   f"Category: {category.replace('_', ' ').title()}. " \
                   f"Our team will review this report. Please ensure you maintain professional conduct."
         
-        await self.db.notifications.insert_one({
-            "user_id": driver_id,
-            "type": "report_notification",
-            "title": "Rider Report",
-            "message": message,
-            "created_at": datetime.utcnow(),
-            "read": False,
-            "priority": "medium"
-        })
+        from user_inbox_notifications import insert_user_notification
+
+        await insert_user_notification(
+            user_id=driver_id,
+            type="report_notification",
+            title="Rider Report",
+            message=message,
+            created_at=datetime.utcnow(),
+            priority="medium",
+        )
     
     async def notify_driver_of_suspension(
         self,
@@ -327,15 +329,16 @@ class DriverReportSystem:
             message = f"Your account has been permanently suspended. Reason: {reason}. " \
                       f"Contact support for more information."
         
-        await self.db.notifications.insert_one({
-            "user_id": driver_id,
-            "type": "suspension",
-            "title": "Account Suspended",
-            "message": message,
-            "created_at": datetime.utcnow(),
-            "read": False,
-            "priority": "critical"
-        })
+        from user_inbox_notifications import insert_user_notification
+
+        await insert_user_notification(
+            user_id=driver_id,
+            type="suspension",
+            title="Account Suspended",
+            message=message,
+            created_at=datetime.utcnow(),
+            priority="critical",
+        )
     
     async def notify_admin_of_critical_report(self, report: Dict[str, Any]):
         """Notify admin of critical safety report"""

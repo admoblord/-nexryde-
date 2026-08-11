@@ -253,14 +253,18 @@ class _UserSocketHub:
                 pass
         return sent
 
-    async def send_json(self, user_id: str, message: dict[str, Any]) -> int:
+    async def send_json(
+        self, user_id: str, message: dict[str, Any], *, cache_for_poll: bool = True
+    ) -> int:
         """
-        Publish to Redis (reaches ALL instances) + cache for poll fallback.
+        Publish to Redis (reaches ALL instances) + optionally cache for poll fallback.
         Falls back to in-process delivery when Redis is unavailable.
         """
         published = await _redis_publish(self._ch(user_id), message)
         # Poll clients expect expanded trip_update (compact `loc` is WS-only wire).
-        await _cache_poll_message(user_id, expand_realtime_payload(message))
+        # Inbox badge pushes must not overwrite the rider trip poll cache.
+        if cache_for_poll:
+            await _cache_poll_message(user_id, expand_realtime_payload(message))
         if not published:
             # Redis unavailable — deliver directly to local sockets only.
             return await self._deliver_locally(user_id, message)
@@ -271,6 +275,7 @@ class _UserSocketHub:
 
 driver_offer_hub = _UserSocketHub("driver")
 rider_trip_hub   = _UserSocketHub("rider")
+user_inbox_hub   = _UserSocketHub("inbox")
 
 
 # ── Auth helper ───────────────────────────────────────────────────────────────
@@ -341,6 +346,26 @@ async def websocket_rider_trips(websocket: WebSocket, rider_id: str):
         pass
     finally:
         await rider_trip_hub.disconnect(websocket, rider_id)
+
+
+@realtime_dispatch_router.websocket("/ws/user/{user_id}/inbox")
+async def websocket_user_inbox(websocket: WebSocket, user_id: str):
+    auth_id = _auth_user_id_from_ws(websocket)
+    if not auth_id or auth_id != user_id:
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
+    await user_inbox_hub.connect(websocket, user_id)
+    try:
+        while True:
+            data = await asyncio.wait_for(websocket.receive_text(), timeout=90)
+            if _is_ws_ping(data):
+                await websocket.send_text("pong")
+    except (WebSocketDisconnect, asyncio.TimeoutError):
+        pass
+    except Exception:
+        pass
+    finally:
+        await user_inbox_hub.disconnect(websocket, user_id)
 
 
 # ── Payload expand (compact loc → trip_update for poll / legacy) ──────────────
@@ -437,6 +462,51 @@ async def push_driver_offers_withdrawn(driver_id: str, *, reason: str = "driver_
 
 async def push_rider_trip_update(rider_id: str, payload: dict) -> int:
     return await rider_trip_hub.send_json(rider_id, payload)
+
+
+_ENGAGEMENT_CATEGORY_NIN = ("driver_engagement", "rider_engagement", "engagement", "daily_slot")
+_ENGAGEMENT_SOURCE_NIN = ("engagement", "daily_slot", "reconnect")
+
+
+async def publish_notification_badge(user_id: str, unread_count: int | None = None) -> int:
+    """Push unread inbox badge count to `/api/ws/user/{user_id}/inbox` clients."""
+    uid = str(user_id or "").strip()
+    if not uid:
+        return 0
+    try:
+        from database import db
+
+        if unread_count is None:
+            unread_count = int(
+                await db.notifications.count_documents({"user_id": uid, "read": False})
+            )
+        else:
+            unread_count = int(unread_count)
+        if unread_count <= 0:
+            excl = 0
+        else:
+            excl = int(
+                await db.notifications.count_documents(
+                    {
+                        "user_id": uid,
+                        "read": False,
+                        "category": {"$nin": list(_ENGAGEMENT_CATEGORY_NIN)},
+                        "source": {"$nin": list(_ENGAGEMENT_SOURCE_NIN)},
+                    }
+                )
+            )
+        return await user_inbox_hub.send_json(
+            uid,
+            {
+                "type": "notification_badge",
+                "unread_count": unread_count,
+                "unread_count_excl_engagement": excl,
+            },
+            cache_for_poll=False,
+        )
+    except Exception as exc:
+        logger.warning("publish_notification_badge failed user=%s: %s", uid, exc)
+        return 0
 
 
 # ── Poll cache (Redis-backed, in-process fallback) ─────────────────────────────

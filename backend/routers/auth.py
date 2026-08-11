@@ -658,16 +658,16 @@ async def send_driver_verification_notification(user_id: str, status: str, reaso
             await send_sms_notification(phone, message)
 
         # Also store in-app notification
-        notification = {
-            "id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "type": "verification_" + status,
-            "title": push_title,
-            "message": message,
-            "read": False,
-            "created_at": datetime.now(timezone.utc),
-        }
-        await db.notifications.insert_one(notification)
+        from user_inbox_notifications import insert_user_notification
+
+        await insert_user_notification(
+            user_id=user_id,
+            type="verification_" + status,
+            title=push_title,
+            message=message,
+            id=str(uuid.uuid4()),
+            created_at=datetime.now(timezone.utc),
+        )
 
         # Phone push notification (FCM / Expo) — mirrors the in-app alert so drivers
         # are told immediately when documents are under review / approved / rejected.

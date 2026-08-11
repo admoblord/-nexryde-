@@ -175,15 +175,16 @@ class PerformanceRewardsManager:
         message = messages.get(reason, "🎉 Congratulations! You've earned 1 FREE MONTH of subscription!")
         
         # Store in-app notification
-        await self.db.notifications.insert_one({
-            "user_id": driver_id,
-            "type": "reward",
-            "title": "Free Month Reward!",
-            "message": message,
-            "created_at": datetime.utcnow(),
-            "read": False,
-            "priority": "high"
-        })
+        from user_inbox_notifications import insert_user_notification
+
+        await insert_user_notification(
+            user_id=driver_id,
+            type="reward",
+            title="Free Month Reward!",
+            message=message,
+            created_at=datetime.utcnow(),
+            priority="high",
+        )
         
         # TODO: Send SMS notification (optional)
         # await send_sms_notification(driver["phone"], message)

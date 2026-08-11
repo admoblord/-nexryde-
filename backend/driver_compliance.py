@@ -120,21 +120,20 @@ async def grant_document_grace(
 
     if notify:
         now_iso = now.isoformat()
-        await db.notifications.insert_one(
-            {
-                "id": str(uuid.uuid4()),
-                "user_id": driver_id,
-                "type": "document_grace",
-                "title": title,
-                "message": message,
-                "read": False,
-                "created_at": now_iso,
-                "data": {
-                    "document_type": document_type,
-                    "grace_until": grace_until.isoformat(),
-                    "screen": "/(auth)/driver-documents",
-                },
-            }
+        from user_inbox_notifications import insert_user_notification
+
+        await insert_user_notification(
+            user_id=driver_id,
+            type="document_grace",
+            title=title,
+            message=message,
+            id=str(uuid.uuid4()),
+            created_at=now_iso,
+            data={
+                "document_type": document_type,
+                "grace_until": grace_until.isoformat(),
+                "screen": "/(auth)/driver-documents",
+            },
         )
         await send_push_notification(
             driver_id,

@@ -15,6 +15,7 @@ import { useRequireRole } from '@/src/hooks/useRequireRole';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
 import { warmTokenCache } from '@/src/lib/tokenStore';
+import { inboxSocket } from '@/src/services/inboxSocket';
 import {
   buildTabScreenOptions,
   tabBadgeStyles,
@@ -127,11 +128,15 @@ export default function DriverTabLayout() {
         /* non-fatal */
       }
     };
-    fetchUnread();
-    const iv = setInterval(fetchUnread, 30000);
+    void fetchUnread();
+    inboxSocket.acquire(userId);
+    const unsub = inboxSocket.subscribeBadge((msg) => {
+      if (!cancelled) setUnreadCount(Number(msg.unread_count) || 0);
+    });
     return () => {
       cancelled = true;
-      clearInterval(iv);
+      unsub();
+      inboxSocket.release();
     };
   }, [allowed, userId]);
 

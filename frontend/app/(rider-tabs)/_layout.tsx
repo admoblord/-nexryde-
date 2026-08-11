@@ -14,7 +14,7 @@ import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { warmTokenCache } from '@/src/lib/tokenStore';
 import { useRiderRidePhaseNavigation } from '@/src/hooks/useRiderRidePhaseNavigation';
 import { useWalletEnabled } from '@/src/services/clientConfig';
-import { setForegroundInterval } from '@/src/utils/foregroundInterval';
+import { inboxSocket } from '@/src/services/inboxSocket';
 import {
   buildTabScreenOptions,
   tabBadgeStyles,
@@ -95,12 +95,15 @@ export default function RiderTabLayout() {
         /* silent */
       }
     };
-    const stop = setForegroundInterval(() => {
-      void fetchUnread();
-    }, 30000);
+    void fetchUnread();
+    inboxSocket.acquire(userId);
+    const unsub = inboxSocket.subscribeBadge((msg) => {
+      if (!cancelled) setUnreadCount(Number(msg.unread_count) || 0);
+    });
     return () => {
       cancelled = true;
-      stop();
+      unsub();
+      inboxSocket.release();
     };
   }, [allowed, userId]);
 

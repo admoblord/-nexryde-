@@ -65,7 +65,7 @@ import DriverStartTripDock from '@/src/components/driver/DriverStartTripDock';
 import DriverOngoingTripDock from '@/src/components/driver/DriverOngoingTripDock';
 import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 import { resolveRiderPhotoUri } from '@/src/utils/tripProfilePhotos';
-import { setForegroundInterval } from '@/src/utils/foregroundInterval';
+import { inboxSocket } from '@/src/services/inboxSocket';
 import { DRIVER_OFFER_COUNTDOWN_SECONDS } from '@/src/constants/driverOffer';
 import {
   DOCK_BLUR_INTENSITY,
@@ -673,12 +673,18 @@ function DriverLiveMapViewInner({
         /* silent */
       }
     };
-    const stop = setForegroundInterval(() => {
-      void fetchUnread();
-    }, 30000);
+    void fetchUnread();
+    inboxSocket.acquire(driverId);
+    const unsub = inboxSocket.subscribeBadge((msg) => {
+      if (cancelled) return;
+      const excl = msg.unread_count_excl_engagement;
+      const count = excl != null ? Number(excl) : Number(msg.unread_count) || 0;
+      setMapInboxUnread(Number.isFinite(count) ? count : 0);
+    });
     return () => {
       cancelled = true;
-      stop();
+      unsub();
+      inboxSocket.release();
     };
   }, [driverId, canCallAuthedApi]);
 

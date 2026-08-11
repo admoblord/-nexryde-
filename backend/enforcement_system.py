@@ -651,13 +651,14 @@ async def record_violation(user_id: str, violation_type: str, trip_id: str = Non
         notify_violation_type, count, total_strikes, action_result, notify_config
     )
 
-    await db.notifications.insert_one({
-        "id": str(uuid.uuid4()),
-        "user_id": user_id,
-        "type": notif_type,
-        "title": title,
-        "message": inbox_message,
-        "data": {
+    from user_inbox_notifications import insert_user_notification
+
+    await insert_user_notification(
+        user_id=user_id,
+        type=notif_type,
+        title=title,
+        message=inbox_message,
+        data={
             "violation_type": violation_type,
             "incident_count": count,
             "total_strikes": total_strikes,
@@ -668,9 +669,7 @@ async def record_violation(user_id: str, violation_type: str, trip_id: str = Non
             "blocked_until": action_result.get("blocked_until"),
             "trip_id": trip_id,
         },
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "read": False,
-    })
+    )
 
     from services.product_notification_email import schedule_notify_user_brevo_email
 
