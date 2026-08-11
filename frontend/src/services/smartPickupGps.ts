@@ -1,35 +1,37 @@
 /**
- * Smart pickup GPS — Uber-style progressive precision.
+ * Smart pickup GPS — last-known first, Balanced refresh, hard timeout.
  *
- * 1. Paint INSTANTLY from last-known position (any accuracy).
- * 2. Stream high-accuracy GPS fixes and converge: only an IMPROVING fix
- *    (better accuracy, or real movement) may replace the current one.
- * 3. Lock when accuracy <= targetAccuracyM (exact-spot grade) or on timeout,
- *    keeping the best fix seen.
- *
- * The caller decides how fixes are applied (e.g. never overwrite a pickup
- * the rider set manually).
+ * Spec:
+ * 1. getLastKnownPositionAsync({ maxAge: 300000 }) → pin + reverse-geocode immediately
+ * 2. getCurrentPositionAsync(Balanced) in background; update only if >50m
+ * 3. Hard 8s timeout on current position — never leave UI stuck
+ * 4. Never use Highest / BestForNavigation for pickup (driver trip tracking only)
  */
 import { Platform } from 'react-native';
 import * as Location from 'expo-location';
+import { getWarmedLocation, setWarmedLocation } from '@/src/services/locationWarm';
 
 export type SmartPickupFix = {
   lat: number;
   lng: number;
   /** Reported horizontal accuracy in meters (null = unknown). */
   accuracyM: number | null;
-  source: 'last_known' | 'gps';
-  /** True when converged (target accuracy reached or timeout with best fix). */
+  source: 'last_known' | 'gps' | 'map_center';
+  /** True when converged (background refresh done or timeout). */
   final: boolean;
 };
 
 export type SmartPickupOptions = {
   onFix: (fix: SmartPickupFix) => void;
   onError?: (error: unknown) => void;
-  /** Stop refining once a fix is at least this accurate. Default 15m. */
-  targetAccuracyM?: number;
-  /** Give up refining after this long and finalize the best fix. Default 12s. */
+  /** Meaningful move before replacing last-known with fresh GPS. Default 50m. */
+  updateThresholdM?: number;
+  /** Hard timeout for getCurrentPositionAsync. Default 8s. */
   timeoutMs?: number;
+  /** Optional map-centre fallback if no last-known and GPS times out. */
+  mapCenterFallback?: { lat: number; lng: number } | null;
+  /** @deprecated Ignored — pickup uses Balanced, not target accuracy chasing. */
+  targetAccuracyM?: number;
 };
 
 export function haversineMeters(
@@ -49,67 +51,53 @@ export function haversineMeters(
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-/** A new sample wins if meaningfully more accurate, or first live GPS after cached. */
-function isImprovement(
-  best: SmartPickupFix | null,
-  accuracyM: number | null,
-  lat: number,
-  lng: number,
-): boolean {
-  if (!best) return true;
-  // Cached fix is always beaten by the first live GPS sample.
-  if (best.source === 'last_known') return true;
-  if (accuracyM == null) return false;
-  if (best.accuracyM == null) return true;
-  if (accuracyM <= best.accuracyM - 5 || accuracyM <= best.accuracyM * 0.8) return true;
-  // Rider actually moved (not noise): similar accuracy but a real displacement.
-  const moved = haversineMeters(best.lat, best.lng, lat, lng);
-  return moved > Math.max(30, (accuracyM ?? 30) * 1.5) && accuracyM <= best.accuracyM + 10;
-}
-
 /**
  * Start smart acquisition. Returns a cancel function — always call it on unmount.
- * Emits: last_known (instant) → improving gps fixes → one fix with final: true.
+ * Emits: last_known (instant) → optional gps if >threshold → final: true.
  */
 export function startSmartPickupGps(options: SmartPickupOptions): () => void {
-  const { onFix, onError, targetAccuracyM = 15, timeoutMs = 12000 } = options;
+  const {
+    onFix,
+    onError,
+    updateThresholdM = 50,
+    timeoutMs = 8000,
+    mapCenterFallback = null,
+  } = options;
 
   let cancelled = false;
   let finalized = false;
-  let best: SmartPickupFix | null = null;
-  let watchSub: { remove: () => void } | null = null;
-  let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  const state: { best: SmartPickupFix | null } = { best: null };
 
-  const cleanup = () => {
-    if (watchSub) {
-      watchSub.remove();
-      watchSub = null;
-    }
-    if (timeoutTimer) {
-      clearTimeout(timeoutTimer);
-      timeoutTimer = null;
-    }
-  };
-
-  const finalize = () => {
+  const finalize = (fix?: SmartPickupFix | null) => {
     if (cancelled || finalized) return;
     finalized = true;
-    cleanup();
-    if (best) onFix({ ...best, final: true });
-    else onError?.(new Error('gps_timeout_no_fix'));
+    const chosen = fix ?? state.best;
+    if (chosen) {
+      onFix({ ...chosen, final: true });
+    } else if (mapCenterFallback) {
+      onFix({
+        lat: mapCenterFallback.lat,
+        lng: mapCenterFallback.lng,
+        accuracyM: null,
+        source: 'map_center',
+        final: true,
+      });
+    } else {
+      onError?.(new Error('gps_timeout_no_fix'));
+    }
   };
 
   const emit = (fix: SmartPickupFix) => {
     if (cancelled || finalized) return;
-    best = fix;
+    state.best = fix;
     onFix(fix);
-    if (
-      fix.source === 'gps' &&
-      fix.accuracyM != null &&
-      fix.accuracyM <= targetAccuracyM
-    ) {
-      finalize();
-    }
+    setWarmedLocation({
+      lat: fix.lat,
+      lng: fix.lng,
+      accuracyM: fix.accuracyM,
+      source: fix.source === 'gps' ? 'gps' : 'last_known',
+      at: Date.now(),
+    });
   };
 
   void (async () => {
@@ -125,66 +113,96 @@ export function startSmartPickupGps(options: SmartPickupOptions): () => void {
         return;
       }
 
-      // 1) Instant paint — any cached position, no accuracy floor.
-      void Location.getLastKnownPositionAsync({ maxAge: 5 * 60 * 1000 })
-        .then((loc) => {
-          if (cancelled || finalized || !loc?.coords) return;
-          const lat = Number(loc.coords.latitude);
-          const lng = Number(loc.coords.longitude);
-          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-          if (best) return; // live GPS already arrived — cached is stale
-          emit({
-            lat,
-            lng,
-            accuracyM: loc.coords.accuracy ?? null,
-            source: 'last_known',
-            final: false,
-          });
-        })
-        .catch(() => {});
-
-      // 2) High-accuracy convergence stream.
-      timeoutTimer = setTimeout(finalize, timeoutMs);
-      watchSub = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.BestForNavigation,
-          timeInterval: 1000,
-          distanceInterval: 0,
-        },
-        (loc) => {
-          if (cancelled || finalized || !loc?.coords) return;
-          const lat = Number(loc.coords.latitude);
-          const lng = Number(loc.coords.longitude);
-          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-          const accuracyM = loc.coords.accuracy ?? null;
-          if (!isImprovement(best, accuracyM, lat, lng)) return;
-          emit({ lat, lng, accuracyM, source: 'gps', final: false });
-        },
-      );
-      if (cancelled || finalized) {
-        cleanup();
-        return;
+      // 0) In-memory warm from home launch — paint before OS last-known round-trip.
+      const warm = getWarmedLocation();
+      if (warm && Date.now() - warm.at < 5 * 60 * 1000) {
+        emit({
+          lat: warm.lat,
+          lng: warm.lng,
+          accuracyM: warm.accuracyM,
+          source: warm.source === 'gps' || warm.source === 'warm' ? 'gps' : 'last_known',
+          final: false,
+        });
       }
 
-      // 3) Safety net — some OEMs never tick the watcher indoors; one direct fix.
-      void Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })
-        .then((loc) => {
-          if (cancelled || finalized || !loc?.coords) return;
+      // 1) OS last-known — under 1s path for address resolve.
+      try {
+        const loc = await Location.getLastKnownPositionAsync({ maxAge: 5 * 60 * 1000 });
+        if (!cancelled && loc?.coords) {
           const lat = Number(loc.coords.latitude);
           const lng = Number(loc.coords.longitude);
-          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-          const accuracyM = loc.coords.accuracy ?? null;
-          if (!isImprovement(best, accuracyM, lat, lng)) return;
-          emit({ lat, lng, accuracyM, source: 'gps', final: false });
-        })
-        .catch(() => {});
+          if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            const prev = state.best;
+            const shouldReplace =
+              !prev || haversineMeters(prev.lat, prev.lng, lat, lng) > 5;
+            if (shouldReplace) {
+              emit({
+                lat,
+                lng,
+                accuracyM: loc.coords.accuracy ?? null,
+                source: 'last_known',
+                final: false,
+              });
+            }
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+
+      if (cancelled || finalized) return;
+
+      // 2) Background Balanced refresh with hard 8s timeout.
+      let current: Location.LocationObject | null = null;
+      try {
+        current = await Promise.race([
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+        ]);
+      } catch {
+        current = null;
+      }
+
+      if (cancelled || finalized) return;
+
+      if (current?.coords) {
+        const lat = Number(current.coords.latitude);
+        const lng = Number(current.coords.longitude);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          const prev = state.best;
+          const moved =
+            !prev || haversineMeters(prev.lat, prev.lng, lat, lng) >= updateThresholdM;
+          if (moved || !prev) {
+            emit({
+              lat,
+              lng,
+              accuracyM: current.coords.accuracy ?? null,
+              source: 'gps',
+              final: false,
+            });
+          } else {
+            // Quietly keep last-known coords but mark GPS freshness on warm store
+            setWarmedLocation({
+              lat: prev.lat,
+              lng: prev.lng,
+              accuracyM: current.coords.accuracy ?? prev.accuracyM,
+              source: 'gps',
+              at: Date.now(),
+            });
+          }
+        }
+      }
+
+      finalize(state.best);
     } catch (e) {
-      if (!cancelled) onError?.(e);
+      if (!cancelled) {
+        if (state.best) finalize(state.best);
+        else onError?.(e);
+      }
     }
   })();
 
   return () => {
     cancelled = true;
-    cleanup();
   };
 }

@@ -149,10 +149,12 @@
         "expo-build-properties",
         {
           "ios": {
+            "jsEngine": "hermes",
             "buildReactNativeFromSource": true,
             "deploymentTarget": "16.4"
           },
           "android": {
+            "jsEngine": "hermes",
             "minSdkVersion": 24,
             "enablePngCrunchInReleaseBuilds": true,
             "extraProguardRules": "",

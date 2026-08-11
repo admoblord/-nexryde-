@@ -3,9 +3,11 @@ Google Places API Proxy Service
 Handles autocomplete and place details from backend to avoid CORS issues.
 
 Caching strategy (cost optimisation):
-  L1 — Redis (hot, TTL 24 h for geocode / 7 days for place details)
+  L1 — Redis (hot, TTL 30 days for reverse-geocode / 7 days for place details)
   L2 — MongoDB google_places_cache (warm, TTL via expireAfterSeconds index)
   L3 — Google API (charged)
+
+  Reverse-geocode keys use lat/lng rounded to 4 decimal places (~11 m).
 
 A two-level cache means a cache-warm deployment with 500 drivers pays
 ~0 geocoding/autocomplete dollars per day for repeated queries.
@@ -299,6 +301,43 @@ async def _require_places_auth(request: Request) -> str:
     return actor
 
 
+# Frequent Lagos landmarks — checked before Google Autocomplete (zero API cost).
+_LAGOS_LANDMARKS: list[dict] = [
+    {"place_id": "local:lekki-conservation", "description": "Lekki Conservation Centre, Lagos", "main_text": "Lekki Conservation Centre", "secondary_text": "Lekki, Lagos", "lat": 6.4391, "lng": 3.5355},
+    {"place_id": "local:murtala-airport", "description": "Murtala Muhammed International Airport, Ikeja", "main_text": "Murtala Muhammed International Airport", "secondary_text": "Ikeja, Lagos", "lat": 6.5774, "lng": 3.3212},
+    {"place_id": "local:cms", "description": "CMS, Lagos Island", "main_text": "CMS", "secondary_text": "Lagos Island", "lat": 6.4510, "lng": 3.3890},
+    {"place_id": "local:computer-village", "description": "Computer Village, Ikeja", "main_text": "Computer Village", "secondary_text": "Ikeja, Lagos", "lat": 6.6018, "lng": 3.3515},
+    {"place_id": "local:admiralty", "description": "Admiralty Way, Lekki Phase 1", "main_text": "Admiralty Way", "secondary_text": "Lekki Phase 1, Lagos", "lat": 6.4474, "lng": 3.4721},
+    {"place_id": "local:vi-landmark", "description": "Landmark Beach, Victoria Island", "main_text": "Landmark Beach", "secondary_text": "Victoria Island, Lagos", "lat": 6.4260, "lng": 3.4340},
+    {"place_id": "local:ikeja-city-mall", "description": "Ikeja City Mall, Ikeja", "main_text": "Ikeja City Mall", "secondary_text": "Ikeja, Lagos", "lat": 6.6194, "lng": 3.3578},
+    {"place_id": "local:national-theatre", "description": "National Theatre, Iganmu", "main_text": "National Theatre", "secondary_text": "Iganmu, Lagos", "lat": 6.4730, "lng": 3.3695},
+    {"place_id": "local:yaba", "description": "Yaba, Lagos", "main_text": "Yaba", "secondary_text": "Lagos", "lat": 6.5095, "lng": 3.3711},
+    {"place_id": "local:ajah", "description": "Ajah, Lagos", "main_text": "Ajah", "secondary_text": "Lagos", "lat": 6.4698, "lng": 3.5852},
+]
+
+
+def _local_landmark_predictions(input_text: str) -> list[dict]:
+    q = (input_text or "").strip().lower()
+    if len(q) < 3:
+        return []
+    out = []
+    for row in _LAGOS_LANDMARKS:
+        hay = f"{row['main_text']} {row['description']}".lower()
+        if q in hay or any(tok and tok in hay for tok in q.split()):
+            out.append(
+                {
+                    "place_id": row["place_id"],
+                    "description": row["description"],
+                    "main_text": row["main_text"],
+                    "secondary_text": row["secondary_text"],
+                    "lat": row["lat"],
+                    "lng": row["lng"],
+                    "source": "local_landmark",
+                }
+            )
+    return out[:5]
+
+
 @places_router.get("/autocomplete")
 async def autocomplete_places(
     request: Request,
@@ -320,6 +359,10 @@ async def autocomplete_places(
     
     if len(input) < 3:
         return {"predictions": [], "status": "OK"}
+
+    local_hits = _local_landmark_predictions(input)
+    if local_hits:
+        return {"predictions": local_hits, "status": "OK", "cache": "local_landmark"}
 
     import time as _time
     t0 = _time.perf_counter()
@@ -533,7 +576,8 @@ async def reverse_geocode(
         if data.get("status") == "OK" and results:
             picked = pick_priority_label(results)
             response_payload = to_api_payload(picked, cache="miss")
-            await _set_cache(key, response_payload, ttl_seconds=3600)
+            # Lagos addresses are stable — 30-day TTL keyed by 4dp lat/lng.
+            await _set_cache(key, response_payload, ttl_seconds=86400 * 30)
             await cache_set_h3(lat, lng, {**picked, "label": response_payload["short_label"]})
             return response_payload
 

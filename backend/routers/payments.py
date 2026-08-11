@@ -162,6 +162,7 @@ async def get_directions_from_google(
                     else:
                         await store_cached_directions(db, p_lat, p_lng, d_lat, d_lng, result)
                 await log_api_call(db, call_type="directions", trip_id=trip_id, cached=False)
+                # Billing counter is incremented inside server get_directions on real Google HTTP hits.
                 return result
 
         if has_stop:
@@ -2642,6 +2643,13 @@ async def verify_wallet_payment_by_reference(transaction_ref: str, request: Requ
 async def get_subscription(driver_id: str, request: Request):
     """Get driver's subscription status (activity-based trial)."""
     verify_owner_strict(request, driver_id)
+    from hot_cache import TTL_SUBSCRIPTION_SEC, cache_get_json, cache_set_json, subscription_key
+
+    cache_key = subscription_key(driver_id)
+    cached = await cache_get_json(cache_key)
+    if isinstance(cached, dict) and cached.get("status") is not None:
+        return cached
+
     await _assert_driver_account(driver_id)
     subscription = await _ensure_auto_trial_for_verified_driver(driver_id)
     if not subscription:
@@ -2689,10 +2697,11 @@ async def get_subscription(driver_id: str, request: Request):
         live_active = subscription.get("status") in {"trial", "active", "grace_period"}
         subscription["subscription_active"] = flag_state["subscription_active"] or live_active
         subscription["subscription_expiry"] = flag_state["subscription_expiry"]
+        await cache_set_json(cache_key, subscription, TTL_SUBSCRIPTION_SEC)
         return subscription
 
     # No subscription yet — driver hasn't completed verification or profile.
-    return {
+    none_payload = {
         "status": "none",
         "days_remaining": 0,
         "trial_trips_target": SUBSCRIPTION_CONFIG["trial_trips_target"],
@@ -2705,6 +2714,8 @@ async def get_subscription(driver_id: str, request: Request):
         "subscription_expiry": None,
         "message": await _trial_unlock_message(),
     }
+    await cache_set_json(cache_key, none_payload, TTL_SUBSCRIPTION_SEC)
+    return none_payload
 
 
 async def _trial_unlock_message() -> str:
@@ -3925,6 +3936,9 @@ async def estimate_fare(request: FareEstimateRequest, http_request: Request):
         "rain_multiplier": rain_mult,
         "surge_details": surge_details,
         "route_metrics_source": route_metrics_source,
+        "google_maps_billed": bool((route_data or {}).get("maps_billed"))
+        if isinstance(route_data, dict)
+        else False,
         "lagride_profile": lagride_profile_out,
         "competitive_positioning_summary": comp_summary,
         "competitive_positioning_bullets": comp_bullets,

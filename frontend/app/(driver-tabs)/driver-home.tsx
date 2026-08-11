@@ -2232,7 +2232,30 @@ export default function ModernDriverHome() {
           setAcceptingRide(false);
           return;
         }
-        // Skip NetInfo preflight — it adds 100–400ms and accept itself fails fast into queue.
+        // Optimistic accept: flip UI instantly, reconcile with server in background.
+        const offerRoute = normalizeRoutePreview(ride?.route_preview_coordinates);
+        const incomingRec = ride as Record<string, unknown> | null | undefined;
+        const optimisticTrip = {
+          id: tripId,
+          status: 'accepted',
+          driver_id: driverId,
+          rider_id: ride?.rider_id,
+          offered_fare: proposed,
+          fare: proposed,
+          pickup_location: ride?.pickup_location,
+          dropoff_location: ride?.dropoff_location,
+          route_preview_coordinates: offerRoute ?? null,
+          rider_profile_image:
+            ride?.rider_photo != null ? String(ride.rider_photo) : undefined,
+          rider_name: typeof ride?.rider_name === 'string' ? ride.rider_name : undefined,
+          shield: incomingRec?.shield as Record<string, unknown> | undefined,
+        } as unknown as Trip;
+        if (Platform.OS !== 'web') {
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+        setCurrentTrip(optimisticTrip);
+        clearIncomingOffer();
+
         const outcome = await acceptDriverTripOffer({
           tripId,
           driverId,
@@ -2241,15 +2264,11 @@ export default function ModernDriverHome() {
         });
 
         if (outcome.status === 'accepted' || outcome.status === 'reconciled') {
-          if (Platform.OS !== 'web') {
-            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          }
           const data = outcome.trip;
           const drec = data as Record<string, unknown>;
           const apiRoute = normalizeRoutePreview(drec.route_preview_coordinates);
-          const offerRoute = normalizeRoutePreview(ride?.route_preview_coordinates);
-          const incomingRec = ride as Record<string, unknown> | null | undefined;
           const mergedTrip = {
+            ...optimisticTrip,
             ...data,
             route_preview_coordinates: apiRoute ?? offerRoute ?? null,
             rider_profile_image:
@@ -2269,15 +2288,15 @@ export default function ModernDriverHome() {
             toast.show('Ride accepted — synced after a slow connection.', 'success');
           }
           setCurrentTrip(mergedTrip);
-          clearIncomingOffer();
         } else if (outcome.status === 'session_expired') {
+          setCurrentTrip(null);
+          toast.show(outcome.message, 'error');
           Alert.alert('Session expired', outcome.message, [
             { text: 'Later', style: 'cancel' },
             { text: 'Sign in', onPress: () => router.replace('/(auth)/login' as Href) },
           ]);
         } else if (outcome.httpStatus === 408) {
-          // Accept timed out / network dropped and server assignment could not be
-          // confirmed — queue it so it replays on reconnect instead of losing the ride.
+          // Keep optimistic trip + queue accept for replay on reconnect.
           await queueDriverRideAcceptance(ride.id, {
             driver_id: driverId,
             offer_id: ride?.offer_id,
@@ -2286,6 +2305,8 @@ export default function ModernDriverHome() {
           setOfflineQueueCount(await getQueueSize());
           toast.show('Bid saved — will send when connection is stable. Tap Send bid to retry.', 'warning');
         } else {
+          // Roll back optimistic accept when the server rejects.
+          setCurrentTrip(null);
           toast.show(outcome.message || 'Could not accept — try the next offer.', 'warning');
         }
       } catch (e) {

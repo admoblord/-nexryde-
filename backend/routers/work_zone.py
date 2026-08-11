@@ -50,7 +50,15 @@ class WorkZoneActivateBody(BaseModel):
 
 @work_zone_router.get("/work-zone/config")
 async def get_work_zone_config():
-    return work_zone_public_config()
+    from hot_cache import TTL_WORK_ZONE_SEC, cache_get_json, cache_set_json, work_zone_config_key
+
+    key = work_zone_config_key()
+    hit = await cache_get_json(key)
+    if isinstance(hit, dict):
+        return hit
+    payload = work_zone_public_config()
+    await cache_set_json(key, payload, TTL_WORK_ZONE_SEC)
+    return payload
 
 
 @work_zone_router.get("/work-zone/areas")
@@ -68,11 +76,24 @@ async def list_work_zone_areas(city: str = "lagos"):
 @work_zone_router.get("/drivers/{user_id}/work-zone")
 async def get_driver_work_zone(user_id: str, request: Request):
     verify_owner_strict(request, user_id)
+    from hot_cache import (
+        TTL_WORK_ZONE_SEC,
+        cache_get_json,
+        cache_set_json,
+        work_zone_driver_key,
+    )
+
+    key = work_zone_driver_key(user_id)
+    hit = await cache_get_json(key)
+    if isinstance(hit, dict):
+        return hit
     profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0}) or {}
     if not profile:
         raise HTTPException(status_code=404, detail="Driver profile not found")
     state = await work_zone_public_state(profile, user_id)
-    return {**state, "config": work_zone_public_config()}
+    payload = {**state, "config": work_zone_public_config()}
+    await cache_set_json(key, payload, TTL_WORK_ZONE_SEC)
+    return payload
 
 
 @work_zone_router.post("/drivers/{user_id}/work-zone")
@@ -148,6 +169,12 @@ async def activate_driver_work_zone(user_id: str, body: WorkZoneActivateBody, re
         },
         upsert=True,
     )
+    try:
+        from hot_cache import invalidate_driver_hot_cache
+
+        await invalidate_driver_hot_cache(user_id)
+    except Exception:
+        pass
     return {
         "success": True,
         "active": True,
@@ -173,4 +200,10 @@ async def deactivate_driver_work_zone(user_id: str, request: Request):
             }
         },
     )
+    try:
+        from hot_cache import invalidate_driver_hot_cache
+
+        await invalidate_driver_hot_cache(user_id)
+    except Exception:
+        pass
     return {"success": True, "active": False}

@@ -1290,24 +1290,32 @@ async def get_directions_from_google(
             db, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, stop_lat, stop_lng
         )
         if shared_cached and is_directions_road_route(shared_cached):
-            route_cache[cache_key] = {"data": shared_cached, "cached_at": datetime.utcnow()}
-            return shared_cached
+            cached_hit = dict(shared_cached)
+            cached_hit["maps_billed"] = False
+            route_cache[cache_key] = {"data": cached_hit, "cached_at": datetime.utcnow()}
+            return cached_hit
     except Exception:
         pass
 
     # L1: in-memory cache (fastest, 5-minute TTL)
     if cache_key in route_cache and is_cache_valid(route_cache[cache_key]):
-        return route_cache[cache_key]["data"]
+        hit = dict(route_cache[cache_key]["data"])
+        hit["maps_billed"] = False
+        return hit
 
     # L1.5: Redis cross-instance cache (6-hour TTL)
     redis_cached = await _redis_get_route(cache_key)
     if redis_cached:
+        redis_cached = dict(redis_cached)
+        redis_cached["maps_billed"] = False
         route_cache[cache_key] = {"data": redis_cached, "cached_at": datetime.utcnow()}
         return redis_cached
 
     # L2: persistent MongoDB cache (survives restarts, 24-hour TTL)
     db_cached = await _get_route_from_db(cache_key)
     if db_cached:
+        db_cached = dict(db_cached)
+        db_cached["maps_billed"] = False
         route_cache[cache_key] = {"data": db_cached, "cached_at": datetime.utcnow()}
         await _redis_set_route(cache_key, db_cached)
         return db_cached
@@ -1358,6 +1366,17 @@ async def get_directions_from_google(
                     )
                 except Exception:
                     pass
+            result["maps_billed"] = True
+            try:
+                from maps_billing import incr_maps_call
+
+                await incr_maps_call(
+                    trip_id=None,
+                    kind="fare_estimate",
+                    detail="directions_traffic_aware",
+                )
+            except Exception:
+                pass
             return result
     except Exception as e:
         logger.warning(f"Directions API failed: {e}")
@@ -1396,6 +1415,17 @@ async def get_directions_from_google(
             }
             route_cache[cache_key] = {"data": result, "cached_at": datetime.utcnow()}
             await _store_route_in_db(cache_key, result)
+            result["maps_billed"] = True
+            try:
+                from maps_billing import incr_maps_call
+
+                await incr_maps_call(
+                    trip_id=None,
+                    kind="fare_estimate",
+                    detail="computeRoutes_traffic_aware",
+                )
+            except Exception:
+                pass
             return result
     except Exception as e:
         logger.warning(f"Routes API failed: {e}")
@@ -2617,15 +2647,47 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 class ResponseTimingMiddleware(BaseHTTPMiddleware):
-    """Optional X-Response-Time-ms for profiling (set NEXRYDE_RESPONSE_TIME_HEADER=1)."""
+    """
+    Server-side latency per request.
+    Always logs slow paths; set NEXRYDE_RESPONSE_TIME_HEADER=1 for X-Response-Time-ms.
+    """
+
+    _SLOW_MS = int(os.environ.get("NEXRYDE_SLOW_REQUEST_MS", "800"))
 
     async def dispatch(self, request: Request, call_next):
         if request.method == "OPTIONS":
             return await call_next(request)
         t0 = time.perf_counter()
         response = await call_next(request)
-        if os.environ.get("NEXRYDE_RESPONSE_TIME_HEADER", "").lower() in ("1", "true", "yes"):
-            response.headers["X-Response-Time-ms"] = str(int((time.perf_counter() - t0) * 1000))
+        ms = int((time.perf_counter() - t0) * 1000)
+        path = request.url.path
+        # Always expose for client/debug; cheap header.
+        response.headers["X-Response-Time-ms"] = str(ms)
+        # W3C Server-Timing — visible in browser/devtools and proxy logs.
+        response.headers["Server-Timing"] = f"app;dur={ms}"
+        # Structured log for places/trips/wallet (and any slow request).
+        interesting = (
+            path.startswith("/api/places/")
+            or path.startswith("/api/trips/")
+            or path.startswith("/api/wallet")
+            or path.startswith("/api/fare/")
+            or path.startswith("/api/users/")
+            or path.startswith("/api/drivers/")
+            or path.startswith("/api/subscriptions")
+            or path.startswith("/api/work-zone")
+            or ms >= self._SLOW_MS
+        )
+        if interesting:
+            try:
+                logging.getLogger("nexryde.latency").info(
+                    "http_latency method=%s path=%s status=%s ms=%s",
+                    request.method,
+                    path,
+                    getattr(response, "status_code", "?"),
+                    ms,
+                )
+            except Exception:
+                pass
         return response
 
 

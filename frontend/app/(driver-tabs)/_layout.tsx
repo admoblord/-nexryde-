@@ -61,6 +61,14 @@ export default function DriverTabLayout() {
     void warmTokenCache();
   }, []);
 
+  // Prefetch earnings/trips/subscription/work-zone before the driver taps tabs.
+  useEffect(() => {
+    if (!allowed || !userId) return;
+    void import('@/src/services/prefetchTabData').then(({ prefetchDriverTabs }) => {
+      void prefetchDriverTabs(userId);
+    });
+  }, [allowed, userId]);
+
   // Warm durable verification fact into memory + display store before Home mounts.
   useEffect(() => {
     if (!userId) return;

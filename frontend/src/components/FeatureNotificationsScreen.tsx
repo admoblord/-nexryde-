@@ -22,8 +22,10 @@ import {
   markFeatureAsSeen,
 } from '@/src/services/featureAnnouncements';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
+import { tabCacheGet, tabCacheSet } from '@/src/services/tabDataCache';
 
 type Props = {
   role: 'rider' | 'driver';
@@ -100,57 +102,86 @@ export default function FeatureNotificationsScreen({ role }: Props) {
   const { userId, canCallAuthedApi } = useAuthedUserId();
   const flow = useFlowLayout();
 
+  const notifCacheKey = userId ? `tab-notifs:${role}:${userId}` : '';
+  const notifCached = userId
+    ? tabCacheGet<{
+        rows: FeatureAnnouncement[];
+        backendNotifs: BackendNotif[];
+        unreadBackend: number;
+      }>(`tab-notifs:${role}:${userId}`)
+    : null;
   const [tab, setTab] = useState<NotifTab>('activity');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !notifCached);
   const [refreshing, setRefreshing] = useState(false);
 
   // Feature announcements
-  const [rows, setRows] = useState<FeatureAnnouncement[]>([]);
+  const [rows, setRows] = useState<FeatureAnnouncement[]>(() => notifCached?.rows ?? []);
   const [seen, setSeen] = useState<Set<string>>(new Set());
 
   // Backend notifications
-  const [backendNotifs, setBackendNotifs] = useState<BackendNotif[]>([]);
-  const [unreadBackend, setUnreadBackend] = useState(0);
+  const [backendNotifs, setBackendNotifs] = useState<BackendNotif[]>(
+    () => notifCached?.backendNotifs ?? [],
+  );
+  const [unreadBackend, setUnreadBackend] = useState(() => Number(notifCached?.unreadBackend ?? 0));
 
-  const loadFeatures = useCallback(async () => {
+  const loadFeatures = useCallback(async (): Promise<FeatureAnnouncement[]> => {
     const [list, seenIds] = await Promise.all([
       fetchFeatureAnnouncements(role),
       getSeenFeatureIds(),
     ]);
     setRows(list);
     setSeen(seenIds);
+    return list;
   }, [role]);
 
-  const loadBackendNotifs = useCallback(async () => {
-    if (!userId || !canCallAuthedApi) return;
+  const loadBackendNotifs = useCallback(async (): Promise<{
+    backendNotifs: BackendNotif[];
+    unreadBackend: number;
+  }> => {
+    if (!userId || !canCallAuthedApi) {
+      return { backendNotifs: [], unreadBackend: 0 };
+    }
     try {
-      const headers = getAuthHeaders() as Record<string, string>;
-      const res = await fetch(
+      const res = await authedFetch(
         `${BACKEND_URL}/api/users/${userId}/notifications?limit=40`,
-        { headers }
+        { timeoutMs: 10_000, preserveSessionOn401: true },
       );
       if (res.ok) {
         const data = await res.json();
-        setBackendNotifs(Array.isArray(data.notifications) ? data.notifications : []);
-        setUnreadBackend(Number(data.unread_count || 0));
+        const list = Array.isArray(data.notifications) ? data.notifications : [];
+        const unread = Number(data.unread_count || 0);
+        setBackendNotifs(list);
+        setUnreadBackend(unread);
+        return { backendNotifs: list, unreadBackend: unread };
       }
     } catch {
-      // silent — show empty state
+      // silent — show empty / cached state
     }
+    return { backendNotifs: [], unreadBackend: 0 };
   }, [userId, canCallAuthedApi]);
 
   const load = useCallback(async () => {
     const LOAD_TIMEOUT_MS = 12000;
+    // Instant return visits: keep prior rows while revalidating.
+    if (!notifCached) setLoading(true);
     try {
-      await Promise.race([
+      const result = await Promise.race([
         Promise.all([loadFeatures(), loadBackendNotifs()]),
-        new Promise<void>((resolve) => setTimeout(resolve, LOAD_TIMEOUT_MS)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), LOAD_TIMEOUT_MS)),
       ]);
+      if (result && notifCacheKey) {
+        const [freshRows, b] = result;
+        tabCacheSet(notifCacheKey, {
+          rows: freshRows,
+          backendNotifs: b.backendNotifs,
+          unreadBackend: b.unreadBackend,
+        });
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [loadFeatures, loadBackendNotifs]);
+  }, [loadFeatures, loadBackendNotifs, notifCached, notifCacheKey]);
 
   useEffect(() => {
     if (!canCallAuthedApi) {

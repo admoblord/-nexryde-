@@ -79,10 +79,12 @@ import { authedFetch } from '@/src/utils/sessionRefresh';
 import * as Haptics from 'expo-haptics';
 import { geocodeAddressForRider } from '@/src/services/riderSavedPlaces';
 import { startSmartPickupGps } from '@/src/services/smartPickupGps';
+import { peekQuickLocation } from '@/src/services/locationWarm';
 import {
   DETECTING_PICKUP,
   SAFE_PICKUP_FALLBACK,
   isDetectingPickupLabel,
+  isPlusCodeLabel,
   isRawLatLngLabel,
   preloadPickupAt,
   resolveInstantPickup,
@@ -304,6 +306,8 @@ function BookInDriveStyle() {
   const [bookingSheetScrolled, setBookingSheetScrolled] = useState(false);
   const bookingSheetScrolledRef = useRef(false);
   const [isLoading, setIsLoading] = useState(false);
+  /** Instant "Finding your driver" overlay — shown before the network returns. */
+  const [findingDriverOverlay, setFindingDriverOverlay] = useState(false);
 
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [editingField, setEditingField] = useState<'pickup' | 'destination' | 'stop'>('pickup');
@@ -908,12 +912,19 @@ function BookInDriveStyle() {
 
     const engine = startInstantPickupEngine({
       isManualPickup: () => manualPickupRef.current,
-      moveThresholdM: 25,
+      moveThresholdM: 50,
       onUpdate: (state) => {
         if (!mounted || manualPickupRef.current) return;
         setPickupCoords({ lat: state.lat, lng: state.lng });
         setCurrentLocation({ lat: state.lat, lng: state.lng, address: state.label });
-        setPickup(safePickupDisplay(state.label, state.detecting));
+        // Engine never sets detecting=true once a last-known/GPS fix exists.
+        setPickup(
+          state.detecting
+            ? DETECTING_PICKUP
+            : safePickupDisplay(
+                isDetectingPickupLabel(state.label) ? SAFE_PICKUP_FALLBACK : state.label,
+              ),
+        );
         setPickupDetecting(state.detecting);
         if (!state.detecting) setGpsStatus('locked');
       },
@@ -928,6 +939,7 @@ function BookInDriveStyle() {
           if (mounted) {
             setGpsStatus('error');
             setPickupDetecting(false);
+            setPickup(SAFE_PICKUP_FALLBACK);
           }
           return;
         }
@@ -937,13 +949,13 @@ function BookInDriveStyle() {
           const lat0 = presetPLat;
           const lng0 = presetPLng;
           const label0 = isRawLatLngLabel(presetPickupTxt)
-            ? DETECTING_PICKUP
+            ? SAFE_PICKUP_FALLBACK
             : safePickupDisplay(presetPickupTxt);
           if (!mounted) return;
           setPickupCoords({ lat: lat0, lng: lng0 });
           setCurrentLocation({ lat: lat0, lng: lng0, address: label0 });
           setPickup(label0);
-          setPickupDetecting(isDetectingPickupLabel(label0));
+          setPickupDetecting(false);
           setGpsStatus('locked');
           try {
             const resolved = await resolveInstantPickup(lat0, lng0);
@@ -972,30 +984,63 @@ function BookInDriveStyle() {
           }
         }
 
-        setPickup(DETECTING_PICKUP);
-        setPickupDetecting(true);
+        // Paint from warm / last-known BEFORE any Detecting… spinner.
+        const quick = await peekQuickLocation();
+        if (quick && mounted) {
+          setPickupCoords({ lat: quick.lat, lng: quick.lng });
+          setCurrentLocation({
+            lat: quick.lat,
+            lng: quick.lng,
+            address: SAFE_PICKUP_FALLBACK,
+          });
+          setPickup(SAFE_PICKUP_FALLBACK);
+          setPickupDetecting(false);
+          setGpsStatus('locked');
+          engine.onGpsFix(quick.lat, quick.lng, { final: false });
+        } else if (mounted) {
+          setPickup(DETECTING_PICKUP);
+          setPickupDetecting(true);
+        }
 
-        let gotFix = false;
+        let gotFix = Boolean(quick);
         cancelSmartGps = startSmartPickupGps({
-          targetAccuracyM: 15,
-          timeoutMs: 12000,
+          updateThresholdM: 50,
+          timeoutMs: 8000,
+          mapCenterFallback: quick
+            ? { lat: quick.lat, lng: quick.lng }
+            : { lat: 6.5244, lng: 3.3792 },
           onFix: (fix) => {
             if (!mounted || manualPickupRef.current) return;
             gotFix = true;
             setGpsStatus('locked');
+            setPickupDetecting(false);
             engine.onGpsFix(fix.lat, fix.lng, { final: fix.final });
           },
           onError: () => {
             if (mounted && !gotFix) {
               setGpsStatus('error');
               setPickupDetecting(false);
+              setPickup((prev) =>
+                isDetectingPickupLabel(prev) ? SAFE_PICKUP_FALLBACK : prev,
+              );
             }
           },
         });
+
+        // Hard UI failsafe — never leave Detecting… past 8s.
+        setTimeout(() => {
+          if (!mounted || manualPickupRef.current) return;
+          setPickup((prev) =>
+            isDetectingPickupLabel(prev) ? SAFE_PICKUP_FALLBACK : prev,
+          );
+          setPickupDetecting(false);
+          if (!gotFix) setGpsStatus((s) => (s === 'detecting' ? 'error' : s));
+        }, 8000);
       } catch {
         if (mounted) {
           setGpsStatus('error');
           setPickupDetecting(false);
+          setPickup(SAFE_PICKUP_FALLBACK);
         }
       }
     };
@@ -1014,10 +1059,17 @@ function BookInDriveStyle() {
     params.pickupLng,
   ]);
 
-  // If pickup is still detecting / raw after lock, retry Instant Pickup (cold start / rate limit).
+  // If pickup is still detecting / raw / Plus Code after lock, retry Instant Pickup.
   useEffect(() => {
     if (gpsStatus !== 'locked' || !pickupCoords) return;
-    if (!isDetectingPickupLabel(pickup) && !isRawLatLngLabel(pickup)) return;
+    if (
+      !isDetectingPickupLabel(pickup) &&
+      !isRawLatLngLabel(pickup) &&
+      !isPlusCodeLabel(pickup) &&
+      pickup !== SAFE_PICKUP_FALLBACK
+    ) {
+      return;
+    }
     let cancelled = false;
     const t = setTimeout(() => {
       void (async () => {
@@ -1934,6 +1986,8 @@ function BookInDriveStyle() {
     }
     offerInFlightRef.current = true;
     setIsLoading(true);
+    // Optimistic UX: show Finding immediately — never wait on the server to paint.
+    setFindingDriverOverlay(true);
     const pLat = pLatEarly;
     const pLng = pLngEarly;
     const dLat = dLatEarly;
@@ -2034,9 +2088,11 @@ function BookInDriveStyle() {
           toast.show('Ride created but tracking could not open. Check My Trips.', 'error');
         }
       } else {
+        setFindingDriverOverlay(false);
         toast.show(toStr(result?.detail || result?.message, 'Could not request ride. Please try again in a moment.'), 'error');
       }
     } catch {
+      setFindingDriverOverlay(false);
       const online = await checkOnlineStatus();
       if (!online && riderId) {
         await createOfflineBooking(riderId, requestBody);
@@ -3483,6 +3539,43 @@ function BookInDriveStyle() {
               <Text style={s.vehCloseText}>Close</Text>
             </TouchableOpacity>
           </View>
+        </View>
+      </Modal>
+
+      {/* Optimistic Finding overlay — paints on tap, before /trips/request returns */}
+      <Modal visible={findingDriverOverlay} animationType="fade" transparent>
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(8,12,20,0.92)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 28,
+          }}
+        >
+          <ActivityIndicator size="large" color="#00D46A" />
+          <Text
+            style={{
+              marginTop: 18,
+              fontSize: 20,
+              fontWeight: '900',
+              color: '#FFF',
+              letterSpacing: -0.3,
+            }}
+          >
+            Finding your driver
+          </Text>
+          <Text
+            style={{
+              marginTop: 8,
+              fontSize: 14,
+              fontWeight: '600',
+              color: '#94A3B8',
+              textAlign: 'center',
+            }}
+          >
+            Matching nearby drivers — hang tight.
+          </Text>
         </View>
       </Modal>
 

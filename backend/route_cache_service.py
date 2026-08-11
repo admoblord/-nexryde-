@@ -136,112 +136,13 @@ class RouteCacheService:
                 "message": f"Using cached route (saved ₦{self.api_call_cost})"
             }
         
-        # ⚠️ CACHE MISS - Need to call Google Maps API
-        print(f"⚠️ CACHE MISS: {route_id} - Calling Google Maps API (₦{self.api_call_cost})")
-        
-        # Check daily budget
-        today_cost = await self.get_today_api_cost(db)
-        if today_cost >= self.daily_budget:
-            raise HTTPException(
-                429,
-                f"Daily API budget exceeded (₦{today_cost:,}/₦{self.daily_budget:,}). Using fallback estimation."
-            )
-        
-        # Call Google Maps API
-        if not self.gmaps:
-            raise HTTPException(500, "Google Maps API not configured")
-        
-        try:
-            directions = self.gmaps.directions(
-                f"{origin['lat']},{origin['lng']}",
-                f"{destination['lat']},{destination['lng']}",
-                mode="driving",
-                departure_time="now"
-            )
-            
-            if not directions:
-                raise HTTPException(404, "Route not found")
-            
-            route_data = directions[0]
-            leg = route_data['legs'][0]
-            
-            # Get driver info for Route Owner
-            driver = await db.users.find_one({"_id": driver_id})
-            driver_name = driver.get("name", "Unknown") if driver else driver_id
-            
-            # Create cache entry
-            now = datetime.utcnow()
-            new_cache = {
-                "route_id": route_id,
-                "origin_city": origin['city'],
-                "origin_lat": origin['lat'],
-                "origin_lng": origin['lng'],
-                "destination_city": destination['city'],
-                "destination_lat": destination['lat'],
-                "destination_lng": destination['lng'],
-                "distance_km": leg['distance']['value'] / 1000,
-                "duration_minutes": leg['duration']['value'] / 60,
-                "polyline": route_data['overview_polyline']['points'],
-                "waypoints": [step['end_location'] for step in leg['steps'][:10]],  # First 10 waypoints
-                "cached_at": now,
-                "last_updated": now,
-                "api_call_cost": self.api_call_cost,
-                "times_used": 1,
-                "money_saved": 0,
-                "first_driver_id": driver_id,
-                "first_driver_name": driver_name,
-                "route_owner_bonus_paid": False
-            }
-            
-            # Save to cache
-            await db.route_cache.insert_one(new_cache)
-            
-            # Track API cost
-            today_str = now.strftime("%Y-%m-%d")
-            await db.api_cost_tracker.update_one(
-                {"date": today_str},
-                {
-                    "$inc": {
-                        "total_api_calls": 1,
-                        "new_route_calls": 1,
-                        "total_cost_naira": self.api_call_cost
-                    },
-                    "$setOnInsert": {
-                        "date": today_str,
-                        "cached_route_hits": 0,
-                        "total_saved_naira": 0.0,
-                        "budget_limit": self.daily_budget,
-                        "budget_remaining": self.daily_budget - self.api_call_cost
-                    }
-                },
-                upsert=True
-            )
-            
-            # Award Route Owner bonus
-            await self.award_route_owner_bonus(db, driver_id, driver_name, route_id)
-            
-            return {
-                "success": True,
-                "from_cache": False,
-                "cost": self.api_call_cost,
-                "route": {
-                    "route_id": new_cache["route_id"],
-                    "origin": origin['city'],
-                    "destination": destination['city'],
-                    "distance_km": new_cache["distance_km"],
-                    "duration_minutes": new_cache["duration_minutes"],
-                    "polyline": new_cache["polyline"],
-                    "route_owner": driver_name
-                },
-                "message": f"🏆 New route cached! You're the Route Owner! +₦{ROUTE_OWNER_BONUS:,} bonus coming!"
-            }
-            
-        except googlemaps.exceptions.ApiError as e:
-            print(f"❌ Google Maps API Error: {str(e)}")
-            raise HTTPException(500, f"Google Maps API error: {str(e)}")
-        except Exception as e:
-            print(f"❌ Unexpected error: {str(e)}")
-            raise HTTPException(500, f"Failed to get route: {str(e)}")
+        # CACHE MISS — Google disabled for gamification route-owner (Maps billing guardrail).
+        # Trip legs use route_leg_service (Essentials, one call per leg) instead.
+        print(f"⚠️ CACHE MISS: {route_id} — Google Directions blocked (maps billing guardrail)")
+        raise HTTPException(
+            503,
+            "Route discovery Google calls are disabled. Use cached routes only.",
+        )
     
     async def award_route_owner_bonus(self, db, driver_id: str, driver_name: str, route_id: str):
         """
