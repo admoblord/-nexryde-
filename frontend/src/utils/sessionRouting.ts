@@ -346,11 +346,8 @@ export async function routeAuthedUser(
         return;
       }
     } else if (role === 'driver') {
-<<<<<<< HEAD
-=======
       // Instant Home when local verification fact is approved (Uber-grade gate).
       // Peek memory first; only hit AsyncStorage when cold. Never await legal network first.
->>>>>>> 1adbbb0e (fix(driver): make tabs, online/offline, and profile feel instant)
       if (needsLegalRedirect(loggedUser, 'routeAuthedUser:driver-local')) {
         const legalUser = await resolveUserForLegalGate(loggedUser);
         if (needsLegalRedirect(legalUser, 'routeAuthedUser:driver')) {
