@@ -166,6 +166,30 @@ def license_storage_fields(plaintext: str | None) -> tuple[dict[str, Any], dict[
     )
 
 
+def has_nin_on_file(doc: dict[str, Any] | None) -> bool:
+    """True when NIN exists as ciphertext/hash/last4 or legacy plaintext.
+
+    After PII encryption migration, plaintext ``nin`` / ``nin_number`` are cleared.
+    Approved drivers must still count as having NIN on file via hash/last4/cipher.
+    """
+    if not doc:
+        return False
+    last4 = doc.get("nin_last4")
+    if not last4:
+        legacy = (doc.get("nin") or "").strip()
+        last4 = legacy[-4:] if len(legacy) >= 4 else None
+    if not last4:
+        legacy_num = (doc.get("nin_number") or "").strip()
+        last4 = legacy_num[-4:] if len(legacy_num) >= 4 else None
+    return bool(
+        doc.get("nin_cipher")
+        or doc.get("nin_hash")
+        or (doc.get("nin") or "").strip()
+        or (doc.get("nin_number") or "").strip()
+        or last4
+    )
+
+
 def public_nin_fields(doc: dict[str, Any] | None) -> dict[str, Any]:
     """Safe fields for API responses — never includes plaintext or cipher."""
     if not doc:
@@ -183,13 +207,7 @@ def public_nin_fields(doc: dict[str, Any] | None) -> dict[str, Any]:
     if not last4:
         legacy_num = (doc.get("nin_number") or "").strip()
         last4 = legacy_num[-4:] if len(legacy_num) >= 4 else None
-    has_nin = bool(
-        doc.get("nin_cipher")
-        or doc.get("nin_hash")
-        or (doc.get("nin") or "").strip()
-        or (doc.get("nin_number") or "").strip()
-        or last4
-    )
+    has_nin = has_nin_on_file(doc)
     return {
         "has_nin": has_nin,
         "nin_masked": mask_last4(last4) if has_nin else "",

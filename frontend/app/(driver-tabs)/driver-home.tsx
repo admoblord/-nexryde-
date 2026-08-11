@@ -488,9 +488,13 @@ export default function ModernDriverHome() {
   const subscriptionStatus = storeSubscription ?? boot.subscriptionStatus;
 
   // Option 1: unfinished drivers never stay on Home (map/GO).
+  // Never bounce approved drivers (durable local fact) back to document upload —
+  // a stale not_submitted flash during boot was sending loopy9ice-style accounts
+  // through the full resubmit flow after login.
   useEffect(() => {
     if (!driverId || !canCallAuthedApi) return;
     if (verificationStatus !== 'not_submitted') return;
+    if (isLocallyApproved(driverId)) return;
     const u = useAppStore.getState().user ?? user;
     if (!u?.id) return;
     router.replace({
