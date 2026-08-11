@@ -337,15 +337,17 @@ export default function RiderTripsScreen() {
       setTrips(list);
       // Default tab is "upcoming" — riders with only past trips saw "No results".
       // Auto-switch once so completed/cancelled history is visible immediately.
-      setActiveTab((tab) => {
-        if (tab !== 'upcoming') return tab;
-        const hasUpcoming = list.some((t: any) => isActiveTripStatus(t.status, t.payment_status));
-        if (hasUpcoming) return tab;
-        const hasCompleted = list.some(
-          (t: any) => normalizeTripStatus(t.status, t.payment_status) === 'completed',
-        );
-        return hasCompleted ? 'completed' : 'cancelled';
-      });
+      if (list.length > 0) {
+        setActiveTab((tab) => {
+          if (tab !== 'upcoming') return tab;
+          const hasUpcoming = list.some((t: any) => isActiveTripStatus(t.status, t.payment_status));
+          if (hasUpcoming) return tab;
+          const hasCompleted = list.some(
+            (t: any) => normalizeTripStatus(t.status, t.payment_status) === 'completed',
+          );
+          return hasCompleted ? 'completed' : 'cancelled';
+        });
+      }
     } catch {
       setLoadError(true);
       setTrips([]);
