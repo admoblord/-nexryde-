@@ -75,6 +75,32 @@ def _is_plus_code(text: str) -> bool:
     )
 
 
+def strip_plus_code_prefix(text: str) -> str:
+    """
+    Remove a leading Plus Code token from a Google address string.
+    e.g. "H988+XVW Maryland mall, Ikeja" → "Maryland mall, Ikeja"
+         "CCHC+8Q3, Lagos" → "Lagos"
+    """
+    import re
+
+    s = str(text or "").strip()
+    if not s or "+" not in s:
+        return s
+    # Leading OLC then space or comma
+    m = re.match(
+        r"^([23456789CFGHJMPQRVWX]{4,11}\+[23456789CFGHJMPQRVWX]{2,6})\s*[, ]\s*(.+)$",
+        s,
+        re.IGNORECASE,
+    )
+    if m:
+        rest = m.group(2).strip(" ,")
+        return rest or s
+    if _is_plus_code(s):
+        parts = [p.strip() for p in s.split(",") if p.strip() and not _is_plus_code(p)]
+        return ", ".join(parts) if parts else s
+    return s
+
+
 def _is_bad_display_label(text: str) -> bool:
     s = str(text or "").strip()
     return (not s) or _looks_like_coords(s) or _is_plus_code(s)

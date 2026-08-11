@@ -4,6 +4,7 @@ from __future__ import annotations
 from instant_pickup import (
     SAFE_FALLBACK,
     pick_priority_label,
+    strip_plus_code_prefix,
     to_api_payload,
     _is_plus_code,
     _looks_like_coords,
@@ -24,6 +25,15 @@ def test_plus_code_detection():
     assert _is_plus_code("8FG8CCHC+8Q3")
     assert not _is_plus_code("Adeola Odeku Street")
     assert not _is_plus_code("Shoprite Sangotedo")
+
+
+def test_strip_plus_code_prefix():
+    assert (
+        strip_plus_code_prefix("H988+XVW Maryland mall, Anthony, Ikeja")
+        == "Maryland mall, Anthony, Ikeja"
+    )
+    assert strip_plus_code_prefix("CCHC+8Q3, Lagos") == "Lagos"
+    assert strip_plus_code_prefix("Adeola Odeku Street, Lagos") == "Adeola Odeku Street, Lagos"
 
 
 def test_never_plus_code_as_pickup_label():
