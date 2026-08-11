@@ -3332,94 +3332,107 @@ function BookInDriveStyle() {
                 else if (editingField === 'stop') setStop(text);
                 else setDestination(text);
               }}
-              onPlaceSelected={async (loc) => {
-                try {
-                  const field = editingField;
-                  const rawDesc = typeof loc?.description === 'string' ? loc.description : '';
-                  let desc = String(rawDesc || '').trim() || 'Selected location';
-                  let coords: { lat: number; lng: number } | null = null;
+              onPlaceSelected={(loc) => {
+                // Close modal + paint label immediately; resolve lat/lng in background.
+                // Waiting on place-details (1s+) made pickup/destination feel frozen.
+                const field = editingField;
+                const rawDesc = typeof loc?.description === 'string' ? loc.description : '';
+                const initialDesc = String(rawDesc || '').trim() || 'Selected location';
+                const placeId = typeof loc?.placeId === 'string' ? loc.placeId.trim() : '';
+                const syntheticPlaceId = !placeId || placeId.startsWith('prediction-');
+                const sessionToken = loc.sessionToken;
 
-                  const placeId = typeof loc?.placeId === 'string' ? loc.placeId.trim() : '';
-                  const syntheticPlaceId = !placeId || placeId.startsWith('prediction-');
+                if (field === 'pickup') {
+                  setPickup(safePickupDisplay(initialDesc));
+                  setPickupDetecting(false);
+                } else if (field === 'stop') {
+                  setStop(initialDesc);
+                } else {
+                  setDestination(initialDesc);
+                }
+                setShowLocationModal(false);
 
-                  if (placeId && !syntheticPlaceId) {
-                    const details = await fetchPlaceDetails(placeId, loc.sessionToken);
-                    if (details && Number.isFinite(details.lat) && Number.isFinite(details.lng)) {
-                      coords = { lat: details.lat, lng: details.lng };
-                      if (details.description) desc = details.description;
+                void (async () => {
+                  try {
+                    let desc = initialDesc;
+                    let coords: { lat: number; lng: number } | null = null;
+
+                    if (placeId && !syntheticPlaceId) {
+                      const details = await fetchPlaceDetails(placeId, sessionToken);
+                      if (details && Number.isFinite(details.lat) && Number.isFinite(details.lng)) {
+                        coords = { lat: details.lat, lng: details.lng };
+                        if (details.description) desc = details.description;
+                      }
                     }
-                  }
 
-                  if (!coords && desc.length >= 3) {
-                    const resolved = await resolveAddressToCoords(desc);
-                    if (resolved && Number.isFinite(resolved.lat) && Number.isFinite(resolved.lng)) {
-                      coords = { lat: resolved.lat, lng: resolved.lng };
-                      desc = String(resolved.address || desc).trim() || desc;
+                    if (!coords && desc.length >= 3) {
+                      const resolved = await resolveAddressToCoords(desc);
+                      if (resolved && Number.isFinite(resolved.lat) && Number.isFinite(resolved.lng)) {
+                        coords = { lat: resolved.lat, lng: resolved.lng };
+                        desc = String(resolved.address || desc).trim() || desc;
+                      }
                     }
-                  }
 
-                  if (field === 'pickup') {
-                    setPickup(safePickupDisplay(desc));
-                    setPickupDetecting(false);
-                    if (coords) {
-                      manualPickupRef.current = true;
-                      setPickupCoords(coords);
-                      if (isRawLatLngLabel(desc) || isDetectingPickupLabel(desc)) {
-                        void resolveInstantPickup(coords.lat, coords.lng).then((r) => {
-                          setPickup(safePickupDisplay(r.label));
-                        });
+                    if (field === 'pickup') {
+                      setPickup(safePickupDisplay(desc));
+                      if (coords) {
+                        manualPickupRef.current = true;
+                        setPickupCoords(coords);
+                        if (isRawLatLngLabel(desc) || isDetectingPickupLabel(desc)) {
+                          void resolveInstantPickup(coords.lat, coords.lng).then((r) => {
+                            setPickup(safePickupDisplay(r.label));
+                          });
+                        }
+                      } else {
+                        Alert.alert(
+                          'Could not pin pickup',
+                          'Pick a suggestion from the list or type a fuller address so we can show the map at your pickup.',
+                        );
+                      }
+                    } else if (field === 'stop') {
+                      setStop(desc);
+                      if (coords) {
+                        setStopCoords(coords);
+                        invalidateRoutePricing();
+                      } else {
+                        Alert.alert(
+                          'Could not pin stop',
+                          'Pick a suggestion from the list or type a fuller address for your stop.',
+                        );
                       }
                     } else {
-                      Alert.alert(
-                        'Could not pin pickup',
-                        'Pick a suggestion from the list or type a fuller address so we can show the map at your pickup.',
-                      );
-                      return;
+                      setDestination(desc);
+                      if (coords) {
+                        setDestinationCoords(coords);
+                        void cacheRecentLocation({
+                          address: desc,
+                          description: desc,
+                          lat: coords.lat,
+                          lng: coords.lng,
+                        });
+                        setRecentDestinations((prev) => {
+                          const next = [
+                            { address: desc, lat: coords.lat, lng: coords.lng },
+                            ...prev.filter(
+                              (p) => String(p.address || p.description) !== desc,
+                            ),
+                          ];
+                          return next.slice(0, 8);
+                        });
+                      } else {
+                        Alert.alert(
+                          'Could not pin destination',
+                          'Pick a suggestion from the list or type a fuller street address so we can place it on the map.',
+                        );
+                      }
                     }
-                  } else if (field === 'stop') {
-                    setStop(desc);
-                    if (coords) {
-                      setStopCoords(coords);
-                      invalidateRoutePricing();
-                    } else {
-                      Alert.alert(
-                        'Could not pin stop',
-                        'Pick a suggestion from the list or type a fuller address for your stop.',
-                      );
-                      return;
-                    }
-                  } else {
-                    setDestination(desc);
-                    if (coords) {
-                      setDestinationCoords(coords);
-                      void cacheRecentLocation({
-                        address: desc,
-                        description: desc,
-                        lat: coords.lat,
-                        lng: coords.lng,
-                      });
-                      setRecentDestinations((prev) => {
-                        const next = [
-                          { address: desc, lat: coords.lat, lng: coords.lng },
-                          ...prev.filter(
-                            (p) =>
-                              String(p.address || p.description) !== desc,
-                          ),
-                        ];
-                        return next.slice(0, 8);
-                      });
-                    } else {
-                      Alert.alert(
-                        'Could not pin destination',
-                        'Pick a suggestion from the list or type a fuller street address so we can place it on the map.',
-                      );
-                      return;
-                    }
+                  } catch {
+                    Alert.alert(
+                      'Location',
+                      'Could not load that place. Try another suggestion or type the address again.',
+                    );
                   }
-                  setShowLocationModal(false);
-                } catch {
-                  Alert.alert('Location', 'Could not load that place. Try another suggestion or type the address again.');
-                }
+                })();
               }}
               biasLat={pickupCoords?.lat ?? currentLocation?.lat}
               biasLng={pickupCoords?.lng ?? currentLocation?.lng}
