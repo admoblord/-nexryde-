@@ -1,6 +1,10 @@
 /**
  * GO ONLINE permission checklist + overlay explainer.
  * Shown instead of a failed connection attempt when required perms are missing.
+ *
+ * Background location uses the Play-required prominent disclosure host
+ * (BackgroundLocationDisclosureHost) via item.request() — never jump straight
+ * to the OS dialog from this checklist.
  */
 import React, { useState } from 'react';
 import {
@@ -34,6 +38,7 @@ export function DriverGoOnlinePermissionGate({
 
   const missing = preflight.missing;
   const overlayMissing = missing.some((m) => m.key === 'overlay');
+  const bgLocMissing = missing.some((m) => m.key === 'background_location');
 
   return (
     <View style={styles.wrap}>
@@ -44,6 +49,9 @@ export function DriverGoOnlinePermissionGate({
       </View>
       <Text style={styles.sub}>
         Permissions are set up before you connect — not during connection.
+        {bgLocMissing
+          ? ' Background location shows a full-screen disclosure first (Google Play requirement).'
+          : ''}
       </Text>
       {preflight.items
         .filter((item) => !item.granted)
@@ -64,7 +72,9 @@ export function DriverGoOnlinePermissionGate({
             >
               <Ionicons name="alert-circle" size={18} color={blocked ? '#FBBF24' : '#93C5FD'} />
               <Text style={styles.rowLabel} numberOfLines={2}>
-                {item.label}
+                {item.key === 'background_location'
+                  ? 'Location all the time (background)'
+                  : item.label}
                 {!item.required ? ' (recommended)' : ''}
               </Text>
               <Text style={styles.rowAction}>Enable</Text>
