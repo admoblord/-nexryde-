@@ -509,14 +509,20 @@ async def reverse_geocode(
         )
         cached = await _get_cache(key)
         if cached and isinstance(cached.get("response"), dict):
+            from instant_pickup import _is_bad_display_label, _is_plus_code
+
             resp = cached["response"]
-            # Migrate legacy coord-fallback payloads
+            # Migrate legacy coord / Plus Code payloads — force re-geocode when bad
             short = str(resp.get("short_label") or resp.get("pickup_label") or "")
             addr = str(resp.get("address") or "")
-            if short and not re.match(r"^\s*-?\d", short):
+            if short and not _is_bad_display_label(short) and not _is_plus_code(short.split(",")[0]):
                 await cache_set_h3(lat, lng, {**resp, "label": short or addr})
                 return {**resp, "cache": "redis_or_mongo"}
-            if addr and not re.match(r"^\s*-?\d+\.\d+\s*,", addr):
+            if (
+                addr
+                and not _is_bad_display_label(addr)
+                and not _is_plus_code(addr.split(",")[0])
+            ):
                 await cache_set_h3(lat, lng, {**resp, "label": resp.get("short_label") or addr})
                 return {**resp, "cache": "redis_or_mongo"}
 

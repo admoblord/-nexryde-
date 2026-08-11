@@ -61,6 +61,21 @@ export function isRawLatLngLabel(s: string): boolean {
   return /^\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*$/.test(String(s || '').trim());
 }
 
+/** Open Location Codes (e.g. CCHC+8Q3) — never show as pickup address. */
+export function isPlusCodeLabel(s: string): boolean {
+  const head = String(s || '')
+    .trim()
+    .split(',')[0]
+    .trim();
+  if (!head || !head.includes('+')) return false;
+  return /^[23456789CFGHJMPQRVWX]{4,11}\+[23456789CFGHJMPQRVWX]{2,6}$/i.test(head);
+}
+
+export function isBadPickupLabel(s: string): boolean {
+  const t = String(s || '').trim();
+  return !t || isRawLatLngLabel(t) || isPlusCodeLabel(t);
+}
+
 export function isDetectingPickupLabel(s: string): boolean {
   const t = String(s || '').trim();
   return (
@@ -72,11 +87,11 @@ export function isDetectingPickupLabel(s: string): boolean {
   );
 }
 
-/** Safe UI string — never raw coordinates. */
+/** Safe UI string — never raw coordinates or Plus Codes. */
 export function safePickupDisplay(label: string | null | undefined, detecting = false): string {
   const t = String(label || '').trim();
   if (detecting || isDetectingPickupLabel(t)) return DETECTING_PICKUP;
-  if (isRawLatLngLabel(t)) return SAFE_PICKUP_FALLBACK;
+  if (isBadPickupLabel(t)) return SAFE_PICKUP_FALLBACK;
   return t;
 }
 
@@ -99,7 +114,7 @@ async function ensureCacheLoaded(): Promise<void> {
         (e) =>
           e &&
           typeof e.label === 'string' &&
-          !isRawLatLngLabel(e.label) &&
+          !isBadPickupLabel(e.label) &&
           Number.isFinite(e.lat) &&
           Number.isFinite(e.lng),
       );
@@ -146,7 +161,7 @@ export async function lookupPickupCache(
       }
     }
   }
-  if (!best || isRawLatLngLabel(best.label)) return null;
+  if (!best || isBadPickupLabel(best.label)) return null;
   return {
     label: best.label,
     tier: (best.tier as PickupTier) || 'area',
@@ -184,7 +199,7 @@ async function fetchReverse(
   const label = String(
     data.pickup_label || data.short_label || data.formatted_address || data.address || '',
   ).trim();
-  if (!label || isRawLatLngLabel(label)) return null;
+  if (!label || isBadPickupLabel(label)) return null;
   const tier = String(data.tier || 'area') as PickupTier;
   return { label, tier, status: String(data.status || 'OK') };
 }

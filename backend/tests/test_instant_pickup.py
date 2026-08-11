@@ -5,6 +5,7 @@ from instant_pickup import (
     SAFE_FALLBACK,
     pick_priority_label,
     to_api_payload,
+    _is_plus_code,
     _looks_like_coords,
 )
 
@@ -15,6 +16,58 @@ def test_never_coords_fallback():
     out = to_api_payload({"label": "6.52, 3.37", "status": "OK"})
     assert out["short_label"] == SAFE_FALLBACK
     assert not _looks_like_coords(out["address"])
+
+
+def test_plus_code_detection():
+    assert _is_plus_code("CCHC+8Q3")
+    assert _is_plus_code("CCHC+8Q3, Lagos")
+    assert _is_plus_code("8FG8CCHC+8Q3")
+    assert not _is_plus_code("Adeola Odeku Street")
+    assert not _is_plus_code("Shoprite Sangotedo")
+
+
+def test_never_plus_code_as_pickup_label():
+    """Google often returns Plus Code as premise/formatted head — use street instead."""
+    results = [
+        {
+            "types": ["plus_code"],
+            "formatted_address": "CCHC+8Q3, Lagos, Nigeria",
+            "address_components": [
+                {"long_name": "CCHC+8Q3", "short_name": "CCHC+8Q3", "types": ["plus_code"]},
+                {"long_name": "Lagos", "types": ["locality", "political"]},
+            ],
+        },
+        {
+            "types": ["premise", "street_address"],
+            "formatted_address": "CCHC+8Q3, Adeola Odeku Street, Victoria Island, Lagos",
+            "address_components": [
+                {"long_name": "CCHC+8Q3", "short_name": "CCHC+8Q3", "types": ["plus_code"]},
+                {"long_name": "Adeola Odeku Street", "types": ["route"]},
+                {"long_name": "Victoria Island", "types": ["neighborhood"]},
+                {"long_name": "Lagos", "types": ["locality", "political"]},
+                {"long_name": "Lagos State", "types": ["administrative_area_level_1"]},
+            ],
+        },
+    ]
+    picked = pick_priority_label(results)
+    assert not _is_plus_code(picked["label"])
+    assert "Adeola" in picked["label"] or "Victoria Island" in picked["label"]
+    out = to_api_payload(picked)
+    assert not _is_plus_code(out["pickup_label"])
+    assert "+" not in out["pickup_label"] or "Adeola" in out["pickup_label"]
+
+
+def test_to_api_payload_strips_plus_code_label():
+    out = to_api_payload(
+        {
+            "label": "CCHC+8Q3, Lagos",
+            "street": "Adeola Odeku Street",
+            "neighborhood": "Victoria Island",
+            "status": "OK",
+        }
+    )
+    assert out["short_label"] == "Adeola Odeku Street"
+    assert out["pickup_label"] == "Adeola Odeku Street"
 
 
 def test_priority_landmark_over_city():
