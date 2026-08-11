@@ -28,7 +28,7 @@ spec:
         run.googleapis.com/cpu-throttling: "false"
         # Private access to Memorystore Redis for rate limits, realtime fanout, and polling cache.
         run.googleapis.com/vpc-access-connector: "projects/nexryde-app/locations/africa-south1/connectors/nexryde-vpc"
-        run.googleapis.com/vpc-access-egress: "private-ranges-only"
+        run.googleapis.com/vpc-access-egress: "all-traffic"  # required: Atlas allowlisted to NAT 34.35.108.112 only
     spec:
       containerConcurrency: 80
       timeoutSeconds: 300
