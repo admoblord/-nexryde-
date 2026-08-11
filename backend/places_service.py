@@ -455,6 +455,17 @@ async def autocomplete_places(
         raise HTTPException(status_code=500, detail=f"Error fetching places: {str(e)}")
 
 
+
+def _local_landmark_by_place_id(place_id: str) -> Optional[dict]:
+    pid = (place_id or "").strip()
+    if not pid.startswith("local:"):
+        return None
+    for row in _LAGOS_LANDMARKS:
+        if row.get("place_id") == pid:
+            return row
+    return None
+
+
 @places_router.get("/details/{place_id}")
 async def get_place_details(
     request: Request,
@@ -467,6 +478,20 @@ async def get_place_details(
     When completing an autocomplete session, pass the same ``sessiontoken``.
     """
     await _require_places_auth(request)
+
+    # Autocomplete may return free local Lagos landmarks (place_id=local:…).
+    # Resolve those here — never proxy local ids to Google (they 404).
+    local = _local_landmark_by_place_id(place_id)
+    if local:
+        return {
+            "latitude": local["lat"],
+            "longitude": local["lng"],
+            "address": local["description"],
+            "status": "OK",
+            "source": "local_landmark",
+            "place_id": local["place_id"],
+        }
+
     if not GOOGLE_MAPS_API_KEY:
         raise HTTPException(status_code=500, detail="Google Maps API key not configured")
     

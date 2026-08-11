@@ -133,6 +133,36 @@ const bookingMapStyles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#fff',
   },
+  pinBadge: {
+    backgroundColor: '#0F172A',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    maxWidth: 148,
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 8,
+  },
+  pinBadgePickup: {
+    borderColor: 'rgba(0,208,132,0.55)',
+  },
+  pinBadgeDrop: {
+    borderColor: 'rgba(248,113,113,0.5)',
+  },
+  pinBadgeText: {
+    color: '#F8FAFC',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.1,
+  },
+  pinStack: {
+    alignItems: 'center',
+  },
 });
 
 export type RiderBookingMapNativeProps = {
@@ -168,6 +198,9 @@ export type RiderBookingMapNativeProps = {
   debugOverlay?: boolean;
   /** Long-press map to set drop-off (booking only). */
   onLongPressMap?: (coords: { lat: number; lng: number }) => void;
+  /** Bolt-style pin badges, e.g. "Pickup / 12 min" and "Dropoff / 12:48 AM". */
+  pickupBadge?: string | null;
+  dropoffBadge?: string | null;
 };
 
 /** Rider booking / request map — teal route, traffic, 100m pickup radius, map FABs. */
@@ -520,14 +553,24 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
             </>
           )}
           <Marker
+            key={`pickup-${props.pickupBadge || 'pin'}`}
             coordinate={{ latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng }}
             title="Pickup"
             description={props.pickup}
-            anchor={{ x: 0.5, y: 0.5 }}
+            anchor={{ x: 0.5, y: props.pickupBadge ? 0.85 : 0.5 }}
             tracksViewChanges={false}
             zIndex={5}
           >
-            <MapBookingUserPulse size={sm ? 44 : 40} />
+            <View style={bookingMapStyles.pinStack}>
+              {props.pickupBadge ? (
+                <View style={[bookingMapStyles.pinBadge, bookingMapStyles.pinBadgePickup]}>
+                  <Text style={bookingMapStyles.pinBadgeText} numberOfLines={1}>
+                    {props.pickupBadge}
+                  </Text>
+                </View>
+              ) : null}
+              <MapBookingUserPulse size={sm ? 44 : 40} />
+            </View>
           </Marker>
           {props.stopCoords ? (
             <Marker
@@ -548,21 +591,31 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
           ) : null}
           {props.destinationCoords ? (
             <Marker
+              key={`drop-${props.dropoffBadge || 'pin'}`}
               coordinate={{
                 latitude: props.destinationCoords.lat,
                 longitude: props.destinationCoords.lng,
               }}
             title="Destination"
             description={props.destination}
-            anchor={{ x: 0.5, y: 0.5 }}
+            anchor={{ x: 0.5, y: props.dropoffBadge ? 0.85 : 0.5 }}
             // Pulse is a native-driven transform on the marker's own view — the
             // bitmap content never changes, so tracking view changes here just
             // forces continuous re-rasterization and is a major jank source.
             tracksViewChanges={false}
           >
-            <Animated.View style={{ transform: [{ scale: dropPulseScale }] }}>
-              <MapBookingDestinationPin />
-            </Animated.View>
+            <View style={bookingMapStyles.pinStack}>
+              {props.dropoffBadge ? (
+                <View style={[bookingMapStyles.pinBadge, bookingMapStyles.pinBadgeDrop]}>
+                  <Text style={bookingMapStyles.pinBadgeText} numberOfLines={1}>
+                    {props.dropoffBadge}
+                  </Text>
+                </View>
+              ) : null}
+              <Animated.View style={{ transform: [{ scale: dropPulseScale }] }}>
+                <MapBookingDestinationPin />
+              </Animated.View>
+            </View>
           </Marker>
           ) : null}
           {driverClusters.map((entry, idx) => {
