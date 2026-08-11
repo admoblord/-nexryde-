@@ -58,6 +58,14 @@ export default function RiderTabLayout() {
     void warmTokenCache();
   }, []);
 
+  // Prefetch every tab's data after auth so second visits paint from cache.
+  useEffect(() => {
+    if (!allowed || !userId) return;
+    void import('@/src/services/prefetchTabData').then(({ prefetchRiderTabs }) => {
+      void prefetchRiderTabs(userId);
+    });
+  }, [allowed, userId]);
+
   const tabScreenOptions = useMemo(
     () =>
       buildTabScreenOptions({

@@ -105,6 +105,7 @@ async def ensure_indexes(db):
         await db.driver_profiles.create_index("work_zone_zones.place_id", sparse=True)
         
         # Trips
+        await db.trips.create_index("id", unique=True, name="trips_id_unique")
         await db.trips.create_index("rider_id")
         await db.trips.create_index("driver_id")
         await db.trips.create_index("status")

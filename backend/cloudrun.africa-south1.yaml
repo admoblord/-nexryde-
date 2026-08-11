@@ -19,14 +19,13 @@ spec:
   template:
     metadata:
       annotations:
-        # Keep one warm instance so tab switches / reverse-geocode never pay a
-        # cold start after idle. Timer work (guardians, saga retries,
-        # safe-arrival escalation) is still driven by Cloud Scheduler calling
-        # POST /api/ops/maintenance-tick.
+        # Keep one warm instance + always-allocated CPU so tab switches /
+        # reverse-geocode never pay a cold start or CPU-thaw delay after idle.
         autoscaling.knative.dev/minScale: "1"
         autoscaling.knative.dev/maxScale: "10"
         run.googleapis.com/startup-cpu-boost: "true"
-        run.googleapis.com/cpu-throttling: "true"
+        # false = CPU always allocated (required for snappy Redis/Mongo under load)
+        run.googleapis.com/cpu-throttling: "false"
         # Private access to Memorystore Redis for rate limits, realtime fanout, and polling cache.
         run.googleapis.com/vpc-access-connector: "projects/nexryde-app/locations/africa-south1/connectors/nexryde-vpc"
         run.googleapis.com/vpc-access-egress: "private-ranges-only"

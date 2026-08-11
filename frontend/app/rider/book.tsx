@@ -306,6 +306,8 @@ function BookInDriveStyle() {
   const [bookingSheetScrolled, setBookingSheetScrolled] = useState(false);
   const bookingSheetScrolledRef = useRef(false);
   const [isLoading, setIsLoading] = useState(false);
+  /** Instant "Finding your driver" overlay — shown before the network returns. */
+  const [findingDriverOverlay, setFindingDriverOverlay] = useState(false);
 
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [editingField, setEditingField] = useState<'pickup' | 'destination' | 'stop'>('pickup');
@@ -1984,6 +1986,8 @@ function BookInDriveStyle() {
     }
     offerInFlightRef.current = true;
     setIsLoading(true);
+    // Optimistic UX: show Finding immediately — never wait on the server to paint.
+    setFindingDriverOverlay(true);
     const pLat = pLatEarly;
     const pLng = pLngEarly;
     const dLat = dLatEarly;
@@ -2084,9 +2088,11 @@ function BookInDriveStyle() {
           toast.show('Ride created but tracking could not open. Check My Trips.', 'error');
         }
       } else {
+        setFindingDriverOverlay(false);
         toast.show(toStr(result?.detail || result?.message, 'Could not request ride. Please try again in a moment.'), 'error');
       }
     } catch {
+      setFindingDriverOverlay(false);
       const online = await checkOnlineStatus();
       if (!online && riderId) {
         await createOfflineBooking(riderId, requestBody);
@@ -3533,6 +3539,43 @@ function BookInDriveStyle() {
               <Text style={s.vehCloseText}>Close</Text>
             </TouchableOpacity>
           </View>
+        </View>
+      </Modal>
+
+      {/* Optimistic Finding overlay — paints on tap, before /trips/request returns */}
+      <Modal visible={findingDriverOverlay} animationType="fade" transparent>
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(8,12,20,0.92)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 28,
+          }}
+        >
+          <ActivityIndicator size="large" color="#00D46A" />
+          <Text
+            style={{
+              marginTop: 18,
+              fontSize: 20,
+              fontWeight: '900',
+              color: '#FFF',
+              letterSpacing: -0.3,
+            }}
+          >
+            Finding your driver
+          </Text>
+          <Text
+            style={{
+              marginTop: 8,
+              fontSize: 14,
+              fontWeight: '600',
+              color: '#94A3B8',
+              textAlign: 'center',
+            }}
+          >
+            Matching nearby drivers — hang tight.
+          </Text>
         </View>
       </Modal>
 

@@ -2633,6 +2633,8 @@ class ResponseTimingMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         # Always expose for client/debug; cheap header.
         response.headers["X-Response-Time-ms"] = str(ms)
+        # W3C Server-Timing — visible in browser/devtools and proxy logs.
+        response.headers["Server-Timing"] = f"app;dur={ms}"
         # Structured log for places/trips/wallet (and any slow request).
         interesting = (
             path.startswith("/api/places/")
@@ -2640,6 +2642,9 @@ class ResponseTimingMiddleware(BaseHTTPMiddleware):
             or path.startswith("/api/wallet")
             or path.startswith("/api/fare/")
             or path.startswith("/api/users/")
+            or path.startswith("/api/drivers/")
+            or path.startswith("/api/subscriptions")
+            or path.startswith("/api/work-zone")
             or ms >= self._SLOW_MS
         )
         if interesting:

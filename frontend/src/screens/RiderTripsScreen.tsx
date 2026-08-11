@@ -12,6 +12,7 @@
  *  - Pull-to-refresh
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   FlatList,
   RefreshControl,
@@ -32,6 +33,7 @@ import { isActiveTripStatus, normalizeTripStatus } from '@/src/utils/tripStatus'
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { tabCacheGet, tabCacheSet } from '@/src/services/tabDataCache';
+import { qk } from '@/src/services/queryKeys';
 
 type TripTab = 'upcoming' | 'completed' | 'cancelled';
 
@@ -318,57 +320,47 @@ export default function RiderTripsScreen() {
   const tripsCacheKey = riderId ? `rider-trips:${riderId}` : '';
   const cachedTrips = riderId ? tabCacheGet<any[]>(`rider-trips:${riderId}`) : null;
   const [activeTab, setActiveTab] = useState<TripTab>('upcoming');
-  const [trips, setTrips] = useState<any[]>(() =>
-    Array.isArray(cachedTrips) ? cachedTrips : [],
-  );
-  const [loading, setLoading] = useState(() => !(Array.isArray(cachedTrips) && cachedTrips.length > 0));
   const [refreshing, setRefreshing] = useState(false);
-  const [loadError, setLoadError] = useState(false);
   const tabPad = useTabBottomPad(8);
   const flow   = useFlowLayout();
   const didAutoTab = useRef(false);
-  const hasPaintedRef = useRef(Array.isArray(cachedTrips) && cachedTrips.length > 0);
 
-  const loadTrips = useCallback(async (silent = false) => {
-    if (!riderId || !canCallAuthedApi) { setLoading(false); return; }
-    if (!silent) setLoadError(false);
-    if (!silent && !hasPaintedRef.current) setLoading(true);
-    try {
-      const res = await getUserTrips(riderId, 'rider');
+  const tripsQuery = useQuery({
+    queryKey: riderId ? qk.riderTrips(riderId) : ['rider', 'trips', 'none'],
+    enabled: Boolean(riderId && canCallAuthedApi),
+    initialData: Array.isArray(cachedTrips) ? cachedTrips : undefined,
+    placeholderData: (prev) => prev,
+    queryFn: async () => {
+      const res = await getUserTrips(riderId!, 'rider');
       const next = Array.isArray(res.data) ? res.data : [];
-      setTrips(next);
-      hasPaintedRef.current = true;
       if (tripsCacheKey) tabCacheSet(tripsCacheKey, next);
-      if (!didAutoTab.current && next.length > 0) {
-        const upcoming = next.filter((t: any) => isActiveTripStatus(t.status, t.payment_status));
-        if (upcoming.length === 0) {
-          const completed = next.filter(
-            (t: any) => normalizeTripStatus(t.status, t.payment_status) === 'completed',
-          );
-          if (completed.length > 0) {
-            setActiveTab('completed');
-            didAutoTab.current = true;
-          }
-        } else {
-          didAutoTab.current = true;
-        }
-      }
-    } catch {
-      setLoadError(true);
-      if (!hasPaintedRef.current) setTrips([]);
+      return next;
+    },
+  });
+
+  const trips = tripsQuery.data ?? [];
+  const loading = tripsQuery.isLoading && trips.length === 0;
+  const loadError = tripsQuery.isError;
+
+  const loadTrips = useCallback(async (_silent = false) => {
+    try {
+      await tripsQuery.refetch();
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
-  }, [riderId, canCallAuthedApi, tripsCacheKey]);
+  }, [tripsQuery]);
 
   useEffect(() => {
-    if (!canCallAuthedApi) {
-      setLoading(false);
-      return;
+    if (didAutoTab.current || trips.length === 0) return;
+    const upcoming = trips.filter((t: any) => isActiveTripStatus(t.status, t.payment_status));
+    if (upcoming.length === 0) {
+      const completed = trips.filter(
+        (t: any) => normalizeTripStatus(t.status, t.payment_status) === 'completed',
+      );
+      if (completed.length > 0) setActiveTab('completed');
     }
-    void loadTrips(hasPaintedRef.current);
-  }, [loadTrips, canCallAuthedApi]);
+    didAutoTab.current = true;
+  }, [trips]);
 
   const segmented = useMemo(() => {
     const upcoming  = trips.filter((t) => isActiveTripStatus(t.status, t.payment_status));
@@ -461,7 +453,7 @@ export default function RiderTripsScreen() {
       <Ionicons name="cloud-offline-outline" size={48} color={BRAND.danger} />
       <Text style={[styles.errorTitle, { color: colors.text }]}>Could not load trips</Text>
       <Text style={[styles.errorSub, { color: colors.textMuted }]}>Check your connection and try again</Text>
-      <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoading(true); void loadTrips(); }}>
+      <TouchableOpacity style={styles.retryBtn} onPress={() => { void loadTrips(); }}>
         <Ionicons name="refresh" size={16} color="#FFF" />
         <Text style={styles.retryBtnTxt}>Retry</Text>
       </TouchableOpacity>

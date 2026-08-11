@@ -371,10 +371,26 @@ class DriverSalaryModeUpdate(BaseModel):
 @drivers_router.get("/drivers/{user_id}/profile")
 async def get_driver_profile(user_id: str, request: Request):
     verify_owner_strict(request, user_id)
+    from hot_cache import (
+        TTL_DRIVER_PROFILE_SEC,
+        cache_get_json,
+        cache_set_json,
+        driver_profile_key,
+    )
+
+    key = driver_profile_key(user_id)
+    hit = await cache_get_json(key)
+    if isinstance(hit, dict) and hit.get("user_id"):
+        return hit
+
     profile = await db.driver_profiles.find_one({"user_id": user_id})
     if not profile:
         raise HTTPException(status_code=404, detail="Driver profile not found")
     profile["_id"] = str(profile["_id"])
+    # Never cache huge binary blobs in Redis.
+    for heavy in ("face_image", "passport_photo", "drivers_license", "insurance"):
+        if isinstance(profile.get(heavy), str) and len(profile[heavy]) > 5000:
+            profile[heavy] = ""
 
     # Derive nin_verified: driver has a NIN number AND their documents were approved.
     nin_raw = resolve_nin_plaintext(profile) or str(profile.get("nin_number") or "").strip() or None
@@ -417,6 +433,7 @@ async def get_driver_profile(user_id: str, request: Request):
         and profile.get("profile_completed")
     )
 
+    await cache_set_json(key, profile, TTL_DRIVER_PROFILE_SEC)
     return profile
 
 @drivers_router.put("/drivers/{user_id}/profile")
@@ -427,6 +444,12 @@ async def update_driver_profile(user_id: str, request: Request, body: DriverProf
         result = await db.driver_profiles.update_one({"user_id": user_id}, {"$set": update_data})
         if result.modified_count == 0:
             await db.driver_profiles.insert_one({"user_id": user_id, **update_data})
+        try:
+            from hot_cache import invalidate_driver_hot_cache
+
+            await invalidate_driver_hot_cache(user_id)
+        except Exception:
+            pass
     profile = await db.driver_profiles.find_one({"user_id": user_id})
     profile["_id"] = str(profile["_id"])
     return profile
