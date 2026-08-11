@@ -80,7 +80,11 @@ export const RIDER_SAVED_SLOT_META: Record<
 export async function geocodeAddressForRider(address: string): Promise<{ lat: number; lng: number; address: string } | null> {
   try {
     const query = encodeURIComponent(address.trim());
-    const res = await fetch(`${BACKEND_URL}/api/places/geocode-address?address=${query}`);
+    const { authedFetch } = await import('@/src/utils/sessionRefresh');
+    const res = await authedFetch(
+      `${BACKEND_URL}/api/places/geocode-address?address=${query}`,
+      { method: 'GET', preserveSessionOn401: true, timeoutMs: 12_000 },
+    );
     const data = await res.json().catch(() => ({}));
     const lat = Number(data?.latitude);
     const lng = Number(data?.longitude);

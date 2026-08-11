@@ -141,9 +141,11 @@ export default function WorkZoneScreen() {
     setResolvingPlace(true);
     try {
       const session = place.sessionToken ? `?sessiontoken=${encodeURIComponent(place.sessionToken)}` : '';
-      const res = await fetch(`${BACKEND_URL}/api/places/details/${encodeURIComponent(place.placeId)}${session}`, {
-        headers: getAuthHeaders(),
-      });
+      const { authedFetch } = await import('@/src/utils/sessionRefresh');
+      const res = await authedFetch(
+        `${BACKEND_URL}/api/places/details/${encodeURIComponent(place.placeId)}${session}`,
+        { method: 'GET', preserveSessionOn401: true, timeoutMs: 12_000 },
+      );
       const details = await res.json().catch(() => ({}));
       if (!res.ok || details.status !== 'OK') {
         Alert.alert('Could not add location', details.detail || 'Please try another result.');

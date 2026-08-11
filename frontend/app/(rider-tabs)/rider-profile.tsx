@@ -20,10 +20,11 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL, deleteUserAccount, getUser, getUserTrustSummary, getAuthHeaders, updateUser } from '@/src/services/api';
+import { BACKEND_URL, deleteUserAccount, getUser, getUserTrustSummary, updateUser } from '@/src/services/api';
 import { buildInviteUrl, buildShareMessage } from '@/src/services/referralService';
 import { sentryTestCrash } from '@/src/utils/sentry';
 import { shareTextViaWhatsApp } from '@/src/services/socialWhatsApp';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 import {
   buildAchievementWhatsAppMessage,
   computeEarnedRiderBadgeIds,
@@ -276,50 +277,52 @@ export default function RiderProfileScreen() {
       if (!userId || !canCallAuthedApi) return;
       setLoadingTrust(true);
 
-      try {
-        const trustRes = await getUserTrustSummary(userId);
-        if (mounted) setTrustSummary(trustRes.data);
-      } catch { /* non-critical */ }
+      // Parallelize — sequential trust→user→referral made Profile feel stuck on open.
+      const [trustSettled, userSettled, referralSettled] = await Promise.allSettled([
+        getUserTrustSummary(userId),
+        getUser(userId),
+        authedFetch(`${BACKEND_URL}/api/incentives/referral-code`, {
+          method: 'GET',
+          preserveSessionOn401: true,
+          timeoutMs: 12_000,
+        }).then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          return { ok: res.ok, data };
+        }),
+      ]);
 
-      try {
-        const userRes = await getUser(userId);
-        if (mounted && userRes?.data) {
-          const d = userRes.data as Record<string, unknown>;
-          setAchievementStats({
-            totalTrips: Number(d.total_trips ?? user?.total_trips ?? 0),
-            rating: Number(d.rating ?? user?.rating ?? 5),
-            riderReputationTripCount:
-              d.rider_reputation_trip_count != null
-                ? Number(d.rider_reputation_trip_count)
-                : undefined,
-          });
-        }
-      } catch { /* non-critical — fall back to store for badges */ }
+      if (!mounted) return;
 
-      if (mounted) setLoadingTrust(false);
-    };
-    void load();
-    return () => { mounted = false; };
-  }, [canCallAuthedApi, userId, user?.rating, user?.total_trips]);
+      if (trustSettled.status === 'fulfilled') {
+        setTrustSummary(trustSettled.value.data);
+      }
 
-  useEffect(() => {
-    let mounted = true;
-    if (!userId || !canCallAuthedApi) return undefined;
-    void (async () => {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/incentives/referral-code`, { headers: getAuthHeaders() });
-        const data = await res.json().catch(() => ({}));
-        if (!mounted || !res.ok) return;
+      if (userSettled.status === 'fulfilled' && userSettled.value?.data) {
+        const d = userSettled.value.data as Record<string, unknown>;
+        setAchievementStats({
+          totalTrips: Number(d.total_trips ?? user?.total_trips ?? 0),
+          rating: Number(d.rating ?? user?.rating ?? 5),
+          riderReputationTripCount:
+            d.rider_reputation_trip_count != null
+              ? Number(d.rider_reputation_trip_count)
+              : undefined,
+        });
+      }
+
+      if (referralSettled.status === 'fulfilled' && referralSettled.value.ok) {
+        const data = referralSettled.value.data as Record<string, unknown>;
         setReferralInviteUrl(typeof data.invite_url === 'string' ? data.invite_url : '');
         setReferralUsername(typeof data.username === 'string' ? data.username : '');
         setReferralCode(typeof data.referral_code === 'string' ? data.referral_code : '');
-      } catch {
-        /* non-critical */
       }
-    })();
+
+      setLoadingTrust(false);
+    };
+    void load();
     return () => {
       mounted = false;
     };
+    // Intentionally not depending on rating/trips — getUser used to re-trigger this loop.
   }, [canCallAuthedApi, userId]);
 
   const saveProfileImage = async (uri: string) => {

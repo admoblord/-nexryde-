@@ -313,7 +313,6 @@ export async function routeAuthedUser(
 
   const role = loggedUser.role;
   const forceCheck = options?.forceStatusCheck === true;
-  const legalUser = await resolveUserForLegalGate(loggedUser);
 
   if (!forceCheck) {
     if (role === 'rider') {
@@ -326,18 +325,33 @@ export async function routeAuthedUser(
         (loggedUser as { rider_verification_completed?: boolean }).rider_verification_completed === true ||
         (loggedUser as { onboarding_complete?: boolean }).onboarding_complete === true;
       if (cached) {
-        if (needsLegalRedirect(legalUser, 'routeAuthedUser:rider-cached')) {
-          replaceLegalTermsIfNeeded(router, role);
-          return;
+        // Instant home from login payload — do NOT await legal-status network first.
+        // Background sync still enforces terms if the server says they are stale.
+        if (needsLegalRedirect(loggedUser, 'routeAuthedUser:rider-cached-local')) {
+          const legalUser = await resolveUserForLegalGate(loggedUser);
+          if (needsLegalRedirect(legalUser, 'routeAuthedUser:rider-cached')) {
+            replaceLegalTermsIfNeeded(router, role);
+            return;
+          }
         }
         routeToHomeInstant(router, role);
+        void syncUserLegalStatus(id).then((synced) => {
+          if (!synced) return;
+          const merged = { ...loggedUser, ...synced } as AuthedUserForRouting;
+          if (needsLegalRedirect(merged, 'routeAuthedUser:rider-bg-legal')) {
+            replaceLegalTermsIfNeeded(router, role);
+          }
+        });
         syncAuthStatusInBackground(loggedUser, resolvedToken);
         return;
       }
     } else if (role === 'driver') {
-      if (needsLegalRedirect(legalUser, 'routeAuthedUser:driver')) {
-        replaceLegalTermsIfNeeded(router, 'driver');
-        return;
+      if (needsLegalRedirect(loggedUser, 'routeAuthedUser:driver-local')) {
+        const legalUser = await resolveUserForLegalGate(loggedUser);
+        if (needsLegalRedirect(legalUser, 'routeAuthedUser:driver')) {
+          replaceLegalTermsIfNeeded(router, 'driver');
+          return;
+        }
       }
       // Never trust onboarded cache alone — unfinished drivers must hit status routing.
       // Instant Home only when local verification fact is approved (Uber-grade gate).
@@ -349,6 +363,13 @@ export async function routeAuthedUser(
           const fact = await readDriverVerificationFact(id);
           if (fact?.verificationStatus === 'approved') {
             routeToHomeInstant(router, role);
+            void syncUserLegalStatus(id).then((synced) => {
+              if (!synced) return;
+              const merged = { ...loggedUser, ...synced } as AuthedUserForRouting;
+              if (needsLegalRedirect(merged, 'routeAuthedUser:driver-bg-legal')) {
+                replaceLegalTermsIfNeeded(router, 'driver');
+              }
+            });
             syncAuthStatusInBackground(loggedUser, resolvedToken);
             return;
           }

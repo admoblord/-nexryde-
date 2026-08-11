@@ -1,4 +1,5 @@
 import { BACKEND_URL } from '@/src/services/api';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 import { decodePolylineToMapCoords } from '@/src/utils/polylineDecoder';
 
 export type DrivingRouteStep = {
@@ -63,9 +64,14 @@ export async function fetchDrivingRoute(
   }
 
   try {
-    const res = await fetch(`${base}/api/places/driving-route?${q.toString()}`, {
+    // Directions proxy requires auth — unauthenticated calls 401 and the map
+    // polyline / ETA never draw after pickup + destination are chosen.
+    const res = await authedFetch(`${base}/api/places/driving-route?${q.toString()}`, {
+      method: 'GET',
       headers: { Accept: 'application/json' },
       signal: options?.signal,
+      preserveSessionOn401: true,
+      timeoutMs: 20_000,
     });
     if (!res.ok) return null;
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
