@@ -57,7 +57,6 @@ const ACTION_ROUTES: Record<string, string> = {
   go_offline: '/(driver-tabs)/driver-home?action=go_offline',
   open_app:  '/(driver-tabs)/driver-home',
   my_trips:  '/(driver-tabs)/driver-trips',
-  wallet:    '/(driver-tabs)/driver-earnings',
 };
 
 /**
@@ -177,13 +176,6 @@ function RootLayout() {
   // Restore last Light / Dark / Auto choice (JS-only; never touches Appearance TurboModule)
   useEffect(() => {
     void bootstrapThemeFromStorage().catch(() => {});
-  }, []);
-
-  // Server feature flags (e.g. wallet on/off) — cached-first, refreshed in background.
-  useEffect(() => {
-    void import('@/src/services/clientConfig')
-      .then((m) => m.loadClientConfig())
-      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -328,14 +320,6 @@ function RootLayout() {
                     options={{
                       headerShown: false,
                       presentation: Platform.OS === 'ios' ? 'modal' : 'card',
-                    }}
-                  />
-                  <Stack.Screen
-                    name="driver/withdrawal"
-                    options={{
-                      headerShown: false,
-                      presentation: Platform.OS === 'ios' ? 'modal' : 'card',
-                      animation: Platform.OS === 'ios' ? 'slide_from_bottom' : 'fade_from_bottom',
                     }}
                   />
                 </Stack>

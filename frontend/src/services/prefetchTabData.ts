@@ -5,7 +5,7 @@
 import { queryClient } from '@/src/providers/QueryProvider';
 import { qk } from '@/src/services/queryKeys';
 import { BACKEND_URL } from '@/src/services/api';
-import { getUserTrips, getWalletMe, getUser, getUserTrustSummary } from '@/src/services/api';
+import { getUserTrips, getUser, getUserTrustSummary } from '@/src/services/api';
 import { authedFetch } from '@/src/utils/sessionRefresh';
 import { loadRiderSavedPlaces } from '@/src/services/riderSavedPlaces';
 import { fetchFeatureAnnouncements } from '@/src/services/featureAnnouncements';
@@ -36,16 +36,6 @@ export async function prefetchRiderTabs(userId: string): Promise<void> {
       queryFn: async () => {
         const res = await getUserTrustSummary(userId);
         return res.data;
-      },
-    }),
-    queryClient.prefetchQuery({
-      queryKey: qk.riderWallet(userId),
-      queryFn: async () => {
-        const w = await getWalletMe(15);
-        return {
-          balance: Number(w.data?.balance ?? 0),
-          txs: Array.isArray(w.data?.transactions) ? w.data.transactions : [],
-        };
       },
     }),
     queryClient.prefetchQuery({

@@ -35,7 +35,6 @@ import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import {
   BACKEND_URL,
   getAuthHeaders,
-  getWalletMe,
   getRiderPreferences,
   updateRiderPreferences,
   getAvailableDrivers,
@@ -93,7 +92,6 @@ import {
   type InstantPickupController,
 } from '@/src/services/instantPickupEngine';
 import { AnimatedPickupLabel } from '@/src/components/rider/AnimatedPickupLabel';
-import { useWalletEnabled } from '@/src/services/clientConfig';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useThemeColors } from '@/src/constants/theme';
 import { FIRST_RIDE_DISCOUNT_PCT } from '@/src/constants/commercialOffers';
@@ -341,10 +339,7 @@ function BookInDriveStyle() {
   const [fareExplainModal, setFareExplainModal] = useState<
     'surge' | 'short' | 'breakdown' | 'positioning' | null
   >(null);
-  const [ridePaymentMethod, setRidePaymentMethod] = useState<'cash' | 'wallet' | 'transfer'>('cash');
-  const [walletBalance, setWalletBalance] = useState<number | null>(null);
-  // Launch mode: wallet off → payment options are Cash and Transfer (direct to driver).
-  const walletEnabled = useWalletEnabled();
+  const [ridePaymentMethod, setRidePaymentMethod] = useState<'cash' | 'transfer'>('cash');
   const [optimizedRoute, setOptimizedRoute] = useState<TrafficRoute | null>(null);
   const [routeSafety, setRouteSafety] = useState<RouteSafetyResponse | null>(null);
   const [routeSafetyLoading, setRouteSafetyLoading] = useState(false);
@@ -678,32 +673,9 @@ function BookInDriveStyle() {
   };
 
   const tripPaymentMethod = useCallback(() => {
-    if (ridePaymentMethod === 'wallet' && walletEnabled) return 'wallet';
     if (ridePaymentMethod === 'transfer') return 'transfer';
     return 'cash';
-  }, [ridePaymentMethod, walletEnabled]);
-
-  // Wallet disabled: never leave a stale 'wallet' selection active.
-  useEffect(() => {
-    if (!walletEnabled && ridePaymentMethod === 'wallet') {
-      setRidePaymentMethod('cash');
-    }
-  }, [walletEnabled, ridePaymentMethod]);
-
-  useEffect(() => {
-    if (!riderId || !walletEnabled) {
-      setWalletBalance(null);
-      return;
-    }
-    (async () => {
-      try {
-        const w = await getWalletMe(1);
-        setWalletBalance(Number(w.data?.balance ?? 0));
-      } catch {
-        setWalletBalance(null);
-      }
-    })();
-  }, [riderId, walletEnabled]);
+  }, [ridePaymentMethod]);
 
   useEffect(() => {
     if (!riderId) return;
@@ -1967,23 +1939,6 @@ function BookInDriveStyle() {
       return;
     }
 
-    if (payMethod === 'wallet') {
-      let bal = walletBalance ?? 0;
-      try {
-        const w = await getWalletMe(1);
-        bal = Number(w.data?.balance ?? 0);
-        setWalletBalance(bal);
-      } catch {
-        /* use cached balance */
-      }
-      if (bal + 1e-6 < bid) {
-        Alert.alert(
-          'Insufficient balance',
-          `You need at least ₦${bid.toLocaleString()} in your wallet. Top up in Wallet or pay with cash.`,
-        );
-        return;
-      }
-    }
     offerInFlightRef.current = true;
     setIsLoading(true);
     // Optimistic UX: show Finding immediately — never wait on the server to paint.
@@ -2950,52 +2905,24 @@ function BookInDriveStyle() {
                       <Text style={s.payChipSub}>Pay driver</Text>
                     </View>
                   </TouchableOpacity>
-                  {walletEnabled ? (
-                    <TouchableOpacity
-                      style={[s.payChip, ridePaymentMethod === 'wallet' && s.payChipOn]}
-                      onPress={() => setRidePaymentMethod('wallet')}
-                      accessibilityLabel="Pay with wallet"
-                      accessibilityRole="button"
-                    >
-                      <Ionicons name="wallet" size={20} color={ridePaymentMethod === 'wallet' ? COLORS.green : COLORS.dim} />
-                      <View>
-                        <Text style={[s.payChipText, ridePaymentMethod === 'wallet' && s.payChipTextOn]}>Wallet</Text>
-                        <Text style={s.payChipSub}>NEXRYDE balance</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity
-                      style={[s.payChip, ridePaymentMethod === 'transfer' && s.payChipOn]}
-                      onPress={() => setRidePaymentMethod('transfer')}
-                      accessibilityLabel="Pay by bank transfer to your driver"
-                      accessibilityRole="button"
-                    >
-                      <Ionicons name="swap-horizontal" size={20} color={ridePaymentMethod === 'transfer' ? COLORS.green : COLORS.dim} />
-                      <View>
-                        <Text style={[s.payChipText, ridePaymentMethod === 'transfer' && s.payChipTextOn]}>Transfer</Text>
-                        <Text style={s.payChipSub}>To driver&apos;s bank</Text>
-                      </View>
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    style={[s.payChip, ridePaymentMethod === 'transfer' && s.payChipOn]}
+                    onPress={() => setRidePaymentMethod('transfer')}
+                    accessibilityLabel="Pay by bank transfer to your driver"
+                    accessibilityRole="button"
+                  >
+                    <Ionicons name="swap-horizontal" size={20} color={ridePaymentMethod === 'transfer' ? COLORS.green : COLORS.dim} />
+                    <View>
+                      <Text style={[s.payChipText, ridePaymentMethod === 'transfer' && s.payChipTextOn]}>Transfer</Text>
+                      <Text style={s.payChipSub}>To driver&apos;s bank</Text>
+                    </View>
+                  </TouchableOpacity>
                 </View>
-                {walletEnabled && ridePaymentMethod === 'wallet' && walletBalance != null && currentFare > 0 && walletBalance < currentFare ? (
-                  <View style={s.walletWarnRow}>
-                    <Ionicons name="warning-outline" size={14} color={COLORS.yellow} />
-                    <Text style={s.walletWarnText}>
-                      Insufficient balance (₦{walletBalance.toLocaleString()}) — top up or pay cash
-                    </Text>
-                  </View>
-                ) : (
-                  <Text style={s.payHint}>
-                    {ridePaymentMethod === 'wallet'
-                      ? walletBalance != null
-                        ? `Balance ₦${walletBalance.toLocaleString()} · charged after trip`
-                        : 'Loading balance…'
-                      : ridePaymentMethod === 'transfer'
-                        ? "Transfer straight to your driver's account after the trip"
-                        : 'Pay your driver in cash at drop-off'}
-                  </Text>
-                )}
+                <Text style={s.payHint}>
+                  {ridePaymentMethod === 'transfer'
+                    ? "Transfer straight to your driver's account after the trip"
+                    : 'Pay your driver in cash at drop-off'}
+                </Text>
               </View>
 
               {/* Trip options — mood + gate collapsed by default */}
@@ -4090,19 +4017,6 @@ const s = StyleSheet.create({
     paddingHorizontal: 4,
   },
   recentEmptyText: { fontSize: 13, color: COLORS.dim, fontStyle: 'italic' },
-  walletWarnRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,184,0,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,184,0,0.25)',
-  },
-  walletWarnText: { flex: 1, fontSize: 12, fontWeight: '600', color: '#FDE68A' },
   preferredBanner: {
     position: 'absolute',
     flexDirection: 'row',

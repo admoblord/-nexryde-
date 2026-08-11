@@ -55,7 +55,6 @@ export function OpsCenterPage() {
         <KpiCard label="Cancelled Today" value={counts.cancelled_today ?? trips.today_cancelled} tone="red" />
         <KpiCard label="Revenue Today ₦" value={Number(trips.today_revenue_ngn ?? 0).toLocaleString()} tone="green" />
         <KpiCard label="Sub Revenue Today ₦" value={Number(ops.todays_subscription_revenue_ngn ?? 0).toLocaleString()} />
-        <KpiCard label="Pending Withdrawals" value={ops.pending_withdrawals} tone="amber" />
         <KpiCard label="Pending Approvals" value={ops.driver_approval_requests} tone="amber" />
         <KpiCard label="SOS Alerts" value={ops.sos_alerts} tone="red" />
         <KpiCard label="Support Tickets" value={ops.support_tickets} tone="amber" />

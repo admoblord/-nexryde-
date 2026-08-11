@@ -50,7 +50,6 @@ import {
   extractApiDetailPayload,
   messageFromAxiosError,
   getDriverSubscriptionStatus,
-  getDriverWithdrawals,
   getTrip,
   arriveTrip,
   startTrip,
@@ -688,9 +687,6 @@ export default function ModernDriverHome() {
     };
     fetchEarnings(true);
     const interval = setInterval(() => fetchEarnings(false), 60000);
-    getDriverWithdrawals(driverId).then(r => {
-      if (mounted) setWalletBalance(r.data.wallet_balance ?? 0);
-    }).catch(() => {});
     return () => {
       mounted = false;
       clearInterval(interval);
@@ -904,7 +900,6 @@ export default function ModernDriverHome() {
   const goOnlineCommitInFlightRef = useRef(false);
   const [earningsLoading, setEarningsLoading] = useState(true);
   const [earningsError, setEarningsError] = useState(false);
-  const [walletBalance, setWalletBalance] = useState(0);
 
   const [tripActionBusy, setTripActionBusy] = useState<string | null>(null);
   const [tripCompletion, setTripCompletion] = useState<TripCompletionPayload | null>(null);
@@ -2462,6 +2457,13 @@ export default function ModernDriverHome() {
       Alert.alert(title, message, [
         { text: 'Later', style: 'cancel' },
         { text: 'Update Docs', onPress: () => guardedPush('/driver/documents') },
+      ]);
+      return;
+    }
+    if (parsed.code === 'ERR_COMPLIANCE') {
+      Alert.alert(title, message, [
+        { text: 'Later', style: 'cancel' },
+        { text: 'Open Documents', onPress: () => guardedPush('/driver/documents') },
       ]);
       return;
     }

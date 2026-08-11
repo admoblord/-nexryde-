@@ -1,11 +1,7 @@
 """Server feature flags (system_config.feature_flags) with a short in-process cache.
 
-LAUNCH POLICY: the fare wallet is DISABLED by default ("wallet": "off").
-Riders pay drivers directly (cash or bank transfer to the driver's account);
-NexRyde holds no fare float. The driver subscription (Squad checkout) is a
-separate flow and is NOT gated by this flag.
-
-Re-enable later without a rebuild: POST /api/admin/feature-flags {"wallet": "all"}.
+NexRyde does not hold customer funds — riders pay drivers by cash/transfer.
+Driver Squad subscription payments are a separate flow and are not gated here.
 """
 from __future__ import annotations
 
@@ -16,7 +12,6 @@ from typing import Any
 FLAG_DEFAULTS: dict[str, str] = {
     "work_zone": "all",
     "favourite_driver": "all",
-    "wallet": "off",  # fare wallet off for launch — cash + direct transfer only
     "referrals": "all",
     "promotions": "all",
     "chat": "all",
@@ -61,15 +56,6 @@ async def get_feature_flags(db: Any) -> dict[str, str]:
     _cache["flags"] = flags
     _cache["at"] = now
     return flags
-
-
-async def is_wallet_enabled(db: Any) -> bool:
-    """Money safety: fail CLOSED — if flags can't be read, the wallet stays off."""
-    try:
-        flags = await get_feature_flags(db)
-    except Exception:
-        return False
-    return flag_value_enabled(flags.get("wallet"))
 
 
 async def is_booking_enabled(db: Any) -> bool:

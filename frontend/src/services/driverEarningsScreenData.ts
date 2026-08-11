@@ -5,7 +5,6 @@ export type EarningsPeriod = 'today' | 'week' | 'month';
 export type DriverEarningsScreenData = {
   dashboard: Record<string, unknown>;
   bankReady: boolean;
-  walletBalance: number | null;
 };
 
 async function readJson(res: Response): Promise<Record<string, unknown>> {
@@ -20,17 +19,12 @@ export async function fetchDriverEarningsScreenData(
   driverId: string,
   period: EarningsPeriod,
 ): Promise<DriverEarningsScreenData> {
-  const [dashRes, bankRes, walletRes] = await Promise.all([
+  const [dashRes, bankRes] = await Promise.all([
     apiFetch(`/driver/earnings/${driverId}?period=${period}`),
     apiFetch(`/drivers/${driverId}/bank-details`),
-    apiFetch(`/drivers/${driverId}/withdrawals?limit=1`),
   ]);
 
   const bankJson = await readJson(bankRes);
-  const walletJson = await readJson(walletRes);
-  const walletRaw = walletJson.wallet_balance;
-  const walletBalance =
-    typeof walletRaw === 'number' && Number.isFinite(walletRaw) ? walletRaw : null;
   const bankReady = Boolean(bankJson.payout_ready);
 
   if (!dashRes.ok) {
@@ -50,7 +44,6 @@ export async function fetchDriverEarningsScreenData(
         daily_breakdown: {},
       },
       bankReady,
-      walletBalance,
     };
   }
 
@@ -59,6 +52,5 @@ export async function fetchDriverEarningsScreenData(
   return {
     dashboard,
     bankReady,
-    walletBalance,
   };
 }

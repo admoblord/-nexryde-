@@ -50,7 +50,7 @@ export function TrackingPaymentView({
   }, [paymentMethod, goToReceipt]);
 
   // Cash/transfer: DRIVER confirms receipt on their completion panel.
-  // Rider never calls confirm-payment for cash. Wallet/transfer (rider) settle here.
+  // Rider never calls confirm-payment for cash; transfer can settle here if needed.
   const handlePay = React.useCallback(async () => {
     if (submitting) return;
     if (!financialPaymentPending || isCashPaymentMethod(paymentMethod)) {
@@ -64,7 +64,7 @@ export function TrackingPaymentView({
     } catch (err) {
       Alert.alert(
         'Payment not completed',
-        apiErrorMessage(err, 'Could not complete your payment. Check your wallet balance and try again.'),
+        apiErrorMessage(err, 'Could not complete your payment. Try again or pay your driver directly.'),
       );
     } finally {
       setSubmitting(false);

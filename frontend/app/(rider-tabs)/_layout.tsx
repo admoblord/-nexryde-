@@ -13,8 +13,12 @@ import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { warmTokenCache } from '@/src/lib/tokenStore';
 import { useRiderRidePhaseNavigation } from '@/src/hooks/useRiderRidePhaseNavigation';
+<<<<<<< HEAD
 import { useWalletEnabled } from '@/src/services/clientConfig';
 import { inboxSocket } from '@/src/services/inboxSocket';
+=======
+import { setForegroundInterval } from '@/src/utils/foregroundInterval';
+>>>>>>> 7f1bd6ad (Remove customer/driver fare wallet — cash and transfer only)
 import {
   buildTabScreenOptions,
   tabBadgeStyles,
@@ -49,7 +53,6 @@ export default function RiderTabLayout() {
   const { colors, isDark } = useThemeColors();
   const allowed = useRequireRole('rider');
   const hasHydrated = usePersistStoreReady();
-  const walletEnabled = useWalletEnabled();
   const { userId } = useAuthedUserId();
   const [unreadCount, setUnreadCount] = useState(0);
   const insets = useSafeAreaInsets();
@@ -147,20 +150,6 @@ export default function RiderTabLayout() {
                   size={22}
                   color={color}
                 />
-              </View>
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="rider-wallet"
-          options={{
-            // Launch mode: fare wallet disabled — riders pay drivers directly.
-            // href: null removes the tab without deleting the screen (flag-reversible).
-            href: walletEnabled ? undefined : null,
-            title: t.tabs.wallet,
-            tabBarIcon: ({ color, focused }) => (
-              <View style={tabIconPillStyle(focused, isDark)}>
-                <Ionicons name={focused ? 'wallet' : 'wallet-outline'} size={22} color={color} />
               </View>
             ),
           }}

@@ -43,7 +43,6 @@ import {
   REFERRAL_REWARD_INVITER_NGN,
   formatNgn,
 } from '@/src/constants/commercialOffers';
-import { useWalletEnabled } from '@/src/services/clientConfig';
 import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -234,7 +233,6 @@ function ScoreBar({ label, value, color }: { label: string; value: number; color
 export default function RiderProfileScreen() {
   const router = useRouter();
   const { colors } = useThemeColors();
-  const walletEnabled = useWalletEnabled();
   const tabPad = useTabBottomPad(16);
   const flow = useFlowLayout();
   const actionTileW = useMemo(
@@ -713,9 +711,6 @@ export default function RiderProfileScreen() {
             <ActionTile icon="time" label="My trips" gradColors={['#5B21B6', '#7C3AED']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-trips' as any)} />
             <ActionTile icon="location" label="Saved places" gradColors={['#065F46', '#059669']} tileWidth={actionTileW} onPress={() => router.push('/rider/saved-places' as any)} />
             <ActionTile icon="heart-circle" label="Favourites" gradColors={['#9D174D', '#EC4899']} tileWidth={actionTileW} onPress={() => router.push('/rider/favorite-drivers')} />
-            {walletEnabled ? (
-              <ActionTile icon="wallet" label="Wallet" gradColors={['#0369A1', '#0EA5E9']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-wallet' as any)} />
-            ) : null}
             <ActionTile icon="notifications" label="Updates" gradColors={['#7C2D12', '#EA580C']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-notifications' as any)} />
           </View>
         </View>

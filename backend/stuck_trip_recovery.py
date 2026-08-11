@@ -23,7 +23,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from ride_state import ride_state_set_fields, ride_state_inc_fields
-from wallet_ops import release_rider_wallet_hold
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +113,6 @@ async def _cancel_stale_trip(db: Any, trip: dict, reason: str) -> bool:
     rider_id = trip.get("rider_id")
     if rider_id:
         try:
-            await release_rider_wallet_hold(db, rider_id, trip_id)
         except Exception:
             logger.exception("stuck_trip_recovery_hold_release trip=%s", trip_id)
     await _clear_driver_lock(db, trip.get("driver_id"), trip_id)
@@ -164,7 +162,6 @@ async def _force_complete_trip_doc(
     if rider_id:
         # Refund any wallet hold — we never debit on a forced completion.
         try:
-            await release_rider_wallet_hold(db, rider_id, trip_id)
         except Exception:
             logger.exception("force_complete_hold_release trip=%s", trip_id)
     await _clear_driver_lock(db, trip.get("driver_id"), trip_id)

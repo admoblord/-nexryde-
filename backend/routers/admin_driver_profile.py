@@ -464,35 +464,7 @@ class WalletAdjustBody(BaseModel):
 
 @admin_driver_profile_router.post("/admin/drivers/{driver_id}/wallet-adjust")
 async def adjust_driver_wallet(driver_id: str, body: WalletAdjustBody, request: Request):
-    user = await db.users.find_one({"id": driver_id, "role": "driver"}, {"_id": 0, "wallet_balance": 1})
-    if not user:
-        raise HTTPException(status_code=404, detail="Driver not found")
-    amount = float(body.amount)
-    delta = amount if body.direction == "credit" else -amount
-    if body.direction == "debit" and float(user.get("wallet_balance") or 0) < amount:
-        raise HTTPException(status_code=400, detail="Insufficient wallet balance")
-    await db.users.update_one({"id": driver_id}, {"$inc": {"wallet_balance": delta}})
-    await db.wallets.update_one({"user_id": driver_id}, {"$inc": {"balance": delta}}, upsert=True)
-    tx = {
-        "id": uuid.uuid4().hex,
-        "user_id": driver_id,
-        "type": body.direction,
-        "amount": amount,
-        "source": "admin_adjustment",
-        "reason": body.reason,
-        "status": "completed",
-        "created_at": datetime.now(timezone.utc),
-        "admin_email": await _admin_email(request),
-    }
-    await db.transactions.insert_one(tx)
-    await _log_audit(request, f"wallet_{body.direction}", "driver", driver_id, {"amount": amount, "reason": body.reason})
-    return {"success": True, "transaction": {k: v for k, v in tx.items() if k != "_id"}}
-
-
-class DocumentReviewBody(BaseModel):
-    action: str = Field(..., pattern="^(approve|reject|request_reupload)$")
-    reason: str = ""
-
+    raise HTTPException(status_code=410, detail="Customer/driver wallet adjustments are disabled. NexRyde does not hold funds.")
 
 @admin_driver_profile_router.post("/admin/drivers/{driver_id}/documents/{doc_type}/review")
 async def review_driver_document(

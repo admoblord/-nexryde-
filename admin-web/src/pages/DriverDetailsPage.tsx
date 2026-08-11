@@ -10,7 +10,7 @@ type DriverProfile = Record<string, unknown>;
 import { Timeline } from '@/components/Timeline';
 
 const TABS = [
-  'Profile', 'Verification', 'Vehicle', 'Subscription', 'Wallet',
+  'Profile', 'Verification', 'Vehicle', 'Subscription',
   'Trips', 'Ratings', 'Analytics', 'Work Zone', 'Activity Timeline', 'Admin Notes',
 ] as const;
 
@@ -198,7 +198,6 @@ export function DriverDetailsPage() {
   const verification = data.verification as Record<string, unknown>;
   const vehicle = data.vehicle as Record<string, unknown>;
   const subscription = data.subscription as Record<string, unknown>;
-  const wallet = data.wallet as Record<string, unknown>;
   const trips = data.trips as Record<string, unknown>;
   const analytics = data.analytics as Record<string, unknown>;
   const live = data.live as Record<string, unknown>;
@@ -244,10 +243,6 @@ export function DriverDetailsPage() {
           }}>Approve</button>
           <button type="button" className="btn-ghost text-xs text-amber-400" disabled={busy} onClick={() => act('/suspend', { days: 7, reason: 'admin_suspend' }, 'Driver suspended')}>Suspend</button>
           <button type="button" className="btn-ghost text-xs text-red-400" disabled={busy} onClick={() => act(`/admin/users/${driverId}/block?block=true`, undefined, 'Driver banned')}>Ban</button>
-          <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => {
-            const amount = Number(prompt('Credit amount ₦:') || 0);
-            if (amount > 0) act('/wallet-adjust', { amount, direction: 'credit', reason: 'admin_credit' });
-          }}>Credit Wallet</button>
           <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={async () => {
             const reason = prompt('Reason for free month:') || 'admin_grant';
             setBusy(true);
@@ -263,10 +258,6 @@ export function DriverDetailsPage() {
             const body = prompt('Message:') || '';
             if (body) act('/notify', { title, body }, 'Notification sent');
           }}>Notify</button>
-          <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => {
-            const amount = Number(prompt('Debit amount ₦:') || 0);
-            if (amount > 0) act('/wallet-adjust', { amount, direction: 'debit', reason: 'admin_debit' });
-          }}>Debit Wallet</button>
           <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => void exportJson()}>Export JSON</button>
         </div>
       </div>
@@ -439,23 +430,6 @@ export function DriverDetailsPage() {
             { key: 'start_date', label: 'Start' },
             { key: 'end_date', label: 'End' },
           ]} rows={(subscription.history as Record<string, unknown>[]) ?? []} empty="No subscription history" />
-        </div>
-      )}
-
-      {tab === 'Wallet' && (
-        <div className="space-y-6">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <KpiCard label="Balance ₦" value={Number(wallet.balance_ngn ?? 0).toLocaleString()} tone="green" />
-            <KpiCard label="Pending Withdrawal ₦" value={Number(wallet.pending_withdrawal_ngn ?? 0).toLocaleString()} tone="amber" />
-            <KpiCard label="Transactions" value={(wallet.transactions as unknown[])?.length ?? 0} />
-          </div>
-          <DataTable columns={[
-            { key: 'type', label: 'Type' },
-            { key: 'amount', label: 'Amount ₦' },
-            { key: 'source', label: 'Source' },
-            { key: 'status', label: 'Status' },
-            { key: 'created_at', label: 'Date' },
-          ]} rows={(wallet.transactions as Record<string, unknown>[]) ?? []} />
         </div>
       )}
 

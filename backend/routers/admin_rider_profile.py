@@ -136,30 +136,7 @@ class WalletAdjustBody(BaseModel):
 
 @admin_rider_profile_router.post("/admin/riders/{rider_id}/wallet-adjust")
 async def adjust_rider_wallet(rider_id: str, body: WalletAdjustBody, request: Request):
-    user = await db.users.find_one({"id": rider_id, "role": "rider"}, {"_id": 0, "wallet_balance": 1})
-    if not user:
-        raise HTTPException(status_code=404, detail="Rider not found")
-    amount = float(body.amount)
-    delta = amount if body.direction == "credit" else -amount
-    if body.direction == "debit" and float(user.get("wallet_balance") or 0) < amount:
-        raise HTTPException(status_code=400, detail="Insufficient wallet balance")
-    await db.users.update_one({"id": rider_id}, {"$inc": {"wallet_balance": delta}})
-    await db.wallets.update_one({"user_id": rider_id}, {"$inc": {"balance": delta}}, upsert=True)
-    tx = {
-        "id": uuid.uuid4().hex,
-        "user_id": rider_id,
-        "type": body.direction,
-        "amount": amount,
-        "source": "admin_adjustment",
-        "reason": body.reason,
-        "status": "completed",
-        "created_at": datetime.now(timezone.utc),
-        "admin_email": await _admin_email(request),
-    }
-    await db.transactions.insert_one(tx)
-    await _log_audit(request, f"wallet_{body.direction}", "rider", rider_id, {"amount": amount, "reason": body.reason})
-    return {"success": True, "transaction": {k: v for k, v in tx.items() if k != "_id"}}
-
+    raise HTTPException(status_code=410, detail="Customer/driver wallet adjustments are disabled. NexRyde does not hold funds.")
 
 @admin_rider_profile_router.post("/admin/riders/{rider_id}/notes")
 async def add_rider_note(rider_id: str, body: RiderNoteBody, request: Request):

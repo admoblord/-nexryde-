@@ -16,7 +16,6 @@ const TripDetailsPage = lazy(() => import('@/pages/TripDetailsPage').then((m) =>
 const MapsUsagePage = lazy(() => import('@/pages/MapsUsagePage').then((m) => ({ default: m.MapsUsagePage })));
 const AnalyticsPage = lazy(() => import('@/pages/MorePages').then((m) => ({ default: m.AnalyticsPage })));
 const SubscriptionIntelPage = lazy(() => import('@/pages/MorePages').then((m) => ({ default: m.SubscriptionIntelPage })));
-const WithdrawalsPage = lazy(() => import('@/pages/MorePages').then((m) => ({ default: m.WithdrawalsPage })));
 const SystemHealthPage = lazy(() => import('@/pages/MorePages').then((m) => ({ default: m.SystemHealthPage })));
 const AuditLogsPage = lazy(() => import('@/pages/MorePages').then((m) => ({ default: m.AuditLogsPage })));
 const AnnouncementsPage = lazy(() => import('@/pages/MorePages').then((m) => ({ default: m.AnnouncementsPage })));
@@ -78,7 +77,6 @@ export default function App() {
           <Route path="finance" element={<FinancePage />} />
           <Route path="subscriptions" element={<SubscriptionsPage />} />
           <Route path="subscription-intelligence" element={<SubscriptionIntelPage />} />
-          <Route path="withdrawals" element={<WithdrawalsPage />} />
           <Route path="support" element={<SupportPage />} />
           <Route path="safety" element={<SafetyPage />} />
           <Route path="fraud" element={<FraudPage />} />

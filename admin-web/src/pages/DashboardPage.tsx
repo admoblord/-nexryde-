@@ -68,7 +68,6 @@ export function DashboardPage() {
         <KpiCard label="Revenue Today ₦" value={Number(data.trips.today_revenue_ngn ?? 0).toLocaleString()} tone="green" />
         <KpiCard label="Monthly Trips" value={o.monthly_trips ?? 0} />
         <KpiCard label="Monthly Sub Revenue ₦" value={Number(o.monthly_subscription_revenue_ngn ?? 0).toLocaleString()} />
-        <KpiCard label="Pending Withdrawals" value={o.pending_withdrawals ?? 0} tone="amber" />
         <KpiCard label="Support Tickets" value={o.support_tickets ?? 0} />
         <KpiCard label="SOS Alerts" value={o.sos_alerts ?? 0} tone="red" />
         <KpiCard label="Driver Approvals" value={o.driver_approval_requests ?? 0} tone="amber" />

@@ -3,7 +3,6 @@ export const qk = {
   riderTrips: (uid: string) => ['rider', 'trips', uid] as const,
   riderSavedPlaces: (uid: string) => ['rider', 'saved-places', uid] as const,
   riderProfile: (uid: string) => ['rider', 'profile', uid] as const,
-  riderWallet: (uid: string) => ['rider', 'wallet', uid] as const,
   riderNotifs: (uid: string) => ['rider', 'notifs', uid] as const,
   riderTrust: (uid: string) => ['rider', 'trust', uid] as const,
   driverEarnings: (uid: string, period: string) =>
