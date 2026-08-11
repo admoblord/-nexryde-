@@ -6,9 +6,13 @@
  *
  * The React host (`BackgroundLocationDisclosureHost`) resolves the pending
  * promise when the driver taps Continue or Not now.
+ *
+ * All BACKGROUND_LOCATION requests in the app MUST go through
+ * `requestBackgroundLocationWithDisclosure()` — the verify script enforces this.
  */
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Location from 'expo-location';
 
 export const BG_LOCATION_DISCLOSURE_STORAGE_KEY = '@nexryde/bg_location_disclosure_v1';
 
@@ -29,6 +33,8 @@ export const BG_LOCATION_DISCLOSURE = {
 type Listener = (visible: boolean) => void;
 
 let visible = false;
+/** Shared in-flight consent so concurrent callers wait on one disclosure. */
+let pendingConsent: Promise<boolean> | null = null;
 let pendingResolve: ((accepted: boolean) => void) | null = null;
 const listeners = new Set<Listener>();
 
@@ -62,6 +68,7 @@ export function resolveBackgroundLocationDisclosure(accepted: boolean): void {
   }
   const resolve = pendingResolve;
   pendingResolve = null;
+  pendingConsent = null;
   visible = false;
   emit();
   resolve(accepted);
@@ -74,21 +81,17 @@ export function resolveBackgroundLocationDisclosure(accepted: boolean): void {
 
 /**
  * Show the prominent disclosure and wait for Continue / Not now.
- * Returns true only if the driver affirmatively continues.
- *
- * On web / already-showing, resolves false (never auto-accept).
+ * Concurrent callers share the same in-flight prompt (do not auto-decline).
  */
 export function promptBackgroundLocationDisclosure(): Promise<boolean> {
   if (Platform.OS === 'web') return Promise.resolve(false);
-  if (pendingResolve) {
-    // Already showing — do not stack; treat as decline for this caller.
-    return Promise.resolve(false);
-  }
-  return new Promise<boolean>((resolve) => {
+  if (pendingConsent) return pendingConsent;
+  pendingConsent = new Promise<boolean>((resolve) => {
     pendingResolve = resolve;
     visible = true;
     emit();
   });
+  return pendingConsent;
 }
 
 /** Whether the driver previously accepted the in-app disclosure (not the OS grant). */
@@ -99,4 +102,27 @@ export async function hasAcceptedBackgroundLocationDisclosure(): Promise<boolean
   } catch {
     return false;
   }
+}
+
+/**
+ * Single choke-point for BACKGROUND_LOCATION.
+ * Returns true only after disclosure Continue + OS grant (or already granted).
+ */
+export async function requestBackgroundLocationWithDisclosure(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+
+  const fg = await Location.getForegroundPermissionsAsync();
+  if (!fg.granted) {
+    const nextFg = await Location.requestForegroundPermissionsAsync();
+    if (!nextFg.granted) return false;
+  }
+
+  const current = await Location.getBackgroundPermissionsAsync();
+  if (current.granted) return true;
+
+  const accepted = await promptBackgroundLocationDisclosure();
+  if (!accepted) return false;
+
+  const next = await Location.requestBackgroundPermissionsAsync();
+  return next.granted;
 }

@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 /**
- * Guardrail: Google Play BACKGROUND_LOCATION prominent disclosure must wrap
- * every requestBackgroundPermissionsAsync call site.
+ * Guardrail: Google Play BACKGROUND_LOCATION prominent disclosure.
+ *
+ * Rules:
+ * 1. Disclosure copy + Continue consent API exist
+ * 2. Host mounted in root layout
+ * 3. The ONLY file allowed to call requestBackgroundPermissionsAsync is
+ *    backgroundLocationDisclosure.ts (single choke-point)
+ * 4. Preflight + BG task use requestBackgroundLocationWithDisclosure
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,40 +32,47 @@ function mustInclude(rel, needles, label) {
   console.log(`OK  ${label}: ${rel}`);
 }
 
-// 1. Disclosure copy + consent API exists
 mustInclude(
   'src/services/backgroundLocationDisclosure.ts',
   [
     'even when the app is closed or not in use',
+    'requestBackgroundLocationWithDisclosure',
     'promptBackgroundLocationDisclosure',
+    'requestBackgroundPermissionsAsync',
     'Continue',
   ],
-  'disclosure service',
+  'disclosure choke-point',
 );
 
-// 2. Host mounted in root layout
 mustInclude(
   'app/_layout.tsx',
   ['BackgroundLocationDisclosureHost'],
   'root host',
 );
 
-// 3. Preflight + BG task both prompt before OS request
 mustInclude(
   'src/services/driverPermissionPreflight.ts',
-  ['promptBackgroundLocationDisclosure', 'requestBackgroundPermissionsAsync'],
+  ['requestBackgroundLocationWithDisclosure'],
   'preflight',
 );
+
 mustInclude(
   'src/tasks/backgroundLocationTask.ts',
-  ['promptBackgroundLocationDisclosure', 'requestBackgroundPermissionsAsync'],
+  ['requestBackgroundLocationWithDisclosure'],
   'bg task',
 );
 
-// 4. No other call sites that request BG location without the disclosure import nearby
+mustInclude(
+  'src/components/driver/BackgroundLocationDisclosureHost.tsx',
+  ['testID="bg-location-disclosure"', 'BG_LOCATION_DISCLOSURE'],
+  'host UI',
+);
+
 const walk = (dir, out = []) => {
   for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (ent.name === 'node_modules' || ent.name === '.git') continue;
+    if (ent.name === 'node_modules' || ent.name === '.git' || ent.name === 'android' || ent.name === 'ios') {
+      continue;
+    }
     const p = path.join(dir, ent.name);
     if (ent.isDirectory()) walk(p, out);
     else if (/\.(ts|tsx|js|jsx)$/.test(ent.name)) out.push(p);
@@ -67,30 +80,54 @@ const walk = (dir, out = []) => {
   return out;
 };
 
+const chokePoint = path.normalize('src/services/backgroundLocationDisclosure.ts');
 const offenders = [];
 for (const file of walk(root)) {
   const text = fs.readFileSync(file, 'utf8');
   if (!text.includes('requestBackgroundPermissionsAsync')) continue;
   const rel = path.relative(root, file);
-  if (
-    rel.includes('backgroundLocationDisclosure') ||
-    rel.includes('verify_background_location_disclosure')
-  ) {
-    continue;
-  }
-  if (!text.includes('promptBackgroundLocationDisclosure')) {
-    offenders.push(rel);
-  }
+  if (path.normalize(rel) === chokePoint) continue;
+  if (rel.includes('verify_background_location_disclosure')) continue;
+  offenders.push(rel);
 }
 
 if (offenders.length) {
-  console.error('FAIL bare requestBackgroundPermissionsAsync without disclosure:', offenders);
+  console.error(
+    'FAIL requestBackgroundPermissionsAsync outside choke-point:',
+    offenders,
+  );
   process.exitCode = 1;
 } else {
-  console.log('OK  all requestBackgroundPermissionsAsync sites gated');
+  console.log('OK  only backgroundLocationDisclosure.ts calls requestBackgroundPermissionsAsync');
 }
 
-if (process.exitCode) {
-  process.exit(process.exitCode);
+// Native Android must not request BACKGROUND_LOCATION itself (JS owns the flow).
+const androidRoot = path.join(root, 'android');
+if (fs.existsSync(androidRoot)) {
+  const nativeOffenders = [];
+  const walkNative = (dir) => {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, ent.name);
+      if (ent.isDirectory()) walkNative(p);
+      else if (/\.(kt|java)$/.test(ent.name)) {
+        const text = fs.readFileSync(p, 'utf8');
+        if (
+          text.includes('ACCESS_BACKGROUND_LOCATION') &&
+          (text.includes('requestPermissions') || text.includes('ActivityCompat.request'))
+        ) {
+          nativeOffenders.push(path.relative(root, p));
+        }
+      }
+    }
+  };
+  walkNative(androidRoot);
+  if (nativeOffenders.length) {
+    console.error('FAIL native BACKGROUND_LOCATION request:', nativeOffenders);
+    process.exitCode = 1;
+  } else {
+    console.log('OK  no native Android BACKGROUND_LOCATION permission requests');
+  }
 }
+
+if (process.exitCode) process.exit(process.exitCode);
 console.log('Background location disclosure checks passed.');
