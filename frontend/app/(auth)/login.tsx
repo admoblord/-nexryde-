@@ -162,10 +162,11 @@ export default function LoginScreen() {
         | null;
       const resolvedRefreshToken = (data?.refresh_token ?? null) as string | null;
       if (data?.user && resolvedToken) {
+        // Memory auth first — never block the home transition on SecureStore.
         await setTokens(resolvedToken, resolvedRefreshToken);
         setUser(data.user as User);
         setIsAuthenticated(true);
-        await saveUserSession({
+        void saveUserSession({
           ...(data.user as User),
           token: resolvedToken,
           ...(resolvedRefreshToken ? { refresh_token: resolvedRefreshToken } : {}),
@@ -182,6 +183,8 @@ export default function LoginScreen() {
         if (Platform.OS !== 'web') {
           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         }
+        // Navigate immediately; legal/verification sync continues in the background.
+        setEmailLoading(false);
         await routeVerifiedUser(data.user as User, resolvedToken);
         return;
       }
