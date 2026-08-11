@@ -363,15 +363,31 @@ export function useRiderTrackingSession() {
     return paramDest.trim() || null;
   }, [currentTrip, params.destination]);
 
-  // Seed finding-phase route from fare estimate / trip preview (don't wait for live phase).
+  // Seed route from server-stored leg / fare preview — never client Directions.
   useEffect(() => {
     if (!currentTrip) return;
     const seeded = routePolylineFromTripRecord(
-      currentTrip as { route_preview_coordinates?: unknown; polyline?: unknown },
+      currentTrip as {
+        route_preview_coordinates?: unknown;
+        polyline?: unknown;
+        leg_polyline?: unknown;
+        active_leg_route?: { polyline?: unknown; coordinates?: unknown } | null;
+      },
     );
     if (seeded.length < DIRECTIONS_ROUTE_MIN_POINTS) return;
-    setSnappedPolyline((prev) => (prev.length >= seeded.length ? prev : seeded));
-  }, [effectiveTripId, currentTrip]);
+    // Prefer fresher active-leg polyline when the backend re-routes.
+    setSnappedPolyline((prev) => {
+      const legPoly = (currentTrip as { active_leg_route?: { polyline?: string } | null })
+        ?.active_leg_route?.polyline;
+      if (legPoly) return seeded;
+      return prev.length >= seeded.length ? prev : seeded;
+    });
+  }, [
+    effectiveTripId,
+    currentTrip,
+    (currentTrip as { active_leg_route?: { polyline?: string } | null } | null)?.active_leg_route
+      ?.polyline,
+  ]);
 
   const mapModel: TrackingMapModel = useMemo(
     () => ({

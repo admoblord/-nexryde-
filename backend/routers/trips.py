@@ -147,6 +147,7 @@ async def get_directions_from_google(
                 else:
                     await store_cached_directions(db, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, result)
             await log_api_call(db, call_type="directions", trip_id=trip_id, cached=False)
+            # Billing counter is incremented inside server get_directions on real Google HTTP hits.
             return result
 
     # Fallback: Haversine estimate (zero API cost)
@@ -502,7 +503,7 @@ async def _emit_rider_trip_realtime(trip_id: str, *, throttle_location: bool = F
         return
     driver_location = await _resolve_driver_location_for_trip(trip)
     if driver_location:
-        driver_location = enrich_driver_location_payload(
+        driver_location = await enrich_driver_location_payload(
             trip,
             driver_location,
             speed_kmh=trip.get("current_speed_kmh"),
@@ -2399,6 +2400,22 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
         await release_rider_wallet_hold(db, rider_id, _new_trip_id)
         raise
     trip_dict.pop("_id", None)
+    # Attribute booking fare Maps call to this trip when we know Google was billed
+    # (estimate flagged, or request-time directions without a prior estimate lock).
+    try:
+        from maps_billing import attribute_booking_maps_call
+
+        billed = False
+        if estimate_id:
+            est_doc = await get_fare_estimate(estimate_id) or fare_estimate_store.get(estimate_id)
+            billed = bool((est_doc or {}).get("google_maps_billed"))
+        elif polyline:
+            billed = True
+        if billed:
+            await attribute_booking_maps_call(_new_trip_id, detail="fare_estimate_at_booking")
+            trip_dict["maps_api_calls"] = 1
+    except Exception:
+        pass
     # Track ride request metric
     try:
         from metrics_service import track_ride_request
@@ -3152,6 +3169,34 @@ async def _accept_trip_commit(
             }
         },
     )
+    # ONE Essentials Compute Routes call: driver → pickup (never per-ping).
+    try:
+        from route_leg_service import store_active_leg_route
+
+        pickup = (trip or {}).get("pickup_location") or {}
+        d_lat = float(
+            (driver_profile or {}).get("current_lat")
+            or ((driver_profile or {}).get("current_location") or {}).get("lat")
+            or pickup.get("lat")
+        )
+        d_lng = float(
+            (driver_profile or {}).get("current_lng")
+            or ((driver_profile or {}).get("current_location") or {}).get("lng")
+            or pickup.get("lng")
+        )
+        await store_active_leg_route(
+            trip_id,
+            leg="to_pickup",
+            origin_lat=d_lat,
+            origin_lng=d_lng,
+            dest_lat=float(pickup["lat"]),
+            dest_lng=float(pickup["lng"]),
+        )
+        trip = await db.trips.find_one({"id": trip_id}) or trip
+        if trip and trip.get("_id"):
+            trip["_id"] = str(trip["_id"])
+    except Exception:
+        logger.warning("accept leg route (driver→pickup) failed", exc_info=True)
     await _log_trip_event(
         trip_id,
         "trip_accepted",
@@ -3649,6 +3694,25 @@ async def verify_face_and_start_trip(trip_id: str, request: FaceVerificationRequ
     
     trip = await db.trips.find_one({"id": trip_id})
     trip["_id"] = str(trip["_id"])
+    # ONE Essentials Compute Routes call: pickup → destination (leg change).
+    try:
+        from route_leg_service import store_active_leg_route
+
+        pickup = trip.get("pickup_location") or {}
+        dropoff = trip.get("dropoff_location") or {}
+        await store_active_leg_route(
+            trip_id,
+            leg="to_dropoff",
+            origin_lat=float(pickup["lat"]),
+            origin_lng=float(pickup["lng"]),
+            dest_lat=float(dropoff["lat"]),
+            dest_lng=float(dropoff["lng"]),
+            force=True,
+        )
+        trip = await db.trips.find_one({"id": trip_id}) or trip
+        trip["_id"] = str(trip["_id"])
+    except Exception:
+        logger.warning("face-start leg route (pickup→dropoff) failed", exc_info=True)
     await _log_trip_event(
         trip_id,
         "face_verified_trip_start",
@@ -3737,6 +3801,25 @@ async def start_trip(trip_id: str, request: Request):
 
     trip = await db.trips.find_one({"id": trip_id})
     trip["_id"] = str(trip["_id"])
+    # ONE Essentials Compute Routes call: pickup → destination (leg change).
+    try:
+        from route_leg_service import store_active_leg_route
+
+        pickup = trip.get("pickup_location") or {}
+        dropoff = trip.get("dropoff_location") or {}
+        await store_active_leg_route(
+            trip_id,
+            leg="to_dropoff",
+            origin_lat=float(pickup["lat"]),
+            origin_lng=float(pickup["lng"]),
+            dest_lat=float(dropoff["lat"]),
+            dest_lng=float(dropoff["lng"]),
+            force=True,
+        )
+        trip = await db.trips.find_one({"id": trip_id}) or trip
+        trip["_id"] = str(trip["_id"])
+    except Exception:
+        logger.warning("start leg route (pickup→dropoff) failed", exc_info=True)
     await _log_trip_event(
         trip_id,
         "trip_started",
@@ -4014,20 +4097,31 @@ async def _update_trip_location_impl(trip_id: str, request: LocationUpdate, http
         elif location_point.get("speed_kmh") is not None:
             current_speed_kmh = float(location_point["speed_kmh"])
         live_tracking_set: dict = {}
-        target = trip_tracking_target(trip)
-        if target:
-            live_preview = compute_live_tracking(
-                driver_lat=float(request.latitude),
-                driver_lng=float(request.longitude),
-                target_lat=target[0],
-                target_lng=target[1],
-                speed_kmh=location_point.get("speed_kmh") or current_speed_kmh,
-                trip_status=str(trip.get("status") or ""),
+        live_preview = None
+        try:
+            from route_leg_service import local_tracking_from_polyline
+
+            live_preview = await local_tracking_from_polyline(
+                trip, float(request.latitude), float(request.longitude)
             )
+        except Exception:
+            live_preview = None
+        if not live_preview:
+            target = trip_tracking_target(trip)
+            if target:
+                live_preview = compute_live_tracking(
+                    driver_lat=float(request.latitude),
+                    driver_lng=float(request.longitude),
+                    target_lat=target[0],
+                    target_lng=target[1],
+                    speed_kmh=location_point.get("speed_kmh") or current_speed_kmh,
+                    trip_status=str(trip.get("status") or ""),
+                )
+        if live_preview:
             live_tracking_set = {
                 "live_eta_seconds": live_preview.get("eta_seconds"),
                 "live_distance_km": live_preview.get("distance_km"),
-                "live_tracking_status": live_preview.get("status"),
+                "live_tracking_status": live_preview.get("status") or "en_route",
                 "live_tracking_updated_at": live_preview.get("updated_at"),
             }
         try:
@@ -4393,22 +4487,54 @@ async def _update_trip_location_impl(trip_id: str, request: LocationUpdate, http
             geo_fence_lock["driver_explanation_required"] = False
 
     live_tracking_set: dict = {}
-    target = trip_tracking_target(trip)
-    if target:
-        live_preview = compute_live_tracking(
-            driver_lat=float(request.latitude),
-            driver_lng=float(request.longitude),
-            target_lat=target[0],
-            target_lng=target[1],
-            speed_kmh=location_point.get("speed_kmh") or current_speed_kmh,
-            trip_status=str(trip.get("status") or ""),
+    # Local polyline ETA (zero Google). Re-route only on sustained deviation.
+    try:
+        from route_leg_service import local_tracking_from_polyline, maybe_reroute_if_deviated
+
+        rerouted = await maybe_reroute_if_deviated(
+            trip_id, float(request.latitude), float(request.longitude)
         )
-        live_tracking_set = {
-            "live_eta_seconds": live_preview.get("eta_seconds"),
-            "live_distance_km": live_preview.get("distance_km"),
-            "live_tracking_status": live_preview.get("status"),
-            "live_tracking_updated_at": live_preview.get("updated_at"),
-        }
+        if rerouted:
+            trip = await db.trips.find_one({"id": trip_id}) or trip
+        live_preview = await local_tracking_from_polyline(
+            trip, float(request.latitude), float(request.longitude)
+        )
+        if live_preview:
+            st = str(trip.get("status") or "").lower()
+            if st == "arrived" or float(live_preview.get("distance_km") or 0) <= 0.05:
+                tracking_st = "arrived"
+                eta_s = 0
+            elif int(live_preview.get("eta_seconds") or 0) < 60:
+                tracking_st = "arriving"
+                eta_s = live_preview.get("eta_seconds")
+            else:
+                tracking_st = "en_route"
+                eta_s = live_preview.get("eta_seconds")
+            live_tracking_set = {
+                "live_eta_seconds": eta_s,
+                "live_distance_km": live_preview.get("distance_km"),
+                "live_tracking_status": tracking_st,
+                "live_tracking_updated_at": live_preview.get("updated_at"),
+            }
+    except Exception:
+        logger.debug("local polyline tracking failed; haversine fallback", exc_info=True)
+    if not live_tracking_set:
+        target = trip_tracking_target(trip)
+        if target:
+            live_preview = compute_live_tracking(
+                driver_lat=float(request.latitude),
+                driver_lng=float(request.longitude),
+                target_lat=target[0],
+                target_lng=target[1],
+                speed_kmh=location_point.get("speed_kmh") or current_speed_kmh,
+                trip_status=str(trip.get("status") or ""),
+            )
+            live_tracking_set = {
+                "live_eta_seconds": live_preview.get("eta_seconds"),
+                "live_distance_km": live_preview.get("distance_km"),
+                "live_tracking_status": live_preview.get("status"),
+                "live_tracking_updated_at": live_preview.get("updated_at"),
+            }
 
     # Throttled DB write — only persist to Mongo when throttle window has elapsed.
     if not _skip_db_write:
@@ -4703,7 +4829,7 @@ async def _build_trip_share_data(trip: dict, share_token: str) -> dict:
             try:
                 from services.trip_tracking_service import enrich_driver_location_payload
 
-                driver_location = enrich_driver_location_payload(
+                driver_location = await enrich_driver_location_payload(
                     trip,
                     driver_location,
                     speed_kmh=trip.get("current_speed_kmh"),
@@ -4805,7 +4931,7 @@ async def get_trip_status(trip_id: str, request: Request):
             try:
                 from services.trip_tracking_service import enrich_driver_location_payload
 
-                driver_location = enrich_driver_location_payload(
+                driver_location = await enrich_driver_location_payload(
                     trip,
                     driver_location,
                     speed_kmh=trip.get("current_speed_kmh"),
@@ -5197,6 +5323,34 @@ async def complete_trip(trip_id: str, request: Request):
     trip = await db.trips.find_one({"id": trip_id})
     trip["_id"] = str(trip["_id"])
 
+    # Feed zone traffic factor from actual vs quoted duration (zero Google cost).
+    try:
+        from traffic_factor import record_trip_duration_sample
+
+        pickup = trip_before.get("pickup_location") or {}
+        started = trip_before.get("started_at") or trip_before.get("accepted_at")
+        quoted_s = float(trip_before.get("duration_mins") or 0) * 60.0
+        actual_s = 0.0
+        if started:
+            try:
+                st = started if isinstance(started, datetime) else datetime.fromisoformat(
+                    str(started).replace("Z", "+00:00")
+                )
+                if st.tzinfo is None:
+                    st = st.replace(tzinfo=timezone.utc)
+                actual_s = max(0.0, (completed_at - st).total_seconds())
+            except Exception:
+                actual_s = 0.0
+        if pickup.get("lat") is not None and pickup.get("lng") is not None and quoted_s and actual_s:
+            await record_trip_duration_sample(
+                pickup_lat=float(pickup["lat"]),
+                pickup_lng=float(pickup["lng"]),
+                quoted_duration_s=quoted_s,
+                actual_duration_s=actual_s,
+            )
+    except Exception:
+        logger.debug("traffic factor sample skipped", exc_info=True)
+
     await _log_trip_event(
         trip_id,
         "trip_completed",
@@ -5210,6 +5364,7 @@ async def complete_trip(trip_id: str, request: Request):
                 reason="driver_complete_trip",
             ),
             "fare": trip.get("fare"),
+            "maps_api_calls": trip.get("maps_api_calls"),
         },
     )
 

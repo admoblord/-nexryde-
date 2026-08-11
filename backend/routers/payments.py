@@ -162,6 +162,7 @@ async def get_directions_from_google(
                     else:
                         await store_cached_directions(db, p_lat, p_lng, d_lat, d_lng, result)
                 await log_api_call(db, call_type="directions", trip_id=trip_id, cached=False)
+                # Billing counter is incremented inside server get_directions on real Google HTTP hits.
                 return result
 
         if has_stop:
@@ -3935,6 +3936,9 @@ async def estimate_fare(request: FareEstimateRequest, http_request: Request):
         "rain_multiplier": rain_mult,
         "surge_details": surge_details,
         "route_metrics_source": route_metrics_source,
+        "google_maps_billed": bool((route_data or {}).get("maps_billed"))
+        if isinstance(route_data, dict)
+        else False,
         "lagride_profile": lagride_profile_out,
         "competitive_positioning_summary": comp_summary,
         "competitive_positioning_bullets": comp_bullets,

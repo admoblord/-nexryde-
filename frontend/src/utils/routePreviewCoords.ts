@@ -2,30 +2,40 @@ import { decodePolyline, DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/na
 
 export type MapRouteCoord = { latitude: number; longitude: number };
 
-/** Decode trip fare / booking route preview into map polyline coords. */
+/** Decode trip fare / booking / active-leg route into map polyline coords. */
 export function routePolylineFromTripRecord(
   trip: {
     route_preview_coordinates?: unknown;
     polyline?: unknown;
+    leg_polyline?: unknown;
+    active_leg_route?: {
+      polyline?: unknown;
+      coordinates?: unknown;
+    } | null;
   } | null | undefined,
 ): MapRouteCoord[] {
   if (!trip) return [];
 
-  const preview = parseRoutePreviewToMapCoords(trip.route_preview_coordinates);
-  if (preview.length >= DIRECTIONS_ROUTE_MIN_POINTS) return preview;
+  const leg = trip.active_leg_route;
+  const legPreview = parseRoutePreviewToMapCoords(leg?.coordinates);
+  if (legPreview.length >= DIRECTIONS_ROUTE_MIN_POINTS) return legPreview;
 
-  const encoded = trip.polyline;
-  if (typeof encoded === 'string' && encoded.trim()) {
-    try {
-      const dec = decodePolyline(encoded);
-      const pts = dec
-        .map((c) => ({ latitude: c.lat, longitude: c.lng }))
-        .filter((c) => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
-      if (pts.length >= DIRECTIONS_ROUTE_MIN_POINTS) return pts;
-    } catch {
-      /* ignore */
+  for (const encoded of [leg?.polyline, trip.leg_polyline, trip.polyline]) {
+    if (typeof encoded === 'string' && encoded.trim()) {
+      try {
+        const dec = decodePolyline(encoded);
+        const pts = dec
+          .map((c) => ({ latitude: c.lat, longitude: c.lng }))
+          .filter((c) => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
+        if (pts.length >= DIRECTIONS_ROUTE_MIN_POINTS) return pts;
+      } catch {
+        /* ignore */
+      }
     }
   }
+
+  const preview = parseRoutePreviewToMapCoords(trip.route_preview_coordinates);
+  if (preview.length >= DIRECTIONS_ROUTE_MIN_POINTS) return preview;
 
   return [];
 }

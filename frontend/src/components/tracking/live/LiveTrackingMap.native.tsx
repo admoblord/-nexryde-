@@ -12,7 +12,6 @@ import { StyleSheet, InteractionManager } from 'react-native';
 import MapView, { Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
-import { fetchDirectionsResilient } from '@/src/navigation/fetchDirectionsResilient';
 import type { TrackingMapModel } from '@/src/components/tracking/types';
 import {
   getPerfectTrackingMapStyle,
@@ -93,11 +92,8 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
     const [trafficOn, setTrafficOn] = useState(true);
     const { colors } = useThemeColors();
     const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(model.userLocation ?? null);
-    const [approachRoute, setApproachRoute] = useState<{ latitude: number; longitude: number }[]>([]);
-    const [tripRoute, setTripRoute] = useState<{ latitude: number; longitude: number }[]>([]);
     const [breadcrumbTrail, setBreadcrumbTrail] = useState<MapCoord[]>([]);
     const lastDriverRef = useRef<{ lat: number; lng: number } | null>(null);
-    const lastApproachFetchRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
 
     const pickup = model.pickup;
     const dropoff = model.dropoff;
@@ -136,121 +132,22 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
       };
     }, [mapReady]);
 
-    // pickup → destination (static leg)
-    useEffect(() => {
-      const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-      if (!key || !pickup || !dropoff) return;
-      const cacheKey = model.tripId ? `trip-${model.tripId}-pickup-dropoff` : undefined;
-      let cancelled = false;
-      void fetchDirectionsResilient(
-        pickup.lat,
-        pickup.lng,
-        dropoff.lat,
-        dropoff.lng,
-        key,
-        cacheKey,
-      ).then((result) => {
-        if (cancelled) return;
-        if (result?.coords?.length) {
-          setTripRoute(result.coords);
-          return;
-        }
-        if (model.routePolyline.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
-          setTripRoute(model.routePolyline);
-        } else {
-          setTripRoute([]);
-        }
-      });
-      return () => {
-        cancelled = true;
-      };
-    }, [pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng, model.routePolyline, model.tripId]);
-
-    // driver → pickup (live approach leg)
-    useEffect(() => {
-      const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-      if (!key || !isEnRoute || !driver || !pickup) {
-        if (!isEnRoute) setApproachRoute([]);
-        return;
-      }
-      const prev = lastApproachFetchRef.current;
-      const now = Date.now();
-      const moved =
-        !prev ||
-        Math.abs(prev.lat - driver.lat) + Math.abs(prev.lng - driver.lng) > 0.0007;
-      const stale = !prev || now - prev.at > 12000;
-      if (!moved && !stale) return;
-      lastApproachFetchRef.current = { lat: driver.lat, lng: driver.lng, at: now };
-
-      const cacheKey = model.tripId ? `trip-${model.tripId}-approach` : undefined;
-      let cancelled = false;
-      void fetchDirectionsResilient(
-        driver.lat,
-        driver.lng,
-        pickup.lat,
-        pickup.lng,
-        key,
-        cacheKey,
-      ).then((result) => {
-        if (cancelled) return;
-        if (result?.coords?.length) {
-          setApproachRoute(result.coords);
-        } else {
-          setApproachRoute([]);
-        }
-      });
-      return () => {
-        cancelled = true;
-      };
-    }, [isEnRoute, driver?.lat, driver?.lng, pickup?.lat, pickup?.lng, model.tripId]);
-
-    // ongoing: driver → destination — only re-fetch when driver deviates >150 m
-    // from the last fetch origin to avoid a Directions API call every 3 s.
-    const lastOngoingFetchRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
-    useEffect(() => {
-      const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-      if (!key || !isOngoing || !driver || !dropoff) {
-        if (!isOngoing) setApproachRoute([]);
-        return;
-      }
-      const prev = lastOngoingFetchRef.current;
-      const now = Date.now();
-      // ~150 m in degrees ≈ 0.00135 — only refetch on meaningful deviation
-      const movedEnough =
-        !prev ||
-        Math.abs(prev.lat - driver.lat) + Math.abs(prev.lng - driver.lng) > 0.00135;
-      // Also refresh every 60 s regardless (route can change due to traffic)
-      const stale = !prev || now - prev.at > 60_000;
-      if (!movedEnough && !stale) return;
-      lastOngoingFetchRef.current = { lat: driver.lat, lng: driver.lng, at: now };
-
-      const cacheKey = model.tripId ? `trip-${model.tripId}-ongoing` : undefined;
-      let cancelled = false;
-      void fetchDirectionsResilient(
-        driver.lat,
-        driver.lng,
-        dropoff.lat,
-        dropoff.lng,
-        key,
-        cacheKey,
-      ).then((result) => {
-        if (cancelled) return;
-        if (result?.coords?.length) setApproachRoute(result.coords);
-      });
-      return () => {
-        cancelled = true;
-      };
-    }, [isOngoing, driver?.lat, driver?.lng, dropoff?.lat, dropoff?.lng, model.tripId]);
-
-    const approachCoords = useMemo(() => sanitizeMapCoords(approachRoute), [approachRoute]);
-    const tripCoords = useMemo(() => sanitizeMapCoords(tripRoute), [tripRoute]);
+    // Server stores ONE polyline per leg — never call Google Directions from the rider map.
+    const tripCoords = useMemo(
+      () => sanitizeMapCoords(model.routePolyline),
+      [model.routePolyline],
+    );
 
     const activeRoute = useMemo(() => {
-      if (isOngoing && approachCoords.length >= DIRECTIONS_ROUTE_MIN_POINTS) return approachCoords;
-      if (isEnRoute && approachCoords.length >= DIRECTIONS_ROUTE_MIN_POINTS) return approachCoords;
       if (tripCoords.length >= DIRECTIONS_ROUTE_MIN_POINTS) return tripCoords;
       return [];
-    }, [isOngoing, isEnRoute, approachCoords, tripCoords]);
+    }, [tripCoords]);
+
+    const approachCoords = useMemo(() => {
+      if (!driver || activeRoute.length < 2) return [];
+      const { remaining } = splitRouteAtDriver(activeRoute, driver);
+      return remaining.length >= 2 ? remaining : activeRoute;
+    }, [activeRoute, driver]);
 
     const routeRemaining = useMemo(() => {
       const driverForSplit =

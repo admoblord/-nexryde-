@@ -84,7 +84,7 @@ def compute_live_tracking(
     }
 
 
-def enrich_driver_location_payload(
+async def enrich_driver_location_payload(
     trip: dict,
     driver_location: Optional[dict],
     *,
@@ -98,6 +98,24 @@ def enrich_driver_location_payload(
     except (KeyError, TypeError, ValueError):
         return driver_location
     out = dict(driver_location)
+    # Prefer stored polyline remaining distance — zero Google cost.
+    try:
+        from route_leg_service import local_tracking_from_polyline
+
+        local = await local_tracking_from_polyline(trip, d_lat, d_lng)
+        if local:
+            status = str(trip.get("status") or "").lower()
+            if status == "arrived" or local["distance_remaining_km"] <= 0.05:
+                local["eta_seconds"] = 0
+                local["status"] = "arrived"
+            elif local["eta_seconds"] < ARRIVING_ETA_SECONDS:
+                local["status"] = "arriving"
+            else:
+                local["status"] = "en_route"
+            out.update(local)
+            return out
+    except Exception:
+        pass
     target = trip_tracking_target(trip)
     if target:
         tracking = compute_live_tracking(

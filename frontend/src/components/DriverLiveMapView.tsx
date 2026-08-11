@@ -85,13 +85,12 @@ import { useDriverHeatmapSnapshot } from '@/src/hooks/useDriverHeatmapSnapshot';
 import { formatPickupWaitLabel } from '@/src/components/driver/driverDockUtils';
 import { driverTripProgressPercent } from '@/src/utils/driverOngoingDisplay';
 import {
-  fetchGoogleDrivingRoutes,
-  fetchDirections,
   fmtDistanceDisplay,
   maneuverToColor,
   haversineM,
   type NavStep,
 } from '@/src/navigation/navUtils';
+import { routePolylineFromTripRecord } from '@/src/utils/routePreviewCoords';
 import { useNavVoiceFromSteps } from '@/src/navigation/useNavVoiceFromSteps';
 import {
   appendTripBreadcrumb,
@@ -269,6 +268,15 @@ export interface ActiveTrip {
   pickup_location?: any;
   dropoff_location?: any;
   route_preview_coordinates?: Array<{ lat: number; lng: number }> | null;
+  polyline?: string | null;
+  leg_polyline?: string | null;
+  active_leg_route?: {
+    leg?: string;
+    polyline?: string;
+    distance_meters?: number;
+    duration_seconds?: number;
+    coordinates?: Array<{ lat: number; lng: number }> | null;
+  } | null;
   current_instruction?: string | null;
   next_instruction?: string | null;
   distance_to_next_km?: number | null;
@@ -943,13 +951,18 @@ function DriverLiveMapViewInner({
     });
   }, [driverCoords, handleRecenter]);
 
-  /* ── Build route polyline ── */
+  /* ── Build route polyline from server-stored leg (never client Directions) ── */
   const routeCoords = React.useMemo(() => {
-    if (!activeTrip?.route_preview_coordinates) return [];
-    return activeTrip.route_preview_coordinates
-      .filter((p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lng))
-      .map((p) => ({ latitude: p.lat, longitude: p.lng }));
-  }, [activeTrip?.route_preview_coordinates]);
+    return routePolylineFromTripRecord(activeTrip);
+  }, [
+    activeTrip?.id,
+    activeTrip?.status,
+    activeTrip?.active_leg_route?.polyline,
+    activeTrip?.active_leg_route?.coordinates,
+    activeTrip?.leg_polyline,
+    activeTrip?.polyline,
+    activeTrip?.route_preview_coordinates,
+  ]);
 
   const hasEmbeddedOffer = Boolean(isOnline && embeddedOfferTrip && !activeTrip);
   const offerTripKey =
@@ -1117,164 +1130,58 @@ function DriverLiveMapViewInner({
     });
   }, [driverCoords?.lat, driverCoords?.lng, tripNavSteps]);
 
+  // Snap routes + ETA from server-stored active_leg_route only — zero client Google calls.
   useEffect(() => {
-    if (!directionsApiKey || !activeTrip?.id) {
+    const st = String(activeTrip?.status || '');
+    if (!activeTrip?.id || !['accepted', 'arrived', 'ongoing'].includes(st)) {
       setSnapRoutes([]);
       setSnapPrimaryMeta(null);
       setTripNavSteps([]);
       setNavLegKey('');
       return;
     }
-    const st = String(activeTrip.status || '');
-    if (!['accepted', 'arrived', 'ongoing'].includes(st)) {
-      setSnapRoutes([]);
-      setSnapPrimaryMeta(null);
-      setTripNavSteps([]);
-      setNavLegKey('');
-      return;
-    }
-
-    let oLat: number;
-    let oLng: number;
-    let dLat: number;
-    let dLng: number;
-
-    if (st === 'accepted') {
-      if (!driverCoords || !pickupCoord) {
-        setSnapRoutes([]);
-        setSnapPrimaryMeta(null);
-        setTripNavSteps([]);
-        setNavLegKey('');
-        return;
-      }
-      oLat = driverCoords.lat;
-      oLng = driverCoords.lng;
-      dLat = pickupCoord.lat;
-      dLng = pickupCoord.lng;
-    } else if (st === 'arrived') {
-      const verified = !!(activeTrip.pickup_code_verified || activeTrip.security_code_verified);
-      if (!verified) {
-        setSnapRoutes([]);
-        setSnapPrimaryMeta(null);
-        setTripNavSteps([]);
-        setNavLegKey('');
-        return;
-      }
-      if (!driverCoords || !dropCoord) {
-        setSnapRoutes([]);
-        setSnapPrimaryMeta(null);
-        setTripNavSteps([]);
-        setNavLegKey('');
-        return;
-      }
-      oLat = driverCoords.lat;
-      oLng = driverCoords.lng;
-      dLat = dropCoord.lat;
-      dLng = dropCoord.lng;
+    const leg = activeTrip.active_leg_route;
+    const coords = routeCoords.length >= 2 ? routeCoords : [];
+    if (coords.length >= 2) {
+      setSnapRoutes([coords]);
     } else {
-      if (!driverCoords || !dropCoord) {
-        setSnapRoutes([]);
-        setSnapPrimaryMeta(null);
-        setTripNavSteps([]);
-        setNavLegKey('');
-        return;
+      setSnapRoutes([]);
+    }
+    const distM = Number(leg?.distance_meters || 0);
+    const durS = Number(leg?.duration_seconds || 0);
+    if (distM > 0 && durS > 0) {
+      const legKey = `${activeTrip.id}|${st}|${leg?.leg || ''}`;
+      const prevMeta = prevRouteSnapMetaRef.current;
+      if (
+        prevMeta &&
+        prevMeta.legKey !== legKey &&
+        Date.now() - routeChangeAlertAtRef.current > 80000
+      ) {
+        routeChangeAlertAtRef.current = Date.now();
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        setRouteChangeBanner('Route updated — follow the line on the map.');
+        if (routeChangeBannerTimerRef.current) clearTimeout(routeChangeBannerTimerRef.current);
+        routeChangeBannerTimerRef.current = setTimeout(() => {
+          setRouteChangeBanner(null);
+          routeChangeBannerTimerRef.current = undefined;
+        }, 12000);
       }
-      oLat = driverCoords.lat;
-      oLng = driverCoords.lng;
-      dLat = dropCoord.lat;
-      dLng = dropCoord.lng;
+      prevRouteSnapMetaRef.current = { legKey, distanceM: distM, durationSec: durS };
+      setSnapPrimaryMeta({ distanceM: distM, durationSec: durS });
+    } else {
+      setSnapPrimaryMeta(null);
     }
-
-    const reqKey = `${activeTrip.id}|${st}|${oLat.toFixed(3)},${oLng.toFixed(3)}→${dLat.toFixed(3)},${dLng.toFixed(3)}`;
-    const prev = lastSnapReqRef.current;
-    const minMs = st === 'arrived' && !(activeTrip.pickup_code_verified || activeTrip.security_code_verified) ? 78000 : 38000;
-    if (prev && prev.key === reqKey && Date.now() - prev.at < minMs) {
-      return;
-    }
-
-    let cancelled = false;
-    fetchGoogleDrivingRoutes(oLat, oLng, dLat, dLng, directionsApiKey, {
-      alternatives: st === 'accepted' || st === 'ongoing',
-    })
-      .then((res) => {
-        if (cancelled || !res?.routes?.length) return;
-        lastSnapReqRef.current = { key: reqKey, at: Date.now() };
-        setSnapRoutes(res.routes.map((r) => r.overview));
-        const leg = res.routes[0];
-        const newDist = leg.distanceM;
-        const newDur = leg.durationSec;
-        const legKey = `${activeTrip.id}|${st}`;
-        const prevMeta = prevRouteSnapMetaRef.current;
-        if (
-          prevMeta &&
-          prevMeta.legKey === legKey &&
-          prevMeta.distanceM > 80 &&
-          prevMeta.durationSec > 30
-        ) {
-          const dDist = Math.abs(newDist - prevMeta.distanceM);
-          const dDur = Math.abs(newDur - prevMeta.durationSec);
-          const baseD = Math.max(prevMeta.distanceM, 300);
-          const baseT = Math.max(prevMeta.durationSec, 90);
-          const significant =
-            dDur >= 120 || dDist >= 500 || dDur / baseT >= 0.18 || dDist / baseD >= 0.14;
-          if (significant && Date.now() - routeChangeAlertAtRef.current > 80000) {
-            routeChangeAlertAtRef.current = Date.now();
-            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            const etaMin = Math.max(1, Math.ceil(newDur / 60));
-            const kmStr = (newDist / 1000).toFixed(1);
-            void notificationService.sendLocalNotification({
-              type: 'route_updated',
-              title: 'Route updated',
-              body: `Your path or ETA changed (traffic or roads). About ${etaMin} min · ${kmStr} km along the route.`,
-              data: { trip_id: activeTrip.id, phase: st },
-            });
-            if (routeChangeBannerTimerRef.current) {
-              clearTimeout(routeChangeBannerTimerRef.current);
-            }
-            setRouteChangeBanner('Route recalculated — follow the updated line on the map.');
-            routeChangeBannerTimerRef.current = setTimeout(() => {
-              setRouteChangeBanner(null);
-              routeChangeBannerTimerRef.current = undefined;
-            }, 12000);
-          }
-        }
-        prevRouteSnapMetaRef.current = { legKey, distanceM: newDist, durationSec: newDur };
-        setSnapPrimaryMeta({ distanceM: newDist, durationSec: newDur });
-        void fetchDirections(oLat, oLng, dLat, dLng, directionsApiKey).then((dir) => {
-          if (cancelled) return;
-          if (!dir?.steps?.length) {
-            setTripNavSteps([]);
-            setNavLegKey('');
-            return;
-          }
-          setNavLegKey(reqKey);
-          setTripNavSteps(dir.steps);
-        });
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSnapRoutes([]);
-          setSnapPrimaryMeta(null);
-          setTripNavSteps([]);
-          setNavLegKey('');
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    // Turn-by-turn steps: use free Google Maps app deep-link, not Directions API.
+    setTripNavSteps([]);
+    setNavLegKey(`${activeTrip.id}|${st}`);
   }, [
-    directionsApiKey,
     activeTrip?.id,
     activeTrip?.status,
-    driverCoords?.lat,
-    driverCoords?.lng,
-    pickupCoord?.lat,
-    pickupCoord?.lng,
-    dropCoord?.lat,
-    dropCoord?.lng,
-    activeTrip?.pickup_code_verified,
-    activeTrip?.security_code_verified,
+    activeTrip?.active_leg_route?.leg,
+    activeTrip?.active_leg_route?.polyline,
+    activeTrip?.active_leg_route?.distance_meters,
+    activeTrip?.active_leg_route?.duration_seconds,
+    routeCoords,
   ]);
 
   const snapDistKm = useMemo(() => {

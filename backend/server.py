@@ -1290,24 +1290,32 @@ async def get_directions_from_google(
             db, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, stop_lat, stop_lng
         )
         if shared_cached and is_directions_road_route(shared_cached):
-            route_cache[cache_key] = {"data": shared_cached, "cached_at": datetime.utcnow()}
-            return shared_cached
+            cached_hit = dict(shared_cached)
+            cached_hit["maps_billed"] = False
+            route_cache[cache_key] = {"data": cached_hit, "cached_at": datetime.utcnow()}
+            return cached_hit
     except Exception:
         pass
 
     # L1: in-memory cache (fastest, 5-minute TTL)
     if cache_key in route_cache and is_cache_valid(route_cache[cache_key]):
-        return route_cache[cache_key]["data"]
+        hit = dict(route_cache[cache_key]["data"])
+        hit["maps_billed"] = False
+        return hit
 
     # L1.5: Redis cross-instance cache (6-hour TTL)
     redis_cached = await _redis_get_route(cache_key)
     if redis_cached:
+        redis_cached = dict(redis_cached)
+        redis_cached["maps_billed"] = False
         route_cache[cache_key] = {"data": redis_cached, "cached_at": datetime.utcnow()}
         return redis_cached
 
     # L2: persistent MongoDB cache (survives restarts, 24-hour TTL)
     db_cached = await _get_route_from_db(cache_key)
     if db_cached:
+        db_cached = dict(db_cached)
+        db_cached["maps_billed"] = False
         route_cache[cache_key] = {"data": db_cached, "cached_at": datetime.utcnow()}
         await _redis_set_route(cache_key, db_cached)
         return db_cached
@@ -1358,6 +1366,17 @@ async def get_directions_from_google(
                     )
                 except Exception:
                     pass
+            result["maps_billed"] = True
+            try:
+                from maps_billing import incr_maps_call
+
+                await incr_maps_call(
+                    trip_id=None,
+                    kind="fare_estimate",
+                    detail="directions_traffic_aware",
+                )
+            except Exception:
+                pass
             return result
     except Exception as e:
         logger.warning(f"Directions API failed: {e}")
@@ -1396,6 +1415,17 @@ async def get_directions_from_google(
             }
             route_cache[cache_key] = {"data": result, "cached_at": datetime.utcnow()}
             await _store_route_in_db(cache_key, result)
+            result["maps_billed"] = True
+            try:
+                from maps_billing import incr_maps_call
+
+                await incr_maps_call(
+                    trip_id=None,
+                    kind="fare_estimate",
+                    detail="computeRoutes_traffic_aware",
+                )
+            except Exception:
+                pass
             return result
     except Exception as e:
         logger.warning(f"Routes API failed: {e}")

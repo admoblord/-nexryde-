@@ -23,13 +23,16 @@ function envString(name: string, fallback = ''): string {
   return typeof raw === 'string' && raw.trim() ? raw.trim() : fallback;
 }
 
-/** Native Google Navigation SDK for driver trip guidance. */
+/**
+ * Native Google Navigation SDK — DISABLED by default (Enterprise billing).
+ * Prefer deep-link `google.navigation:q=lat,lng&mode=d` (free).
+ * Opt-in only via EXPO_PUBLIC_GOOGLE_NAVIGATION_ENABLED=true.
+ */
 export function isGoogleNavigationEnabled(): boolean {
   if (Platform.OS === 'web') return false;
-  // iOS: Nav SDK (GoogleMaps 10.13) conflicts with react-native-maps (GoogleMaps 8.4).
-  // Native module is unlinked via react-native.config.js; use external Maps instead.
+  // iOS: Nav SDK conflicts with react-native-maps; never enable.
   if (Platform.OS === 'ios') return false;
-  return envFlag('EXPO_PUBLIC_GOOGLE_NAVIGATION_ENABLED', true);
+  return envFlag('EXPO_PUBLIC_GOOGLE_NAVIGATION_ENABLED', false);
 }
 
 /** MapLibre GPU heatmap + vector style surfaces. */
