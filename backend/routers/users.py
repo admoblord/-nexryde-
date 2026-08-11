@@ -839,12 +839,24 @@ async def mark_notification_read(user_id: str, notification_id: str, request: Re
     result = await db.notifications.update_one({"id": notification_id, "user_id": user_id}, {"$set": {"read": True}})
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Notification not found")
+    try:
+        from routers.realtime_dispatch import publish_notification_badge
+
+        await publish_notification_badge(user_id)
+    except Exception:
+        logger.debug("badge publish after mark-read failed", exc_info=True)
     return {"success": True}
 
 @users_router.post("/users/{user_id}/notifications/read-all")
 async def mark_all_notifications_read(user_id: str, request: Request):
     verify_owner_strict(request, user_id)
     await db.notifications.update_many({"user_id": user_id, "read": False}, {"$set": {"read": True}})
+    try:
+        from routers.realtime_dispatch import publish_notification_badge
+
+        await publish_notification_badge(user_id, unread_count=0)
+    except Exception:
+        logger.debug("badge publish after read-all failed", exc_info=True)
     return {"success": True}
 
 # ==================== USER PREFERENCES ====================

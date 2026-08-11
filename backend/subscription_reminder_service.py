@@ -44,17 +44,16 @@ async def _upsert_subscription_notification(
     if existing:
         return
     now_iso = datetime.now(timezone.utc).isoformat()
-    await db.notifications.insert_one(
-        {
-            "id": str(uuid.uuid4()),
-            "user_id": driver_id,
-            "type": notif_type,
-            "title": title,
-            "message": message,
-            "read": False,
-            "created_at": now_iso,
-            "data": {"dedupe_key": dedupe_key, "screen": "/driver/subscription"},
-        }
+    from user_inbox_notifications import insert_user_notification
+
+    await insert_user_notification(
+        user_id=driver_id,
+        type=notif_type,
+        title=title,
+        message=message,
+        id=str(uuid.uuid4()),
+        created_at=now_iso,
+        data={"dedupe_key": dedupe_key, "screen": "/driver/subscription"},
     )
     try:
         await send_push_notification(

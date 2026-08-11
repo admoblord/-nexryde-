@@ -1921,15 +1921,16 @@ async def verify_vehicle_registration(
                 message = f"Your vehicle registration was not approved. Reason: {rejection_reason or 'Did not meet category requirements'}. Please update your vehicle details."
             
             # Store notification
-            await db.notifications.insert_one({
-                "id": str(uuid.uuid4()),
-                "user_id": driver_id,
-                "type": "vehicle_verification",
-                "title": "Vehicle Verification " + ("Approved ✅" if approved else "Rejected ❌"),
-                "message": message,
-                "read": False,
-                "created_at": datetime.utcnow()
-            })
+            from user_inbox_notifications import insert_user_notification
+
+            await insert_user_notification(
+                user_id=driver_id,
+                type="vehicle_verification",
+                title="Vehicle Verification " + ("Approved ✅" if approved else "Rejected ❌"),
+                message=message,
+                id=str(uuid.uuid4()),
+                created_at=datetime.utcnow(),
+            )
 
             from services.product_notification_email import schedule_notify_user_brevo_email
 

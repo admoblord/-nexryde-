@@ -674,9 +674,18 @@ async def book_for_family_member(family_id: str, booker_id: str, member_phone: s
     trip_id = str(uuid.uuid4())
     trip = {"id": trip_id, "rider_id": member.get("user_id", f"family-{normalized_phone}"), "rider_phone": normalized_phone, "rider_name": member.get("name"), "booked_by": booker_id, "family_id": family_id, "is_family_booking": True, "pickup_location": {"lat": pickup_lat, "lng": pickup_lng, "address": pickup_address}, "dropoff_location": {"lat": dropoff_lat, "lng": dropoff_lng, "address": dropoff_address}, "status": "pending", "created_at": datetime.now(timezone.utc), "fare": 0}
     await db.trips.insert_one(trip)
+    from user_inbox_notifications import insert_user_notification
+
     for m in family["members"]:
         if m["user_id"] != booker_id:
-            await db.notifications.insert_one({"user_id": m["user_id"], "type": "family_trip_booked", "title": "Family Trip Alert", "message": f"{member.get('name')} has a ride booked", "data": {"trip_id": trip_id}, "created_at": datetime.now(timezone.utc), "read": False})
+            await insert_user_notification(
+                user_id=m["user_id"],
+                type="family_trip_booked",
+                title="Family Trip Alert",
+                message=f"{member.get('name')} has a ride booked",
+                data={"trip_id": trip_id},
+                created_at=datetime.now(timezone.utc),
+            )
     return {"message": "Trip booked for family member", "trip_id": trip_id}
 
 @support_router.post("/family/{family_id}/safety-alert")
@@ -690,9 +699,19 @@ async def trigger_family_safety_alert(family_id: str, member_id: str, location_l
     if not any(m.get("user_id") == actor_id for m in family.get("members", [])):
         raise HTTPException(status_code=403, detail="Not a family member")
     member_name = next((m.get("name", "Family member") for m in family["members"] if m["user_id"] == member_id), "Family member")
+    from user_inbox_notifications import insert_user_notification
+
     for m in family["members"]:
         if m["user_id"] != member_id:
-            await db.notifications.insert_one({"user_id": m["user_id"], "type": "safety_circle_alert", "title": "SAFETY ALERT", "message": f"{member_name} needs help!", "data": {"member_id": member_id, "location": {"lat": location_lat, "lng": location_lng}}, "created_at": datetime.now(timezone.utc), "read": False, "urgent": True})
+            await insert_user_notification(
+                user_id=m["user_id"],
+                type="safety_circle_alert",
+                title="SAFETY ALERT",
+                message=f"{member_name} needs help!",
+                data={"member_id": member_id, "location": {"lat": location_lat, "lng": location_lng}},
+                created_at=datetime.now(timezone.utc),
+                urgent=True,
+            )
     return {"message": "Safety alert sent to all family members", "notified_count": len(family["members"]) - 1}
 
 # ==================== TRIP SHARING ====================

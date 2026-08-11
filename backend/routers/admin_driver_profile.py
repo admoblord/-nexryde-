@@ -568,16 +568,17 @@ async def notify_driver(driver_id: str, body: NotifyDriverBody, request: Request
     if user.get("role") != "driver":
         raise HTTPException(status_code=400, detail="Target user is not a driver")
     now_iso = datetime.now(timezone.utc).isoformat()
-    await db.notifications.insert_one({
-        "id": str(uuid.uuid4()),
-        "user_id": driver_id,
-        "type": "admin_message",
-        "title": body.title,
-        "message": body.body,
-        "read": False,
-        "created_at": now_iso,
-        "data": {"source": "admin"},
-    })
+    from user_inbox_notifications import insert_user_notification
+
+    await insert_user_notification(
+        user_id=driver_id,
+        type="admin_message",
+        title=body.title,
+        message=body.body,
+        id=str(uuid.uuid4()),
+        created_at=now_iso,
+        data={"source": "admin"},
+    )
     await send_push_notification(driver_id, body.title, body.body, {"type": "admin_message", "source": "admin"})
     await _log_audit(request, "driver_notification_sent", "driver", driver_id, {"title": body.title})
     return {"success": True}

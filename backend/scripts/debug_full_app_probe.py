@@ -324,6 +324,8 @@ def main() -> int:
     ws_checks = [
         (f"/api/ws/rider/trips/{rider_id}", rider_token),
         (f"/api/ws/driver/offers/{driver_id}", driver_token),
+        (f"/api/ws/user/{rider_id}/inbox", rider_token),
+        (f"/api/ws/user/{driver_id}/inbox", driver_token),
     ]
     for wp, tok in ws_checks:
         try:

@@ -226,17 +226,17 @@ async def _deliver_driver_surge_alert(
         "type": notif_type,
         "window_ends_label": surge_status.get("window_ends_label"),
     }
-    doc = {
-        "id": str(uuid.uuid4()),
-        "user_id": driver_id,
-        "type": notif_type,
-        "title": title,
-        "message": message,
-        "data": data,
-        "created_at": now_iso,
-        "read": False,
-    }
-    await db.notifications.insert_one(doc)
+    from user_inbox_notifications import insert_user_notification
+
+    await insert_user_notification(
+        user_id=driver_id,
+        type=notif_type,
+        title=title,
+        message=message,
+        data=data,
+        id=str(uuid.uuid4()),
+        created_at=now_iso,
+    )
 
     if send_push:
         try:
