@@ -280,7 +280,7 @@ async def _geocode_search_fallback_predictions(input_text: str, components: str)
     if data.get("status") != "OK" or not data.get("results"):
         return None
     predictions: list[dict] = []
-        for idx, r in enumerate(data.get("results", [])[:12]):
+    for idx, r in enumerate(data.get("results", [])[:12]):
         pid = str(r.get("place_id") or "").strip()
         formatted = _humanize_address(str(r.get("formatted_address") or "").strip())
         if not formatted:
