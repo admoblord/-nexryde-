@@ -2,15 +2,14 @@
  * DriverEarningsScreen — Premium dark-theme earnings hub.
  *
  * Sections:
- *  1. Wallet balance hero → tap to withdraw
- *  2. Trial progress banner (only when on trial)
- *  3. Total earnings card with period toggle
- *  4. Stats grid (trips, hours, rating, km)
- *  5. Live surge/area pricing card
- *  6. 7-day earnings bar chart
- *  7. Earnings outlook (daily/weekly/monthly)
- *  8. Salary mode card (if enabled)
- *  9. Bank & payout route CTA
+ *  1. Trial progress banner (only when on trial)
+ *  2. Total earnings card with period toggle
+ *  3. Stats grid (trips, hours, rating, km)
+ *  4. Live surge/area pricing card
+ *  5. 7-day earnings bar chart
+ *  6. Earnings outlook (daily/weekly/monthly)
+ *  7. Salary mode card (if enabled)
+ *  8. Bank account CTA (riders pay by cash/transfer)
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
@@ -40,7 +39,6 @@ import {
   fetchDriverEarningsScreenData,
   type EarningsPeriod,
 } from '@/src/services/driverEarningsScreenData';
-import { useWalletEnabled } from '@/src/services/clientConfig';
 
 // ─── Design tokens (appearance-aware) ──────────────────────────────────────
 type EarnPalette = {
@@ -106,8 +104,6 @@ function EarningsSkeleton() {
 
 export default function DriverEarningsScreen() {
   const router = useRouter();
-  // Launch mode: wallet off → earnings is a record only (riders pay drivers directly).
-  const walletEnabled = useWalletEnabled();
   const user         = useAppStore((s) => s.user);
   const subscription = useAppStore((s) => s.subscription) as any;
   const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
@@ -155,8 +151,6 @@ export default function DriverEarningsScreen() {
 
   const dashboard = (data?.dashboard ?? null) as Record<string, any> | null;
   const bankReady = data?.bankReady ?? false;
-  const walletBal = data?.walletBalance ?? null;
-
   useEffect(() => {
     if (!loading) setRefreshing(false);
   }, [loading]);
@@ -234,19 +228,9 @@ export default function DriverEarningsScreen() {
         <View>
           <Text style={s.headerTitle}>Earnings</Text>
           <Text style={s.headerSub}>
-            {walletEnabled ? 'You keep 100% of every fare' : 'Riders pay you directly — you keep 100%'}
+            Riders pay you directly — you keep 100%
           </Text>
         </View>
-        {walletEnabled ? (
-          <TouchableOpacity
-            style={s.withdrawBtn}
-            onPress={() => router.push('/driver/withdrawal')}
-            accessibilityRole="button"
-          >
-            <Ionicons name="arrow-up-circle-outline" size={16} color={D.neon} />
-            <Text style={s.withdrawBtnTxt}>Withdraw</Text>
-          </TouchableOpacity>
-        ) : null}
       </View>
 
       <ScrollView
@@ -276,36 +260,6 @@ export default function DriverEarningsScreen() {
 
         {data ? (
         <>
-        {walletEnabled ? (
-        <TouchableOpacity
-          onPress={() => router.push('/driver/withdrawal')}
-          activeOpacity={0.88}
-          accessibilityRole="button"
-          accessibilityLabel="Wallet balance, tap to withdraw"
-        >
-          <LinearGradient
-            colors={['#0B2A1A', '#0F3D24', '#0B2A1A']}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={s.walletHero}
-          >
-            <View style={s.walletHeroLeft}>
-              <View style={s.walletIconWrap}>
-                <Ionicons name="wallet" size={22} color={D.neon} />
-              </View>
-              <View>
-                <Text style={s.walletLabel}>Wallet balance</Text>
-                <Text style={s.walletAmount}>
-                  {walletBal !== null ? fmtMoney(walletBal) : '—'}
-                </Text>
-              </View>
-            </View>
-            <View style={s.walletAction}>
-              <Text style={s.walletActionTxt}>Withdraw</Text>
-              <Ionicons name="arrow-forward" size={14} color={D.neon} />
-            </View>
-          </LinearGradient>
-        </TouchableOpacity>
-        ) : null}
 
         {/* ── Trial progress banner ───────────────────────────────────────── */}
         {isOnTrial ? (
@@ -565,15 +519,15 @@ export default function DriverEarningsScreen() {
           </>
         ) : null}
 
-        {/* ── Bank & payout route ─────────────────────────────────────────── */}
-        <SectionLabel text={walletEnabled ? 'Payout route' : 'Getting paid'} />
+        {/* ── Bank account for rider transfers ───────────────────────────── */}
+        <SectionLabel text="Getting paid" />
         <View style={s.payoutRow}>
           <TouchableOpacity style={s.payoutCard} onPress={() => router.push('/driver/bank')} activeOpacity={0.85}>
             <View style={s.payoutIcon}>
               <Ionicons name="card-outline" size={22} color={D.blue} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={s.payoutTitle}>{walletEnabled ? 'Bank & payout route' : 'Your bank account'}</Text>
+              <Text style={s.payoutTitle}>Your bank account</Text>
               <Text style={s.payoutSub}>
                 {bankReady
                   ? 'Riders can transfer fares straight to this account'
@@ -587,23 +541,6 @@ export default function DriverEarningsScreen() {
             </View>
             <Ionicons name="chevron-forward" size={18} color={D.muted} />
           </TouchableOpacity>
-
-          {walletEnabled ? (
-          <TouchableOpacity style={s.payoutCard} onPress={() => router.push('/driver/withdrawal')} activeOpacity={0.85}>
-            <View style={[s.payoutIcon, { backgroundColor: `${D.neon}15` }]}>
-              <Ionicons name="arrow-up-circle-outline" size={22} color={D.neon} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.payoutTitle}>Withdraw earnings</Text>
-              <Text style={s.payoutSub}>
-                {walletBal !== null
-                  ? `${fmtMoney(walletBal)} available to withdraw`
-                  : 'View balance and withdraw to your bank'}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={D.muted} />
-          </TouchableOpacity>
-          ) : null}
         </View>
 
         </>

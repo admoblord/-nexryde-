@@ -864,49 +864,47 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
                 },
             )
 
-        # ── SOFT gates: warn but allow newer verified drivers a grace period ──
-        # If the driver was approved within the last 30 days, skip compliance
-        # checks — their initial verification IS their compliance for this period.
-        approved_recently = False
+        # ── HARD compliance gate (must match GET /drivers/{id}/compliance) ──
+        # Soft-bypass previously let non-compliant drivers go online while the
+        # compliance API reported can_go_online=false. Reject with a clear code.
         try:
-            profile_completed_at_raw = profile.get("profile_completed_at") or profile.get("approved_at")
-            if profile_completed_at_raw:
-                approved_at_dt = datetime.fromisoformat(str(profile_completed_at_raw).replace("Z", "+00:00"))
-                if approved_at_dt.tzinfo is None:
-                    approved_at_dt = approved_at_dt.replace(tzinfo=timezone.utc)
-                approved_recently = (datetime.now(timezone.utc) - approved_at_dt).days < 30
-        except Exception:
-            approved_recently = True  # On parse error, give benefit of the doubt
+            from driver_compliance import evaluate_driver_go_online_compliance
 
-        # Monthly compliance: skip for brand-new drivers (< 30 days since approval)
-        if not approved_recently:
-            try:
-                from driver_compliance import check_monthly_uploads
-                monthly_status = await check_monthly_uploads(user_id)
-                if not monthly_status.get("compliant", False):
-                    # Soft: log but do not block — the driver gets a push notification reminder
-                    logger.info(f"Driver {user_id} going online without monthly compliance (will be notified)")
-            except Exception as compliance_error:
-                logger.warning(f"Compliance pre-check warning for {user_id}: {compliance_error}")
+            compliance = await evaluate_driver_go_online_compliance(user_id, profile)
+        except HTTPException:
+            raise
+        except Exception as compliance_error:
+            logger.error(
+                f"Compliance pre-check failed closed for {user_id}: {compliance_error}"
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "ERR_COMPLIANCE",
+                    "message": "Could not verify compliance. Complete monthly verification and try again.",
+                },
+            ) from compliance_error
 
-        # Document expiry: only block if documents are critically expired (hard block).
-        # Skip for recently approved drivers — same grace as monthly compliance.
-        if not approved_recently:
-            try:
-                from driver_compliance import check_driver_document_expiry
-                docs_status = await check_driver_document_expiry(user_id)
-                if not docs_status.get("compliant", False) and docs_status.get("critically_expired"):
-                    raise HTTPException(
-                        status_code=403,
-                        detail={
-                            "code": "ERR_DOCUMENTS",
-                            "message": "One or more required documents have expired. Please renew them before going online.",
+        if not compliance.get("can_go_online"):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": compliance.get("block_code") or "ERR_COMPLIANCE",
+                    "message": compliance.get("block_message")
+                    or "Complete required verification before going online.",
+                    "compliance": {
+                        "monthly_verification": compliance.get("monthly_verification"),
+                        "documents": {
+                            "compliant": (compliance.get("documents") or {}).get("compliant"),
+                            "expired": (compliance.get("documents") or {}).get("expired"),
+                            "critically_expired": (compliance.get("documents") or {}).get(
+                                "critically_expired"
+                            ),
                         },
-                    )
-            except HTTPException:
-                raise
-            except Exception as compliance_error:
-                logger.warning(f"Document expiry pre-check warning for {user_id}: {compliance_error}")
+                        "vehicle": compliance.get("vehicle"),
+                    },
+                },
+            )
 
         from driver_trial_policy import record_first_go_online
         from routers.payments import _ensure_auto_trial_for_verified_driver, _evaluate_driver_trial
@@ -2905,171 +2903,19 @@ async def verify_bank_account(driver_id: str, request: dict, http_request: Reque
 
 @drivers_router.get("/drivers/{driver_id}/earnings-vault")
 async def get_earnings_vault(driver_id: str, http_request: Request):
-    """Spendable wallet vs locked vault and any pending cooldown release."""
-    verify_owner_strict(http_request, driver_id)
-    user = await db.users.find_one(
-        {"id": driver_id},
-        {"_id": 0, "role": 1, "wallet_balance": 1, "earnings_vault_locked": 1, "earnings_vault_pending_release": 1},
-    ) or {}
-    if user.get("role") != "driver":
-        raise HTTPException(status_code=403, detail="Driver account required")
-    wallet = round(float(user.get("wallet_balance", 0.0) or 0.0), 2)
-    locked = round(float(user.get("earnings_vault_locked", 0.0) or 0.0), 2)
-    pending = user.get("earnings_vault_pending_release") or {}
-    return {
-        "success": True,
-        "wallet_spendable": wallet,
-        "vault_locked": locked,
-        "pending_release": pending if pending.get("amount") else None,
-        "cooldown_hours": VAULT_RELEASE_COOLDOWN_HOURS,
-    }
-
+    raise HTTPException(status_code=410, detail="In-app earnings wallet/vault has been removed. Riders pay you directly by cash or bank transfer.")
 
 @drivers_router.post("/drivers/{driver_id}/earnings-vault/lock")
 async def lock_earnings_vault(driver_id: str, request: EarningsVaultLockRequest, http_request: Request):
-    """Move funds from spendable wallet into untouchable vault."""
-    verify_owner_strict(http_request, driver_id)
-    user = await db.users.find_one({"id": driver_id}, {"_id": 0, "role": 1, "wallet_balance": 1}) or {}
-    if user.get("role") != "driver":
-        raise HTTPException(status_code=403, detail="Driver account required")
-    amount = round(float(request.amount), 2)
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="Amount must be positive")
-    wallet = float(user.get("wallet_balance", 0.0) or 0.0)
-    if wallet < amount - 0.005:
-        raise HTTPException(status_code=400, detail=f"Insufficient spendable balance. Available: ₦{wallet:,.2f}")
-    res = await db.users.update_one(
-        {"id": driver_id, "wallet_balance": {"$gte": amount}},
-        {"$inc": {"wallet_balance": -amount, "earnings_vault_locked": amount}},
-    )
-    if res.modified_count == 0:
-        raise HTTPException(status_code=400, detail="Could not lock funds. Check your balance.")
-    await db.transactions.insert_one(
-        {
-            "id": str(uuid.uuid4()),
-            "user_id": driver_id,
-            "type": "vault_lock",
-            "source": "earnings_vault",
-            "amount": -amount,
-            "status": "success",
-            "timestamp": datetime.utcnow(),
-            "reference": f"vault_lock_{uuid.uuid4().hex[:10]}",
-        }
-    )
-    updated = await db.users.find_one({"id": driver_id}, {"_id": 0, "wallet_balance": 1, "earnings_vault_locked": 1}) or {}
-    return {
-        "success": True,
-        "message": "Funds moved to Earnings Vault. They cannot be withdrawn without unlock cooldown and secondary verification.",
-        "wallet_spendable": round(float(updated.get("wallet_balance", 0.0) or 0.0), 2),
-        "vault_locked": round(float(updated.get("earnings_vault_locked", 0.0) or 0.0), 2),
-    }
-
+    raise HTTPException(status_code=410, detail="In-app earnings wallet/vault has been removed. Riders pay you directly by cash or bank transfer.")
 
 @drivers_router.post("/drivers/{driver_id}/earnings-vault/request-unlock")
 async def request_earnings_vault_unlock(driver_id: str, request: EarningsVaultUnlockRequest, http_request: Request):
-    """Start 48-hour cooldown before vault funds can return to spendable wallet."""
-    verify_owner_strict(http_request, driver_id)
-    user = await db.users.find_one({"id": driver_id}, {"_id": 0, "role": 1, "earnings_vault_locked": 1, "earnings_vault_pending_release": 1}) or {}
-    if user.get("role") != "driver":
-        raise HTTPException(status_code=403, detail="Driver account required")
-    pending = user.get("earnings_vault_pending_release") or {}
-    if pending.get("amount"):
-        raise HTTPException(status_code=400, detail="An unlock is already in progress. Wait for the cooldown or complete release.")
-    amount = round(float(request.amount), 2)
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="Amount must be positive")
-    locked = float(user.get("earnings_vault_locked", 0.0) or 0.0)
-    if locked < amount - 0.005:
-        raise HTTPException(status_code=400, detail=f"Insufficient vault balance. Locked: ₦{locked:,.2f}")
-    now = datetime.now(timezone.utc)
-    release_at = now + timedelta(hours=VAULT_RELEASE_COOLDOWN_HOURS)
-    pending_doc = {
-        "amount": amount,
-        "requested_at": now.isoformat(),
-        "release_available_at": release_at.isoformat(),
-    }
-    res = await db.users.update_one(
-        {"id": driver_id, "earnings_vault_locked": {"$gte": amount}},
-        {"$inc": {"earnings_vault_locked": -amount}, "$set": {"earnings_vault_pending_release": pending_doc}},
-    )
-    if res.modified_count == 0:
-        raise HTTPException(status_code=400, detail="Could not start unlock. Check vault balance.")
-    return {
-        "success": True,
-        "message": f"Unlock started. After {VAULT_RELEASE_COOLDOWN_HOURS} hours, confirm with PIN and face scan to move funds to your spendable wallet.",
-        "pending_release": pending_doc,
-    }
-
+    raise HTTPException(status_code=410, detail="In-app earnings wallet/vault has been removed. Riders pay you directly by cash or bank transfer.")
 
 @drivers_router.post("/drivers/{driver_id}/earnings-vault/confirm-release")
 async def confirm_earnings_vault_release(driver_id: str, request: EarningsVaultReleaseRequest, http_request: Request):
-    """After cooldown, move pending vault funds to spendable wallet using PIN + face scan."""
-    verify_owner_strict(http_request, driver_id)
-    user = await db.users.find_one({"id": driver_id}, {"_id": 0}) or {}
-    if user.get("role") != "driver":
-        raise HTTPException(status_code=403, detail="Driver account required")
-    pending = user.get("earnings_vault_pending_release") or {}
-    release_amount = float(pending.get("amount") or 0.0)
-    if release_amount <= 0:
-        raise HTTPException(status_code=400, detail="No pending vault release. Request an unlock first.")
-    raw_deadline = pending.get("release_available_at")
-    try:
-        deadline = datetime.fromisoformat(str(raw_deadline).replace("Z", "+00:00"))
-        if deadline.tzinfo is None:
-            deadline = deadline.replace(tzinfo=timezone.utc)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid pending release state")
-    now = datetime.now(timezone.utc)
-    if now < deadline:
-        remaining = int((deadline - now).total_seconds())
-        hours = remaining // 3600
-        mins = (remaining % 3600) // 60
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cooldown active. Funds unlock in {hours}h {mins}m. No withdrawal until then.",
-        )
-    if not request.pin.isdigit():
-        raise HTTPException(status_code=400, detail="PIN must be digits only")
-    pin_hash = str(user.get("driver_account_pin_hash") or "")
-    if not pin_hash or pin_hash != _vault_pin_hash(driver_id, request.pin):
-        raise HTTPException(status_code=403, detail="Invalid PIN")
-    reference_face = await get_reference_face_image(driver_id)
-    if not reference_face:
-        reference_face = user.get("profile_image")
-    if not reference_face:
-        raise HTTPException(status_code=400, detail="No registered face reference")
-    confidence = face_match_confidence(reference_face, request.face_image)
-    if confidence < FACE_MATCH_SENSITIVE_MIN:
-        raise HTTPException(status_code=403, detail="Face verification failed. Vault funds stay protected.")
-    res = await db.users.update_one(
-        {"id": driver_id, "earnings_vault_pending_release.amount": release_amount},
-        {"$inc": {"wallet_balance": release_amount}, "$unset": {"earnings_vault_pending_release": ""}},
-    )
-    if res.modified_count == 0:
-        raise HTTPException(status_code=400, detail="Could not complete release. Try again or contact support.")
-    await db.transactions.insert_one(
-        {
-            "id": str(uuid.uuid4()),
-            "user_id": driver_id,
-            "type": "vault_release",
-            "source": "earnings_vault",
-            "amount": release_amount,
-            "status": "success",
-            "timestamp": datetime.utcnow(),
-            "reference": f"vault_release_{uuid.uuid4().hex[:10]}",
-            "meta": {"face_confidence": confidence, "cooldown_hours": VAULT_RELEASE_COOLDOWN_HOURS},
-        }
-    )
-    updated = await db.users.find_one({"id": driver_id}, {"_id": 0, "wallet_balance": 1, "earnings_vault_locked": 1}) or {}
-    return {
-        "success": True,
-        "message": "Vault funds released to your spendable wallet after cooldown and secondary verification.",
-        "released_amount": round(release_amount, 2),
-        "wallet_spendable": round(float(updated.get("wallet_balance", 0.0) or 0.0), 2),
-        "vault_locked": round(float(updated.get("earnings_vault_locked", 0.0) or 0.0), 2),
-        "face_match_confidence": confidence,
-    }
-
+    raise HTTPException(status_code=410, detail="In-app earnings wallet/vault has been removed. Riders pay you directly by cash or bank transfer.")
 
 @drivers_router.post("/drivers/{driver_id}/sim-swap-signal")
 async def report_sim_swap_signal(driver_id: str, request: SimSwapSignalRequest, http_request: Request):
@@ -3082,8 +2928,7 @@ async def report_sim_swap_signal(driver_id: str, request: SimSwapSignalRequest, 
 async def get_driver_withdrawals(driver_id: str, http_request: Request, limit: int = 30, skip: int = 0):
     """Return driver's withdrawal transaction history, most recent first."""
     verify_owner_strict(http_request, driver_id)
-    user = await find_user_by_id(driver_id, {"_id": 0, "wallet_balance": 1, "earnings_frozen": 1}) or {}
-    wallet_balance = round(float(user.get("wallet_balance") or 0.0), 2)
+    user = await find_user_by_id(driver_id, {"_id": 0, "earnings_frozen": 1}) or {}
     earnings_frozen = bool(user.get("earnings_frozen"))
 
     profile = await db.driver_profiles.find_one(
@@ -3118,13 +2963,11 @@ async def get_driver_withdrawals(driver_id: str, http_request: Request, limit: i
             "settlement_reason": t.get("settlement_reason"),
             "created_at": created_at,
             "settled_at": settled_at,
-            "reversed_to_wallet": bool(t.get("reversed_to_wallet")),
         })
 
     total = await db.transactions.count_documents({"user_id": driver_id, "source": "driver_withdrawal"})
     return {
         "success": True,
-        "wallet_balance": wallet_balance,
         "earnings_frozen": earnings_frozen,
         "bank_ready": bank_ready,
         "bank": {
@@ -3139,112 +2982,7 @@ async def get_driver_withdrawals(driver_id: str, http_request: Request, limit: i
 
 @drivers_router.post("/drivers/{driver_id}/withdraw-earnings")
 async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWithdrawalRequest, http_request: Request):
-    """Withdraw driver wallet earnings only after live face confirmation."""
-    from feature_flags import is_wallet_enabled
-    if not await is_wallet_enabled(db):
-        raise HTTPException(
-            status_code=403,
-            detail="Withdrawals are not needed — riders pay you directly (cash or transfer). You keep 100%.",
-        )
-    # Rate-limit: 5 withdrawal attempts per hour per driver
-    from security_advanced import general_limiter
-    await general_limiter.check_rate_limit(http_request, f"withdraw:{driver_id}")
-    verify_owner_strict(http_request, driver_id)
-    user = await db.users.find_one({"id": driver_id}, {"_id": 0, "role": 1, "wallet_balance": 1, "profile_image": 1}) or {}
-    if user.get("role") != "driver":
-        raise HTTPException(status_code=403, detail="Driver account required")
-
-    profile = await db.driver_profiles.find_one(
-        {"user_id": driver_id},
-        {"_id": 0, "bank_name": 1, "account_number": 1, "account_name": 1},
-    ) or {}
-    if not (profile.get("bank_name") and profile.get("account_number") and profile.get("account_name")):
-        raise HTTPException(status_code=400, detail="Complete bank details before withdrawing earnings.")
-
-    reference_face = await get_reference_face_image(driver_id)
-    if not reference_face:
-        reference_face = user.get("profile_image")
-    if not reference_face:
-        raise HTTPException(status_code=400, detail="No registered face reference found for biometric withdrawal.")
-    confidence = face_match_confidence(reference_face, request.face_image)
-    if confidence < FACE_MATCH_SENSITIVE_MIN:
-        raise HTTPException(status_code=403, detail="Face verification failed. Withdrawal blocked.")
-
-    current_balance = float(user.get("wallet_balance", 0.0) or 0.0)
-    amount = round(float(request.amount), 2)
-    if amount > current_balance:
-        raise HTTPException(status_code=400, detail=f"Insufficient wallet balance. Available: ₦{current_balance:,.2f}")
-
-    idem_key = (request.idempotency_key or "").strip()
-    if not idem_key:
-        raise HTTPException(
-            status_code=400,
-            detail="idempotency_key is required to prevent duplicate withdrawals. Generate a UUID on the client.",
-        )
-    existing = await db.transactions.find_one(
-        {
-            "user_id": driver_id,
-            "source": "driver_withdrawal",
-            "meta.idempotency_key": idem_key,
-        },
-        {"_id": 0},
-    )
-    if existing:
-        return {
-            "success": True,
-            "duplicate": True,
-            "message": "Withdrawal request already submitted.",
-            "withdrawn_amount": abs(float(existing.get("amount") or 0)),
-            "status": existing.get("status"),
-            "reference": existing.get("reference"),
-        }
-
-    withdraw_reference = f"withdraw_{uuid.uuid4().hex[:12]}"
-    # Insert ledger entry FIRST — if the process crashes before the $inc, the
-    # ledger shows the pending withdrawal and the admin can reconcile.
-    await db.transactions.insert_one(
-        {
-            "id": str(uuid.uuid4()),
-            "user_id": driver_id,
-            "type": "debit",
-            "source": "driver_withdrawal",
-            "amount": -amount,
-            "amount_kobo": -int(round(amount * 100)),
-            "status": "pending_settlement",
-            "timestamp": datetime.utcnow(),
-            "payment_method": "bank_transfer",
-            "reference": withdraw_reference,
-            "meta": {
-                "biometric_required": True,
-                "biometric_face_confidence": confidence,
-                "bank_name": profile.get("bank_name"),
-                "account_number": profile.get("account_number"),
-                "account_name": profile.get("account_name"),
-                "idempotency_key": idem_key,
-            },
-        }
-    )
-    # Debit balance AFTER ledger is committed
-    await db.users.update_one({"id": driver_id}, {"$inc": {"wallet_balance": -amount}})
-    await db.face_verifications.insert_one(
-        {
-            "driver_id": driver_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "verification_type": "earnings_withdrawal",
-            "verified": True,
-            "match_confidence": confidence,
-        }
-    )
-    return {
-        "success": True,
-        "message": "Biometric verified. Withdrawal request submitted securely.",
-        "withdrawn_amount": amount,
-        "remaining_balance": round(current_balance - amount, 2),
-        "face_match_confidence": confidence,
-        "reference": withdraw_reference,
-        "status": "pending_settlement",
-    }
-
+    raise HTTPException(status_code=410, detail="In-app earnings wallet/vault has been removed. Riders pay you directly by cash or bank transfer.")
 
 @drivers_router.post("/admin/withdrawals/{transaction_id}/settlement")
 async def update_driver_withdrawal_settlement(transaction_id: str, payload: WithdrawalSettlementRequest, request: Request):
@@ -3272,24 +3010,12 @@ async def update_driver_withdrawal_settlement(transaction_id: str, payload: With
     if payload.provider_reference:
         update_doc["provider_reference"] = payload.provider_reference.strip()
 
-    if target == "failed":
-        amount = abs(float(tx.get("amount") or 0))
-        user_id = str(tx.get("user_id") or "")
-        if amount <= 0 or not user_id:
-            raise HTTPException(status_code=400, detail="Invalid withdrawal amount/user for rollback")
-        await db.users.update_one({"id": user_id}, {"$inc": {"wallet_balance": amount}})
-        update_doc["reversed_to_wallet"] = True
-        update_doc["reversed_at"] = datetime.utcnow()
-
     await db.transactions.update_one({"id": transaction_id}, {"$set": update_doc})
 
-    user_id = str(tx.get("user_id") or "")
-    user = await db.users.find_one({"id": user_id}, {"_id": 0, "wallet_balance": 1}) if user_id else None
     return {
         "success": True,
         "transaction_id": transaction_id,
         "status": target,
-        "wallet_balance": round(float((user or {}).get("wallet_balance") or 0.0), 2),
     }
 
 
@@ -3356,13 +3082,4 @@ async def provider_withdrawal_callback(payload: WithdrawalProviderCallbackReques
         "settlement_updated_by": "provider_callback",
         "settlement_reason": (payload.reason or "").strip() or None,
     }
-    if target == "failed":
-        amount = abs(float(tx.get("amount") or 0))
-        user_id = str(tx.get("user_id") or "")
-        if amount <= 0 or not user_id:
-            raise HTTPException(status_code=400, detail="Invalid withdrawal amount/user for rollback")
-        await db.users.update_one({"id": user_id}, {"$inc": {"wallet_balance": amount}})
-        update_doc["reversed_to_wallet"] = True
-        update_doc["reversed_at"] = datetime.utcnow()
-
     await db.transactions.update_one({"id": payload.transaction_id}, {"$set": update_doc})

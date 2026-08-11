@@ -80,27 +80,6 @@ export function breadcrumbTripCancelled(tripId: string, reason: string, byWhom: 
   });
 }
 
-// ─── Payment breadcrumbs ──────────────────────────────────────────────────────
-
-export function breadcrumbWalletTopup(amount: number, reference: string) {
-  getSentry()?.addBreadcrumb({
-    category: 'payment',
-    message: 'Wallet top-up initiated',
-    data: { amount, reference },
-    level: 'info',
-  });
-}
-
-export function breadcrumbWalletDebitFailed(amount: number, reason: string) {
-  getSentry()?.addBreadcrumb({
-    category: 'payment',
-    message: 'Wallet debit failed',
-    data: { amount, reason },
-    level: 'error',
-  });
-  getSentry()?.captureMessage(`Wallet debit failed: ${reason}`, { level: 'warning' } as never);
-}
-
 // ─── Navigation breadcrumbs ───────────────────────────────────────────────────
 
 export function breadcrumbScreenView(screenName: string) {

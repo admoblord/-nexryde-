@@ -1,7 +1,7 @@
 import {
   Activity, BarChart3, Bell, Car, CreditCard, FileText, Flag, Gauge,
   Globe, Headphones, LayoutDashboard, Map, Megaphone, Radio, Settings,
-  Shield, Truck, Users, Wallet, Wrench, Zap,
+  Shield, Truck, Users, Wrench, Zap,
 } from 'lucide-react';
 
 export type AdminRole =
@@ -34,10 +34,9 @@ export const NAV: NavItem[] = [
   { id: 'riders', label: 'Riders', path: '/riders', icon: Users, section: 'Users' },
   { id: 'trips', label: 'Trips', path: '/trips', icon: Car, section: 'Trips' },
   { id: 'work-zones', label: 'Work Zones', path: '/work-zones', icon: Globe, section: 'Operations' },
-  { id: 'finance', label: 'Wallet & Finance', path: '/finance', icon: Wallet, section: 'Finance' },
+  { id: 'finance', label: 'Subscription Finance', path: '/finance', icon: CreditCard, section: 'Finance' },
   { id: 'subscriptions', label: 'Subscriptions', path: '/subscriptions', icon: CreditCard, section: 'Finance' },
   { id: 'sub-intel', label: 'Subscription Intel', path: '/subscription-intelligence', icon: Gauge, section: 'Finance' },
-  { id: 'withdrawals', label: 'Withdrawals', path: '/withdrawals', icon: Wallet, section: 'Finance' },
   { id: 'support', label: 'Support Center', path: '/support', icon: Headphones, section: 'Support' },
   { id: 'safety', label: 'Safety Center', path: '/safety', icon: Shield, section: 'Support' },
   { id: 'fraud', label: 'Fraud & Security', path: '/fraud', icon: Flag, section: 'Support' },

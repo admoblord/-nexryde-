@@ -1,7 +1,7 @@
 """
 E2E ride lifecycle simulation test.
 Tests the full flow: request → accept → arrive → start → complete → payment
-Also validates: wallet hold/release, driver lock, atomic cancellation.
+Also validates: driver lock, atomic cancellation; wallet booking is rejected.
 
 Run with:
     BACKEND_URL=https://nexryde-backend-993913300770.us-central1.run.app \
@@ -146,8 +146,8 @@ async def test_full_ride_lifecycle():
 
 
 @pytest.mark.asyncio
-async def test_cancel_releases_wallet_hold():
-    """After cancel, wallet balance must be restored."""
+async def test_wallet_booking_rejected():
+    """Fare wallet is removed — booking with payment_method=wallet must fail."""
     async with httpx.AsyncClient(base_url=BACKEND_URL, timeout=TIMEOUT) as client:
         hc = await client.get("/api/health")
         if hc.status_code != 200:
@@ -159,16 +159,6 @@ async def test_cancel_releases_wallet_hold():
         if not rider_token:
             pytest.skip("Could not authenticate rider")
 
-        # Check balance before booking
-        me_resp = await client.get("/api/users/me", headers=_auth_header(rider_token))
-        if me_resp.status_code != 200:
-            pytest.skip("Could not fetch rider profile")
-        balance_before = float(me_resp.json().get("wallet_balance", 0))
-
-        if balance_before < 1000:
-            pytest.skip("Rider has insufficient balance for wallet booking test")
-
-        # Book with wallet
         trip_resp = await client.post(
             "/api/trips/request",
             json={
@@ -179,33 +169,11 @@ async def test_cancel_releases_wallet_hold():
             },
             headers=_auth_header(rider_token),
         )
-        if trip_resp.status_code not in (200, 201):
-            pytest.skip(f"Trip request failed: {trip_resp.text}")
-
-        trip_id = (trip_resp.json().get("trip_id") or trip_resp.json().get("id", ""))
-
-        # Balance should be reduced by fare
-        me_after = await client.get("/api/users/me", headers=_auth_header(rider_token))
-        balance_after_book = float(me_after.json().get("wallet_balance", 0))
-        fare = float(trip_resp.json().get("fare", 0))
-        if fare > 0:
-            assert balance_after_book < balance_before, "Balance not reduced after wallet booking"
-
-        # Cancel — balance should be restored
-        cancel_resp = await client.put(
-            f"/api/trips/{trip_id}/cancel",
-            json={"reason": "test"},
-            headers=_auth_header(rider_token),
+        assert trip_resp.status_code == 400, (
+            f"Expected wallet booking rejected with 400, got {trip_resp.status_code}: {trip_resp.text}"
         )
-        assert cancel_resp.status_code in (200, 400), f"Cancel unexpected: {cancel_resp.text}"
-
-        if cancel_resp.status_code == 200:
-            me_final = await client.get("/api/users/me", headers=_auth_header(rider_token))
-            balance_final = float(me_final.json().get("wallet_balance", 0))
-            if fare > 0:
-                assert abs(balance_final - balance_before) < 1.0, (
-                    f"Wallet not restored after cancel: before={balance_before}, final={balance_final}"
-                )
+        detail = str(trip_resp.json().get("detail") or trip_resp.text)
+        assert "wallet" in detail.lower() or "cash" in detail.lower()
 
 
 @pytest.mark.asyncio

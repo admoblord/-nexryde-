@@ -18,9 +18,9 @@ The NEXRYDE admin panel has been extended from a functional foundation into an *
 | Feature | Status |
 |---------|--------|
 | Click driver row → full profile page | ✅ `/drivers/:driverId` |
-| Tabs: Profile, Verification, Vehicle, Subscription, Wallet, Trips, Ratings, Analytics, Work Zone, Activity Timeline, Admin Notes | ✅ |
+| Tabs: Profile, Verification, Vehicle, Subscription, Trips, Ratings, Analytics, Work Zone, Activity Timeline, Admin Notes | ✅ |
 | Document view / zoom / download / approve / reject / re-upload | ✅ |
-| Admin actions: Approve, Suspend, Ban, Credit/Debit wallet, Notify, Grant Free Month, Export JSON | ✅ |
+| Admin actions: Approve, Suspend, Ban, Notify, Grant Free Month, Export JSON | ✅ |
 | Approval history + audit logging | ✅ |
 
 **Gaps:** Force logout, reset password, send email/SMS UI (APIs exist in legacy panel). Route replay heat map in Analytics tab.
@@ -29,11 +29,11 @@ The NEXRYDE admin panel has been extended from a functional foundation into an *
 | Feature | Status |
 |---------|--------|
 | Click rider row → full profile | ✅ `/riders/:riderId` |
-| Tabs: Profile, Wallet, Trips, Payments, Favourites, Complaints, Ratings, Timeline, Notes | ✅ |
-| Wallet credit + admin notes | ✅ |
+| Tabs: Profile, Trips, Payments, Favourites, Complaints, Ratings, Timeline, Notes | ✅ |
+| Admin notes | ✅ |
 | Suspend / Ban quick actions | ✅ |
 
-**Gaps:** Dedicated debit wallet button, push/SMS/email from rider page.
+**Gaps:** Push/SMS/email from rider page. Customer fare wallet removed (cash/transfer only).
 
 ### 3. Live Operations Center ✅
 | Feature | Status |
@@ -99,7 +99,7 @@ Admin, action, target, IP, change details (`details` JSON column).
 Today's revenue, subscriptions, pending approvals/withdrawals, failed dispatches, avg wait, en route, in progress.
 
 ### 15. Quick Actions ✅
-Driver and rider profile pages include suspend, ban, wallet, notify (driver).
+Driver and rider profile pages include suspend, ban, notify (driver).
 
 ### 16. Exports ✅
 CSV export for drivers, riders, trips at `/export`.
@@ -130,7 +130,6 @@ All original nav routes retained. Legacy panel at `backend/admin/index.legacy.ht
 | `GET /api/admin/search` | Global search |
 | `GET /api/admin/drivers/{id}/operations-profile` | Driver ops profile |
 | `GET /api/admin/riders/{id}/operations-profile` | Rider ops profile |
-| `POST /api/admin/riders/{id}/wallet-adjust` | Rider wallet credit/debit |
 | `GET /api/admin/trips/{id}/operations-detail` | Trip ops detail |
 | `GET /api/admin/dispatch/monitor` | Live dispatch control room |
 | `GET /api/admin/dispatch/events` | Per-trip dispatch timeline |

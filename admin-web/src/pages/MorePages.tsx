@@ -62,38 +62,12 @@ export function SubscriptionIntelPage() {
 }
 
 export function WithdrawalsPage() {
-  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
-  const [counts, setCounts] = useState<Record<string, number>>({});
-  const load = () => api<{ withdrawals: Record<string, unknown>[]; counts: Record<string, number> }>('/admin/withdrawals').then((x) => { setRows(x.withdrawals); setCounts(x.counts); });
-  useEffect(() => { load(); }, []);
-  const act = async (id: string, action: 'approve' | 'reject') => {
-    const note = prompt(`${action} withdrawal — optional note:`) || '';
-    await api(`/admin/withdrawals/${id}/${action}`, { method: 'POST', body: JSON.stringify({ note }) });
-    load();
-  };
   return (
     <div>
-      <PageHeader title="Withdrawals" desc="Approve, reject, export" />
-      <div className="mb-4 grid gap-4 sm:grid-cols-3">
-        <KpiCard label="Pending" value={counts.pending ?? 0} tone="amber" />
-        <KpiCard label="Completed" value={counts.completed ?? 0} tone="green" />
-        <KpiCard label="Failed" value={counts.failed ?? 0} tone="red" />
+      <PageHeader title="Withdrawals" desc="Removed — NexRyde does not hold driver or rider funds" />
+      <div className="card text-slate-400">
+        In-app withdrawals are disabled. Riders pay drivers by cash or bank transfer. Use Subscription Finance for Squad subscription revenue.
       </div>
-      <DataTable columns={[
-        { key: 'id', label: 'ID', render: (r) => String(r.id).slice(0, 10) },
-        { key: 'user_id', label: 'User' },
-        { key: 'amount', label: 'Amount ₦' },
-        { key: 'status', label: 'Status' },
-        { key: 'created_at', label: 'Date' },
-        {
-          key: 'actions', label: 'Actions', render: (r) => r.status === 'pending' || r.status === 'processing' ? (
-            <div className="flex gap-2">
-              <button type="button" className="text-xs font-bold text-emerald-400" onClick={() => act(String(r.id), 'approve')}>Approve</button>
-              <button type="button" className="text-xs font-bold text-red-400" onClick={() => act(String(r.id), 'reject')}>Reject</button>
-            </div>
-          ) : '—',
-        },
-      ]} rows={rows} />
     </div>
   );
 }
@@ -317,27 +291,20 @@ export function PlaceholderPage({ title, desc }: { title: string; desc: string }
 export function FinancePage() {
   const [payments, setPayments] = useState<Record<string, unknown>[]>([]);
   const [stats, setStats] = useState<Record<string, number>>({});
-  const [withdrawalCounts, setWithdrawalCounts] = useState<Record<string, number>>({});
-  const [withdrawals, setWithdrawals] = useState<Record<string, unknown>[]>([]);
   useEffect(() => {
-    Promise.all([
-      api<{ payments: Record<string, unknown>[]; approved_count: number; pending_count: number; total_revenue: number }>('/admin/payments'),
-      api<{ withdrawals: Record<string, unknown>[]; counts: Record<string, number> }>('/admin/withdrawals'),
-    ]).then(([p, w]) => {
-      setPayments(p.payments ?? []);
-      setStats({ approved: p.approved_count, pending: p.pending_count, revenue: p.total_revenue });
-      setWithdrawalCounts(w.counts ?? {});
-      setWithdrawals(w.withdrawals ?? []);
-    });
+    api<{ payments: Record<string, unknown>[]; approved_count: number; pending_count: number; total_revenue: number }>('/admin/payments')
+      .then((p) => {
+        setPayments(p.payments ?? []);
+        setStats({ approved: p.approved_count, pending: p.pending_count, revenue: p.total_revenue });
+      });
   }, []);
   return (
     <div>
-      <PageHeader title="Wallet & Finance" desc="Subscriptions, withdrawals, revenue" />
-      <div className="mb-4 grid gap-4 sm:grid-cols-4">
+      <PageHeader title="Subscription Finance" desc="Driver subscription revenue (NexRyde does not hold rider/driver fare balances)" />
+      <div className="mb-4 grid gap-4 sm:grid-cols-3">
         <KpiCard label="Sub Revenue ₦" value={(stats.revenue ?? 0).toLocaleString()} tone="green" />
         <KpiCard label="Approved Payments" value={stats.approved ?? 0} />
         <KpiCard label="Pending Payments" value={stats.pending ?? 0} tone="amber" />
-        <KpiCard label="Pending Withdrawals" value={withdrawalCounts.pending ?? 0} tone="amber" />
       </div>
       <h3 className="mb-2 font-bold">Subscription Payments</h3>
       <DataTable columns={[
@@ -346,12 +313,6 @@ export function FinancePage() {
         { key: 'status', label: 'Status' },
         { key: 'created_at', label: 'Date' },
       ]} rows={payments} />
-      <h3 className="mb-2 mt-6 font-bold">Recent Withdrawals</h3>
-      <DataTable columns={[
-        { key: 'user_id', label: 'User' },
-        { key: 'amount', label: 'Amount ₦' },
-        { key: 'status', label: 'Status' },
-      ]} rows={withdrawals.slice(0, 20)} />
     </div>
   );
 }

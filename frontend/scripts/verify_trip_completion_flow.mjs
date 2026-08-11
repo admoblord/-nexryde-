@@ -2,7 +2,7 @@
 /**
  * Contract check: rider trip completion still routes correctly after UI polish.
  * - cash completed → terminal completed → receipt
- * - wallet completed + payment pending → pending_payment (not stuck in live)
+ * - non-cash completed + payment pending → pending_payment (not stuck in live)
  * - tracking session still navigates to /rider/trip-receipt
  * - matchedBeat must not block completion/payment phases
  */
@@ -144,7 +144,7 @@ else {
   else ok('payment phase still gated');
 
   if (!/TrackingPaymentView/.test(live)) fail('TrackingPaymentView missing');
-  else ok('wallet payment UI still mounted');
+  else ok('payment UI still mounted');
 
   if (!/TripRatingModal/.test(live)) fail('post-trip rating modal missing');
   else ok('post-trip rating modal present');

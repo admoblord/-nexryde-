@@ -27,7 +27,6 @@ HERE = Path(__file__).parent
 
 TESTS = [
     ("Full Ride Flow",             HERE / "e2e_full_ride_flow.py"),
-    ("Wallet Top-Up & Withdrawal", HERE / "e2e_wallet_topup_withdrawal.py"),
     ("Token Expiry + Refresh",     HERE / "e2e_token_expiry_refresh.py"),
     ("Background GPS + Offline",   HERE / "e2e_background_gps_driver_offline.py"),
 ]

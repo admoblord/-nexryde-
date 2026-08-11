@@ -1798,16 +1798,12 @@ async def health_check():
 
 @api_router.get("/config/client")
 async def client_config():
-    """Public app config read at startup. Controls launch-mode features without a rebuild.
+    """Public app config read at startup.
 
-    wallet_enabled=false → cash + direct bank transfer only; no fare-wallet UI or holds.
+    NexRyde holds no customer funds — riders pay drivers by cash or bank transfer.
     """
-    from feature_flags import is_wallet_enabled
-
-    wallet_on = await is_wallet_enabled(db)
     return {
-        "wallet_enabled": wallet_on,
-        "payment_methods": (["cash", "transfer", "wallet"] if wallet_on else ["cash", "transfer"]),
+        "payment_methods": ["cash", "transfer"],
     }
 
 
@@ -2228,11 +2224,6 @@ async def _stranded_trip_cleanup_loop():
                     {"created_at": {"$lt": cutoff.isoformat()}},
                 ],
             }
-            # Capture trips before expire so wallet holds can be released.
-            stale_trips = await db.trips.find(
-                stale_filter,
-                {"_id": 0, "id": 1, "rider_id": 1, "payment_method": 1},
-            ).to_list(200)
             result = await db.trips.update_many(
                 stale_filter,
                 {
@@ -2245,19 +2236,6 @@ async def _stranded_trip_cleanup_loop():
             )
             if result.modified_count:
                 logger.info("Stranded trip cleanup: expired %d stuck trips", result.modified_count)
-                try:
-                    from wallet_ops import release_rider_wallet_hold
-                    from wallet_trip_helpers import is_wallet_payment_method
-
-                    for t in stale_trips:
-                        if not is_wallet_payment_method(t.get("payment_method")):
-                            continue
-                        rid = t.get("rider_id")
-                        tid = t.get("id")
-                        if rid and tid:
-                            await release_rider_wallet_hold(db, rid, tid)
-                except Exception:
-                    logger.exception("stranded_trip_hold_release")
 
             # Also close stale trip_offers
             offer_cutoff = datetime.now(timezone.utc) - timedelta(minutes=6)

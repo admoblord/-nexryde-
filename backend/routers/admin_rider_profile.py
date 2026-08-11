@@ -59,9 +59,6 @@ async def rider_operations_profile(rider_id: str):
     if not rider:
         raise HTTPException(status_code=404, detail="Rider not found")
 
-    wallet_doc = await db.wallets.find_one({"user_id": rider_id}, {"_id": 0}) or {}
-    balance = float(wallet_doc.get("balance") or rider.get("wallet_balance") or 0)
-
     transactions = await db.transactions.find({"user_id": rider_id}, {"_id": 0}).sort("created_at", -1).limit(50).to_list(50)
     recent_trips = await db.trips.find(
         {"rider_id": rider_id},
@@ -90,6 +87,7 @@ async def rider_operations_profile(rider_id: str):
     spend_row = spend_agg[0] if spend_agg else {}
 
     rider_safe = strip_sensitive_pii(rider)
+    rider_safe.pop("wallet_balance", None)
     nin_public = public_nin_fields(rider)
     nin_public["nin_verify_method"] = rider.get("nin_verify_method") or (
         "nexryde" if rider.get("nin_verified") else None
@@ -98,7 +96,6 @@ async def rider_operations_profile(rider_id: str):
     return {
         "profile": {
             **rider_safe,
-            "wallet_balance": balance,
             "account_status": "banned" if rider.get("blocked") else ("suspended" if rider.get("suspended_until") else "active"),
             "total_trips": total,
             "completed_trips": completed,
@@ -112,9 +109,8 @@ async def rider_operations_profile(rider_id: str):
             "face_liveness_score": rider.get("face_liveness_score"),
             "is_verified": bool(rider.get("is_verified")),
         },
-        "wallet": {"balance_ngn": balance, "transactions": transactions},
         "trips": {"recent": recent_trips, "completed": completed, "cancelled": cancelled, "total": total},
-        "payments": [t for t in transactions if t.get("source") in ("ride_payment", "wallet_topup", "refund")],
+        "payments": [t for t in transactions if t.get("source") in ("ride_payment", "refund", "promo_credit")],
         "favourite_drivers": fav_drivers,
         "saved_locations": saved_locations,
         "complaints": reports,
@@ -136,30 +132,7 @@ class WalletAdjustBody(BaseModel):
 
 @admin_rider_profile_router.post("/admin/riders/{rider_id}/wallet-adjust")
 async def adjust_rider_wallet(rider_id: str, body: WalletAdjustBody, request: Request):
-    user = await db.users.find_one({"id": rider_id, "role": "rider"}, {"_id": 0, "wallet_balance": 1})
-    if not user:
-        raise HTTPException(status_code=404, detail="Rider not found")
-    amount = float(body.amount)
-    delta = amount if body.direction == "credit" else -amount
-    if body.direction == "debit" and float(user.get("wallet_balance") or 0) < amount:
-        raise HTTPException(status_code=400, detail="Insufficient wallet balance")
-    await db.users.update_one({"id": rider_id}, {"$inc": {"wallet_balance": delta}})
-    await db.wallets.update_one({"user_id": rider_id}, {"$inc": {"balance": delta}}, upsert=True)
-    tx = {
-        "id": uuid.uuid4().hex,
-        "user_id": rider_id,
-        "type": body.direction,
-        "amount": amount,
-        "source": "admin_adjustment",
-        "reason": body.reason,
-        "status": "completed",
-        "created_at": datetime.now(timezone.utc),
-        "admin_email": await _admin_email(request),
-    }
-    await db.transactions.insert_one(tx)
-    await _log_audit(request, f"wallet_{body.direction}", "rider", rider_id, {"amount": amount, "reason": body.reason})
-    return {"success": True, "transaction": {k: v for k, v in tx.items() if k != "_id"}}
-
+    raise HTTPException(status_code=410, detail="Customer/driver wallet adjustments are disabled. NexRyde does not hold funds.")
 
 @admin_rider_profile_router.post("/admin/riders/{rider_id}/notes")
 async def add_rider_note(rider_id: str, body: RiderNoteBody, request: Request):

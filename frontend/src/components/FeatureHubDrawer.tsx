@@ -16,7 +16,6 @@ import * as Haptics from 'expo-haptics';
 import { SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, useThemeColors } from '@/src/constants/theme';
 import { BRAND, LAYOUT, SURFACE } from '@/src/constants/designSystem';
 import { useFlowLayout } from '@/src/constants/flowLayout';
-import { useWalletEnabled } from '@/src/services/clientConfig';
 
 type HubRole = 'driver' | 'rider';
 
@@ -25,8 +24,6 @@ type HubItem = {
   hint?: string;
   route: string;
   icon: React.ComponentProps<typeof Ionicons>['name'];
-  /** Only shown when the fare wallet feature flag is on. */
-  requiresWallet?: boolean;
 };
 
 type HubSection = { id: string; title: string; items: HubItem[] };
@@ -49,7 +46,6 @@ const DRIVER_SECTIONS: HubSection[] = [
     id: 'account',
     title: 'Account & payments',
     items: [
-      { label: 'Withdraw Earnings', route: '/driver/withdrawal', icon: 'arrow-up-circle', hint: 'Cash out balance', requiresWallet: true },
       { label: 'Bank details', route: '/driver/bank', icon: 'business-outline', hint: 'Where riders transfer your fares' },
       { label: 'Subscription', route: '/driver/subscription', icon: 'card-outline', hint: 'Plan & billing' },
     ],
@@ -74,11 +70,9 @@ const DRIVER_SECTIONS: HubSection[] = [
 
 const RIDER_SECTIONS: HubSection[] = [
   {
-    id: 'wallet',
-    title: 'Wallet & payments',
+    id: 'payments',
+    title: 'Payments',
     items: [
-      { label: 'Wallet', route: '/(rider-tabs)/rider-wallet', icon: 'wallet', hint: 'Balance & top-up', requiresWallet: true },
-      { label: 'Promo code', route: '/promo-code', icon: 'pricetag', hint: 'Apply a code', requiresWallet: true },
       { label: 'Split fare', route: '/rider/split-fare', icon: 'people', hint: 'Share cost' },
     ],
   },
@@ -113,17 +107,7 @@ export function FeatureHubDrawer({ visible, onClose, role }: FeatureHubDrawerPro
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
   const { colors, isDark } = useThemeColors();
-  const walletEnabled = useWalletEnabled();
-  const sections = useMemo(() => {
-    const base = role === 'driver' ? DRIVER_SECTIONS : RIDER_SECTIONS;
-    return base
-      .map((section) => ({
-        ...section,
-        title: !walletEnabled && section.id === 'wallet' ? 'Payments' : section.title,
-        items: section.items.filter((item) => walletEnabled || !item.requiresWallet),
-      }))
-      .filter((section) => section.items.length > 0);
-  }, [role, walletEnabled]);
+  const sections = useMemo(() => (role === 'driver' ? DRIVER_SECTIONS : RIDER_SECTIONS), [role]);
 
   const sheetBg = isDark ? SURFACE.cardDark : colors.background;
   const rowBg = isDark ? SURFACE.glassSoft : colors.card;
@@ -166,9 +150,7 @@ export function FeatureHubDrawer({ visible, onClose, role }: FeatureHubDrawerPro
               <Text style={[styles.sheetSubtitle, { color: muted }]}>
                 {role === 'driver'
                   ? 'Earnings, zones & support'
-                  : walletEnabled
-                    ? 'Wallet, rides & support'
-                    : 'Rides, payments & support'}
+                  : 'Rides, payments & support'}
               </Text>
             </View>
             <TouchableOpacity

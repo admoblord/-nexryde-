@@ -622,27 +622,25 @@ class TestCallFeature:
             pytest.fail(f"Unexpected response: {response.status_code}")
 
 
-# ==================== WALLET ====================
+# ==================== WALLET (REMOVED) ====================
 
 class TestWallet:
-    """Test wallet features"""
-    
-    def test_01_get_wallet_balance(self, session):
-        """GET /api/wallet/{user_id}"""
+    """Customer fare wallet endpoints must return 410 Gone."""
+
+    def test_01_get_wallet_balance_gone(self, session):
+        """GET /api/wallet/{user_id} → 410"""
         rider_id = getattr(TestAuthFlow, 'rider_id', TEST_RIDER_ID)
         response = session.get(f"{BASE_URL}/api/wallet/{rider_id}")
-        assert response.status_code == 200, f"Get wallet failed: {response.status_code}"
-        data = response.json()
-        print(f"PASS: Wallet balance: ₦{data.get('balance', 0)}")
-    
-    def test_02_topup_wallet(self, session):
-        """POST /api/wallet/{user_id}/topup"""
+        assert response.status_code == 410, f"Expected 410, got: {response.status_code}"
+        print("PASS: Wallet balance endpoint removed (410)")
+
+    def test_02_topup_wallet_gone(self, session):
+        """POST /api/wallet/{user_id}/topup → 410"""
         rider_id = getattr(TestAuthFlow, 'rider_id', TEST_RIDER_ID)
         payload = {"amount": 5000, "payment_method": "bank_transfer", "reference": f"TEST-{TEST_RUN_ID}"}
         response = session.post(f"{BASE_URL}/api/wallet/{rider_id}/topup", json=payload)
-        assert response.status_code == 200, f"Topup failed: {response.status_code}"
-        data = response.json()
-        print(f"PASS: Wallet topped up - new balance: ₦{data.get('balance', 0)}")
+        assert response.status_code == 410, f"Expected 410, got: {response.status_code}"
+        print("PASS: Wallet top-up endpoint removed (410)")
 
 
 # ==================== SAFETY ====================

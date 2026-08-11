@@ -159,26 +159,6 @@ export async function resolveAuthHeaders(): Promise<Record<string, string>> {
   return base;
 }
 
-/** User-facing copy when POST /payment/wallet/initiate-checkout returns 502 { success: false }. */
-export const WALLET_CHECKOUT_USER_ERROR =
-  'Unable to start payment. Please try again.';
-
-/** True only when we have a usable Squad URL and the server did not mark failure. */
-export function isWalletCheckoutInitOk(
-  data: unknown
-): data is {
-  checkout_url: string;
-  transaction_ref?: string;
-  transactionRef?: string;
-  amount_ngn?: number;
-} {
-  if (!data || typeof data !== 'object') return false;
-  const o = data as Record<string, unknown>;
-  if (o.success === false) return false;
-  const url = o.checkout_url;
-  return typeof url === 'string' && url.trim().length > 0;
-}
-
 /** FastAPI `detail` may be a string, a dict (e.g. 409), or a validation array — use in Alert() instead of only `typeof === 'string'`. */
 export function formatApiDetail(detail: unknown): string {
   if (detail == null) return '';
@@ -217,7 +197,7 @@ export function messageFromAxiosError(e: unknown, fallback: string): string {
   if (axios.isAxiosError(e)) {
     const raw = e.response?.data;
     if (raw && typeof raw === 'object' && (raw as { success?: unknown }).success === false) {
-      return WALLET_CHECKOUT_USER_ERROR;
+      return 'Unable to start payment. Please try again.';
     }
     const text = formatApiDetail(
       raw && typeof raw === 'object' && 'detail' in raw
@@ -865,92 +845,6 @@ export const getDriverBankDetails = (driverId: string) =>
     message: string;
   }>(`/drivers/${driverId}/bank-details`);
 
-export type WithdrawalRecord = {
-  id: string;
-  reference: string;
-  amount: number;
-  status: 'pending_settlement' | 'processing' | 'paid' | 'failed' | string;
-  bank_name: string;
-  account_number: string;
-  account_name: string;
-  provider_reference?: string | null;
-  settlement_reason?: string | null;
-  created_at: string;
-  settled_at?: string | null;
-  reversed_to_wallet?: boolean;
-};
-
-export const getDriverWithdrawals = (driverId: string, params?: { limit?: number; skip?: number }) => {
-  const qs = params ? `?limit=${params.limit ?? 30}&skip=${params.skip ?? 0}` : '';
-  return api.get<{
-    success: boolean;
-    wallet_balance: number;
-    earnings_frozen: boolean;
-    bank_ready: boolean;
-    bank: { bank_name: string; account_number: string; account_name: string };
-    withdrawals: WithdrawalRecord[];
-    total: number;
-  }>(`/drivers/${driverId}/withdrawals${qs}`);
-};
-
-export const withdrawDriverEarningsWithBiometric = (
-  driverId: string,
-  payload: { amount: number; face_image: string; idempotency_key?: string }
-) =>
-  api.post<{
-    success: boolean;
-    message: string;
-    withdrawn_amount: number;
-    remaining_balance: number;
-    face_match_confidence: number;
-    reference?: string;
-    status?: string;
-    duplicate?: boolean;
-  }>(`/drivers/${driverId}/withdraw-earnings`, payload);
-
-export type EarningsVaultPendingRelease = {
-  amount: number;
-  requested_at: string;
-  release_available_at: string;
-};
-
-export const getDriverEarningsVault = (driverId: string) =>
-  api.get<{
-    success: boolean;
-    wallet_spendable: number;
-    vault_locked: number;
-    pending_release: EarningsVaultPendingRelease | null;
-    cooldown_hours: number;
-  }>(`/drivers/${driverId}/earnings-vault`);
-
-export const lockDriverEarningsVault = (driverId: string, amount: number) =>
-  api.post<{
-    success: boolean;
-    message: string;
-    wallet_spendable: number;
-    vault_locked: number;
-  }>(`/drivers/${driverId}/earnings-vault/lock`, { amount });
-
-export const requestDriverEarningsVaultUnlock = (driverId: string, amount: number) =>
-  api.post<{
-    success: boolean;
-    message: string;
-    pending_release: EarningsVaultPendingRelease;
-  }>(`/drivers/${driverId}/earnings-vault/request-unlock`, { amount });
-
-export const confirmDriverEarningsVaultRelease = (
-  driverId: string,
-  payload: { face_image: string; pin: string }
-) =>
-  api.post<{
-    success: boolean;
-    message: string;
-    released_amount: number;
-    wallet_spendable: number;
-    vault_locked: number;
-    face_match_confidence: number;
-  }>(`/drivers/${driverId}/earnings-vault/confirm-release`, payload);
-
 export const getDriverSalaryMode = (driverId: string) =>
   api.get<{
     success: boolean;
@@ -996,59 +890,6 @@ export const getDriverPayoutRestrictions = (driverId: string) =>
     show_payment_popup: boolean;
     message: string;
   }>(`/subscriptions/${driverId}/check-restrictions`);
-
-// Wallet APIs
-export const getWallet = (userId: string) => 
-  api.get(`/wallet/${userId}`);
-
-/** Balance + recent transactions for the authenticated user (single round-trip). */
-export const getWalletMe = (limit = 25) =>
-  api.get<{
-    balance: number;
-    user_id: string;
-    currency: string;
-    transactions: unknown[];
-    /** Ignored if present — wallet top-up is checkout-only (no VA UI). */
-    company_virtual_account?: unknown;
-    virtualAccount?: unknown;
-  }>(`/wallet/me?limit=${Math.min(100, Math.max(1, limit))}`);
-
-/** @deprecated For riders use initiateRiderWalletCheckout — server requires verified Paystack reference. */
-export const topupWallet = (userId: string, amount: number) =>
-  api.post(`/wallet/${userId}/topup`, { amount });
-
-export const getWalletTransactions = (userId: string, limit: number = 30) =>
-  api.get(`/wallet/${userId}/transactions?limit=${limit}`);
-
-/** SquadCo: card/bank checkout to credit rider wallet (completes via webhook or verify-pending). */
-export const initiateRiderWalletCheckout = (amount: number, replacePending = false) =>
-  api.post('/payment/wallet/initiate-checkout', { amount, replace_pending: replacePending });
-
-/** Latest resumable Squad checkout for this user (backend source of truth). */
-export const getPendingWalletCheckout = () =>
-  api.get<{
-    pending: boolean;
-    transaction_ref?: string;
-    checkout_url?: string;
-    amount_ngn?: number;
-    amount_kobo?: number;
-  }>('/payment/wallet/pending-checkout');
-
-export const getWalletPendingIntents = () =>
-  api.get<{
-    data: Array<{
-      squadReference: string;
-      status: string;
-      amountKobo: number;
-      expiresAt: string | null;
-    }>;
-  }>('/wallet/pending-intents');
-
-/** Abandon pending checkout intents so a new session/amount can start. */
-export const cancelPendingWalletCheckout = () => api.post('/payment/wallet/cancel-pending');
-
-export const verifyPendingRiderWallet = (transactionRef?: string) =>
-  api.post('/payment/wallet/verify-pending', transactionRef ? { transaction_ref: transactionRef } : {});
 
 // Emergency Contacts
 export const addEmergencyContact = (userId: string, data: { name: string; phone: string; relationship: string }) =>

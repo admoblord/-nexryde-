@@ -51,7 +51,6 @@ const SCREENS = [
   { id: 'screen-1', file: '01-rider-home.png', title: 'Rider home', category: 'Rider' },
   { id: 'screen-2', file: '02-finding-driver.png', title: 'Finding driver', category: 'Rider', mapSlot: 2, lat: LAGOS.lat + 0.008, lng: LAGOS.lng, zoom: 14 },
   { id: 'screen-5', file: '03-live-tracking.png', title: 'Live tracking', category: 'Rider', mapSlot: 5, lat: LAGOS.lat - 0.004, lng: LAGOS.lng + 0.012, zoom: 15 },
-  { id: 'screen-6', file: '04-rider-wallet.png', title: 'Rider wallet', category: 'Rider' },
   { id: 'screen-7', file: '05-rider-safety.png', title: 'Safety center', category: 'Rider' },
   { id: 'screen-4', file: '06-driver-home.png', title: 'Driver home', category: 'Driver', mapSlot: 4, lat: LAGOS.lat, lng: LAGOS.lng, zoom: 15 },
   { id: 'screen-8', file: '07-driver-ride-offer.png', title: 'Ride offer', category: 'Driver', mapSlot: 8, lat: LAGOS.lat + 0.006, lng: LAGOS.lng - 0.008, zoom: 14 },

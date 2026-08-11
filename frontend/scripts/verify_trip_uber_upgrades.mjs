@@ -102,8 +102,6 @@ has(
 );
 has('src/components/tracking/live/LiveDriverSheet.tsx', /collapsedPlateChip|displayPlate/, 'peek shows plate');
 has('src/components/finding/FindingDriverScreenV2.tsx', /hasPickup|Waiting for location|Getting your pickup/, 'finding refuses Lagos ghost pin');
-has('app/(rider-tabs)/rider-wallet.tsx', /WalletScreenSkeleton/, 'wallet uses skeleton while loading');
-
 if (fails.length) {
   console.error('\nFAILED', fails.length);
   process.exit(1);

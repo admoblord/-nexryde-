@@ -188,7 +188,7 @@ export function resolvePushNotificationRoute(
     return { pathname: '/driver/subscription' };
   }
   if (type === 'earnings_update' && role === 'driver') {
-    return { pathname: '/driver/withdrawal' };
+    return { pathname: '/driver/bank' };
   }
   if (type === 'work_zone_expiring' && role === 'driver') {
     return { pathname: '/driver/work-zone' };

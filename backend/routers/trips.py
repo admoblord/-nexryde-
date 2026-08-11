@@ -52,13 +52,6 @@ from wallet_trip_helpers import (
     payment_status_after_completion,
     trip_fare_amount,
 )
-from wallet_ops import (
-    assert_rider_wallet_covers_fare,
-    reserve_rider_wallet_fare,
-    release_rider_wallet_hold,
-    apply_driver_wallet_ride_credit,
-    apply_rider_wallet_ride_debit,
-)
 from services.product_notification_email import schedule_trip_receipt_emails_after_payment
 from earnings_query import match_completed_trip_paid_for_earnings
 from user_scores import calculate_rider_risk_score
@@ -1879,9 +1872,6 @@ async def create_trip_with_custom_price(request: CustomPriceRequest, http_reques
             if recommended_server > 0
             else 0.0
         )
-        await assert_rider_wallet_covers_fare(
-            db, request.rider_id, request.payment_method, float(request.offered_fare)
-        )
         trip = {
             "id": trip_id,
             "rider_id": request.rider_id,
@@ -2308,10 +2298,6 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
     # Generate trip ID early so the wallet hold is keyed to this trip.
     _new_trip_id = str(uuid4())
 
-    # Atomic fare reservation — deducts balance immediately to prevent double-spend.
-    # Released on cancel, finalized on payment confirmation.
-    await reserve_rider_wallet_fare(db, rider_id, _new_trip_id, request.payment_method, float(final_fare))
-
     trip_dict = {
         "id": _new_trip_id,
         "rider_id": rider_id,
@@ -2395,9 +2381,6 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
     try:
         await db.trips.insert_one(trip_dict)
     except Exception:
-        from wallet_ops import release_rider_wallet_hold
-
-        await release_rider_wallet_hold(db, rider_id, _new_trip_id)
         raise
     trip_dict.pop("_id", None)
     # Attribute booking fare Maps call to this trip when we know Google was billed
@@ -2489,8 +2472,6 @@ async def book_for_other(booker_id: str, request: BookForOtherRequest, http_requ
         request.dropoff_lng,
     )
     area_line = area_summary_line(request.pickup_address, request.dropoff_address)
-
-    await assert_rider_wallet_covers_fare(db, booker_id, request.payment_method, float(fare["total_fare"]))
 
     trip_dict = {
         "id": str(uuid4()),
@@ -5410,12 +5391,6 @@ async def complete_trip(trip_id: str, request: Request):
             track_ride_completed(fare_ngn=float(trip.get("fare") or 0))
         except Exception:
             pass
-        if not is_wallet_payment_method(trip_before.get("payment_method")):
-            try:
-                from wallet_ops import release_rider_wallet_hold
-                await release_rider_wallet_hold(db, trip_before.get("rider_id") or "", trip_id)
-            except Exception:
-                pass
         await _emit_rider_trip_realtime(trip_id)
 
     if trip.get("driver_id"):
@@ -5438,13 +5413,14 @@ async def confirm_trip_payment(trip_id: str, request: Request):
     verify_trip_participant(request, trip)
 
     actor_id = require_authenticated(request)
-    # Wallet settlement moves rider funds, so only the rider may trigger it.
-    # Cash/transfer are settled directly between rider and driver — the DRIVER
-    # is the one who knows the money arrived, so either participant may confirm.
+    # Cash/transfer settle between rider and driver — either participant may confirm.
+    # In-app wallet holding was removed; reject legacy wallet payment methods.
     if is_wallet_payment_method(trip.get("payment_method")):
-        if actor_id != trip.get("rider_id"):
-            raise HTTPException(status_code=403, detail="Only the rider can confirm a wallet payment")
-    elif actor_id not in {trip.get("rider_id"), trip.get("driver_id")}:
+        raise HTTPException(
+            status_code=400,
+            detail="Wallet payments are unavailable. Settle with cash or bank transfer.",
+        )
+    if actor_id not in {trip.get("rider_id"), trip.get("driver_id")}:
         raise HTTPException(status_code=403, detail="Only trip participants can confirm payment")
 
     if trip.get("status") != "completed":
@@ -5461,27 +5437,6 @@ async def confirm_trip_payment(trip_id: str, request: Request):
     )
     if not result:
         return {"success": True, "payment_status": "completed", "message": "Payment already confirmed"}
-
-    # Settle wallet funds and ONLY keep the "completed" flag if money actually
-    # moved. Previously payment_status was flipped first, so a settlement failure
-    # (e.g. insufficient balance on the no-hold fallback, or a Mongo blip) left a
-    # trip marked paid with no ledger entry — a free ride / unpaid driver. If
-    # settlement raises, roll the flag back so the client can safely retry.
-    if is_wallet_payment_method(trip.get("payment_method")):
-        rider_id = trip.get("rider_id")
-        amount = trip_fare_amount(trip)
-        prior_payment_status = trip.get("payment_status") or "pending"
-        try:
-            await apply_rider_wallet_ride_debit(db, rider_id, trip_id, amount)
-            driver_id = trip.get("driver_id")
-            if driver_id:
-                await apply_driver_wallet_ride_credit(db, driver_id, trip_id, amount)
-        except Exception:
-            await db.trips.update_one(
-                {"id": trip_id},
-                {"$set": {"payment_status": prior_payment_status}, "$unset": {"paid_at": ""}},
-            )
-            raise
 
     try:
         from metrics_service import track_payment_confirmed
@@ -5673,11 +5628,6 @@ async def _cancel_trip_commit(
     except Exception as saga_exc:
         logger.warning("cancel saga failed trip=%s: %s", trip_id, saga_exc)
         # Fallback inline (legacy path)
-        try:
-            if trip.get("rider_id"):
-                await release_rider_wallet_hold(db, trip["rider_id"], trip_id)
-        except Exception as _we:
-            logger.warning(f"Wallet hold release failed on cancel trip={trip_id}: {_we}")
         if trip.get("driver_id"):
             await db.driver_profiles.update_one(
                 {"user_id": trip["driver_id"]},

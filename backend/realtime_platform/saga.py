@@ -197,15 +197,7 @@ async def run_completion_saga(trip_id: str, *, trip: Optional[dict[str, Any]] = 
                     pass
 
         async def step_wallet() -> None:
-            pm = str(trip.get("payment_method") or "cash").lower()
-            if pm in ("wallet", "nexryde_wallet"):
-                return
-            rid = trip.get("rider_id")
-            if not rid:
-                return
-            from wallet_ops import release_rider_wallet_hold
-
-            await release_rider_wallet_hold(db, rid, trip_id)
+            return
 
         async def step_pushes() -> None:
             from push_notifications import send_push_notification
@@ -313,12 +305,7 @@ async def run_cancel_saga(
             return {"ok": False, "reason": "not_found"}
 
         async def step_wallet() -> None:
-            rid = trip.get("rider_id")
-            if not rid:
-                return
-            from wallet_ops import release_rider_wallet_hold
-
-            await release_rider_wallet_hold(db, rid, trip_id)
+            return
 
         async def step_lock() -> None:
             did = trip.get("driver_id")

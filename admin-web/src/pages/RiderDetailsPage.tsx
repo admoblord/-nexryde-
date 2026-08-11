@@ -5,7 +5,7 @@ import { api } from '@/api';
 import { DataTable, KpiCard } from '@/components/ui';
 import { Timeline } from '@/components/Timeline';
 
-const TABS = ['Profile', 'Verification', 'Wallet', 'Trips', 'Payments', 'Favourites', 'Complaints', 'Ratings', 'Timeline', 'Notes'] as const;
+const TABS = ['Profile', 'Verification', 'Trips', 'Payments', 'Favourites', 'Complaints', 'Ratings', 'Timeline', 'Notes'] as const;
 type Tab = (typeof TABS)[number];
 
 function fmt(v: unknown) {
@@ -49,7 +49,6 @@ export function RiderDetailsPage() {
   const profile = data.profile as Record<string, unknown>;
   const verification = data.verification as Record<string, unknown>;
   const nin = (verification?.nin as Record<string, unknown>) ?? profile;
-  const wallet = data.wallet as Record<string, unknown>;
   const trips = data.trips as Record<string, unknown>;
 
   const act = async (path: string, body?: unknown) => {
@@ -95,10 +94,6 @@ export function RiderDetailsPage() {
         <div className="flex flex-wrap gap-2">
           <button type="button" className="btn-ghost text-xs text-amber-400" disabled={busy} onClick={() => act(`/admin/users/${riderId}/block?block=true`)}>Suspend</button>
           <button type="button" className="btn-ghost text-xs text-red-400" disabled={busy} onClick={() => act(`/admin/users/${riderId}/block?block=true`)}>Ban</button>
-          <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => {
-            const amount = Number(prompt('Credit ₦:') || 0);
-            if (amount > 0) act(`/admin/riders/${riderId}/wallet-adjust`, { amount, direction: 'credit', reason: 'admin_credit' });
-          }}>Credit Wallet</button>
           {nin.has_nin ? (
             <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={revealNin}>Reveal NIN</button>
           ) : null}
@@ -150,14 +145,6 @@ export function RiderDetailsPage() {
               </div>
             ) : null}
           </div>
-        </div>
-      )}
-      {tab === 'Wallet' && (
-        <div>
-          <KpiCard label="Balance ₦" value={Number(wallet.balance_ngn ?? 0).toLocaleString()} tone="green" />
-          <div className="mt-4"><DataTable columns={[
-            { key: 'type', label: 'Type' }, { key: 'amount', label: '₦' }, { key: 'status', label: 'Status' }, { key: 'created_at', label: 'Date' },
-          ]} rows={(wallet.transactions as Record<string, unknown>[]) ?? []} /></div>
         </div>
       )}
       {tab === 'Trips' && (

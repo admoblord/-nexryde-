@@ -39,7 +39,6 @@ import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { sentryTestCrash } from '@/src/utils/sentry';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useThemeColors } from '@/src/constants/theme';
-import { useWalletEnabled } from '@/src/services/clientConfig';
 import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
 
 const PROFILE_GREEN = BRAND.primary;
@@ -221,7 +220,6 @@ export default function DriverProfileScreen() {
   const tabPad = useTabBottomPad(16);
   const flow = useFlowLayout();
   const { colors, isDark } = useThemeColors();
-  const walletEnabled = useWalletEnabled();
   const actionTileW = useMemo(
     () => Math.max(120, Math.floor((flow.width - flow.padH * 2 - 12) / 2)),
     [flow.padH, flow.width],
@@ -772,11 +770,7 @@ export default function DriverProfileScreen() {
             <ActionTile icon="list" label="Trip History" gradColors={['#5B21B6', '#7C3AED']} tileWidth={actionTileW} onPress={() => router.push(DRIVER_TRIPS_TAB_HREF as any)} />
             <ActionTile icon="car-sport" label="My Vehicle" gradColors={['#065F46', '#059669']} tileWidth={actionTileW} onPress={() => router.push('/driver/vehicle')} />
             <ActionTile icon="document-text" label="Documents" gradColors={['#7C2D12', '#EA580C']} tileWidth={actionTileW} onPress={() => router.push('/driver/documents')} />
-            {walletEnabled ? (
-              <ActionTile icon="arrow-up-circle" label="Withdraw" gradColors={['#14532D', '#16A34A']} tileWidth={actionTileW} onPress={() => router.push('/driver/withdrawal')} />
-            ) : (
-              <ActionTile icon="card" label="Bank details" gradColors={['#14532D', '#16A34A']} tileWidth={actionTileW} onPress={() => router.push('/driver/bank')} />
-            )}
+            <ActionTile icon="card" label="Bank details" gradColors={['#14532D', '#16A34A']} tileWidth={actionTileW} onPress={() => router.push('/driver/bank')} />
             <ActionTile icon="analytics" label="Performance" gradColors={['#0C4A6E', BRAND.info]} tileWidth={actionTileW} onPress={() => router.push('/driver/performance')} />
           </View>
         </View>
@@ -888,7 +882,6 @@ export default function DriverProfileScreen() {
         <Section title="Mode & preferences">
           <MenuRow icon="settings" gradColors={['#166534', PROFILE_GREEN]} title="Settings" subtitle="App preferences & defaults" onPress={() => router.push('/settings')} />
           <MenuRow icon="swap-horizontal" gradColors={['#3730A3', '#4F46E5']} title="Switch to Rider Mode" subtitle="Book rides as a passenger" onPress={() => setShowSwitchModal(true)} />
-          <MenuRow icon="business" gradColors={['#0F4C75', '#0C7BB3']} title="NEXRYDE Wallet as Bank" subtitle="Coming soon — interest, transfers & more" onPress={() => {}} badge="Soon" />
         </Section>
 
         {/* ── SUPPORT & LEGAL ── */}

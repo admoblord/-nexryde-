@@ -70,7 +70,6 @@ _LOGIN_USER_PROJECTION = {
     "verification_status": 1,
     "driver_verification_status": 1,
     "city": 1,
-    "wallet_balance": 1,
     "nin_verified": 1,
     "subscription_status": 1,
     "is_suspended": 1,
@@ -236,6 +235,7 @@ async def _complete_existing_user_email_login(user: dict, device_id: Optional[st
         label="refresh_token_insert",
     )
 
+    user.pop("wallet_balance", None)
     return {
         "message":       "Login successful",
         "is_new_user":   False,
@@ -303,17 +303,6 @@ def create_user_dict(**kwargs):
     }
     defaults.update(kwargs)
     return defaults
-
-
-def create_wallet_dict(user_id):
-    return {
-        "id": str(uuid4()),
-        "user_id": user_id,
-        "balance": 0.0,
-        "currency": "NGN",
-        "transactions": [],
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
 
 
 def create_driver_profile_dict(user_id):
@@ -1559,10 +1548,7 @@ async def register(request: RegisterRequest, http_request: Request):
                 {"$set": rider_update},
             )
             user.update(rider_update)
-    
-    wallet = create_wallet_dict(user["id"])
-    await db.wallets.insert_one(wallet)
-    
+
     if request.role == "driver":
         driver_profile = create_driver_profile_dict(user["id"])
         await db.driver_profiles.insert_one(driver_profile)

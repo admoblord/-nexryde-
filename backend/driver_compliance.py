@@ -511,28 +511,60 @@ async def live_face_verification(driver_id: str, request: MonthlyPhotoUpload, ht
 
 # ==================== COMPLIANCE STATUS ENDPOINT ====================
 
-@compliance_router.get("/drivers/{driver_id}/compliance")
-async def get_driver_compliance(driver_id: str, http_request: Request):
-    """Full compliance status for a driver."""
-    await _require_owner_or_admin(http_request, driver_id)
+async def evaluate_driver_go_online_compliance(driver_id: str, profile: dict | None = None) -> dict:
+    """Shared compliance gate for GET /compliance and PUT /online.
+
+    Returns the same shape as the compliance endpoint, plus ``block_code`` /
+    ``block_message`` when ``can_go_online`` is false so go-online can reject
+    with a clear reason (no soft bypass).
+    """
     doc_status = await check_driver_document_expiry(driver_id)
     monthly_status = await check_monthly_uploads(driver_id)
-    profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
+    if profile is None:
+        profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
 
     last_face = profile.get("last_face_verification")
     face_verified_today = False
     if last_face:
         try:
-            face_dt = datetime.fromisoformat(last_face.replace("Z", "+00:00"))
+            face_dt = datetime.fromisoformat(str(last_face).replace("Z", "+00:00"))
             face_verified_today = (datetime.now(timezone.utc) - face_dt).total_seconds() < 86400
         except (ValueError, TypeError):
             pass
 
-    all_compliant = (
-        doc_status["compliant"]
-        and monthly_status["compliant"]
-        and profile.get("has_ac", False)
-    )
+    has_ac = bool(profile.get("has_ac", False))
+    docs_ok = bool(doc_status.get("compliant", False))
+    monthly_ok = bool(monthly_status.get("compliant", False))
+    all_compliant = docs_ok and monthly_ok and has_ac
+
+    block_code = None
+    block_message = None
+    if not all_compliant:
+        if not docs_ok:
+            block_code = "ERR_DOCUMENTS"
+            expired = doc_status.get("expired") or []
+            names = ", ".join(
+                (e.get("document") or e.get("type") or "document") for e in expired[:3]
+            ) or "required documents"
+            block_message = (
+                f"Expired documents must be renewed before going online: {names}."
+            )
+        elif not monthly_ok:
+            missing = []
+            if not monthly_status.get("interior_uploaded"):
+                missing.append("vehicle interior photo")
+            if not monthly_status.get("selfie_uploaded"):
+                missing.append("driver selfie")
+            what = " and ".join(missing) if missing else "monthly verification photos"
+            block_code = "ERR_COMPLIANCE"
+            block_message = (
+                f"Monthly verification incomplete. Upload your {what} before going online."
+            )
+        elif not has_ac:
+            block_code = "ERR_COMPLIANCE"
+            block_message = (
+                "Your vehicle must have working AC confirmed on your profile before going online."
+            )
 
     return {
         "fully_compliant": all_compliant,
@@ -545,8 +577,26 @@ async def get_driver_compliance(driver_id: str, http_request: Request):
             "required_before_each_ride": True,
         },
         "vehicle": {
-            "has_ac": profile.get("has_ac", False),
+            "has_ac": has_ac,
         },
+        "block_code": block_code,
+        "block_message": block_message,
+    }
+
+
+@compliance_router.get("/drivers/{driver_id}/compliance")
+async def get_driver_compliance(driver_id: str, http_request: Request):
+    """Full compliance status for a driver."""
+    await _require_owner_or_admin(http_request, driver_id)
+    status = await evaluate_driver_go_online_compliance(driver_id)
+    # Public response keeps the historical shape (no internal block helpers required).
+    return {
+        "fully_compliant": status["fully_compliant"],
+        "can_go_online": status["can_go_online"],
+        "documents": status["documents"],
+        "monthly_verification": status["monthly_verification"],
+        "face_verification": status["face_verification"],
+        "vehicle": status["vehicle"],
     }
 
 

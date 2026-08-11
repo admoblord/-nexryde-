@@ -5,7 +5,6 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Any, Optional, List
-from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
@@ -445,311 +444,6 @@ async def _assert_driver_account(driver_id: str):
     if profile or (user and user.get("role") == "driver"):
         return
     raise HTTPException(status_code=403, detail="Driver account required")
-
-
-async def _assert_wallet_user_exists(user_id: str):
-    user = await find_user_by_id(user_id, {"_id": 0, "id": 1})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-
-async def _rider_wallet_topup_idempotent(
-    user_id: str,
-    amount: float,
-    reference: str,
-    payment_method: str,
-    verify_result: dict,
-    webhook_payload: Optional[dict] = None,
-) -> dict:
-    """Credit wallet once per reference; used by Squad webhook and verify-pending."""
-    existing = await db.transactions.find_one(
-        {
-            "user_id": user_id,
-            "reference": reference,
-            "type": {"$in": ["topup", "credit"]},
-        }
-    )
-    if existing:
-        user = await db.users.find_one({"id": user_id})
-        return {"duplicate": True, "new_balance": (user or {}).get("wallet_balance", 0)}
-    await db.transactions.insert_one(
-        {
-            "id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "type": "credit",
-            "source": "squad",
-            "amount": amount,
-            "status": "success",
-            "timestamp": datetime.utcnow(),
-            "payment_method": payment_method,
-            "reference": reference,
-            "provider": "squad",
-            "provider_verification": verify_result,
-            "webhook_payload": webhook_payload,
-        }
-    )
-    await db.users.update_one({"id": user_id}, {"$inc": {"wallet_balance": amount}})
-    user = await db.users.find_one({"id": user_id})
-    return {"duplicate": False, "new_balance": (user or {}).get("wallet_balance", amount)}
-
-
-def _intent_is_expired(intent: Optional[dict]) -> bool:
-    if not intent:
-        return False
-    exp = intent.get("expires_at")
-    if isinstance(exp, datetime):
-        return _to_utc_naive(exp) <= datetime.utcnow()
-    created = intent.get("created_at")
-    if isinstance(created, datetime):
-        return _to_utc_naive(created) <= datetime.utcnow() - timedelta(minutes=30)
-    return False
-
-
-def _extract_paid_kobo_from_verify_result(verify_result: dict) -> Optional[int]:
-    raw = verify_result.get("raw") if isinstance(verify_result, dict) else {}
-    data = raw.get("data") if isinstance(raw, dict) else {}
-    value = None
-    if isinstance(data, dict):
-        value = data.get("transaction_amount") or data.get("amount_paid") or data.get("amount")
-    if value is None and isinstance(raw, dict):
-        value = raw.get("amount_paid") or raw.get("amount")
-    if value is None:
-        paid_amount = verify_result.get("paid_amount")
-        try:
-            if paid_amount is not None:
-                return int(round(float(paid_amount) * 100))
-        except Exception:
-            return None
-        return None
-    try:
-        as_float = float(value)
-    except Exception:
-        return None
-    # Squad verify normally returns kobo integer-like values.
-    if as_float > 10000:
-        return int(round(as_float))
-    return int(round(as_float * 100))
-
-
-async def _expire_stale_wallet_payment_intents(user_id: Optional[str] = None) -> int:
-    now = datetime.utcnow()
-    expired_cutoff = now - timedelta(minutes=30)
-    stuck_cutoff = now - timedelta(minutes=5)
-
-    # Expire old pending intents
-    q_expire: dict = {"status": "pending", "created_at": {"$lt": expired_cutoff}}
-    if user_id:
-        q_expire["user_id"] = user_id
-    res = await db.wallet_payment_intents.update_many(
-        q_expire,
-        {"$set": {"status": "expired", "updated_at": now, "failed_reason": "expired"}},
-    )
-
-    # Reset stuck "processing" intents back to "pending" so future verify calls can find them.
-    # Processing intents older than 5 min means the prior verify attempt failed (Squad not confirmed yet).
-    q_stuck: dict = {"status": "processing", "updated_at": {"$lt": stuck_cutoff}}
-    if user_id:
-        q_stuck["user_id"] = user_id
-    await db.wallet_payment_intents.update_many(
-        q_stuck,
-        {"$set": {"status": "pending", "updated_at": now, "_processing_reset_at": now.isoformat()}},
-    )
-
-    return int(res.modified_count)
-
-
-async def _credit_wallet_checkout_intent(
-    *,
-    intent: dict,
-    verify_result: dict,
-    webhook_payload: Optional[dict] = None,
-    source: str = "verify_pending",
-) -> dict:
-    intent_id = str(intent.get("id") or "")
-    if not intent_id:
-        return {"credited": False, "duplicate": False, "reason": "missing_intent_id"}
-
-    if hasattr(db.wallet_payment_intents, "find_one_and_update"):
-        # Accept both "pending" and "processing" so stuck intents (Squad not confirmed on
-        # a prior verify attempt) are retried instead of raising intent_not_pending.
-        fresh = await db.wallet_payment_intents.find_one_and_update(
-            {"id": intent_id, "status": {"$in": ["pending", "processing"]}},
-            {"$set": {"status": "processing", "updated_at": datetime.utcnow()}},
-            return_document=ReturnDocument.BEFORE,
-        )
-        if not fresh:
-            fresh2 = await db.wallet_payment_intents.find_one({"id": intent_id})
-            if fresh2 and (fresh2.get("status") == "completed" or fresh2.get("credited_at")):
-                user = await db.users.find_one({"id": fresh2.get("user_id")})
-                return {
-                    "credited": False,
-                    "duplicate": True,
-                    "new_balance": float((user or {}).get("wallet_balance") or 0),
-                }
-            return {"credited": False, "duplicate": False, "reason": "intent_not_pending"}
-    else:
-        fresh = await db.wallet_payment_intents.find_one({"id": intent_id})
-    if not fresh:
-        return {"credited": False, "duplicate": False, "reason": "intent_not_found"}
-    status = str(fresh.get("status") or "pending")
-    if status == "completed" or fresh.get("credited_at"):
-        user = await db.users.find_one({"id": fresh.get("user_id")})
-        return {"credited": False, "duplicate": True, "new_balance": float((user or {}).get("wallet_balance") or 0)}
-    if status in {"cancelled", "failed", "expired"}:
-        ledger_status = "cancelled" if status == "cancelled" else "failed"
-        await _upsert_wallet_topup_transaction(
-            user_id=str(fresh.get("user_id") or ""),
-            amount_ngn=float(fresh.get("amount_ngn") or 0),
-            transaction_ref=str(fresh.get("transaction_ref") or ""),
-            status=ledger_status,
-        )
-        return {"credited": False, "duplicate": False, "reason": f"intent_{status}"}
-    if _intent_is_expired(fresh):
-        await db.wallet_payment_intents.update_one(
-            {"id": fresh["id"], "status": "pending"},
-            {
-                "$set": {
-                    "status": "expired",
-                    "updated_at": datetime.utcnow(),
-                    "failed_reason": "expired",
-                    "failure_reason": "expired",
-                }
-            },
-        )
-        await _upsert_wallet_topup_transaction(
-            user_id=str(fresh.get("user_id") or ""),
-            amount_ngn=float(fresh.get("amount_ngn") or 0),
-            transaction_ref=str(fresh.get("transaction_ref") or ""),
-            status="failed",
-        )
-        return {"credited": False, "duplicate": False, "reason": "intent_expired"}
-
-    if not verify_result or not verify_result.get("verified"):
-        # Squad hasn't confirmed yet — reset intent from "processing" back to "pending"
-        # so the next verify attempt (user taps "Verify Payment" again) can find it.
-        await db.wallet_payment_intents.update_one(
-            {"id": intent_id, "status": "processing"},
-            {"$set": {"status": "pending", "updated_at": datetime.utcnow(), "_last_verify_failed_at": datetime.utcnow().isoformat()}},
-        )
-        return {"credited": False, "duplicate": False, "reason": "squad_not_confirmed_yet"}
-
-    tx_ref = str(fresh.get("transaction_ref") or "")
-    if tx_ref:
-        prior = await db.transactions.find_one(
-            {
-                "reference": tx_ref,
-                "user_id": fresh.get("user_id"),
-                "type": "credit",
-                "status": "success",
-            }
-        )
-        if prior:
-            user = await db.users.find_one({"id": fresh.get("user_id")})
-            await db.wallet_payment_intents.update_one(
-                {"id": fresh["id"], "status": {"$in": ["pending", "processing"]}},
-                {
-                    "$set": {
-                        "status": "completed",
-                        "credited_at": prior.get("timestamp") or datetime.utcnow(),
-                        "completed_at": prior.get("timestamp") or datetime.utcnow(),
-                        "updated_at": datetime.utcnow(),
-                        "verify_payload": verify_result,
-                    }
-                },
-            )
-            logger.info(
-                "WALLET CREDIT SOURCE: %s (already_credited_tx) %s",
-                source,
-                tx_ref,
-            )
-            return {
-                "credited": False,
-                "duplicate": True,
-                "new_balance": float((user or {}).get("wallet_balance") or 0),
-            }
-
-    expected_kobo = int(fresh.get("amount_kobo") or 0)
-    paid_kobo = _extract_paid_kobo_from_verify_result(verify_result)
-    if expected_kobo <= 0 or paid_kobo is None or paid_kobo != expected_kobo:
-        await db.wallet_payment_intents.update_one(
-            {"id": fresh["id"]},
-            {
-                "$set": {
-                    "status": "failed",
-                    "failed_reason": "amount_mismatch",
-                    "failure_reason": "amount_mismatch",
-                    "updated_at": datetime.utcnow(),
-                    "verify_payload": verify_result,
-                }
-            },
-        )
-        await _upsert_wallet_topup_transaction(
-            user_id=str(fresh.get("user_id") or ""),
-            amount_ngn=float(fresh.get("amount_ngn") or 0),
-            transaction_ref=str(fresh.get("transaction_ref") or ""),
-            status="failed",
-        )
-        return {"credited": False, "duplicate": False, "reason": "amount_mismatch"}
-
-    amount_ngn = round(expected_kobo / 100.0, 2)
-    tx_doc = {
-        "id": str(uuid.uuid4()),
-        "user_id": fresh.get("user_id"),
-        "type": "credit",
-        "direction": "credit",
-        "source": "squad",
-        "amount": amount_ngn,
-        "amount_kobo": expected_kobo,
-        "status": "success",
-        "timestamp": datetime.utcnow(),
-        "payment_method": "squad_checkout",
-        "reference": str(fresh.get("transaction_ref") or ""),
-        "provider": "squad",
-        "provider_verification": verify_result,
-        "webhook_payload": webhook_payload,
-        "payment_intent_id": fresh.get("id"),
-        "description": f"Top-up via Squad ({source})",
-    }
-    try:
-        await db.transactions.insert_one(tx_doc)
-    except DuplicateKeyError:
-        user = await db.users.find_one({"id": fresh.get("user_id")})
-        logger.info(
-            "WALLET CREDIT SOURCE: %s (duplicate_key) %s",
-            source,
-            str(fresh.get("transaction_ref") or ""),
-        )
-        return {"credited": False, "duplicate": True, "new_balance": float((user or {}).get("wallet_balance") or 0)}
-
-    logger.info(
-        "WALLET CREDIT SOURCE: %s %s",
-        source,
-        str(fresh.get("transaction_ref") or ""),
-    )
-    await db.users.update_one({"id": fresh.get("user_id")}, {"$inc": {"wallet_balance": amount_ngn}})
-    await db.wallet_payment_intents.update_one(
-        {"id": fresh.get("id")},
-        {
-            "$set": {
-                "status": "completed",
-                "paid_amount_ngn": amount_ngn,
-                "paid_amount_kobo": expected_kobo,
-                "completed_at": datetime.utcnow(),
-                "credited_at": datetime.utcnow(),
-                "verify_payload": verify_result,
-                "webhook_payload": webhook_payload,
-                "updated_at": datetime.utcnow(),
-            }
-        },
-    )
-    await _upsert_wallet_topup_transaction(
-        user_id=str(fresh.get("user_id") or ""),
-        amount_ngn=float(amount_ngn),
-        transaction_ref=str(fresh.get("transaction_ref") or ""),
-        status="success",
-    )
-    user = await db.users.find_one({"id": fresh.get("user_id")})
-    return {"credited": True, "duplicate": False, "new_balance": float((user or {}).get("wallet_balance") or 0)}
 
 
 async def _ensure_auto_trial_for_verified_driver(driver_id: str) -> Optional[dict]:
@@ -1575,12 +1269,12 @@ def _parse_squad_dynamic_va_response(
 
 
 def _squad_callback_url() -> Optional[str]:
-    """Wallet payment callback URL."""
+    """Squad redirect callback — subscription only (customer wallet removed)."""
     if SQUAD_CALLBACK_URL:
         return SQUAD_CALLBACK_URL
     if not NEXRYDE_PUBLIC_URL:
         return None
-    return f"{NEXRYDE_PUBLIC_URL.rstrip('/')}/api/wallet/callback"
+    return f"{NEXRYDE_PUBLIC_URL.rstrip('/')}/api/payment/subscription/callback"
 
 
 def _squad_subscription_callback_url() -> Optional[str]:
@@ -2048,222 +1742,6 @@ async def verify_pending_subscription_checkout(
     return {"verified": True, "activated": True, "activation": activation, "subscription_active": True}
 
 
-def _validate_wallet_topup_amount(amount: float) -> float:
-    a = round(float(amount), 2)
-    if a < 100:
-        raise HTTPException(status_code=400, detail="Minimum top-up is ₦100")
-    if a > 1_000_000:
-        raise HTTPException(
-            status_code=400,
-            detail="Maximum single top-up is ₦1,000,000. Contact support for larger amounts.",
-        )
-    return a
-
-
-_WALLET_CHECKOUT_EMAIL_RE = re.compile(
-    r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$"
-)
-
-
-def _validate_rider_wallet_checkout_email(email: str) -> str:
-    e = (email or "").strip()
-    if not e or any(c.isspace() for c in e):
-        raise HTTPException(
-            status_code=400,
-            detail="A valid email is required for payment. Update your email in your profile.",
-        )
-    if not _WALLET_CHECKOUT_EMAIL_RE.match(e):
-        raise HTTPException(
-            status_code=400,
-            detail="A valid email is required for payment. Update your email in your profile.",
-        )
-    return e
-
-
-def _json_safe_for_response(obj: Any) -> Any:
-    try:
-        return json.loads(json.dumps(obj, default=str))
-    except Exception:
-        return {"_serialization_note": str(obj)[:800]}
-
-
-def _wallet_checkout_squad_failed_response(
-    *,
-    user_id: str,
-    intent_id: str,
-    init_body: dict,
-    provider_payload: Optional[dict],
-    last_error: str,
-    fail_reason: str,
-) -> JSONResponse:
-    """502 JSON body for clients; full context logged server-side."""
-    safe_body = sanitize_squad_transaction_initiate_payload(init_body)
-    try:
-        req_json = json.dumps(safe_body, default=str)
-    except Exception:
-        req_json = str(safe_body)
-    sq = provider_payload if isinstance(provider_payload, dict) else None
-    try:
-        sq_log = json.dumps(sq, default=str) if sq else last_error
-    except Exception:
-        sq_log = str(sq) if sq else last_error
-    logger.error(
-        "Squad wallet checkout init FAILED user=%s intent=%s reason=%s last_error=%s "
-        "request_payload=%s full_squad_response=%s",
-        user_id,
-        intent_id,
-        fail_reason,
-        last_error,
-        req_json[:8000],
-        sq_log[:14000],
-    )
-    squad_out: Any = _json_safe_for_response(sq) if sq is not None else {"error": last_error}
-    return JSONResponse(
-        status_code=502,
-        content={
-            "success": False,
-            "message": "Squad init failed",
-            "squad_response": squad_out,
-        },
-    )
-
-
-async def _latest_pending_wallet_checkout_intent(user_id: str) -> Optional[dict]:
-    """Newest pending Squad inline checkout with a URL (resumable session)."""
-    return await db.wallet_payment_intents.find_one(
-        {
-            "user_id": user_id,
-            "status": "pending",
-            "checkout_url": {"$ne": None, "$exists": True},
-        },
-        sort=[("created_at", -1)],
-    )
-
-
-def _wallet_checkout_client_payload(*, checkout_url: str, transaction_ref: str, resumed: bool = False) -> dict:
-    """Minimal client response: no bank/VA fields, no Squad raw payload."""
-    return {
-        "success": True,
-        "checkout_url": checkout_url,
-        "transaction_ref": transaction_ref,
-        "transactionRef": transaction_ref,
-        "resumed": resumed,
-    }
-
-
-async def _cancel_all_pending_wallet_intents(user_id: str) -> int:
-    now = datetime.utcnow()
-    result = await db.wallet_payment_intents.update_many(
-        {"user_id": user_id, "status": "pending"},
-        {
-            "$set": {
-                "status": "cancelled",
-                "cancelled_at": now,
-                "updated_at": now,
-                "failed_reason": "user_cancelled",
-                "failure_reason": "user_cancelled",
-            }
-        },
-    )
-    await db.wallet_topup_transactions.update_many(
-        {"userId": user_id, "status": "pending"},
-        {"$set": {"status": "cancelled", "updatedAt": now, "failure_reason": "user_cancelled"}},
-    )
-    return int(result.modified_count)
-
-
-async def _cancel_pending_wallet_intent_by_reference(user_id: str, reference: str) -> int:
-    refs = _wallet_intent_ref_candidates(reference)
-    if not refs:
-        return 0
-    result = await db.wallet_payment_intents.update_many(
-        {"user_id": user_id, "status": "pending", "transaction_ref": {"$in": refs}},
-        {
-            "$set": {
-                "status": "cancelled",
-                "cancelled_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
-                "failed_reason": "user_cancelled",
-                "failure_reason": "user_cancelled",
-            }
-        },
-    )
-    await db.wallet_topup_transactions.update_many(
-        {"userId": user_id, "transactionRef": {"$in": refs}, "status": "pending"},
-        {"$set": {"status": "cancelled", "updatedAt": datetime.utcnow(), "failure_reason": "user_cancelled"}},
-    )
-    return int(result.modified_count)
-
-
-async def _upsert_wallet_topup_transaction(*, user_id: str, amount_ngn: float, transaction_ref: str, status: str) -> None:
-    now = datetime.utcnow()
-    await db.wallet_topup_transactions.update_one(
-        {"transactionRef": transaction_ref},
-        {
-            "$setOnInsert": {
-                "id": str(uuid.uuid4()),
-                "userId": user_id,
-                "amount": float(amount_ngn),
-                "transactionRef": transaction_ref,
-                "createdAt": now,
-            },
-            "$set": {
-                "status": status,
-                "updatedAt": now,
-            },
-        },
-        upsert=True,
-    )
-
-
-async def _reserve_wallet_payment_intent(
-    *,
-    user_id: str,
-    amount_ngn: float,
-    amount_kobo: int,
-) -> tuple[str, str]:
-    """
-    Persist a pending wallet payment before calling Squad (unique transaction_ref).
-    Returns (transaction_ref, intent_id).
-    """
-    last_exc: Optional[Exception] = None
-    for _ in range(12):
-        transaction_ref = generate_nexryde_squad_transaction_ref()
-        intent_id = str(uuid4())
-        now = datetime.utcnow()
-        doc = {
-            "id": intent_id,
-            "user_id": user_id,
-            "amount_ngn": amount_ngn,
-            "amount_kobo": amount_kobo,
-            "transaction_ref": transaction_ref,
-            "status": "pending",
-            "payment_provider": "squad",
-            "checkout_url": None,
-            "initiate_response": None,
-            "expires_at": now + timedelta(minutes=30),
-            "created_at": now,
-            "updated_at": now,
-        }
-        try:
-            await db.wallet_payment_intents.insert_one(doc)
-            await _upsert_wallet_topup_transaction(
-                user_id=user_id,
-                amount_ngn=amount_ngn,
-                transaction_ref=transaction_ref,
-                status="pending",
-            )
-            return transaction_ref, intent_id
-        except DuplicateKeyError as exc:
-            last_exc = exc
-            continue
-    logger.error("wallet_payment_intents could not allocate unique transaction_ref: %s", last_exc)
-    raise HTTPException(
-        status_code=503,
-        detail="Could not allocate a payment reference. Please try again.",
-    )
-
-
 async def _reserve_subscription_payment_intent(
     *,
     driver_id: str,
@@ -2312,331 +1790,35 @@ async def initiate_rider_wallet_checkout(
     http_request: Request,
     body: RiderWalletTopupAmountBody,
 ):
-    """
-    Squad inline checkout (card / bank in Squad UI) to credit rider wallet.
-    Completes via webhook or POST /payment/wallet/verify-pending.
-    """
-    user_id = require_authenticated(http_request)
-    from feature_flags import is_wallet_enabled
-    if not await is_wallet_enabled(db):
-        raise HTTPException(
-            status_code=403,
-            detail="Wallet top-up is currently unavailable. Pay your driver directly with cash or bank transfer.",
-        )
-    await general_limiter.check_rate_limit(http_request, f"wallet_init:{user_id}")
-    verify_owner_strict(http_request, user_id)
-    await _assert_wallet_user_exists(user_id)
-    await _expire_stale_wallet_payment_intents(user_id)
-    if not SQUAD_SECRET_KEY or not SQUAD_PUBLIC_KEY:
-        raise HTTPException(
-            status_code=500,
-            detail="Squad is not configured (SQUAD_SECRET_KEY and SQUAD_PUBLIC_KEY required)",
-        )
-    amount_ngn = _validate_wallet_topup_amount(body.amount)
-    amount_kobo = int(round(amount_ngn * 100))
-
-    user = await db.users.find_one({"id": user_id}) or {}
-    full_name = (user.get("name") or "NEXRYDE User").strip()
-    raw_email = (user.get("email") or "").strip()
-    if raw_email:
-        email = _validate_rider_wallet_checkout_email(raw_email)
-    else:
-        email = f"{user_id}@nexryde.app"
-
-    if body.replace_pending:
-        await _cancel_all_pending_wallet_intents(user_id)
-    else:
-        pending = await _latest_pending_wallet_checkout_intent(user_id)
-        if pending:
-            prev_amt = _normalize_amount(pending.get("amount_ngn"))
-            checkout_url = pending.get("checkout_url")
-            prev_ref = str(pending.get("transaction_ref") or "")
-            if checkout_url and isinstance(checkout_url, str):
-                if prev_amt is not None and abs(float(prev_amt) - float(amount_ngn)) <= 0.01:
-                    return _wallet_checkout_client_payload(
-                        checkout_url=checkout_url,
-                        transaction_ref=prev_ref,
-                        resumed=True,
-                    )
-                raise HTTPException(
-                    status_code=409,
-                    detail={
-                        "code": "pending_checkout_exists",
-                        "message": (
-                            "You already have a pending top-up. Open the same checkout, verify payment, "
-                            "or cancel it to use a different amount."
-                        ),
-                        "pending_amount_ngn": prev_amt,
-                        "transaction_ref": prev_ref,
-                        "checkout_url": checkout_url,
-                    },
-                )
-
-    transaction_ref, intent_id = await _reserve_wallet_payment_intent(
-        user_id=user_id,
-        amount_ngn=amount_ngn,
-        amount_kobo=amount_kobo,
-    )
-
-    init_body = _squad_initiate_inline_body(
-        amount_kobo=amount_kobo,
-        email=email,
-        transaction_ref=transaction_ref,
-        customer_name=full_name,
-        metadata={
-            "user_id": user_id,
-            "purpose": "rider_wallet_topup",
-        },
-    )
-    transaction_ref = str(init_body["transaction_ref"])
-
-    provider_payload, last_error = await _post_squad_transaction_initiate(init_body)
-
-    pp_dict = provider_payload if isinstance(provider_payload, dict) else None
-    if not pp_dict or not squad_initiate_response_ok(pp_dict):
-        safe = (last_error or "unknown")[:500]
-        fail_at = datetime.utcnow()
-        await db.wallet_payment_intents.update_one(
-            {"id": intent_id},
-            {
-                "$set": {
-                    "status": "failed",
-                    "failed_reason": safe,
-                    "initiate_error": safe,
-                    "updated_at": fail_at,
-                }
-            },
-        )
-        await _upsert_wallet_topup_transaction(
-            user_id=user_id,
-            amount_ngn=amount_ngn,
-            transaction_ref=transaction_ref,
-            status="failed",
-        )
-        return _wallet_checkout_squad_failed_response(
-            user_id=user_id,
-            intent_id=intent_id,
-            init_body=init_body,
-            provider_payload=pp_dict,
-            last_error=last_error or safe,
-            fail_reason="squad_reject_or_invalid_response",
-        )
-
-    data = pp_dict.get("data") if isinstance(pp_dict.get("data"), dict) else {}
-    data = data if isinstance(data, dict) else {}
-    # Resolve checkout URL: Squad's response if it's a genuine Squad domain URL,
-    # otherwise construct from the transaction_ref (Squad's pay.squadco.com/{ref} pattern).
-    checkout_url = _resolve_squad_checkout_url(pp_dict, data, transaction_ref)
-    logger.info(
-        "Squad wallet checkout_url resolved user=%s ref=%s url=%s",
-        user_id, transaction_ref, checkout_url,
-    )
-    if not checkout_url:
-        fail_at = datetime.utcnow()
-        await db.wallet_payment_intents.update_one(
-            {"id": intent_id},
-            {
-                "$set": {
-                    "status": "failed",
-                    "failed_reason": "no_checkout_url",
-                    "initiate_response": pp_dict,
-                    "updated_at": fail_at,
-                }
-            },
-        )
-        await _upsert_wallet_topup_transaction(
-            user_id=user_id,
-            amount_ngn=amount_ngn,
-            transaction_ref=transaction_ref,
-            status="failed",
-        )
-        return _wallet_checkout_squad_failed_response(
-            user_id=user_id,
-            intent_id=intent_id,
-            init_body=init_body,
-            provider_payload=pp_dict,
-            last_error="Squad response missing checkout_url",
-            fail_reason="no_checkout_url",
-        )
-
-    now = datetime.utcnow()
-    await db.wallet_payment_intents.update_one(
-        {"id": intent_id},
-        {
-            "$set": {
-                "checkout_url": checkout_url,
-                "initiate_response": pp_dict,
-                "updated_at": now,
-            }
-        },
-    )
-
-    logger.info(
-        "Squad wallet checkout init OK user=%s ref=%s amount_kobo=%s checkout_url_present=1",
-        user_id,
-        transaction_ref,
-        amount_kobo,
-    )
-
-    return _wallet_checkout_client_payload(
-        checkout_url=checkout_url,
-        transaction_ref=transaction_ref,
-        resumed=False,
-    )
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.get("/payment/wallet/pending-checkout")
 async def get_pending_rider_wallet_checkout(http_request: Request):
-    """Source of truth for an in-progress Squad checkout (app resume / sync)."""
-    user_id = require_authenticated(http_request)
-    verify_owner_strict(http_request, user_id)
-    await _expire_stale_wallet_payment_intents(user_id)
-    intent = await _latest_pending_wallet_checkout_intent(user_id)
-    if not intent:
-        return {"pending": False}
-    return {
-        "pending": True,
-        "transaction_ref": intent.get("transaction_ref"),
-        "checkout_url": intent.get("checkout_url"),
-        "amount_ngn": intent.get("amount_ngn"),
-        "amount_kobo": intent.get("amount_kobo"),
-    }
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.post("/payment/wallet/cancel-pending")
 async def cancel_pending_rider_wallet_checkout(http_request: Request):
-    """Abandon in-app checkout so a new amount/session can be started (wallet not credited)."""
-    user_id = require_authenticated(http_request)
-    verify_owner_strict(http_request, user_id)
-    n = await _cancel_all_pending_wallet_intents(user_id)
-    return {"cancelled": n}
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.post("/payment/wallet/create-virtual-account")
 async def create_rider_wallet_virtual_account(http_request: Request):
-    """Removed: wallet top-up uses Squad checkout only (no per-user bank transfer VA)."""
-    require_authenticated(http_request)
-    raise HTTPException(
-        status_code=410,
-        detail="Wallet bank-transfer virtual accounts are disabled. Use card/bank checkout (Squad) only.",
-    )
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.post("/payment/wallet/verify-pending")
 async def verify_pending_rider_wallet_checkout(
     http_request: Request,
     body: VerifyRiderWalletBody = Body(default_factory=VerifyRiderWalletBody),
 ):
-    """Poll after paying if webhook was delayed; verifies reference with Squad API."""
-    user_id = require_authenticated(http_request)
-    await general_limiter.check_rate_limit(http_request, f"wallet_verify:{user_id}")
-    verify_owner_strict(http_request, user_id)
-    await _expire_stale_wallet_payment_intents(user_id)
-
-    since = datetime.utcnow() - timedelta(hours=24)
-    intent: Optional[dict] = None
-
-    if body.transaction_ref and str(body.transaction_ref).strip():
-        candidates = _wallet_intent_ref_candidates(str(body.transaction_ref).strip())
-        if not candidates:
-            raise HTTPException(status_code=404, detail="No pending wallet checkout for that reference")
-        # Search pending + processing (processing = a prior verify attempt started but Squad hadn't confirmed yet)
-        intent = await db.wallet_payment_intents.find_one(
-            {"user_id": user_id, "status": {"$in": ["pending", "processing"]}, "transaction_ref": {"$in": candidates}},
-        )
-        if not intent:
-            intent = await db.wallet_payment_intents.find_one(
-                {"user_id": user_id, "status": "completed", "transaction_ref": {"$in": candidates}},
-                sort=[("completed_at", -1)],
-            )
-        if not intent:
-            raise HTTPException(status_code=404, detail="No pending wallet checkout for that reference")
-    else:
-        intent = await db.wallet_payment_intents.find_one(
-            {"user_id": user_id, "status": {"$in": ["pending", "processing"]}},
-            sort=[("created_at", -1)],
-        )
-        if not intent:
-            intent = await db.wallet_payment_intents.find_one(
-                {
-                    "user_id": user_id,
-                    "status": "completed",
-                    "completed_at": {"$gte": since},
-                },
-                sort=[("completed_at", -1)],
-            )
-        if not intent:
-            raise HTTPException(
-                status_code=404,
-                detail="No pending wallet checkout. If you already paid, pull to refresh balance or try again in a moment.",
-            )
-
-    ref = str(intent.get("transaction_ref") or "")
-    if not ref:
-        raise HTTPException(status_code=404, detail="No pending wallet checkout for that reference")
-
-    if str(intent.get("status") or "") in {"cancelled", "failed", "expired"} or _intent_is_expired(intent):
-        return {
-            "verified": False,
-            "terminal": True,
-            "status": str(intent.get("status") or "expired"),
-            "detail": "Payment intent is no longer payable. Start a new top-up.",
-        }
-
-    verify_result = await _verify_squad_transaction(ref)
-    if not verify_result.get("verified"):
-        return {"verified": False, "verify_result": verify_result}
-
-    if intent.get("status") == "completed" or intent.get("credited_at"):
-        user = await db.users.find_one({"id": user_id})
-        bal = float((user or {}).get("wallet_balance") or 0)
-        return {
-            "verified": True,
-            "credited": False,
-            "duplicate": True,
-            "new_balance": bal,
-            "already_settled": True,
-        }
-
-    expected_amount = _normalize_amount(intent.get("amount_ngn"))
-    paid_amount = _reconcile_squad_amount_with_intent(
-        expected_amount,
-        verify_result.get("paid_amount"),
-        verify_ok=True,
-    )
-    if paid_amount is None or expected_amount is None:
-        return {
-            "verified": False,
-            "detail": "amount_mismatch",
-            "paid_amount": verify_result.get("paid_amount"),
-            "expected_amount": expected_amount,
-        }
-    res = await _credit_wallet_checkout_intent(
-        intent=intent,
-        verify_result=verify_result,
-        webhook_payload=None,
-        source="verify_pending_endpoint",
-    )
-    return {
-        "verified": bool(res.get("credited") or res.get("duplicate")),
-        "credited": bool(res.get("credited")),
-        "duplicate": bool(res.get("duplicate")),
-        "new_balance": res.get("new_balance"),
-        "already_settled": bool(res.get("duplicate")),
-        "reason": res.get("reason"),
-    }
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.get("/payments/verify/{transaction_ref}")
 async def verify_wallet_payment_by_reference(transaction_ref: str, request: Request):
-    """
-    Verification fallback endpoint.
-    Calls provider verify and credits wallet only after confirmed success.
-    """
-    user_id = require_authenticated(request)
-    verify_owner_strict(request, user_id)
-    body = VerifyRiderWalletBody(transaction_ref=transaction_ref)
-    return await verify_pending_rider_wallet_checkout(request, body)
+    """Legacy wallet verify path — customer wallet removed."""
+    del transaction_ref, request
+    raise HTTPException(
+        status_code=410,
+        detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.",
+    )
 
 
 @payments_router.get("/subscriptions/{driver_id}")
@@ -2847,7 +2029,7 @@ async def _process_squad_webhook_payload(payload: dict) -> dict:
     verify_result = await _verify_squad_transaction(str(event_reference or ""))
     logger.info(f"Squad verification response for ref={event_reference}: {verify_result}")
     # Strict money safety: never trust webhook status alone for credit.
-    # Wallet/subscription funds must come only from provider verify confirmation.
+    # Subscription funds must come only from provider verify confirmation.
 
     if not verify_result.get("verified"):
         ref_s = str(event_reference or "").strip()
@@ -2866,21 +2048,6 @@ async def _process_squad_webhook_payload(payload: dict) -> dict:
         if ref_s and (ps in terminal_fail or ev in terminal_fail):
             fail_at = datetime.utcnow()
             reason = ps or ev or verify_result.get("reason") or "verification_failed"
-            await db.wallet_payment_intents.update_many(
-                {"transaction_ref": ref_s, "status": "pending"},
-                {
-                    "$set": {
-                        "status": "failed",
-                        "failed_at": fail_at,
-                        "failed_reason": reason,
-                        "updated_at": fail_at,
-                    }
-                },
-            )
-            await db.wallet_topup_transactions.update_many(
-                {"transactionRef": {"$in": _wallet_intent_ref_candidates(ref_s)}, "status": "pending"},
-                {"$set": {"status": "failed", "updatedAt": fail_at, "failure_reason": reason}},
-            )
             await db.subscription_payment_intents.update_many(
                 {"transaction_ref": ref_s, "status": "pending"},
                 {
@@ -2906,124 +2073,8 @@ async def _process_squad_webhook_payload(payload: dict) -> dict:
         )
         return {"received": True, "processed": False}
 
-    # --- Rider wallet top-up (before driver subscription matching) ---
-    wva = None
-    wva_or: list = []
-    if event_reference:
-        er = str(event_reference)
-        wva_or.extend([{"reference": er}, {"provider_reference": er}])
-    if account_number:
-        wva_or.append({"account_number": str(account_number)})
-    if wva_or:
-        wva = await db.wallet_virtual_accounts.find_one({"$and": [{"$or": wva_or}, {"status": "pending"}]})
-
-    wpi = None
-    if not wva and event_reference:
-        wpi_candidates = _wallet_intent_ref_candidates(str(event_reference))
-        if wpi_candidates:
-            wpi = await db.wallet_payment_intents.find_one(
-                {"transaction_ref": {"$in": wpi_candidates}, "status": "pending"}
-            )
-            if not wpi:
-                done_w = await db.wallet_payment_intents.find_one(
-                    {"transaction_ref": {"$in": wpi_candidates}, "status": "completed"},
-                    sort=[("completed_at", -1)],
-                )
-                if done_w:
-                    logger.info(
-                        "Squad webhook: wallet checkout already completed ref=%s (duplicate event)",
-                        event_reference,
-                    )
-                    return {"received": True, "processed": True, "wallet_topup": True, "duplicate": True}
-
-    if wva:
-        uid = wva.get("user_id")
-        expected_amount = _normalize_amount(wva.get("amount_expected"))
-        paid_amount = _reconcile_squad_amount_with_intent(
-            expected_amount,
-            verify_result.get("paid_amount"),
-            verify_ok=bool(verify_result.get("verified")),
-        )
-        if paid_amount is None or expected_amount is None:
-            logger.warning(
-                f"Squad wallet VA amount mismatch user={uid} paid={verify_result.get('paid_amount')} expected={expected_amount}"
-            )
-            await db.subscription_transactions.insert_one(
-                {
-                    "id": str(uuid.uuid4()),
-                    "provider": "squad",
-                    "reference": event_reference,
-                    "status": "wallet_va_amount_mismatch",
-                    "paid_amount": paid_amount,
-                    "expected_amount": expected_amount,
-                    "verify_result": verify_result,
-                    "webhook_payload": payload,
-                    "created_at": datetime.utcnow(),
-                }
-            )
-            return {"received": True, "processed": False}
-        ref_key = str(event_reference or wva.get("reference") or "")
-        res = await _rider_wallet_topup_idempotent(
-            uid,
-            paid_amount,
-            ref_key,
-            "squad_virtual_account",
-            verify_result,
-            payload,
-        )
-        await db.wallet_virtual_accounts.update_one(
-            {"id": wva["id"]},
-            {
-                "$set": {
-                    "status": "success",
-                    "paid_amount": paid_amount,
-                    "verified_at": datetime.utcnow(),
-                    "last_webhook_status": event_status,
-                    "last_reference": ref_key,
-                }
-            },
-        )
-        logger.info(f"Squad wallet VA credited user={uid} ref={ref_key} dup={res.get('duplicate')}")
-        return {"received": True, "processed": True, "wallet_topup": True}
-
-    if wpi:
-        uid = wpi.get("user_id")
-        if str(wpi.get("status") or "") in {"cancelled", "failed", "expired"} or _intent_is_expired(wpi):
-            logger.info("Squad webhook skipped terminal/expired wallet intent ref=%s", event_reference)
-            return {"received": True, "processed": True, "wallet_topup": False, "skipped": True}
-        expected_amount = _normalize_amount(wpi.get("amount_ngn"))
-        paid_amount = _reconcile_squad_amount_with_intent(
-            expected_amount,
-            verify_result.get("paid_amount"),
-            verify_ok=bool(verify_result.get("verified")),
-        )
-        if paid_amount is None or expected_amount is None:
-            logger.warning(
-                f"Squad wallet checkout amount mismatch user={uid} raw_paid={verify_result.get('paid_amount')} expected={expected_amount}"
-            )
-            await db.subscription_transactions.insert_one(
-                {
-                    "id": str(uuid.uuid4()),
-                    "provider": "squad",
-                    "reference": event_reference,
-                    "status": "wallet_checkout_amount_mismatch",
-                    "paid_amount": paid_amount,
-                    "expected_amount": expected_amount,
-                    "verify_result": verify_result,
-                    "webhook_payload": payload,
-                    "created_at": datetime.utcnow(),
-                }
-            )
-            return {"received": True, "processed": False}
-        ref_key = str(event_reference or "")
-        res = await _credit_wallet_checkout_intent(
-            intent=wpi,
-            verify_result=verify_result,
-            webhook_payload=payload,
-            source="squad_webhook",
-        )
-        logger.info(f"Squad wallet checkout credited user={uid} ref={ref_key} dup={res.get('duplicate')}")
-        return {"received": True, "processed": True, "wallet_topup": True}
+    # Rider wallet top-up removed — NexRyde does not hold customer funds.
+    # Fall through to driver subscription matching only.
 
     virtual_account = await db.subscription_virtual_accounts.find_one(
         {"$or": [
@@ -4028,140 +3079,31 @@ async def estimate_fare(request: FareEstimateRequest, http_request: Request):
 # ==================== WALLET ENDPOINTS ====================
 @payments_router.get("/wallet/me")
 async def get_wallet_me(request: Request, limit: int = 25):
-    """Authenticated user: balance + recent transactions (must be before /wallet/{user_id})."""
-    user_id = require_authenticated(request)
-    verify_owner_strict(request, user_id)
-    user = await find_user_by_id(user_id, {"_id": 0, "wallet_balance": 1})
-    safe_limit = max(1, min(limit, 100))
-    rows = (
-        await db.transactions.find({"user_id": user_id}, {"_id": 0})
-        .sort("timestamp", -1)
-        .limit(safe_limit)
-        .to_list(safe_limit)
-    )
-    for tx in rows:
-        ts = tx.get("timestamp")
-        if hasattr(ts, "isoformat"):
-            tx["timestamp"] = ts.isoformat()
-    return {
-        "currency": "NGN",
-        "user_id": user_id,
-        "balance": float((user or {}).get("wallet_balance") or 0),
-        "transactions": rows,
-    }
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.get("/wallet")
 async def get_wallet_v2(request: Request, limit: int = 20):
-    payload = await get_wallet_me(request, limit=limit)
-    return {
-        "data": {
-            "balanceKobo": int(round(float(payload.get("balance") or 0) * 100)),
-            "currency": payload.get("currency", "NGN"),
-            "recentTxns": payload.get("transactions", []),
-        }
-    }
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.get("/wallet/pending-intents")
 async def get_wallet_pending_intents_v2(request: Request):
-    user_id = require_authenticated(request)
-    verify_owner_strict(request, user_id)
-    await _expire_stale_wallet_payment_intents(user_id)
-    rows = (
-        await db.wallet_payment_intents.find(
-            {"user_id": user_id, "status": "pending"},
-            {"_id": 0, "transaction_ref": 1, "expires_at": 1, "status": 1, "amount_kobo": 1},
-        )
-        .sort("created_at", -1)
-        .limit(20)
-        .to_list(20)
-    )
-    out = []
-    for row in rows:
-        exp = row.get("expires_at")
-        out.append(
-            {
-                "squadReference": row.get("transaction_ref"),
-                "status": row.get("status"),
-                "amountKobo": int(row.get("amount_kobo") or 0),
-                "expiresAt": exp.isoformat() if isinstance(exp, datetime) else None,
-            }
-        )
-    return {"data": out}
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.post("/wallet/topup/init")
 async def wallet_topup_init_v2(request: Request, body: WalletTopupInitKoboBody):
-    amount_ngn = round(body.amountKobo / 100.0, 2)
-    result = await initiate_rider_wallet_checkout(
-        request,
-        RiderWalletTopupAmountBody(amount=amount_ngn, replace_pending=False),
-    )
-    return {
-        "data": {
-            "reference": result.get("transaction_ref"),
-            "checkoutUrl": result.get("checkout_url"),
-            "expiresAt": (datetime.utcnow() + timedelta(minutes=30)).isoformat(),
-        }
-    }
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.post("/wallet/topup/verify")
 async def wallet_topup_verify_v2(request: Request, body: WalletReferenceBody):
-    result = await verify_pending_rider_wallet_checkout(
-        request,
-        VerifyRiderWalletBody(transaction_ref=body.reference),
-    )
-    user_id = require_authenticated(request)
-    user = await db.users.find_one({"id": user_id})
-    intent = await db.wallet_payment_intents.find_one(
-        {"user_id": user_id, "transaction_ref": {"$in": _wallet_intent_ref_candidates(body.reference)}},
-        sort=[("updated_at", -1)],
-    )
-    return {
-        "data": {
-            "intent": {
-                "reference": body.reference,
-                "status": str((intent or {}).get("status") or "pending"),
-                "verified": bool(result.get("verified")),
-                "credited": bool(result.get("credited")),
-                "reason": result.get("reason"),
-            },
-            "wallet": {
-                "balanceKobo": int(round(float((user or {}).get("wallet_balance") or 0) * 100)),
-                "currency": "NGN",
-            },
-        }
-    }
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.post("/wallet/topup/cancel")
 async def wallet_topup_cancel_v2(request: Request, body: WalletReferenceBody):
-    user_id = require_authenticated(request)
-    verify_owner_strict(request, user_id)
-    cancelled = await _cancel_pending_wallet_intent_by_reference(user_id, body.reference)
-    return {"data": {"cancelled": cancelled >= 0}}
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.get("/wallet/callback")
 async def wallet_callback_v2(reference: Optional[str] = None):
-    ref = (reference or "").strip()
-    deep_link = f"nexryde://wallet/return?reference={ref}" if ref else "nexryde://wallet/return"
-    html = f"""
-<!doctype html>
-<html>
-  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1" /></head>
-  <body style="font-family: sans-serif; padding: 24px;">
-    <h3>Returning to NEXRYDE Wallet</h3>
-    <p>Payment verification continues securely in-app.</p>
-    <a href="{deep_link}">Tap here if the app did not open automatically</a>
-    <script>window.location.href = "{deep_link}";</script>
-  </body>
-</html>
-"""
-    return HTMLResponse(content=html)
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.get("/payment/subscription/callback")
 async def subscription_payment_callback(reference: Optional[str] = None):
@@ -4197,248 +3139,23 @@ async def subscription_payment_callback(reference: Optional[str] = None):
 
 @payments_router.get("/wallet/{user_id}")
 async def get_wallet_balance(user_id: str, request: Request):
-    """Get user wallet balance"""
-    verify_owner_strict(request, user_id)
-    user = await db.users.find_one({"id": user_id})
-    base: dict = {"currency": "NGN", "user_id": user_id}
-    if not user:
-        base["balance"] = 0
-        base["balance_kobo"] = 0
-        return base
-    bal = float(user.get("wallet_balance", 0) or 0)
-    base["balance"] = bal
-    base["balance_kobo"] = _naira_to_kobo(bal)
-    return base
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.get("/wallet/{user_id}/transactions")
 async def get_wallet_transactions(user_id: str, request: Request, limit: int = 30):
-    """Get recent wallet transactions for a user."""
-    verify_owner_strict(request, user_id)
-    safe_limit = max(1, min(limit, 100))
-    rows = await db.transactions.find(
-        {"user_id": user_id},
-        {"_id": 0}
-    ).sort("timestamp", -1).limit(safe_limit).to_list(safe_limit)
-    for tx in rows:
-        ts = tx.get("timestamp")
-        if hasattr(ts, "isoformat"):
-            tx["timestamp"] = ts.isoformat()
-        if "amount_kobo" not in tx and tx.get("amount") is not None:
-            try:
-                tx["amount_kobo"] = _naira_to_kobo(float(tx.get("amount") or 0))
-            except Exception:
-                pass
-    return {"user_id": user_id, "transactions": rows}
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.post("/wallet/{user_id}/topup")
 async def topup_wallet_balance(user_id: str, request: dict, http_request: Request):
-    """Top up wallet - ENHANCED with validation and logging"""
-    from feature_flags import is_wallet_enabled
-    if not await is_wallet_enabled(db):
-        raise HTTPException(
-            status_code=403,
-            detail="Wallet top-up is currently unavailable. Pay your driver directly with cash or bank transfer.",
-        )
-    verify_owner_strict(http_request, user_id)
-    amount = request.get("amount", 0)
-    if not amount:
-        raise HTTPException(status_code=400, detail="amount is required")
-    
-    # Validation
-    if amount < 100:
-        raise HTTPException(status_code=400, detail="Minimum top-up is ₦100")
-    if amount > 1000000:
-        raise HTTPException(status_code=400, detail="Maximum single top-up is ₦1,000,000. Contact support for larger amounts.")
-    
-    # Check if user exists
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    payment_reference = (request.get("payment_reference") or "").strip()
-    if not payment_reference:
-        raise HTTPException(status_code=400, detail="payment_reference is required")
-
-    provider_result = await _verify_reference_with_paystack(payment_reference, float(amount))
-    if not provider_result.get("verified"):
-        raise HTTPException(status_code=400, detail="Payment could not be verified")
-    
-    # Create transaction record for audit
-    transaction = {
-        "id": str(uuid.uuid4()),
-        "user_id": user_id,
-        "type": "topup",
-        "amount": amount,
-        "amount_kobo": _naira_to_kobo(float(amount)),
-        "status": "completed",
-        "timestamp": datetime.utcnow(),
-        "payment_method": request.get("payment_method", "card"),
-        "reference": payment_reference,
-        "provider_verification": provider_result,
-    }
-    
-    await db.transactions.insert_one(transaction)
-    
-    # Update wallet balance
-    await db.users.update_one(
-        {"id": user_id},
-        {"$inc": {"wallet_balance": amount}}
-    )
-    
-    user = await db.users.find_one({"id": user_id})
-    new_balance = user.get("wallet_balance", amount)
-    
-    logger.info(f"💰 Wallet top-up: User {user_id} added ₦{amount:,.2f}. New balance: ₦{new_balance:,.2f}")
-    
-    return {
-        "success": True,
-        "message": f"Successfully added ₦{amount:,.2f} to wallet",
-        "new_balance": new_balance,
-        "amount_added": amount,
-        "transaction_id": transaction["id"],
-        "reference": transaction["reference"]
-    }
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.post("/wallet/refund")
 async def refund_wallet_transaction(body: WalletRefundRequestBody, request: Request):
-    """Admin-only deterministic refund for completed wallet top-up transactions."""
-    await require_admin_request(request)
-    user_id = body.user_id.strip()
-    tx_id = body.transaction_id.strip()
-    reason = body.reason.strip()
-    idem_key = (body.idempotency_key or "").strip() or f"refund:{tx_id}"
-
-    source_tx = await db.transactions.find_one({"id": tx_id, "user_id": user_id}, {"_id": 0})
-    if not source_tx:
-        raise HTTPException(status_code=404, detail="Source transaction not found")
-
-    src_type = str(source_tx.get("type") or "").lower()
-    src_status = str(source_tx.get("status") or "").lower()
-    src_source = str(source_tx.get("source") or "").lower()
-
-    # Real Squad-funded top-ups are stored as type="credit"/status="success"
-    # (see _credit_wallet_for_squad_reference), while legacy/manual top-ups use
-    # type="topup"/status="completed". Accept both shapes so a genuinely funded
-    # balance can actually be refunded.
-    is_legacy_topup = src_type in {"topup", "wallet_topup"}
-    is_squad_credit = src_type == "credit" and src_source == "squad"
-    if not (is_legacy_topup or is_squad_credit):
-        raise HTTPException(status_code=400, detail="Only completed wallet top-up transactions can be refunded")
-    if src_status not in {"completed", "success"}:
-        raise HTTPException(status_code=400, detail="Source transaction is not in a completed/success status")
-
-    amount_ngn = _normalize_amount(source_tx.get("amount"))
-    if amount_ngn is None or amount_ngn <= 0:
-        raise HTTPException(status_code=400, detail="Invalid source amount for refund")
-
-    existing = await db.transactions.find_one(
-        {
-            "type": "refund",
-            "$or": [
-                {"meta.source_transaction_id": tx_id},
-                {"meta.idempotency_key": idem_key},
-            ],
-            "status": "completed",
-        },
-        {"_id": 0},
-    )
-    if existing:
-        return {
-            "success": True,
-            "duplicate": True,
-            "refund_transaction_id": existing.get("id"),
-            "refunded_amount": existing.get("amount"),
-        }
-
-    user = await db.users.find_one({"id": user_id}, {"_id": 0, "wallet_balance": 1})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    debit_result = await db.users.update_one(
-        {"id": user_id, "wallet_balance": {"$gte": float(amount_ngn)}},
-        {"$inc": {"wallet_balance": -float(amount_ngn)}},
-    )
-    if debit_result.modified_count != 1:
-        raise HTTPException(status_code=409, detail="Refund blocked: insufficient current wallet balance")
-
-    refund_tx = {
-        "id": str(uuid.uuid4()),
-        "user_id": user_id,
-        "type": "refund",
-        "amount": float(amount_ngn),
-        "amount_kobo": _naira_to_kobo(float(amount_ngn)),
-        "status": "completed",
-        "timestamp": datetime.utcnow(),
-        "reference": f"refund_{uuid.uuid4().hex[:12]}",
-        "meta": {
-            "source_transaction_id": tx_id,
-            "source_reference": source_tx.get("reference"),
-            "reason": reason,
-            "idempotency_key": idem_key,
-            "refunded_by": request.headers.get("x-admin-email") or "admin",
-        },
-    }
-    await db.transactions.insert_one(refund_tx)
-
-    updated_user = await db.users.find_one({"id": user_id}, {"_id": 0, "wallet_balance": 1})
-    return {
-        "success": True,
-        "duplicate": False,
-        "refund_transaction_id": refund_tx["id"],
-        "refunded_amount": float(amount_ngn),
-        "new_balance": float((updated_user or {}).get("wallet_balance") or 0),
-    }
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.get("/wallet/reconcile")
 async def wallet_reconcile(request: Request, tolerance: float = 1.0, limit: int = 1000):
-    """Admin-only: flag wallets whose stored balance diverges from the ledger.
-
-    Read-only — reports divergence, never writes corrections. Run periodically
-    (or before widening past the pilot) to catch double-credits/debits and the
-    stale db.wallets parallel store.
-    """
-    await require_admin_request(request)
-    from wallet_reconciliation import reconcile_wallets
-    return await reconcile_wallets(db, tolerance=float(tolerance), limit=int(limit))
-
-
-# ==================== SURGE PRICING ====================
-def _service_surge_cap(city: str, service_type: str) -> float:
-    city_key = normalize_fare_city_key(city or "default")
-    svc = (service_type or "economy").strip().lower()
-    if svc == "standard":
-        svc = "economy"
-    if svc == "pro":
-        svc = "premium"
-    city_cfg = FARE_CONFIG.get(city_key, FARE_CONFIG["default"])
-    tier = city_cfg.get(svc) or city_cfg.get("economy") or FARE_CONFIG["default"]["economy"]
-    return float(tier.get("max_multiplier", 2.5))
-
-
-def calculate_surge_multiplier(
-    lat: float = 0.0,
-    lng: float = 0.0,
-    demand_ratio: float = 0.0,
-    is_raining: bool = False,
-    service_type: str = "economy",
-    city: str = "lagos",
-) -> dict:
-    """
-    Rider-facing surge: max(Normal, High demand, Rain, Peak) in WAT — matches nationwide product card
-    and Lagos Lagride fare engine. Capped by ``FARE_CONFIG`` tier ``max_multiplier``.
-    """
-    cap = _service_surge_cap(city, service_type)
-    return compute_max_style_surge_multiplier(
-        lat=lat,
-        lng=lng,
-        demand_ratio=demand_ratio,
-        is_raining=is_raining,
-        service_max_multiplier=cap,
-    )
-
+    raise HTTPException(status_code=410, detail="Customer wallet has been removed. Pay drivers with cash or bank transfer.")
 
 @payments_router.get("/surge/check")
 async def check_surge_pricing(

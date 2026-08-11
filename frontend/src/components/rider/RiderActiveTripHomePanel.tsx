@@ -225,8 +225,7 @@ export function RiderActiveTripHomePanel() {
       <View style={styles.notice}>
         <Ionicons name="information-circle-outline" size={16} color="#64748B" />
         <Text style={styles.noticeTxt}>
-          New bookings are paused until this trip finishes. You can still use Safety, Wallet, and
-          other tabs.
+          New bookings are paused until this trip finishes. You can still use Safety and other tabs.
         </Text>
       </View>
 

@@ -153,6 +153,7 @@ async def get_user(user_id: str, request: Request):
         raise HTTPException(status_code=404, detail="User not found")
     user["_id"] = str(user["_id"])
     safe = strip_sensitive_pii(user)
+    safe.pop("wallet_balance", None)
     safe.update(public_nin_fields(user))
     return safe
 

@@ -1,5 +1,5 @@
 /**
- * Reusable empty state component for wallet, trips, notifications, and other lists.
+ * Reusable empty state component for trips, notifications, and other lists.
  */
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -48,13 +48,11 @@ export const NoTripsEmpty: React.FC<{ onBook?: () => void }> = ({ onBook }) => (
   />
 );
 
-export const NoTransactionsEmpty: React.FC<{ onTopUp?: () => void }> = ({ onTopUp }) => (
+export const NoTransactionsEmpty: React.FC = () => (
   <EmptyState
-    icon="wallet-outline"
+    icon="receipt-outline"
     title="No transactions"
-    subtitle="Your wallet top-ups and trip payments will appear here."
-    actionLabel={onTopUp ? 'Top up wallet' : undefined}
-    onAction={onTopUp}
+    subtitle="Your trip payments will appear here."
   />
 );
 

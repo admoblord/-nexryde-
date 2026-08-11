@@ -58,28 +58,6 @@ export const SkeletonBox: React.FC<SkeletonBoxProps> = ({
 
 // ─── Screen-level skeletons ────────────────────────────────────────────────────
 
-export const WalletScreenSkeleton: React.FC = () => (
-  <View style={styles.container}>
-    {/* Balance card */}
-    <SkeletonBox height={140} borderRadius={20} style={{ marginBottom: 16 }} />
-    {/* Top-up row */}
-    <View style={styles.row}>
-      <SkeletonBox width="48%" height={52} borderRadius={14} />
-      <SkeletonBox width="48%" height={52} borderRadius={14} />
-    </View>
-    {/* Transaction list */}
-    {[0, 1, 2, 3, 4].map((i) => (
-      <View key={i} style={[styles.row, { marginTop: 12, alignItems: 'center' }]}>
-        <SkeletonBox width={44} height={44} borderRadius={22} delay={i * 80} />
-        <View style={{ flex: 1, marginLeft: 12, gap: 6 }}>
-          <SkeletonBox height={14} width="60%" borderRadius={6} delay={i * 80} />
-          <SkeletonBox height={12} width="40%" borderRadius={6} delay={i * 80 + 100} />
-        </View>
-        <SkeletonBox width={64} height={14} borderRadius={6} delay={i * 80} />
-      </View>
-    ))}
-  </View>
-);
 
 export const TripHistorySkeleton: React.FC = () => (
   <View style={styles.container}>
