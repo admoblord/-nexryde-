@@ -26,6 +26,10 @@ import {
 import { RiderFavoriteIcon } from '@/src/components/rider/RiderFavoriteIcon';
 import { BORDER_RADIUS, COLORS, FONT_SIZE, SPACING, useThemeColors } from '@/src/constants/theme';
 
+/** Module cache so Home remounts / tab switches paint favourites instantly. */
+const FAV_STRIP_CACHE = new Map<string, { at: number; rows: RiderFavoriteDriverRow[] }>();
+const FAV_STRIP_TTL_MS = 60_000;
+
 function mapRow(d: Record<string, unknown>): RiderFavoriteDriverRow {
   const id = String(d.driver_id || d.id || '');
   return {
@@ -43,8 +47,10 @@ function mapRow(d: Record<string, unknown>): RiderFavoriteDriverRow {
 export function RiderFavoritesHomeStrip() {
   const router = useRouter();
   const { userId: riderId, canCallAuthedApi } = useAuthedUserId();
-  const [loading, setLoading] = useState(true);
-  const [drivers, setDrivers] = useState<RiderFavoriteDriverRow[]>([]);
+  const cached =
+    riderId && FAV_STRIP_CACHE.has(riderId) ? FAV_STRIP_CACHE.get(riderId)! : null;
+  const [loading, setLoading] = useState(!cached);
+  const [drivers, setDrivers] = useState<RiderFavoriteDriverRow[]>(cached?.rows ?? []);
   const { colors, isDark } = useThemeColors();
 
   const load = useCallback(async () => {
@@ -58,9 +64,10 @@ export function RiderFavoritesHomeStrip() {
       const raw = res.data?.favorite_drivers || res.data;
       const rows = Array.isArray(raw) ? raw.map((d) => mapRow(d as Record<string, unknown>)) : [];
       rows.sort((a, b) => Number(b.isOnline) - Number(a.isOnline));
+      FAV_STRIP_CACHE.set(riderId, { at: Date.now(), rows });
       setDrivers(rows);
     } catch {
-      setDrivers([]);
+      if (!FAV_STRIP_CACHE.has(riderId)) setDrivers([]);
     } finally {
       setLoading(false);
     }
@@ -69,15 +76,21 @@ export function RiderFavoritesHomeStrip() {
   const loadedOnceRef = useRef(false);
   useFocusEffect(
     useCallback(() => {
-      if (!canCallAuthedApi) return;
-      // Only show the loading spinner on first load — refresh silently on
-      // repeat tab focus so switching back to Home doesn't flash a spinner
-      // over data that's already on screen.
-      if (!loadedOnceRef.current) setLoading(true);
+      if (!canCallAuthedApi || !riderId) return;
+      const hit = FAV_STRIP_CACHE.get(riderId);
+      if (hit) {
+        setDrivers(hit.rows);
+        setLoading(false);
+        loadedOnceRef.current = true;
+        // Silent refresh when stale; skip network when still fresh.
+        if (Date.now() - hit.at < FAV_STRIP_TTL_MS) return;
+      } else if (!loadedOnceRef.current) {
+        setLoading(true);
+      }
       void load().finally(() => {
         loadedOnceRef.current = true;
       });
-    }, [load, canCallAuthedApi]),
+    }, [load, canCallAuthedApi, riderId]),
   );
 
   const bookDriver = (d: RiderFavoriteDriverRow) => {

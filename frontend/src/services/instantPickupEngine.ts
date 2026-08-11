@@ -8,8 +8,9 @@
  * - Preloads before destination typing
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { BACKEND_URL, resolveAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL } from '@/src/services/api';
 import { haversineMeters } from '@/src/services/smartPickupGps';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 
 export const DETECTING_PICKUP = 'Detecting your pickup...';
 export const SAFE_PICKUP_FALLBACK = 'Near your location';
@@ -60,6 +61,21 @@ export function isRawLatLngLabel(s: string): boolean {
   return /^\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*$/.test(String(s || '').trim());
 }
 
+/** Open Location Codes (e.g. CCHC+8Q3) — never show as pickup address. */
+export function isPlusCodeLabel(s: string): boolean {
+  const head = String(s || '')
+    .trim()
+    .split(',')[0]
+    .trim();
+  if (!head || !head.includes('+')) return false;
+  return /^[23456789CFGHJMPQRVWX]{4,11}\+[23456789CFGHJMPQRVWX]{2,6}$/i.test(head);
+}
+
+export function isBadPickupLabel(s: string): boolean {
+  const t = String(s || '').trim();
+  return !t || isRawLatLngLabel(t) || isPlusCodeLabel(t);
+}
+
 export function isDetectingPickupLabel(s: string): boolean {
   const t = String(s || '').trim();
   return (
@@ -71,11 +87,11 @@ export function isDetectingPickupLabel(s: string): boolean {
   );
 }
 
-/** Safe UI string — never raw coordinates. */
+/** Safe UI string — never raw coordinates or Plus Codes. */
 export function safePickupDisplay(label: string | null | undefined, detecting = false): string {
   const t = String(label || '').trim();
   if (detecting || isDetectingPickupLabel(t)) return DETECTING_PICKUP;
-  if (isRawLatLngLabel(t)) return SAFE_PICKUP_FALLBACK;
+  if (isBadPickupLabel(t)) return SAFE_PICKUP_FALLBACK;
   return t;
 }
 
@@ -98,7 +114,7 @@ async function ensureCacheLoaded(): Promise<void> {
         (e) =>
           e &&
           typeof e.label === 'string' &&
-          !isRawLatLngLabel(e.label) &&
+          !isBadPickupLabel(e.label) &&
           Number.isFinite(e.lat) &&
           Number.isFinite(e.lng),
       );
@@ -145,7 +161,7 @@ export async function lookupPickupCache(
       }
     }
   }
-  if (!best || isRawLatLngLabel(best.label)) return null;
+  if (!best || isBadPickupLabel(best.label)) return null;
   return {
     label: best.label,
     tier: (best.tier as PickupTier) || 'area',
@@ -170,16 +186,20 @@ async function fetchReverse(
   if (!origin) return null;
   const q = `lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}`;
   const url = `${origin}/api/places/reverse-geocode?${q}`;
-  // /api/places/reverse-geocode requires auth — a plain fetch always 401s and the
-  // pickup label stays stuck on "Detecting…". Attach a valid bearer (no logout on
-  // failure; this is a best-effort label resolve).
-  const headers = await resolveAuthHeaders();
-  const res = await fetch(url, { signal, headers });
+  // Must use authedFetch: places require auth, and bare fetch can hang forever
+  // (no timeout) leaving "Detecting your pickup…" stuck on screen.
+  const res = await authedFetch(url, {
+    method: 'GET',
+    signal,
+    timeoutMs: 8_000,
+    preserveSessionOn401: true,
+  });
+  if (!res.ok) return null;
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   const label = String(
     data.pickup_label || data.short_label || data.formatted_address || data.address || '',
   ).trim();
-  if (!label || isRawLatLngLabel(label)) return null;
+  if (!label || isBadPickupLabel(label)) return null;
   const tier = String(data.tier || 'area') as PickupTier;
   return { label, tier, status: String(data.status || 'OK') };
 }

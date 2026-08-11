@@ -87,18 +87,27 @@ export default function RiderTabLayout() {
         /* silent */
       }
     };
+    // Don't steal radio on first paint — home/book need the network first.
     const stop = setForegroundInterval(() => {
       void fetchUnread();
-    }, 30000);
+    }, 30000, { runImmediately: false, runOnForeground: false });
+    const warm = setTimeout(() => {
+      if (!cancelled) void fetchUnread();
+    }, 4000);
     return () => {
       cancelled = true;
+      clearTimeout(warm);
       stop();
     };
   }, [allowed, userId]);
 
   useRiderRidePhaseNavigation();
 
-  if (!hasHydrated || !allowed) return null;
+  // Keep chrome painted while hydrating — blank null frame felt like a freeze after login.
+  if (!hasHydrated) {
+    return <View style={{ flex: 1, backgroundColor: colors.background }} />;
+  }
+  if (!allowed) return null;
 
   return (
     <>

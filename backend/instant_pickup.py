@@ -57,10 +57,69 @@ def _looks_like_coords(text: str) -> bool:
     )
 
 
+def _is_plus_code(text: str) -> bool:
+    """True for Open Location Codes (e.g. CCHC+8Q3 or 8FG8CCHC+8Q3, Lagos)."""
+    import re
+
+    s = str(text or "").strip()
+    if not s or "+" not in s:
+        return False
+    head = s.split(",", 1)[0].strip()
+    # OLC alphabet excludes vowels and some letters; short or full codes both match.
+    return bool(
+        re.match(
+            r"^[23456789CFGHJMPQRVWX]{4,11}\+[23456789CFGHJMPQRVWX]{2,6}$",
+            head,
+            re.IGNORECASE,
+        )
+    )
+
+
+def strip_plus_code_prefix(text: str) -> str:
+    """
+    Remove a leading Plus Code token from a Google address string.
+    e.g. "H988+XVW Maryland mall, Ikeja" → "Maryland mall, Ikeja"
+         "CCHC+8Q3, Lagos" → "Lagos"
+    """
+    import re
+
+    s = str(text or "").strip()
+    if not s or "+" not in s:
+        return s
+    # Leading OLC then space or comma
+    m = re.match(
+        r"^([23456789CFGHJMPQRVWX]{4,11}\+[23456789CFGHJMPQRVWX]{2,6})\s*[, ]\s*(.+)$",
+        s,
+        re.IGNORECASE,
+    )
+    if m:
+        rest = m.group(2).strip(" ,")
+        return rest or s
+    if _is_plus_code(s):
+        parts = [p.strip() for p in s.split(",") if p.strip() and not _is_plus_code(p)]
+        return ", ".join(parts) if parts else s
+    return s
+
+
+def _is_bad_display_label(text: str) -> bool:
+    s = str(text or "").strip()
+    return (not s) or _looks_like_coords(s) or _is_plus_code(s)
+
+
+def _first_human_segment(formatted: str) -> str:
+    """First comma segment that is not a Plus Code / coordinate blob."""
+    for part in str(formatted or "").split(","):
+        head = part.strip()
+        if head and not _is_bad_display_label(head):
+            return head
+    return ""
+
+
 def pick_priority_label(results: list[dict[str, Any]]) -> dict[str, Any]:
     """
     Choose the best human label from Google Geocoding results.
     Returns {label, tier, formatted_address, components...}.
+    Never returns Plus Codes or raw lat/lng as the pickup chip.
     """
     best: Optional[dict[str, Any]] = None
     best_score = -1
@@ -71,6 +130,10 @@ def pick_priority_label(results: list[dict[str, Any]]) -> dict[str, Any]:
         formatted = str(result.get("formatted_address") or "").strip()
         name = str(result.get("name") or "").strip()  # rarely present on geocode
 
+        # Skip pure plus_code-only geocode rows; other results usually have the street.
+        if types == {"plus_code"}:
+            continue
+
         landmark = ""
         building = ""
         street = ""
@@ -78,27 +141,25 @@ def pick_priority_label(results: list[dict[str, Any]]) -> dict[str, Any]:
         area = ""
         city = ""
 
-        # Landmark / POI
-        if types & {"point_of_interest", "establishment", "tourist_attraction", "premise"}:
-            # Prefer first token of formatted (often the POI name) when types say POI
-            if formatted and "," in formatted:
-                landmark = formatted.split(",")[0].strip()
+        # Landmark / POI — never treat Plus Codes as landmarks
+        if types & {"point_of_interest", "establishment", "tourist_attraction"}:
+            landmark = _first_human_segment(formatted)
             landmark = landmark or name or comps.get("point_of_interest") or comps.get("establishment") or ""
+            if _is_bad_display_label(landmark):
+                landmark = ""
 
-        # Building
-        building = (
-            comps.get("premise")
-            or comps.get("subpremise")
-            or comps.get("plus_code")
-            or ""
-        )
+        # Building / premise — Plus Codes are NOT buildings
+        building = comps.get("premise") or comps.get("subpremise") or ""
+        if _is_bad_display_label(building):
+            building = ""
         if not building and "street_address" in types and formatted:
-            # House number + route often first segment
-            head = formatted.split(",")[0].strip()
-            if any(ch.isdigit() for ch in head):
+            head = _first_human_segment(formatted)
+            if head and any(ch.isdigit() for ch in head) and not _is_plus_code(head):
                 building = head
 
         route = comps.get("route") or ""
+        if _is_bad_display_label(route):
+            route = ""
         street_num = comps.get("street_number") or ""
         if street_num and route:
             street = f"{street_num} {route}"
@@ -112,57 +173,75 @@ def pick_priority_label(results: list[dict[str, Any]]) -> dict[str, Any]:
             or comps.get("colloquial_area")
             or ""
         )
+        if _is_bad_display_label(estate):
+            estate = ""
         area = estate or comps.get("administrative_area_level_2") or ""
+        if _is_bad_display_label(area):
+            area = ""
         city = (
             comps.get("locality")
             or comps.get("postal_town")
             or comps.get("administrative_area_level_2")
             or ""
         )
+        if _is_bad_display_label(city):
+            city = ""
         state = comps.get("administrative_area_level_1") or ""
         state_short = state.replace(" State", "").strip()
 
         # Tier selection
-        if landmark and not _looks_like_coords(landmark):
+        if landmark and not _is_bad_display_label(landmark):
             tier, score = "landmark", 100
             label = landmark
             if city and city.lower() not in label.lower():
                 label = f"{label}, {city}"
-        elif building and not _looks_like_coords(building):
+        elif building and not _is_bad_display_label(building):
             tier, score = "building", 80
             label = building
             if route and route.lower() not in label.lower():
                 label = f"{label}, {route}"
-        elif street and not _looks_like_coords(street):
+        elif street and not _is_bad_display_label(street):
             tier, score = "street", 60
             label = street
             if estate and estate.lower() not in label.lower():
                 label = f"{label}, {estate}"
             elif city and city.lower() not in label.lower():
                 label = f"{label}, {city}"
-        elif estate and not _looks_like_coords(estate):
+        elif estate and not _is_bad_display_label(estate):
             tier, score = "estate", 45
             label = f"{estate}, {state_short}" if state_short and estate != state_short else estate
-        elif area and not _looks_like_coords(area):
+        elif area and not _is_bad_display_label(area):
             tier, score = "area", 30
             label = f"{area}, {state_short}" if state_short and area != state_short else area
-        elif city and not _looks_like_coords(city):
+        elif city and not _is_bad_display_label(city):
             tier, score = "city", 15
             label = f"{city}, {state_short}" if state_short and city != state_short else city
-        elif formatted and not _looks_like_coords(formatted):
+        elif formatted and not _is_bad_display_label(formatted):
             tier, score = "area", 25
-            # Truncate long formatted addresses for chip UI
-            parts = [p.strip() for p in formatted.split(",") if p.strip()]
-            label = ", ".join(parts[:3]) if parts else formatted
+            # Truncate long formatted addresses for chip UI; drop Plus Code heads
+            parts = [
+                p.strip()
+                for p in formatted.split(",")
+                if p.strip() and not _is_bad_display_label(p.strip())
+            ]
+            label = ", ".join(parts[:3]) if parts else ""
+            if not label:
+                continue
         else:
+            continue
+
+        if _is_bad_display_label(label):
             continue
 
         if score > best_score:
             best_score = score
+            safe_formatted = formatted
+            if _is_bad_display_label(safe_formatted) or _is_plus_code(safe_formatted.split(",")[0]):
+                safe_formatted = label
             best = {
                 "label": label,
                 "tier": tier,
-                "formatted_address": formatted if not _looks_like_coords(formatted) else label,
+                "formatted_address": safe_formatted,
                 "landmark": landmark,
                 "building": building,
                 "street": street,
@@ -228,10 +307,15 @@ async def cache_get_by_h3(lat: float, lng: float) -> Optional[dict[str, Any]]:
             import json
 
             data = json.loads(raw) if isinstance(raw, str) else None
-            if isinstance(data, dict) and data.get("label") and not _looks_like_coords(str(data["label"])):
-                data["cache"] = "h3_hit"
-                data["h3_cell"] = cell
-                return data
+            if not isinstance(data, dict):
+                continue
+            label = str(data.get("label") or data.get("pickup_label") or data.get("short_label") or "")
+            # Skip poisoned cache entries (Plus Codes / coordinates) so we re-geocode.
+            if _is_bad_display_label(label):
+                continue
+            data["cache"] = "h3_hit"
+            data["h3_cell"] = cell
+            return data
     except Exception:
         logger.debug("pickup h3 cache get failed", exc_info=True)
     return None
@@ -258,10 +342,23 @@ async def cache_set_h3(lat: float, lng: float, payload: dict[str, Any], ttl_sec:
 
 def to_api_payload(picked: dict[str, Any], *, cache: str = "miss") -> dict[str, Any]:
     label = str(picked.get("label") or SAFE_FALLBACK).strip()
-    if _looks_like_coords(label) or not label:
-        label = SAFE_FALLBACK
+    if _is_bad_display_label(label):
+        # Prefer street / neighborhood fields over a Plus Code chip
+        for alt in (
+            picked.get("street"),
+            picked.get("neighborhood"),
+            picked.get("estate"),
+            picked.get("area"),
+            picked.get("city"),
+        ):
+            alt_s = str(alt or "").strip()
+            if alt_s and not _is_bad_display_label(alt_s):
+                label = alt_s
+                break
+        else:
+            label = SAFE_FALLBACK
     formatted = str(picked.get("formatted_address") or label).strip()
-    if _looks_like_coords(formatted) or not formatted:
+    if _is_bad_display_label(formatted) or _is_plus_code(formatted.split(",")[0]):
         formatted = label
     return {
         "address": formatted,

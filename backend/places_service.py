@@ -108,12 +108,22 @@ def _strip_directions_html(html: str) -> str:
     return " ".join(t.split()).strip()
 
 
+def _humanize_address(text: str) -> str:
+    """Drop leading Open Location Codes from Google address strings."""
+    try:
+        from instant_pickup import strip_plus_code_prefix
+
+        return strip_plus_code_prefix(text)
+    except Exception:
+        return str(text or "").strip()
+
+
 def _geocode_result_payload(first_result: dict) -> dict:
     """
     Build API response from Google Geocoding `results[0]`.
     `short_label` is rider-friendly: e.g. "Sangotedo, Lagos" when components allow.
     """
-    formatted = str(first_result.get("formatted_address") or "").strip()
+    formatted = _humanize_address(str(first_result.get("formatted_address") or "").strip())
     comps = first_result.get("address_components") or []
 
     neighborhood = ""
@@ -151,6 +161,7 @@ def _geocode_result_payload(first_result: dict) -> dict:
         short_label = formatted
     else:
         short_label = ""
+    short_label = _humanize_address(short_label)
 
     return {
         "address": formatted,
@@ -271,7 +282,7 @@ async def _geocode_search_fallback_predictions(input_text: str, components: str)
     predictions: list[dict] = []
     for idx, r in enumerate(data.get("results", [])[:12]):
         pid = str(r.get("place_id") or "").strip()
-        formatted = str(r.get("formatted_address") or "").strip()
+        formatted = _humanize_address(str(r.get("formatted_address") or "").strip())
         if not formatted:
             continue
         parts = [p.strip() for p in formatted.split(",") if p.strip()]
@@ -343,7 +354,21 @@ async def autocomplete_places(
                     incr("places.autocomplete_cache_hit")
                 except Exception:
                     pass
-                return cached["response"]
+                resp = cached["response"]
+                if isinstance(resp, dict) and isinstance(resp.get("predictions"), list):
+                    cleaned = []
+                    for p in resp["predictions"]:
+                        if not isinstance(p, dict):
+                            continue
+                        cleaned.append(
+                            {
+                                **p,
+                                "description": _humanize_address(p.get("description", "")),
+                                "main_text": _humanize_address(p.get("main_text", "")),
+                            }
+                        )
+                    return {**resp, "predictions": cleaned}
+                return resp
 
         # Build location bias parameter
         location_params = f"&components={components}" if components else ""
@@ -365,10 +390,14 @@ async def autocomplete_places(
             predictions = []
             for pred in data.get("predictions", []):
                 formatting = pred.get("structured_formatting", {})
+                description = _humanize_address(pred.get("description", ""))
+                main = _humanize_address(
+                    formatting.get("main_text", pred.get("description", ""))
+                )
                 predictions.append({
                     "place_id": pred.get("place_id", ""),
-                    "description": pred.get("description", ""),
-                    "main_text": formatting.get("main_text", pred.get("description", "")),
+                    "description": description,
+                    "main_text": main,
                     "secondary_text": formatting.get("secondary_text", ""),
                 })
 
@@ -435,7 +464,10 @@ async def get_place_details(
             key = _cache_key("place_details", {"place_id": place_id})
             cached = await _get_cache(key)
             if cached:
-                return cached["response"]
+                resp = cached["response"]
+                if isinstance(resp, dict) and resp.get("address"):
+                    return {**resp, "address": _humanize_address(resp.get("address") or "")}
+                return resp
 
         session_param = f"&sessiontoken={quote(session)}" if session else ""
         url = (
@@ -452,7 +484,7 @@ async def get_place_details(
             response_payload = {
                 "latitude": result["geometry"]["location"]["lat"],
                 "longitude": result["geometry"]["location"]["lng"],
-                "address": result["formatted_address"],
+                "address": _humanize_address(result.get("formatted_address") or ""),
                 "status": "OK"
             }
             if use_cache:
@@ -509,14 +541,20 @@ async def reverse_geocode(
         )
         cached = await _get_cache(key)
         if cached and isinstance(cached.get("response"), dict):
+            from instant_pickup import _is_bad_display_label, _is_plus_code
+
             resp = cached["response"]
-            # Migrate legacy coord-fallback payloads
+            # Migrate legacy coord / Plus Code payloads — force re-geocode when bad
             short = str(resp.get("short_label") or resp.get("pickup_label") or "")
             addr = str(resp.get("address") or "")
-            if short and not re.match(r"^\s*-?\d", short):
+            if short and not _is_bad_display_label(short) and not _is_plus_code(short.split(",")[0]):
                 await cache_set_h3(lat, lng, {**resp, "label": short or addr})
                 return {**resp, "cache": "redis_or_mongo"}
-            if addr and not re.match(r"^\s*-?\d+\.\d+\s*,", addr):
+            if (
+                addr
+                and not _is_bad_display_label(addr)
+                and not _is_plus_code(addr.split(",")[0])
+            ):
                 await cache_set_h3(lat, lng, {**resp, "label": resp.get("short_label") or addr})
                 return {**resp, "cache": "redis_or_mongo"}
 

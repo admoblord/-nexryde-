@@ -21,7 +21,8 @@ import {
   markAllFeaturesAsSeen,
   markFeatureAsSeen,
 } from '@/src/services/featureAnnouncements';
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL } from '@/src/services/api';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 
@@ -101,8 +102,10 @@ export default function FeatureNotificationsScreen({ role }: Props) {
   const flow = useFlowLayout();
 
   const [tab, setTab] = useState<NotifTab>('activity');
-  const [loading, setLoading] = useState(true);
+  // Don't gate the whole tab on network — paint chrome immediately, fill list in place.
+  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [listHydrating, setListHydrating] = useState(true);
 
   // Feature announcements
   const [rows, setRows] = useState<FeatureAnnouncement[]>([]);
@@ -124,10 +127,10 @@ export default function FeatureNotificationsScreen({ role }: Props) {
   const loadBackendNotifs = useCallback(async () => {
     if (!userId || !canCallAuthedApi) return;
     try {
-      const headers = getAuthHeaders() as Record<string, string>;
-      const res = await fetch(
+      // authedFetch: waits for token + refreshes on 401 (bare getAuthHeaders raced empty).
+      const res = await authedFetch(
         `${BACKEND_URL}/api/users/${userId}/notifications?limit=40`,
-        { headers }
+        { method: 'GET', timeoutMs: 12_000, preserveSessionOn401: true },
       );
       if (res.ok) {
         const data = await res.json();
@@ -148,6 +151,7 @@ export default function FeatureNotificationsScreen({ role }: Props) {
       ]);
     } finally {
       setLoading(false);
+      setListHydrating(false);
       setRefreshing(false);
     }
   }, [loadFeatures, loadBackendNotifs]);
@@ -155,11 +159,16 @@ export default function FeatureNotificationsScreen({ role }: Props) {
   useEffect(() => {
     if (!canCallAuthedApi) {
       setLoading(false);
+      setListHydrating(false);
       return;
     }
+    setListHydrating(true);
     void load();
     // Absolute failsafe — never leave the tab spinning forever on weak networks.
-    const failsafe = setTimeout(() => setLoading(false), 15000);
+    const failsafe = setTimeout(() => {
+      setLoading(false);
+      setListHydrating(false);
+    }, 15000);
     return () => clearTimeout(failsafe);
   }, [load, canCallAuthedApi]);
 
@@ -170,10 +179,9 @@ export default function FeatureNotificationsScreen({ role }: Props) {
     );
     setUnreadBackend((c) => Math.max(0, c - 1));
     try {
-      const headers = getAuthHeaders() as Record<string, string>;
-      await fetch(
+      await authedFetch(
         `${BACKEND_URL}/api/users/${userId}/notifications/${notifId}/read`,
-        { method: 'POST', headers }
+        { method: 'POST', timeoutMs: 10_000, preserveSessionOn401: true },
       );
     } catch { /* best-effort */ }
   };
@@ -183,10 +191,9 @@ export default function FeatureNotificationsScreen({ role }: Props) {
     setBackendNotifs((prev) => prev.map((n) => ({ ...n, read: true })));
     setUnreadBackend(0);
     try {
-      const headers = getAuthHeaders() as Record<string, string>;
-      await fetch(
+      await authedFetch(
         `${BACKEND_URL}/api/users/${userId}/notifications/read-all`,
-        { method: 'POST', headers }
+        { method: 'POST', timeoutMs: 10_000, preserveSessionOn401: true },
       );
     } catch { /* best-effort */ }
   };
@@ -340,11 +347,19 @@ export default function FeatureNotificationsScreen({ role }: Props) {
                     },
                   ]}
                 >
-                  <Ionicons name="notifications-off-outline" size={32} color={colors.textMuted} />
-                  <Text style={[styles.emptyTitle, { color: colors.text }]}>All caught up</Text>
-                  <Text style={[styles.emptyText, { color: colors.textMuted }]}>
-                    Trip updates, payments, and account alerts land here.
+                  {listHydrating ? (
+                    <ActivityIndicator color={BRAND.primary} />
+                  ) : (
+                    <Ionicons name="notifications-off-outline" size={32} color={colors.textMuted} />
+                  )}
+                  <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                    {listHydrating ? 'Loading…' : 'All caught up'}
                   </Text>
+                  {!listHydrating ? (
+                    <Text style={[styles.emptyText, { color: colors.textMuted }]}>
+                      Trip updates, payments, and account alerts land here.
+                    </Text>
+                  ) : null}
                 </View>
               ) : (
                 backendNotifs.map((notif) => {

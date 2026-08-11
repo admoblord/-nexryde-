@@ -28,7 +28,9 @@ spec:
         # Trade-off: the first request after ~15 min idle pays a cold start.
         # startup-cpu-boost stays on to shorten it, and the app already warms
         # the backend from the welcome/login screen (warmBackend.ts).
-        autoscaling.knative.dev/minScale: "0"
+        # Keep one warm instance — scale-to-zero caused 503s / 60s+ cold starts so
+        # rider pickup, tabs, and profile looked empty after idle.
+        autoscaling.knative.dev/minScale: "1"
         autoscaling.knative.dev/maxScale: "10"
         run.googleapis.com/startup-cpu-boost: "true"
         run.googleapis.com/cpu-throttling: "true"

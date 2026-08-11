@@ -83,6 +83,7 @@ import {
   DETECTING_PICKUP,
   SAFE_PICKUP_FALLBACK,
   isDetectingPickupLabel,
+  isPlusCodeLabel,
   isRawLatLngLabel,
   preloadPickupAt,
   resolveInstantPickup,
@@ -686,54 +687,54 @@ function BookInDriveStyle() {
     }
   }, [walletEnabled, ridePaymentMethod]);
 
+  // Defer secondary book loads so GPS + destination search get the radio first.
   useEffect(() => {
-    if (!riderId || !walletEnabled) {
-      setWalletBalance(null);
-      return;
-    }
-    (async () => {
-      try {
-        const w = await getWalletMe(1);
-        setWalletBalance(Number(w.data?.balance ?? 0));
-      } catch {
+    if (!riderId) return;
+    let cancelled = false;
+    const warm = setTimeout(() => {
+      if (cancelled) return;
+      if (walletEnabled) {
+        void getWalletMe(1)
+          .then((w) => {
+            if (!cancelled) setWalletBalance(Number(w.data?.balance ?? 0));
+          })
+          .catch(() => {
+            if (!cancelled) setWalletBalance(null);
+          });
+      } else {
         setWalletBalance(null);
       }
-    })();
+      void getRiderPreferences(riderId)
+        .then((res) => {
+          if (cancelled) return;
+          const name = String(res.data?.estate_name || '');
+          const code = String(res.data?.estate_gate_code || '');
+          setEstateName(name);
+          setEstateGateCode(code);
+          if (code) {
+            setGateCodeSaved(true);
+            setIncludeGateCode(true);
+          }
+        })
+        .catch(() => {});
+      void fetch(`${BACKEND_URL}/api/enforcement/book-status/${riderId}`, {
+        headers: getAuthHeaders(),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (cancelled) return;
+          if (!data.can_book && data.reason === 'booking_blocked' && data.seconds_remaining > 0) {
+            setBookSuspended(true);
+            setBookSuspendedSeconds(data.seconds_remaining);
+          }
+        })
+        .catch(() => {});
+    }, 900);
+    return () => {
+      cancelled = true;
+      clearTimeout(warm);
+    };
   }, [riderId, walletEnabled]);
-
-  useEffect(() => {
-    if (!riderId) return;
-    (async () => {
-      try {
-        const res = await getRiderPreferences(riderId);
-        const name = String(res.data?.estate_name || '');
-        const code = String(res.data?.estate_gate_code || '');
-        setEstateName(name);
-        setEstateGateCode(code);
-        if (code) {
-          setGateCodeSaved(true);
-          setIncludeGateCode(true);
-        }
-      } catch {}
-    })();
-  }, [riderId]);
-
-  // Check if rider is currently booking-suspended (1h cooldown after 7 cancellations in 24h)
-  useEffect(() => {
-    if (!riderId) return;
-    void (async () => {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/enforcement/book-status/${riderId}`, {
-          headers: getAuthHeaders(),
-        });
-        const data = await res.json();
-        if (!data.can_book && data.reason === 'booking_blocked' && data.seconds_remaining > 0) {
-          setBookSuspended(true);
-          setBookSuspendedSeconds(data.seconds_remaining);
-        }
-      } catch {}
-    })();
-  }, [riderId]);
 
   // Countdown ticker for booking suspension
   useEffect(() => {
@@ -759,52 +760,68 @@ function BookInDriveStyle() {
     };
   }, [bookSuspended]);
 
-  // Pre-load rider's saved mood preferences as default chip selection
+  // Mood / promo / first-ride / scheduled — after first paint (not on the critical booking path).
   useEffect(() => {
     if (!riderId) return;
-    void (async () => {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/users/${riderId}/preferences`, {
-          headers: getAuthHeaders(),
+    let cancelled = false;
+    const warm = setTimeout(() => {
+      if (cancelled) return;
+      void fetch(`${BACKEND_URL}/api/users/${riderId}/preferences`, {
+        headers: getAuthHeaders(),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (cancelled) return;
+          const m = data?.ride_mood;
+          if (!m) return;
+          const chips: string[] = [];
+          if (m.conversation === 'quiet') chips.push('quiet_ride');
+          if (m.conversation === 'chatty') chips.push('chatty_driver');
+          if (m.music === 'on') chips.push('music_on');
+          if (m.temperature === 'cold') chips.push('cold_ac');
+          if (chips.length > 0) setRidePreferences(chips);
+        })
+        .catch(() => {});
+      void fetch(`${BACKEND_URL}/api/incentives/first-ride-status`, {
+        headers: getAuthHeaders(),
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          if (!cancelled) setIsFirstRider(d?.first_ride_completed === false);
+        })
+        .catch(() => {});
+      void fetch(`${BACKEND_URL}/api/rides/scheduled/${encodeURIComponent(riderId)}`, {
+        headers: getAuthHeaders(),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (cancelled) return;
+          const rides = Array.isArray(data?.scheduled_rides) ? data.scheduled_rides : [];
+          setScheduledRides(rides.slice(0, 2));
+        })
+        .catch(() => {
+          if (!cancelled) setScheduledRides([]);
         });
-        const data = await res.json();
-        const m = data?.ride_mood;
-        if (!m) return;
-        const chips: string[] = [];
-        if (m.conversation === 'quiet') chips.push('quiet_ride');
-        if (m.conversation === 'chatty') chips.push('chatty_driver');
-        if (m.music === 'on') chips.push('music_on');
-        if (m.temperature === 'cold') chips.push('cold_ac');
-        if (chips.length > 0) setRidePreferences(chips);
-      } catch {}
-    })();
+    }, 1400);
+    return () => {
+      cancelled = true;
+      clearTimeout(warm);
+    };
   }, [riderId]);
 
   useEffect(() => {
     if (!BOOKING_PROMO_ENABLED) return;
     let cancelled = false;
-    void AsyncStorage.getItem(BOOKING_PROMO_DISMISS_KEY).then((v) => {
-      if (!cancelled && v !== '1') setBookingPromoVisible(true);
-    });
+    const warm = setTimeout(() => {
+      void AsyncStorage.getItem(BOOKING_PROMO_DISMISS_KEY).then((v) => {
+        if (!cancelled && v !== '1') setBookingPromoVisible(true);
+      });
+    }, 1600);
     return () => {
       cancelled = true;
+      clearTimeout(warm);
     };
   }, []);
-
-  // Check if this rider has never taken a trip — show 20% first-ride discount banner
-  useEffect(() => {
-    if (!riderId) return;
-    let cancelled = false;
-    void fetch(`${BACKEND_URL}/api/incentives/first-ride-status`, {
-      headers: getAuthHeaders(),
-    })
-      .then((r) => r.json())
-      .then((d) => {
-        if (!cancelled) setIsFirstRider(d?.first_ride_completed === false);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [riderId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -824,25 +841,6 @@ function BookInDriveStyle() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (!riderId) {
-      setScheduledRides([]);
-      return;
-    }
-    (async () => {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/rides/scheduled/${encodeURIComponent(riderId)}`, {
-          headers: getAuthHeaders(),
-        });
-        const data = await res.json();
-        const rides = Array.isArray(data?.scheduled_rides) ? data.scheduled_rides : [];
-        setScheduledRides(rides.slice(0, 2));
-      } catch {
-        setScheduledRides([]);
-      }
-    })();
-  }, [riderId]);
 
   useEffect(() => {
     const lat = pickupCoords?.lat || currentLocation?.lat;
@@ -878,12 +876,14 @@ function BookInDriveStyle() {
         if (!cancelled) setNearbyDrivers([]);
       }
     };
-    void run();
-    // 30s is plenty for a nearby-supply overlay; tripDraftRouteKey was forcing
-    // extra fetch+marker churn on every fare recalculation.
+    // Nearby supply overlay can wait — don't compete with fare/places on open.
+    const start = setTimeout(() => {
+      if (!cancelled) void run();
+    }, 1200);
     const timer = setInterval(run, 30000);
     return () => {
       cancelled = true;
+      clearTimeout(start);
       clearInterval(timer);
     };
   }, [pickupCoords?.lat, pickupCoords?.lng, currentLocation?.lat, currentLocation?.lng, selectedVehicle]);
@@ -927,6 +927,7 @@ function BookInDriveStyle() {
         if (status !== 'granted') {
           if (mounted) {
             setGpsStatus('error');
+            setPickup(SAFE_PICKUP_FALLBACK);
             setPickupDetecting(false);
           }
           return;
@@ -988,13 +989,24 @@ function BookInDriveStyle() {
           onError: () => {
             if (mounted && !gotFix) {
               setGpsStatus('error');
+              setPickup(SAFE_PICKUP_FALLBACK);
               setPickupDetecting(false);
             }
           },
         });
+        // Hard failsafe — never leave Detecting… if GPS/network stalls.
+        setTimeout(() => {
+          if (!mounted || gotFix || manualPickupRef.current) return;
+          setPickup((prev) =>
+            isDetectingPickupLabel(prev) ? SAFE_PICKUP_FALLBACK : prev,
+          );
+          setPickupDetecting(false);
+          setGpsStatus((s) => (s === 'detecting' ? 'error' : s));
+        }, 14000);
       } catch {
         if (mounted) {
           setGpsStatus('error');
+          setPickup(SAFE_PICKUP_FALLBACK);
           setPickupDetecting(false);
         }
       }
@@ -1014,10 +1026,16 @@ function BookInDriveStyle() {
     params.pickupLng,
   ]);
 
-  // If pickup is still detecting / raw after lock, retry Instant Pickup (cold start / rate limit).
+  // If pickup is still detecting / raw / Plus Code after lock, retry Instant Pickup.
   useEffect(() => {
     if (gpsStatus !== 'locked' || !pickupCoords) return;
-    if (!isDetectingPickupLabel(pickup) && !isRawLatLngLabel(pickup)) return;
+    if (
+      !isDetectingPickupLabel(pickup) &&
+      !isRawLatLngLabel(pickup) &&
+      !isPlusCodeLabel(pickup)
+    ) {
+      return;
+    }
     let cancelled = false;
     const t = setTimeout(() => {
       void (async () => {
@@ -1034,7 +1052,10 @@ function BookInDriveStyle() {
               : prev,
           );
         } catch {
-          /* ignore */
+          if (!cancelled) {
+            setPickup(SAFE_PICKUP_FALLBACK);
+            setPickupDetecting(false);
+          }
         }
       })();
     }, 220);
@@ -1044,10 +1065,16 @@ function BookInDriveStyle() {
     };
   }, [gpsStatus, pickupCoords?.lat, pickupCoords?.lng, pickup]);
 
-  // Opening pickup search — resolve detecting / legacy labels when modal opens.
+  // Opening pickup search — resolve detecting / legacy / Plus Code labels when modal opens.
   useEffect(() => {
     if (!showLocationModal || editingField !== 'pickup' || !pickupCoords) return;
-    if (!isDetectingPickupLabel(pickup) && !isRawLatLngLabel(pickup)) return;
+    if (
+      !isDetectingPickupLabel(pickup) &&
+      !isRawLatLngLabel(pickup) &&
+      !isPlusCodeLabel(pickup)
+    ) {
+      return;
+    }
     let cancelled = false;
     void (async () => {
       const resolved = await resolveInstantPickup(pickupCoords.lat, pickupCoords.lng, {
@@ -1077,8 +1104,10 @@ function BookInDriveStyle() {
         sessionToken && sessionToken.trim().length > 0
           ? `?sessiontoken=${encodeURIComponent(sessionToken.trim())}`
           : '';
-      const res = await fetch(
+      // Place details require auth — without a bearer the pick never resolves coords.
+      const res = await authedFetch(
         `${BACKEND_URL}/api/places/details/${encodeURIComponent(id)}${sessionQ}`,
+        { method: 'GET', preserveSessionOn401: true, timeoutMs: 12_000 },
       );
       const data = await res.json().catch(() => ({}));
       const lat = Number(data?.latitude);
@@ -1434,77 +1463,70 @@ function BookInDriveStyle() {
         inferCity(pickup, destination) ||
         'default';
 
-      const results = await Promise.all(
-        availableVehicles.map(async (vehicle) => {
-          try {
-            const data = await requestFareEstimate({
-              pickup_lat: pLat!,
-              pickup_lng: pLng!,
-              dropoff_lat: dLat!,
-              dropoff_lng: dLng!,
-              ...routeStopFields,
-              service_type: vehicle.id,
-              city,
-              pickup_address: pickup?.trim() || undefined,
-              dropoff_address: destination?.trim() || undefined,
-              preferred_driver_id: requestedDriverId || undefined,
-            });
-            const price = Number(data?.total_fare ?? data?.fare ?? data?.total ?? 0);
-            return [vehicle.id, Math.round(price), data] as const;
-          } catch {
-            return [vehicle.id, 0, null] as const;
-          }
-        })
-      );
+      const estimateOne = async (vehicleId: string) => {
+        try {
+          const data = await requestFareEstimate({
+            pickup_lat: pLat!,
+            pickup_lng: pLng!,
+            dropoff_lat: dLat!,
+            dropoff_lng: dLng!,
+            ...routeStopFields,
+            service_type: vehicleId,
+            city,
+            pickup_address: pickup?.trim() || undefined,
+            dropoff_address: destination?.trim() || undefined,
+            preferred_driver_id: requestedDriverId || undefined,
+          });
+          const price = Number(data?.total_fare ?? data?.fare ?? data?.total ?? 0);
+          return [vehicleId, Math.round(price), data] as const;
+        } catch {
+          return [vehicleId, 0, null] as const;
+        }
+      };
 
-      if (ignoreStaleRouteResponse(requestId, 'fare-matrix')) return;
+      // Selected (or economy) first so Confirm / main price unlock ASAP; others fill in background.
+      let veh = selectedVehicle || 'economy';
+      if (!selectedVehicle) setSelectedVehicle('economy');
 
-      const nextMatrix = Object.fromEntries(results.map(([id, price]) => [id, price]));
-      const nextOrig: Record<string, number> = {};
-      for (const [id, price, data] of results) {
-        const d = data as FareEstimateResponse | null;
-        if (
-          d?.first_ride_discount_applied &&
-          d.original_total_fare != null &&
-          Number.isFinite(Number(d.original_total_fare))
-        ) {
-          const o = Math.round(Number(d.original_total_fare));
-          if (o > price) nextOrig[id] = o;
+      const primary = await estimateOne(veh);
+      if (ignoreStaleRouteResponse(requestId, 'fare-matrix-primary')) return;
+
+      const [primaryId, primaryPrice, primaryDetail] = primary;
+      setFareMatrix((prev) => ({ ...prev, [primaryId]: primaryPrice }));
+      if (
+        primaryDetail?.first_ride_discount_applied &&
+        primaryDetail.original_total_fare != null &&
+        Number.isFinite(Number(primaryDetail.original_total_fare))
+      ) {
+        const o = Math.round(Number(primaryDetail.original_total_fare));
+        if (o > primaryPrice) {
+          setFareMatrixOriginal((prev) => ({ ...prev, [primaryId]: o }));
         }
       }
-      setFareMatrix(nextMatrix);
-      setFareMatrixOriginal(nextOrig);
 
-      let veh = selectedVehicle;
-      if (!veh && (nextMatrix['economy'] ?? 0) > 0) {
-        veh = 'economy';
-        setSelectedVehicle('economy');
-      }
-      if (!veh) return;
-
-      const row = results.find((r) => r[0] === veh);
-      const detail = row?.[2];
-      const vehPrice = Number(nextMatrix[veh] ?? 0);
-      if (detail) {
+      if (primaryDetail) {
         fareDetailsEpochRef.current = requestId;
-        setFareDetails(detail);
+        setFareDetails(primaryDetail);
         const etaFromEstimate = Number(
-          detail.duration_min ??
-            detail.estimated_time_minutes ??
-            detail.traffic_duration_min ??
-            detail.pricing_route_minutes ??
+          primaryDetail.duration_min ??
+            primaryDetail.estimated_time_minutes ??
+            primaryDetail.traffic_duration_min ??
+            primaryDetail.pricing_route_minutes ??
             tripDraft.durationMinutes ??
             0,
         );
-        const distanceKm = Number(
-          detail.distance_km ?? tripDraft.distanceKm ?? 0,
+        const distanceKm = Number(primaryDetail.distance_km ?? tripDraft.distanceKm ?? 0);
+        const vehFare = Math.round(
+          Number(primaryDetail.total_fare ?? primaryDetail.fare ?? primaryPrice ?? 0),
         );
-        const vehFare = Math.round(Number(detail.total_fare ?? detail.fare ?? vehPrice ?? 0));
         commitFare(requestId, vehFare, {
           vehicleId: veh,
-          distanceKm: Number(detail.distance_km ?? tripDraft.distanceKm ?? 0),
+          distanceKm: Number(primaryDetail.distance_km ?? tripDraft.distanceKm ?? 0),
           durationMinutes: Number(
-            detail.duration_min ?? detail.estimated_time_minutes ?? tripDraft.durationMinutes ?? 0,
+            primaryDetail.duration_min ??
+              primaryDetail.estimated_time_minutes ??
+              tripDraft.durationMinutes ??
+              0,
           ),
         });
         applyTripDraftRoute(requestId, {
@@ -1527,7 +1549,7 @@ function BookInDriveStyle() {
           if (ignoreStaleRouteResponse(requestId, 'current-fare')) return prev;
           return vehFare > 0 ? vehFare : prev;
         });
-      } else if (vehPrice > 0) {
+      } else if (primaryPrice > 0) {
         syncFareLockSnapshot(
           pLat!,
           pLng!,
@@ -1536,11 +1558,40 @@ function BookInDriveStyle() {
           routeStopFields.stop_lat,
           routeStopFields.stop_lng,
         );
-        applyTripDraftRoute(requestId, { estimatedFare: vehPrice });
+        applyTripDraftRoute(requestId, { estimatedFare: primaryPrice });
         if (!ignoreStaleRouteResponse(requestId, 'current-fare-fallback')) {
-          setCurrentFare(vehPrice);
+          setCurrentFare(primaryPrice);
         }
       }
+
+      const others = availableVehicles.map((v) => v.id).filter((id) => id !== veh);
+      const rest = await Promise.all(others.map((id) => estimateOne(id)));
+      if (ignoreStaleRouteResponse(requestId, 'fare-matrix')) return;
+
+      const nextMatrix: Record<string, number> = { [primaryId]: primaryPrice };
+      const nextOrig: Record<string, number> = {};
+      if (
+        primaryDetail?.first_ride_discount_applied &&
+        primaryDetail.original_total_fare != null &&
+        Number.isFinite(Number(primaryDetail.original_total_fare))
+      ) {
+        const o = Math.round(Number(primaryDetail.original_total_fare));
+        if (o > primaryPrice) nextOrig[primaryId] = o;
+      }
+      for (const [id, price, data] of rest) {
+        nextMatrix[id] = price;
+        const d = data as FareEstimateResponse | null;
+        if (
+          d?.first_ride_discount_applied &&
+          d.original_total_fare != null &&
+          Number.isFinite(Number(d.original_total_fare))
+        ) {
+          const o = Math.round(Number(d.original_total_fare));
+          if (o > price) nextOrig[id] = o;
+        }
+      }
+      setFareMatrix(nextMatrix);
+      setFareMatrixOriginal(nextOrig);
     } catch {
       /* matrix calc failed — keep prior fares; avoid crashing booking sheet */
     }
@@ -1705,7 +1756,7 @@ function BookInDriveStyle() {
         /* fare matrix best-effort */
       }
     };
-    const timer = setTimeout(run, 400);
+    const timer = setTimeout(run, 180);
     return () => {
       clearTimeout(timer);
     };
@@ -1713,9 +1764,8 @@ function BookInDriveStyle() {
     // NOTE: tripDraft.distanceKm and selectedVehicle are intentionally NOT deps.
     // - distanceKm is *written* by this effect (via applyTripDraftRoute), so
     //   including it caused a self-triggered second full 4–5 call fan-out.
-    // - a vehicle tap already recomputes its fare via handleCalculateFare(); the
-    //   matrix prices don't change with selection, so re-running the whole
-    //   fan-out on every tap was pure waste.
+    // - Primary vehicle is estimated first inside calculateAllVehiclePrices; a
+    //   vehicle tap already recomputes its fare via handleCalculateFare().
     pickupCoords?.lat,
     pickupCoords?.lng,
     destinationCoords?.lat,
@@ -3330,94 +3380,107 @@ function BookInDriveStyle() {
                 else if (editingField === 'stop') setStop(text);
                 else setDestination(text);
               }}
-              onPlaceSelected={async (loc) => {
-                try {
-                  const field = editingField;
-                  const rawDesc = typeof loc?.description === 'string' ? loc.description : '';
-                  let desc = String(rawDesc || '').trim() || 'Selected location';
-                  let coords: { lat: number; lng: number } | null = null;
+              onPlaceSelected={(loc) => {
+                // Close modal + paint label immediately; resolve lat/lng in background.
+                // Waiting on place-details (1s+) made pickup/destination feel frozen.
+                const field = editingField;
+                const rawDesc = typeof loc?.description === 'string' ? loc.description : '';
+                const initialDesc = String(rawDesc || '').trim() || 'Selected location';
+                const placeId = typeof loc?.placeId === 'string' ? loc.placeId.trim() : '';
+                const syntheticPlaceId = !placeId || placeId.startsWith('prediction-');
+                const sessionToken = loc.sessionToken;
 
-                  const placeId = typeof loc?.placeId === 'string' ? loc.placeId.trim() : '';
-                  const syntheticPlaceId = !placeId || placeId.startsWith('prediction-');
+                if (field === 'pickup') {
+                  setPickup(safePickupDisplay(initialDesc));
+                  setPickupDetecting(false);
+                } else if (field === 'stop') {
+                  setStop(initialDesc);
+                } else {
+                  setDestination(initialDesc);
+                }
+                setShowLocationModal(false);
 
-                  if (placeId && !syntheticPlaceId) {
-                    const details = await fetchPlaceDetails(placeId, loc.sessionToken);
-                    if (details && Number.isFinite(details.lat) && Number.isFinite(details.lng)) {
-                      coords = { lat: details.lat, lng: details.lng };
-                      if (details.description) desc = details.description;
+                void (async () => {
+                  try {
+                    let desc = initialDesc;
+                    let coords: { lat: number; lng: number } | null = null;
+
+                    if (placeId && !syntheticPlaceId) {
+                      const details = await fetchPlaceDetails(placeId, sessionToken);
+                      if (details && Number.isFinite(details.lat) && Number.isFinite(details.lng)) {
+                        coords = { lat: details.lat, lng: details.lng };
+                        if (details.description) desc = details.description;
+                      }
                     }
-                  }
 
-                  if (!coords && desc.length >= 3) {
-                    const resolved = await resolveAddressToCoords(desc);
-                    if (resolved && Number.isFinite(resolved.lat) && Number.isFinite(resolved.lng)) {
-                      coords = { lat: resolved.lat, lng: resolved.lng };
-                      desc = String(resolved.address || desc).trim() || desc;
+                    if (!coords && desc.length >= 3) {
+                      const resolved = await resolveAddressToCoords(desc);
+                      if (resolved && Number.isFinite(resolved.lat) && Number.isFinite(resolved.lng)) {
+                        coords = { lat: resolved.lat, lng: resolved.lng };
+                        desc = String(resolved.address || desc).trim() || desc;
+                      }
                     }
-                  }
 
-                  if (field === 'pickup') {
-                    setPickup(safePickupDisplay(desc));
-                    setPickupDetecting(false);
-                    if (coords) {
-                      manualPickupRef.current = true;
-                      setPickupCoords(coords);
-                      if (isRawLatLngLabel(desc) || isDetectingPickupLabel(desc)) {
-                        void resolveInstantPickup(coords.lat, coords.lng).then((r) => {
-                          setPickup(safePickupDisplay(r.label));
-                        });
+                    if (field === 'pickup') {
+                      setPickup(safePickupDisplay(desc));
+                      if (coords) {
+                        manualPickupRef.current = true;
+                        setPickupCoords(coords);
+                        if (isRawLatLngLabel(desc) || isDetectingPickupLabel(desc)) {
+                          void resolveInstantPickup(coords.lat, coords.lng).then((r) => {
+                            setPickup(safePickupDisplay(r.label));
+                          });
+                        }
+                      } else {
+                        Alert.alert(
+                          'Could not pin pickup',
+                          'Pick a suggestion from the list or type a fuller address so we can show the map at your pickup.',
+                        );
+                      }
+                    } else if (field === 'stop') {
+                      setStop(desc);
+                      if (coords) {
+                        setStopCoords(coords);
+                        invalidateRoutePricing();
+                      } else {
+                        Alert.alert(
+                          'Could not pin stop',
+                          'Pick a suggestion from the list or type a fuller address for your stop.',
+                        );
                       }
                     } else {
-                      Alert.alert(
-                        'Could not pin pickup',
-                        'Pick a suggestion from the list or type a fuller address so we can show the map at your pickup.',
-                      );
-                      return;
+                      setDestination(desc);
+                      if (coords) {
+                        setDestinationCoords(coords);
+                        void cacheRecentLocation({
+                          address: desc,
+                          description: desc,
+                          lat: coords.lat,
+                          lng: coords.lng,
+                        });
+                        setRecentDestinations((prev) => {
+                          const next = [
+                            { address: desc, lat: coords.lat, lng: coords.lng },
+                            ...prev.filter(
+                              (p) => String(p.address || p.description) !== desc,
+                            ),
+                          ];
+                          return next.slice(0, 8);
+                        });
+                      } else {
+                        Alert.alert(
+                          'Could not pin destination',
+                          'Pick a suggestion from the list or type a fuller street address so we can place it on the map.',
+                        );
+                      }
                     }
-                  } else if (field === 'stop') {
-                    setStop(desc);
-                    if (coords) {
-                      setStopCoords(coords);
-                      invalidateRoutePricing();
-                    } else {
-                      Alert.alert(
-                        'Could not pin stop',
-                        'Pick a suggestion from the list or type a fuller address for your stop.',
-                      );
-                      return;
-                    }
-                  } else {
-                    setDestination(desc);
-                    if (coords) {
-                      setDestinationCoords(coords);
-                      void cacheRecentLocation({
-                        address: desc,
-                        description: desc,
-                        lat: coords.lat,
-                        lng: coords.lng,
-                      });
-                      setRecentDestinations((prev) => {
-                        const next = [
-                          { address: desc, lat: coords.lat, lng: coords.lng },
-                          ...prev.filter(
-                            (p) =>
-                              String(p.address || p.description) !== desc,
-                          ),
-                        ];
-                        return next.slice(0, 8);
-                      });
-                    } else {
-                      Alert.alert(
-                        'Could not pin destination',
-                        'Pick a suggestion from the list or type a fuller street address so we can place it on the map.',
-                      );
-                      return;
-                    }
+                  } catch {
+                    Alert.alert(
+                      'Location',
+                      'Could not load that place. Try another suggestion or type the address again.',
+                    );
                   }
-                  setShowLocationModal(false);
-                } catch {
-                  Alert.alert('Location', 'Could not load that place. Try another suggestion or type the address again.');
-                }
+                })();
               }}
               biasLat={pickupCoords?.lat ?? currentLocation?.lat}
               biasLng={pickupCoords?.lng ?? currentLocation?.lng}

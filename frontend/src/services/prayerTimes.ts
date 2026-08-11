@@ -245,8 +245,10 @@ export function usePrayerTimes() {
     if (!location) return;
 
     try {
-      const response = await fetch(
-        `${BACKEND_URL}/api/places/nearby?lat=${location.lat}&lng=${location.lng}&radius=5000&type=mosque`
+      const { authedFetch } = await import('@/src/utils/sessionRefresh');
+      const response = await authedFetch(
+        `${BACKEND_URL}/api/places/nearby?lat=${location.lat}&lng=${location.lng}&radius=5000&type=mosque`,
+        { method: 'GET', preserveSessionOn401: true, timeoutMs: 12_000 },
       );
 
       const data = await response.json();

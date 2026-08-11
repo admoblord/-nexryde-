@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BACKEND_URL } from '@/src/services/api';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 
 interface Prediction {
   place_id: string;
@@ -23,9 +24,11 @@ interface Prediction {
   secondary_text?: string;
 }
 
-const AUTOCOMPLETE_DEBOUNCE_MS = 400;
+const AUTOCOMPLETE_DEBOUNCE_MS = 250;
 const AUTOCOMPLETE_MIN_CHARS = 3;
 const PREDICTION_CACHE_MAX = 48;
+/** Module-scoped so Home → Book remounts still hit warm predictions. */
+const SHARED_PREDICTION_CACHE = new Map<string, Prediction[]>();
 
 function newPlacesSessionToken(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
@@ -99,7 +102,7 @@ export default function LocationAutocomplete({
   const mountedRef = useRef(true);
   const activeRequestIdRef = useRef(0);
   const sessionTokenRef = useRef<string | null>(null);
-  const predictionCacheRef = useRef<Map<string, Prediction[]>>(new Map());
+  const predictionCacheRef = useRef<Map<string, Prediction[]>>(SHARED_PREDICTION_CACHE);
 
   const buildCacheKey = useCallback(
     (input: string) => {
@@ -176,7 +179,13 @@ export default function LocationAutocomplete({
           url += `&location_bias=${encodeURIComponent(`${biasLat},${biasLng}`)}&radius=${r}`;
         }
 
-        const response = await fetch(url);
+        // Places proxy requires a bearer token — a bare fetch always 401s and
+        // leaves pickup/destination search empty after login.
+        const response = await authedFetch(url, {
+          method: 'GET',
+          preserveSessionOn401: true,
+          timeoutMs: 12_000,
+        });
         let data: any = {};
         try {
           data = await response.json();

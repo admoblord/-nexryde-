@@ -19,6 +19,7 @@ import LocationAutocomplete from '@/src/components/LocationAutocomplete';
 import { RiderSavedSlotPremiumIcon } from '@/src/components/RiderSavedSlotPremiumIcon';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL } from '@/src/services/api';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 import { useThemeColors } from '@/src/constants/theme';
 import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
 import { useFlowLayout } from '@/src/constants/flowLayout';
@@ -82,8 +83,9 @@ export default function RiderSavedPlacesScreen() {
         sessionToken && sessionToken.trim().length > 0
           ? `?sessiontoken=${encodeURIComponent(sessionToken.trim())}`
           : '';
-      const res = await fetch(
+      const res = await authedFetch(
         `${BACKEND_URL}/api/places/details/${encodeURIComponent(placeId)}${sessionQ}`,
+        { method: 'GET', preserveSessionOn401: true, timeoutMs: 12_000 },
       );
       const data = await res.json().catch(() => ({}));
       const lat = Number(data?.latitude);

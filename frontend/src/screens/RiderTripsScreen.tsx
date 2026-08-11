@@ -327,7 +327,27 @@ export default function RiderTripsScreen() {
     if (!silent) setLoadError(false);
     try {
       const res = await getUserTrips(riderId, 'rider');
-      setTrips(Array.isArray(res.data) ? res.data : []);
+      // API returns a bare list; also accept { trips: [] } wrappers.
+      const raw = res.data;
+      const list = Array.isArray(raw)
+        ? raw
+        : Array.isArray((raw as { trips?: unknown })?.trips)
+          ? ((raw as { trips: unknown[] }).trips)
+          : [];
+      setTrips(list);
+      // Default tab is "upcoming" — riders with only past trips saw "No results".
+      // Auto-switch once so completed/cancelled history is visible immediately.
+      if (list.length > 0) {
+        setActiveTab((tab) => {
+          if (tab !== 'upcoming') return tab;
+          const hasUpcoming = list.some((t: any) => isActiveTripStatus(t.status, t.payment_status));
+          if (hasUpcoming) return tab;
+          const hasCompleted = list.some(
+            (t: any) => normalizeTripStatus(t.status, t.payment_status) === 'completed',
+          );
+          return hasCompleted ? 'completed' : 'cancelled';
+        });
+      }
     } catch {
       setLoadError(true);
       setTrips([]);
