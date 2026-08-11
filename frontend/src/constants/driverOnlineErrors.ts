@@ -15,6 +15,7 @@ export const DriverOnlineErrorCode = {
   ERR_NETWORK: 'ERR_NETWORK',
   ERR_APPROVAL: 'ERR_APPROVAL',
   ERR_DOCUMENTS: 'ERR_DOCUMENTS',
+  ERR_COMPLIANCE: 'ERR_COMPLIANCE',
   ERR_UNKNOWN: 'ERR_UNKNOWN',
 } as const;
 
@@ -35,6 +36,8 @@ const CODE_MESSAGES: Record<DriverOnlineErrorCode, string> = {
   ERR_NETWORK: 'Network request failed. Check LTE/Wi‑Fi, then tap GO to retry.',
   ERR_APPROVAL: 'Your account is still under review. You can go online after approval.',
   ERR_DOCUMENTS: 'Update expired documents before going online.',
+  ERR_COMPLIANCE:
+    'Complete monthly verification (interior photo + selfie) before going online.',
   ERR_UNKNOWN: 'Couldn’t go online. Tap GO to retry.',
 };
 
@@ -89,6 +92,14 @@ export function classifyDriverOnlineDetail(
   }
   if (lower.includes('expired') || lower.includes('document')) {
     return { code: 'ERR_DOCUMENTS', message: detail };
+  }
+  if (
+    lower.includes('monthly verification') ||
+    lower.includes('interior photo') ||
+    lower.includes('compliance') ||
+    lower.includes('working ac')
+  ) {
+    return { code: 'ERR_COMPLIANCE', message: detail };
   }
   if (
     lower.includes('approval') ||
