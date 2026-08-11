@@ -425,3 +425,13 @@ if REDIS_URL:
 else:
     store = _fallback
     logger.info("redis_store: in-memory fallback mode (set REDIS_URL for multi-instance)")
+
+
+def get_redis():
+    """Compatibility accessor used by places_service / server cache helpers.
+
+    Returns the shared async ``store`` (Redis or in-memory fallback).
+    Historically imported as ``get_redis``; without this alias, places L1
+    Redis cache silently never writes and inflates keyspace misses.
+    """
+    return store
