@@ -12,6 +12,7 @@ import { bootstrapThemeFromStorage, persistThemePreference } from '@/src/theme/a
 import { ErrorBoundary } from '@/src/components/ErrorBoundary';
 import { OfflineBanner } from '@/src/components/OfflineBanner';
 import { RiderSessionEffects } from '@/src/components/rider/RiderSessionEffects';
+import { BackgroundLocationDisclosureHost } from '@/src/components/driver/BackgroundLocationDisclosureHost';
 import { LanguageProvider } from '@/src/i18n/LanguageContext';
 import { ErrorToastProvider } from '@/src/components/shared/ErrorToast';
 import { QueryProvider } from '@/src/providers/QueryProvider';
@@ -288,6 +289,8 @@ function RootLayout() {
                 <StatusBar style={isDark ? 'light' : 'dark'} />
                 <OfflineBanner />
                 <RiderSessionEffects />
+                {/* Play BACKGROUND_LOCATION prominent disclosure — before OS dialog */}
+                <BackgroundLocationDisclosureHost />
                 <Stack
                   screenOptions={{
                     headerShown: false,

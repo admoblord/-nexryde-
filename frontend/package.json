@@ -33,6 +33,7 @@
     "verify:android-release-startup": "node ./scripts/verify_android_release_startup.mjs",
     "verify:driver-fgs-login": "node ./scripts/verify_driver_fgs_login_crash.mjs",
     "verify:legal-terms": "node ./scripts/verify_legal_terms_stability.mjs",
+    "verify:bg-location-disclosure": "node ./scripts/verify_background_location_disclosure.mjs",
     "screenshots:ios": "node ./scripts/generate-app-store-screenshots.mjs",
     "screenshots:ipad13": "node ./scripts/generate-ipad-13-screenshots.mjs",
     "deploy:backend": "bash ../scripts/deploy_backend.sh",

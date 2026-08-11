@@ -61,8 +61,23 @@ export async function startDriverBackgroundLocation(): Promise<void> {
     const { status: fg } = await Location.requestForegroundPermissionsAsync();
     if (fg !== 'granted') return;
 
-    const { status: bg } = await Location.requestBackgroundPermissionsAsync();
-    if (bg !== 'granted') {
+    const existingBg = await Location.getBackgroundPermissionsAsync();
+    let bgStatus = existingBg.status;
+    if (bgStatus !== 'granted') {
+      // Play policy: never call requestBackgroundPermissionsAsync without the
+      // in-app prominent disclosure first.
+      const { promptBackgroundLocationDisclosure } = await import(
+        '@/src/services/backgroundLocationDisclosure'
+      );
+      const accepted = await promptBackgroundLocationDisclosure();
+      if (!accepted) {
+        console.warn('[BG Location] Driver declined background-location disclosure');
+        return;
+      }
+      const requested = await Location.requestBackgroundPermissionsAsync();
+      bgStatus = requested.status;
+    }
+    if (bgStatus !== 'granted') {
       console.warn('[BG Location] Background permission not granted; foreground GPS only');
       return;
     }
