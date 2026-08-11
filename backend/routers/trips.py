@@ -5671,36 +5671,76 @@ async def rate_trip(trip_id: str, rater_id: str, request: ComfortRatingRequest, 
         }
     return {"message": "Rating submitted"}
 
+# List payload only — never ship polylines / route geometry here (detail endpoint only).
+_TRIP_LIST_PROJECTION = {
+    "_id": 1,
+    "id": 1,
+    "status": 1,
+    "fare": 1,
+    "payment_method": 1,
+    "payment_status": 1,
+    "distance_km": 1,
+    "duration_mins": 1,
+    "pickup_location.lat": 1,
+    "pickup_location.lng": 1,
+    "pickup_location.address": 1,
+    "dropoff_location.lat": 1,
+    "dropoff_location.lng": 1,
+    "dropoff_location.address": 1,
+    "pickup_address": 1,
+    "dropoff_address": 1,
+    "rider_display_name": 1,
+    "rider_name": 1,
+    "driver_name": 1,
+    "created_at": 1,
+    "requested_at": 1,
+    "completed_at": 1,
+    "driver_id": 1,
+    "rider_id": 1,
+}
+
+
 @trips_router.get("/trips/user/{user_id}")
 async def get_user_trips(user_id: str, request: Request, role: str = "rider", limit: int = 20):
+    """Paginated trip history for rider/driver tabs. Cap 20; no route polylines."""
     verify_owner_strict(request, user_id)
-    cap = max(1, min(int(limit), 50))
-    projection = {
-        "_id": 1,
-        "id": 1,
-        "status": 1,
-        "fare": 1,
-        "distance_km": 1,
-        "duration_mins": 1,
-        "pickup_location": 1,
-        "dropoff_location": 1,
-        "pickup_address": 1,
-        "dropoff_address": 1,
-        "rider_display_name": 1,
-        "rider_name": 1,
-        "created_at": 1,
-        "requested_at": 1,
-        "completed_at": 1,
-        "driver_id": 1,
-        "rider_id": 1,
-    }
+    cap = max(1, min(int(limit), 20))
+    # Equality on actor + sort created_at — use (actor, created_at) prefix indexes.
+    # (actor, status, created_at) compounds are for status-filtered queries.
     if role == "rider":
-        trips = await db.trips.find({"rider_id": user_id}, projection).sort("created_at", -1).limit(cap).to_list(cap)
+        query = {"rider_id": user_id}
+        hint = "trips_rider_created_desc"
     else:
-        trips = await db.trips.find({"driver_id": user_id}, projection).sort("created_at", -1).limit(cap).to_list(cap)
-    
+        query = {"driver_id": user_id}
+        hint = "trips_driver_created_desc"
+    try:
+        trips = await (
+            db.trips.find(query, _TRIP_LIST_PROJECTION)
+            .sort("created_at", -1)
+            .limit(cap)
+            .hint(hint)
+            .to_list(cap)
+        )
+    except Exception:
+        trips = await (
+            db.trips.find(query, _TRIP_LIST_PROJECTION)
+            .sort("created_at", -1)
+            .limit(cap)
+            .to_list(cap)
+        )
+
     for trip in trips:
         trip["_id"] = str(trip["_id"])
+        # Belt-and-suspenders: strip any geometry fields if a doc somehow included them.
+        for heavy in (
+            "polyline",
+            "leg_polyline",
+            "active_leg_route",
+            "route_preview_coordinates",
+            "actual_route",
+            "maps_api_call_log",
+        ):
+            trip.pop(heavy, None)
     return trips
 
 @trips_router.get("/trips/user/{user_id}/with-driver/{driver_id}")

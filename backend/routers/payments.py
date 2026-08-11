@@ -4017,6 +4017,20 @@ async def get_wallet_me(request: Request, limit: int = 25):
     """Authenticated user: balance + recent transactions (must be before /wallet/{user_id})."""
     user_id = require_authenticated(request)
     verify_owner_strict(request, user_id)
+    # Launch: fare wallet is disabled — do not scan transactions if nothing needs it.
+    try:
+        from feature_flags import is_wallet_enabled
+
+        if not await is_wallet_enabled(db):
+            return {
+                "currency": "NGN",
+                "user_id": user_id,
+                "balance": 0.0,
+                "transactions": [],
+                "wallet_enabled": False,
+            }
+    except Exception:
+        pass
     user = await find_user_by_id(user_id, {"_id": 0, "wallet_balance": 1})
     safe_limit = max(1, min(limit, 100))
     rows = (
@@ -4034,6 +4048,7 @@ async def get_wallet_me(request: Request, limit: int = 25):
         "user_id": user_id,
         "balance": float((user or {}).get("wallet_balance") or 0),
         "transactions": rows,
+        "wallet_enabled": True,
     }
 
 
