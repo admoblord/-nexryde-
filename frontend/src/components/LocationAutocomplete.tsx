@@ -24,7 +24,7 @@ interface Prediction {
   secondary_text?: string;
 }
 
-const AUTOCOMPLETE_DEBOUNCE_MS = 400;
+const AUTOCOMPLETE_DEBOUNCE_MS = 250;
 const AUTOCOMPLETE_MIN_CHARS = 3;
 const PREDICTION_CACHE_MAX = 48;
 

@@ -20,7 +20,7 @@ import { useLanguage } from '@/src/i18n/LanguageContext';
 import { useAppStore } from '@/src/store/appStore';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL } from '@/src/services/api';
 import { logLegalGateCheck, syncUserLegalStatus } from '@/src/services/legalStatusSync';
 import { replaceLegalTermsIfNeeded } from '@/src/utils/navigationRouteGuard';
 import { normalizeTripStatus, resolveRiderScreenStatus } from '@/src/utils/tripStatus';
@@ -113,9 +113,11 @@ export default function ModernRiderHome() {
         return;
       }
       try {
-        const res = await fetch(`${BACKEND_URL}/api/users/${riderId}/rider-verification-status`, {
-          headers: getAuthHeaders(),
-        });
+        const { authedFetch } = await import('@/src/utils/sessionRefresh');
+        const res = await authedFetch(
+          `${BACKEND_URL}/api/users/${riderId}/rider-verification-status`,
+          { method: 'GET', preserveSessionOn401: true, timeoutMs: 12_000 },
+        );
         // Auth / identity errors → re-login only when we had a token (avoid pre-hydration 401).
         if (res.status === 401 || res.status === 403) {
           router.replace('/(auth)/login');
