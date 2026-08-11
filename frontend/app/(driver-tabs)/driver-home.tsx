@@ -424,13 +424,20 @@ export default function ModernDriverHome() {
   useEffect(() => {
     const enforceDriverLegal = async () => {
       if (!canCallAuthedApi || !driverId || user?.role !== 'driver') return;
-      await syncUserLegalStatus(driverId);
+      // Paint Home / map first; legal sync is not on the critical go-online path.
+      const legalSynced = await syncUserLegalStatus(driverId);
       const effectiveUser = useAppStore.getState().user ?? user;
-      if (logLegalGateCheck(effectiveUser, 'driver-home')) {
+      if (
+        logLegalGateCheck(effectiveUser, 'driver-home') ||
+        (legalSynced && logLegalGateCheck({ ...effectiveUser, ...legalSynced }, 'driver-home'))
+      ) {
         replaceLegalTermsIfNeeded(router, 'driver', segments);
       }
     };
-    void enforceDriverLegal();
+    const warm = setTimeout(() => {
+      void enforceDriverLegal();
+    }, 600);
+    return () => clearTimeout(warm);
   }, [canCallAuthedApi, driverId, router, segments, user?.role, user?.terms_accepted, user?.terms_version, user?.privacy_accepted, user?.privacy_version]);
 
   const handleBootRedirect = useCallback(
@@ -620,10 +627,13 @@ export default function ModernDriverHome() {
     setStoreIsOnline(sessionEngaged);
   }, [sessionEngaged, setStoreIsOnline]);
 
-  // Work Zone: load once per session into store (no remount refetch / flicker)
+  // Work Zone: defer — endpoint is slow (~4s); don't compete with boot/online.
   useEffect(() => {
     if (!driverId) return;
-    void loadWorkZoneOnce(driverId);
+    const warm = setTimeout(() => {
+      void loadWorkZoneOnce(driverId);
+    }, 1800);
+    return () => clearTimeout(warm);
   }, [driverId]);
 
   const [earnings, setEarnings] = useState({
@@ -634,7 +644,7 @@ export default function ModernDriverHome() {
   });
   const [surgePricing, setSurgePricing] = useState<any>(null);
 
-  // Load earnings for offline + online home (never leave EARNINGS/TRIPS blank forever).
+  // Earnings: today first (unlocks strip ASAP); week + wallet balance fill in after.
   useEffect(() => {
     if (!driverId) {
       setEarningsLoading(false);
@@ -644,37 +654,41 @@ export default function ModernDriverHome() {
     const fetchEarnings = async (isInitial = false) => {
       if (isInitial) { setEarningsLoading(true); setEarningsError(false); }
       try {
-        const [todayRes, weekRes] = await Promise.all([
-          fetchWithTimeout(`${BACKEND_URL}/api/driver/earnings/${driverId}?period=today`, {
-            headers: getAuthHeaders(),
-            timeoutMs: 5000,
-          }),
-          fetchWithTimeout(`${BACKEND_URL}/api/driver/earnings/${driverId}?period=week`, {
-            headers: getAuthHeaders(),
-            timeoutMs: 5000,
-          }),
-        ]);
+        const todayRes = await fetchWithTimeout(
+          `${BACKEND_URL}/api/driver/earnings/${driverId}?period=today`,
+          { headers: getAuthHeaders(), timeoutMs: 5000 },
+        );
         if (!mounted) return;
         if (!todayRes.ok) { if (isInitial) setEarningsError(true); return; }
         const todayData = await todayRes.json();
-        const weekData = weekRes.ok ? await weekRes.json() : null;
         const todaySummary = todayData?.summary || {};
-        const weekSummary = weekData?.summary || {};
         if (mounted && todayData) {
           const todayEarnings = Number(
             todaySummary.total_earnings ?? todayData.today_earnings ?? todayData?.projections?.daily ?? 0
           );
-          const weekEarnings = Number(weekSummary.total_earnings ?? weekData?.projections?.weekly ?? 0);
           const tripMins = Number(todaySummary.total_time_mins ?? 0);
           const tripHoursToday = tripMins > 0 ? Math.round((tripMins / 60) * 10) / 10 : 0;
-          setEarnings({
+          setEarnings((prev) => ({
+            ...prev,
             today: todayEarnings,
-            week: weekEarnings,
             trips: Number(todaySummary.total_trips ?? 0),
             tripHoursToday,
-          });
+          }));
           setSurgePricing(todayData.surge || null);
           setEarningsError(false);
+        }
+        if (mounted && isInitial) setEarningsLoading(false);
+
+        const weekRes = await fetchWithTimeout(
+          `${BACKEND_URL}/api/driver/earnings/${driverId}?period=week`,
+          { headers: getAuthHeaders(), timeoutMs: 5000 },
+        );
+        if (!mounted || !weekRes.ok) return;
+        const weekData = await weekRes.json();
+        const weekSummary = weekData?.summary || {};
+        const weekEarnings = Number(weekSummary.total_earnings ?? weekData?.projections?.weekly ?? 0);
+        if (mounted) {
+          setEarnings((prev) => ({ ...prev, week: weekEarnings }));
         }
       } catch {
         if (mounted && isInitial) setEarningsError(true);
@@ -682,13 +696,19 @@ export default function ModernDriverHome() {
         if (mounted && isInitial) setEarningsLoading(false);
       }
     };
-    fetchEarnings(true);
+    const start = setTimeout(() => {
+      if (!mounted) return;
+      void fetchEarnings(true);
+      void getDriverWithdrawals(driverId)
+        .then((r) => {
+          if (mounted) setWalletBalance(r.data.wallet_balance ?? 0);
+        })
+        .catch(() => {});
+    }, 700);
     const interval = setInterval(() => fetchEarnings(false), 60000);
-    getDriverWithdrawals(driverId).then(r => {
-      if (mounted) setWalletBalance(r.data.wallet_balance ?? 0);
-    }).catch(() => {});
     return () => {
       mounted = false;
+      clearTimeout(start);
       clearInterval(interval);
     };
   }, [driverId, user?.total_trips]);
@@ -925,25 +945,30 @@ export default function ModernDriverHome() {
   const [idleBoostVisible, setIdleBoostVisible] = useState(false);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load driver categories on mount
+  // Categories: defer — not needed until chips / idle boost; default economy paints instantly.
   useEffect(() => {
     if (!driverId) return;
     let mounted = true;
-    (async () => {
-      try {
-        const res = await fetchWithTimeout(`${BACKEND_URL}/api/drivers/${driverId}/categories`, {
-          headers: getAuthHeaders(),
-          timeoutMs: 5000,
-        });
-        if (res.ok && mounted) {
-          const data = await res.json();
-          if (Array.isArray(data.active_categories) && data.active_categories.length > 0) {
-            setActiveCategories(data.active_categories);
+    const warm = setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await fetchWithTimeout(`${BACKEND_URL}/api/drivers/${driverId}/categories`, {
+            headers: getAuthHeaders(),
+            timeoutMs: 5000,
+          });
+          if (res.ok && mounted) {
+            const data = await res.json();
+            if (Array.isArray(data.active_categories) && data.active_categories.length > 0) {
+              setActiveCategories(data.active_categories);
+            }
           }
-        }
-      } catch { /* silent — default to economy */ }
-    })();
-    return () => { mounted = false; };
+        } catch { /* silent — default to economy */ }
+      })();
+    }, 1500);
+    return () => {
+      mounted = false;
+      clearTimeout(warm);
+    };
   }, [driverId]);
 
   const toggleCategory = async (catId: string) => {
@@ -1562,33 +1587,32 @@ export default function ModernDriverHome() {
     stopNativeRideAlert();
   }, []);
   
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(30)).current;
+  // Start visible — a 600ms fade made Home / GO feel lagged after login.
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const slideAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     startupLog('SCREEN_MOUNT', { screen: 'driver-home', driverId: driverId ?? null });
   }, [driverId]);
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
-      Animated.spring(slideAnim, { toValue: 0, friction: 8, useNativeDriver: true }),
-    ]).start();
-
     void getQueueSize().then(setOfflineQueueCount);
   }, []);
 
   useEffect(() => {
     if (!driverId) return;
-
-    hydrateOnlineState();
-
+    // Defer profile hydrate — useDriverBoot already hits profile; Android usually
+    // forces offline anyway. Avoid duplicate profile storm on first paint.
+    const warm = setTimeout(() => {
+      void hydrateOnlineState();
+    }, 900);
     void saveDriverState({
       isOnline: isOnlineRef.current,
       lastScreen: 'home',
       activeTripId: null,
       userId: driverId,
     });
+    return () => clearTimeout(warm);
   }, [driverId]);
 
   // ── Auto online actions from widget / shortcut / persistent notification ─────────────────
@@ -2904,8 +2928,13 @@ export default function ModernDriverHome() {
           return;
         }
 
-        // Session + FSI before Online UI — never claim Online without native accept readiness.
-        const session = await ensureCriticalSessionReady();
+        // Session + FSI in parallel — never claim Online without native accept readiness.
+        const [session, fsiOk] = await Promise.all([
+          ensureCriticalSessionReady(),
+          Platform.OS === 'android'
+            ? checkNativeFullScreenIntentPermission()
+            : Promise.resolve(true),
+        ]);
         if (goOnlineToggleGenRef.current !== toggleGen) {
           releaseGoOnlineLock();
           return;
@@ -2919,30 +2948,19 @@ export default function ModernDriverHome() {
           );
           return;
         }
-        if (Platform.OS === 'android') {
-          const fsiOk = await checkNativeFullScreenIntentPermission();
-          if (goOnlineToggleGenRef.current !== toggleGen) {
-            releaseGoOnlineLock();
-            return;
-          }
-          if (!fsiOk) {
-            releaseGoOnlineLock();
-            void refreshPermissionPreflight();
-            Alert.alert(
-              'Enable full-screen ride alerts',
-              'Full-screen alerts are required before going online.',
-              [{ text: 'Open Settings', onPress: requestNativeFullScreenIntentPermission }],
-            );
-            return;
-          }
+        if (Platform.OS === 'android' && !fsiOk) {
+          releaseGoOnlineLock();
+          void refreshPermissionPreflight();
+          Alert.alert(
+            'Enable full-screen ride alerts',
+            'Full-screen alerts are required before going online.',
+            [{ text: 'Open Settings', onPress: requestNativeFullScreenIntentPermission }],
+          );
+          return;
         }
 
-        // Push JWT into FGS before UI says Online (native accept needs a fresh bearer).
-        try {
-          await refreshNativeDriverSession();
-        } catch {
-          /* non-fatal — FGS start also receives token */
-        }
+        // Push JWT into FGS without blocking Online UI (FGS start also receives token).
+        void refreshNativeDriverSession().catch(() => {});
 
         desiredOfflineUntilSyncedRef.current = false;
         // Guard the commit window BEFORE flipping to Online so the heartbeat that

@@ -15,6 +15,7 @@ import { useRequireRole } from '@/src/hooks/useRequireRole';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
 import { warmTokenCache } from '@/src/lib/tokenStore';
+import { setForegroundInterval } from '@/src/utils/foregroundInterval';
 import {
   buildTabScreenOptions,
   tabBadgeStyles,
@@ -119,15 +120,24 @@ export default function DriverTabLayout() {
         /* non-fatal */
       }
     };
-    fetchUnread();
-    const iv = setInterval(fetchUnread, 30000);
+    // Don't steal radio on first paint — home/online toggle need the network first.
+    const stop = setForegroundInterval(() => {
+      void fetchUnread();
+    }, 30000, { runImmediately: false, runOnForeground: false });
+    const warm = setTimeout(() => {
+      if (!cancelled) void fetchUnread();
+    }, 4000);
     return () => {
       cancelled = true;
-      clearInterval(iv);
+      clearTimeout(warm);
+      stop();
     };
   }, [allowed, userId]);
 
-  if (!hasHydrated) return null;
+  // Keep chrome painted while hydrating — blank null frame felt like a freeze after login.
+  if (!hasHydrated) {
+    return <View style={{ flex: 1, backgroundColor: colors.background }} />;
+  }
   if (!allowed) return null;
 
   return (
