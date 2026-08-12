@@ -203,6 +203,14 @@ spec:
                 secretKeyRef:
                   name: BREVO_API_KEY
                   key: latest
+            # brevo_is_configured() needs BOTH the key and a verified sender.
+            # Without this, email OTP fell through to the unconfigured SMTP path
+            # and every login request returned 503.
+            - name: BREVO_SENDER_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: BREVO_SENDER_EMAIL
+                  key: latest
             - name: GOOGLE_MAPS_API_KEY
               valueFrom:
                 secretKeyRef:
