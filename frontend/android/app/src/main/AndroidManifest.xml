@@ -51,7 +51,12 @@
     <meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
-    <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">
+    <!--
+      Android 16 (API 36): do not lock orientation/resizability — Play warns and
+      large screens (sw>=600dp) ignore these restrictions anyway. Keep phone
+      layouts adaptive; iOS portrait remains via Info.plist.
+    -->
+    <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:resizeableActivity="true">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
         <category android:name="android.intent.category.LAUNCHER"/>
@@ -121,6 +126,19 @@
       android:exported="false"
       android:launchMode="singleTop"
       android:theme="@style/AppTheme"/>
+    <!-- Override library portrait locks (Play large-screen / Android 16). -->
+    <activity
+      android:name="com.google.mlkit.vision.codescanner.internal.GmsBarcodeScanningDelegateActivity"
+      android:screenOrientation="unspecified"
+      tools:replace="android:screenOrientation"/>
+    <activity
+      android:name="com.canhub.cropper.CropImageActivity"
+      android:screenOrientation="unspecified"
+      tools:replace="android:screenOrientation"/>
+    <activity
+      android:name="expo.modules.imagepicker.ExpoCropImageActivity"
+      android:screenOrientation="unspecified"
+      tools:replace="android:screenOrientation"/>
     <uses-library android:name="org.apache.http.legacy" android:required="false"/>
   </application>
 </manifest>
