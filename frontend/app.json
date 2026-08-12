@@ -70,7 +70,7 @@
       }
     },
     "android": {
-      "versionCode": 300,
+      "versionCode": 301,
       "config": {
         "googleMaps": {
           "apiKey": "GOOGLE_MAPS_KEY_REDACTED"
@@ -136,11 +136,8 @@
     "plugins": [
       "./plugins/withSafeAppearanceTurboModule.js",
       "./plugins/withDriverExperiencePackage.js",
-<<<<<<< HEAD
       "./plugins/withAndroid16KbPageSize.js",
-=======
       "./plugins/withAndroidLargeScreenSupport.js",
->>>>>>> origin/cursor/large-screen-orientation-1fc9
       [
         "expo-cronet",
         {
