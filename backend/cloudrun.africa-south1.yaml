@@ -48,6 +48,12 @@ spec:
               value: production
             - name: NEXRYDE_SLOW_REQUEST_MS
               value: "800"
+            # Dumps thread stacks when the loop blocks long enough for Cloud Run's
+            # liveness probe to start missing (3 x 30s), so the culprit shows up in logs.
+            - name: NEXRYDE_LOOP_WATCHDOG
+              value: "1"
+            - name: NEXRYDE_LOOP_STALL_MS
+              value: "5000"
             - name: NEXRYDE_RESPONSE_TIME_HEADER
               value: "1"
             - name: DB_NAME

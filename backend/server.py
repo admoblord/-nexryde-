@@ -2507,6 +2507,12 @@ async def seed_promo_codes():
     set_payments_fare_estimate_store(fare_estimate_store)
     asyncio.create_task(_deferred_startup())
     asyncio.create_task(_mongo_keepalive_loop())
+    try:
+        from loop_watchdog import start_loop_watchdog
+
+        start_loop_watchdog()
+    except Exception:
+        logger.exception("loop watchdog start failed")
     # Optional native gRPC RidePush (set NEXRYDE_GRPC_PORT). HTTPS Connect-SSE is always on.
     try:
         from grpc_ride_push import start_grpc_ride_push_if_configured

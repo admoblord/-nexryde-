@@ -7,7 +7,6 @@ Maximizes driver earnings by ensuring they never travel empty
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
 import os
 import asyncio
@@ -67,11 +66,11 @@ class RouteMatch(BaseModel):
 
 route_planner_router = APIRouter(prefix="/api/smart-route-planner", tags=["smart-route-planner"])
 
-# Database helper
+# Database helper — see route_cache_service.get_db: never build a per-call client.
 def get_db():
-    mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
-    client = AsyncIOMotorClient(mongo_url)
-    return client[os.environ.get('DB_NAME', 'nexryde_db')]
+    from database import db as _shared_db
+
+    return _shared_db
 
 # Active WebSocket connections for real-time notifications
 active_connections: Dict[str, WebSocket] = {}
