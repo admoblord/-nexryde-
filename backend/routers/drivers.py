@@ -1112,6 +1112,14 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
             pass
         await db.driver_profiles.update_one({"user_id": user_id}, profile_online_update)
 
+    # Profile hot-cache must not keep a stale is_online after toggle.
+    try:
+        from hot_cache import invalidate_driver_hot_cache
+
+        await invalidate_driver_hot_cache(user_id)
+    except Exception:
+        logger.debug("driver hot-cache invalidate after online toggle failed", exc_info=True)
+
     return {"message": f"Driver is now {'online' if is_online else 'offline'}"}
 
 @drivers_router.post("/drivers/{user_id}/verify-face-at-start")
