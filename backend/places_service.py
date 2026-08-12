@@ -320,10 +320,13 @@ def _local_landmark_predictions(input_text: str) -> list[dict]:
     q = (input_text or "").strip().lower()
     if len(q) < 3:
         return []
+    # Require the full phrase OR every significant token (len>=3). A single
+    # shared token like "island"/"mall" must not hijack unrelated landmarks.
+    tokens = [t for t in q.split() if len(t) >= 3]
     out = []
     for row in _LAGOS_LANDMARKS:
-        hay = f"{row['main_text']} {row['description']}".lower()
-        if q in hay or any(tok and tok in hay for tok in q.split()):
+        hay = f"{row['main_text']} {row['description']} {row.get('secondary_text') or ''}".lower()
+        if q in hay or (tokens and all(tok in hay for tok in tokens)):
             out.append(
                 {
                     "place_id": row["place_id"],
@@ -441,15 +444,28 @@ async def autocomplete_places(
                 await _set_cache(key, response_payload, ttl_seconds=120)
             return response_payload
 
-        response_payload = {
-            "predictions": [],
-            "status": data.get("status", "ERROR"),
-            "error_message": data.get("error_message", "Unknown error"),
-        }
-        if use_cache:
-            await _set_cache(key, response_payload, ttl_seconds=60)
-        return response_payload
-    
+        g_status = str(data.get("status") or "ERROR")
+        g_err = str(data.get("error_message") or "Unknown error")
+        # Never look like ZERO_RESULTS when Google rejected the key/API/quota.
+        print(
+            f"[places.autocomplete] Google status={g_status} error_message={g_err} "
+            f"input={input[:64]!r}"
+        )
+        http_status = 503
+        if g_status == "INVALID_REQUEST":
+            http_status = 400
+        raise HTTPException(
+            status_code=http_status,
+            detail={
+                "predictions": [],
+                "status": g_status,
+                "error_message": g_err,
+                "user_message": "Search unavailable, try again",
+            },
+        )
+
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error in autocomplete: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching places: {str(e)}")

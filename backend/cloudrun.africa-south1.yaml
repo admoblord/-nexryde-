@@ -223,19 +223,23 @@ spec:
               mountPath: /secrets/firebase
               readOnly: true
 
+          # Health checks take ~0.5s when healthy; 1s defaults kill instances
+          # under Mongo/VPC blips and surface as "No places found" / skeleton tabs.
           livenessProbe:
             httpGet:
               path: /api/health
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 30
+            timeoutSeconds: 5
             failureThreshold: 3
 
           readinessProbe:
             httpGet:
               path: /api/health/ready
               port: 8080
-            periodSeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
             failureThreshold: 3
 
           startupProbe:
@@ -244,7 +248,8 @@ spec:
               port: 8080
             initialDelaySeconds: 10
             periodSeconds: 5
-            failureThreshold: 12
+            timeoutSeconds: 5
+            failureThreshold: 24
 
       volumes:
         - name: firebase-service-account

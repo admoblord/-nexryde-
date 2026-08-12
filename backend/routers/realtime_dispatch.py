@@ -355,11 +355,20 @@ async def websocket_user_inbox(websocket: WebSocket, user_id: str):
         await websocket.close(code=1008, reason="Unauthorized")
         return
     await user_inbox_hub.connect(websocket, user_id)
+    # Push current badge immediately so clients aren't stuck waiting for a write.
+    try:
+        await publish_notification_badge(user_id)
+    except Exception:
+        logger.debug("inbox connect badge push failed user=%s", user_id, exc_info=True)
     try:
         while True:
             data = await asyncio.wait_for(websocket.receive_text(), timeout=90)
             if _is_ws_ping(data):
-                await websocket.send_text("pong")
+                # Prefer JSON so RN clients that only parse objects don't drop it.
+                try:
+                    await websocket.send_text('{"type":"pong"}')
+                except Exception:
+                    await websocket.send_text("pong")
     except (WebSocketDisconnect, asyncio.TimeoutError):
         pass
     except Exception:

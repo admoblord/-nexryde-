@@ -126,10 +126,13 @@ export function BoltRouteSearch({
     return sessionRef.current;
   }, []);
 
+  const [searchError, setSearchError] = useState<string | null>(null);
+
   const fetchPlaces = useCallback(
     async (input: string) => {
       const reqId = ++reqIdRef.current;
       setLoading(true);
+      setSearchError(null);
       try {
         const session = ensureSession();
         let url = `${BACKEND_URL}/api/places/autocomplete?input=${encodeURIComponent(
@@ -138,7 +141,11 @@ export function BoltRouteSearch({
         if (origin && Number.isFinite(origin.lat) && Number.isFinite(origin.lng)) {
           url += `&location_bias=${encodeURIComponent(`${origin.lat},${origin.lng}`)}&radius=45000`;
         }
-        const res = await authedFetch(url, { method: 'GET', preserveSessionOn401: true });
+        const res = await authedFetch(url, {
+          method: 'GET',
+          preserveSessionOn401: true,
+          timeoutMs: 12_000,
+        });
         const data = await res.json().catch(() => ({}));
         if (reqId !== reqIdRef.current) return;
         if (res.ok && data?.status === 'OK') {
@@ -150,11 +157,26 @@ export function BoltRouteSearch({
               session,
             ),
           );
-        } else {
-          setPlaces([]);
+          return;
         }
-      } catch {
-        if (reqId === reqIdRef.current) setPlaces([]);
+        setPlaces([]);
+        // 401/403/503 or Google REQUEST_DENIED must not read as "place does not exist".
+        const detail = data?.detail;
+        const apiMsg =
+          (typeof detail === 'object' && detail?.user_message) ||
+          data?.user_message ||
+          (typeof detail === 'object' && detail?.error_message) ||
+          data?.error_message;
+        if (!res.ok || (data?.status && data.status !== 'OK' && data.status !== 'ZERO_RESULTS')) {
+          console.error('[BoltRouteSearch] places unavailable', res.status, data?.status, apiMsg);
+          setSearchError('Search unavailable, try again');
+        }
+      } catch (err) {
+        console.error('[BoltRouteSearch] places fetch failed', err);
+        if (reqId === reqIdRef.current) {
+          setPlaces([]);
+          setSearchError('Search unavailable, try again');
+        }
       } finally {
         if (reqId === reqIdRef.current) setLoading(false);
       }
@@ -167,6 +189,7 @@ export function BoltRouteSearch({
     const q = activeQuery.trim();
     if (q.length < MIN_CHARS) {
       setPlaces([]);
+      setSearchError(null);
       setLoading(false);
       return;
     }
@@ -355,7 +378,7 @@ export function BoltRouteSearch({
         ListEmptyComponent={
           <Text style={styles.empty}>
             {activeQuery.trim().length >= MIN_CHARS
-              ? 'No places found'
+              ? searchError || 'No places found'
               : 'Saved places and recent searches appear here'}
           </Text>
         }

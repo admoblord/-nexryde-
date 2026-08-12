@@ -113,6 +113,7 @@ export default function FeatureNotificationsScreen({ role }: Props) {
   const [tab, setTab] = useState<NotifTab>('activity');
   const [loading, setLoading] = useState(() => !notifCached);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Feature announcements
   const [rows, setRows] = useState<FeatureAnnouncement[]>(() => notifCached?.rows ?? []);
@@ -164,6 +165,7 @@ export default function FeatureNotificationsScreen({ role }: Props) {
     const LOAD_TIMEOUT_MS = 12000;
     // Instant return visits: keep prior rows while revalidating.
     if (!notifCached) setLoading(true);
+    setLoadError(null);
     try {
       const result = await Promise.race([
         Promise.all([loadFeatures(), loadBackendNotifs()]),
@@ -176,7 +178,13 @@ export default function FeatureNotificationsScreen({ role }: Props) {
           backendNotifs: b.backendNotifs,
           unreadBackend: b.unreadBackend,
         });
+      } else if (!result) {
+        // Timed out — leave any cached rows visible, stop skeleton.
+        setLoadError('Couldn’t refresh notifications. Pull to retry.');
       }
+    } catch (err) {
+      console.error('[FeatureNotificationsScreen] load failed', err);
+      setLoadError('Couldn’t load notifications. Pull to retry.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -343,6 +351,9 @@ export default function FeatureNotificationsScreen({ role }: Props) {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           showsVerticalScrollIndicator={false}
         >
+          {loadError ? (
+            <Text style={{ color: colors.textMuted, marginBottom: SPACING.sm }}>{loadError}</Text>
+          ) : null}
           {/* ── Activity tab ─────────────────────────────────────── */}
           {tab === 'activity' && (
             <>
