@@ -576,6 +576,33 @@ async def live_face_verification(driver_id: str, request: MonthlyPhotoUpload, ht
 
 # ==================== COMPLIANCE STATUS ENDPOINT ====================
 
+async def get_driver_compliance_snapshot(driver_id: str) -> dict:
+    """Compliance verdict without the HTTP layer, for server-side gates.
+
+    Returns `can_go_online` plus `blocking_reasons` naming what is missing, so a
+    rejection can tell the driver which item to fix instead of a bare refusal.
+    """
+    doc_status = await check_driver_document_expiry(driver_id)
+    monthly_status = await check_monthly_uploads(driver_id)
+    profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
+
+    reasons: list[str] = []
+    if not doc_status.get("compliant", False):
+        expired = ", ".join(d.get("document", "document") for d in (doc_status.get("expired") or []))
+        reasons.append(f"expired documents ({expired})" if expired else "documents not verified")
+    if not monthly_status.get("compliant", False):
+        reasons.append("monthly re-upload due")
+    if not profile.get("has_ac", False):
+        reasons.append("air conditioning not confirmed")
+
+    return {
+        "can_go_online": not reasons,
+        "blocking_reasons": reasons,
+        "documents": doc_status,
+        "monthly_verification": monthly_status,
+    }
+
+
 @compliance_router.get("/drivers/{driver_id}/compliance")
 async def get_driver_compliance(driver_id: str, http_request: Request):
     """Full compliance status for a driver."""

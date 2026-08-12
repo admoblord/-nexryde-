@@ -164,7 +164,9 @@ export default function FeatureNotificationsScreen({ role }: Props) {
   }, [userId, canCallAuthedApi]);
 
   const load = useCallback(async () => {
-    const LOAD_TIMEOUT_MS = 12000;
+    // A skeleton that sits for 12s reads as broken. Give up on the network well
+    // before that and show cached rows or a retry line instead.
+    const LOAD_TIMEOUT_MS = 7000;
     // Instant return visits: keep prior rows while revalidating.
     if (!notifCached) setLoading(true);
     setLoadError(null);
@@ -200,7 +202,7 @@ export default function FeatureNotificationsScreen({ role }: Props) {
     }
     void load();
     // Absolute failsafe — never leave the tab spinning forever on weak networks.
-    const failsafe = setTimeout(() => setLoading(false), 15000);
+    const failsafe = setTimeout(() => setLoading(false), 8000);
     return () => clearTimeout(failsafe);
   }, [load, canCallAuthedApi]);
 

@@ -89,7 +89,9 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
     const mapReadyRef = useRef(false);
     const [mapReady, setMapReady] = useState(false);
     const markerTracks = useMapMarkerTracksChanges(model.tripId);
-    const [trafficOn, setTrafficOn] = useState(true);
+    // Off by default: congestion colours compete with the route line at trip zoom
+    // and the route must stay the highest-contrast thing on the map.
+    const [trafficOn, setTrafficOn] = useState(false);
     const { colors } = useThemeColors();
     const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(model.userLocation ?? null);
     const [breadcrumbTrail, setBreadcrumbTrail] = useState<MapCoord[]>([]);
@@ -149,18 +151,40 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
       return remaining.length >= 2 ? remaining : activeRoute;
     }, [activeRoute, driver]);
 
+    /**
+     * The drawn route follows the phase, not the booking.
+     *
+     * While the driver is still coming, the line is driver → pickup. Drawing the
+     * pickup → destination route then is a lie: it shows the rider a path their
+     * car is not on. The server keeps one polyline per leg and the rider map is
+     * not allowed to call Directions, so the approach leg is a direct line.
+     * Once the trip starts, the trip polyline takes over.
+     */
     const routeRemaining = useMemo(() => {
       const driverForSplit =
         driver && isValidMapCoord(driver.lat, driver.lng) ? driver : null;
-      if (!driverForSplit || activeRoute.length < 2) {
-        return { approach: approachCoords, trip: tripCoords };
+
+      if (isEnRoute) {
+        const approach =
+          driverForSplit && pickup && isValidMapCoord(pickup.lat, pickup.lng)
+            ? sanitizeMapCoords([
+                { latitude: driverForSplit.lat, longitude: driverForSplit.lng },
+                { latitude: pickup.lat, longitude: pickup.lng },
+              ])
+            : [];
+        return { approach, trip: [] as typeof tripCoords };
       }
-      const split = splitRouteAtDriver(activeRoute, driverForSplit);
-      if (isOngoing || isEnRoute) {
+
+      if (isOngoing) {
+        if (!driverForSplit || activeRoute.length < 2) {
+          return { approach: approachCoords, trip: tripCoords };
+        }
+        const split = splitRouteAtDriver(activeRoute, driverForSplit);
         return { approach: sanitizeMapCoords(split.remaining), trip: tripCoords };
       }
+
       return { approach: approachCoords, trip: tripCoords };
-    }, [activeRoute, approachCoords, tripCoords, isOngoing, isEnRoute, driver]);
+    }, [activeRoute, approachCoords, tripCoords, isOngoing, isEnRoute, driver, pickup]);
 
     const lastHeadingRef = useRef(0);
     const driverHeading = useMemo(() => {
@@ -207,25 +231,48 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
       );
     }, [driver?.lat, driver?.lng, model.driverHeading]);
 
+    /**
+     * Fit the pair that matters for this phase.
+     *
+     * Including every known point — full trip polyline, pickup, dropoff, driver
+     * and the rider — is what zoomed the live trip out across half of Lagos
+     * while the driver was two streets away.
+     */
     const fitCoords = useMemo(() => {
-      const pts = [...tripCoords, ...approachCoords];
-      if (pickup && isValidMapCoord(pickup.lat, pickup.lng)) {
-        pts.push({ latitude: pickup.lat, longitude: pickup.lng });
+      const pts: Array<{ latitude: number; longitude: number }> = [];
+      const driverPt =
+        driver && isValidMapCoord(driver.lat, driver.lng)
+          ? { latitude: driver.lat, longitude: driver.lng }
+          : null;
+      const pickupPt =
+        pickup && isValidMapCoord(pickup.lat, pickup.lng)
+          ? { latitude: pickup.lat, longitude: pickup.lng }
+          : null;
+      const dropoffPt =
+        dropoff && isValidMapCoord(dropoff.lat, dropoff.lng)
+          ? { latitude: dropoff.lat, longitude: dropoff.lng }
+          : null;
+
+      if (isEnRoute) {
+        // Driver + pickup only.
+        if (driverPt) pts.push(driverPt);
+        if (pickupPt) pts.push(pickupPt);
+      } else if (isOngoing) {
+        // Where the car is now + where it is going, plus any remaining stop.
+        if (driverPt) pts.push(driverPt);
+        for (const s of stops) pts.push({ latitude: s.lat, longitude: s.lng });
+        if (dropoffPt) pts.push(dropoffPt);
+        if (pts.length < 2) pts.push(...tripCoords);
+      } else {
+        // Pre-assignment: the booked route.
+        if (pickupPt) pts.push(pickupPt);
+        for (const s of stops) pts.push({ latitude: s.lat, longitude: s.lng });
+        if (dropoffPt) pts.push(dropoffPt);
+        if (pts.length < 2) pts.push(...tripCoords);
       }
-      for (const s of stops) {
-        pts.push({ latitude: s.lat, longitude: s.lng });
-      }
-      if (dropoff && isValidMapCoord(dropoff.lat, dropoff.lng)) {
-        pts.push({ latitude: dropoff.lat, longitude: dropoff.lng });
-      }
-      if (driver && isValidMapCoord(driver.lat, driver.lng)) {
-        pts.push({ latitude: driver.lat, longitude: driver.lng });
-      }
-      if (userLoc && isValidMapCoord(userLoc.lat, userLoc.lng)) {
-        pts.push({ latitude: userLoc.lat, longitude: userLoc.lng });
-      }
+
       return sanitizeMapCoords(pts);
-    }, [tripCoords, approachCoords, pickup, stops, dropoff, driver, userLoc]);
+    }, [tripCoords, pickup, stops, dropoff, driver, isEnRoute, isOngoing]);
 
     const initialRegion = useMemo(() => regionFromCoords(fitCoords), [fitCoords]);
     const followRef = useRef(true);
@@ -350,9 +397,9 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
           setMapReady(true);
         }}
       >
-        {tripCoords.length >= DIRECTIONS_ROUTE_MIN_POINTS ? (
+        {routeRemaining.trip.length >= DIRECTIONS_ROUTE_MIN_POINTS ? (
           <Polyline
-            coordinates={tripCoords}
+            coordinates={routeRemaining.trip}
             strokeColor="rgba(0,208,132,0.22)"
             strokeWidth={7}
             lineCap="round"

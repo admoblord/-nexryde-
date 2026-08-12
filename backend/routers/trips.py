@@ -4972,7 +4972,11 @@ async def get_trip_status(trip_id: str, request: Request):
 
         # Use locked vehicle data if available (anti-fraud: prevents mid-trip plate swap)
         locked_v = trip.get("locked_vehicle") or {}
-        live_plate = locked_v.get("plate") or profile.get("vehicle_plate") or ""
+        # Plate has been stored under three shapes over time. Reading only one of
+        # them is why riders saw a blank plate for drivers who had registered one.
+        from routers.drivers import driver_plate_on_record
+
+        live_plate = str(locked_v.get("plate") or "").strip().upper() or driver_plate_on_record(profile)
         live_model = locked_v.get("model") or profile.get("vehicle_model") or "Vehicle"
         live_color = locked_v.get("color") or profile.get("vehicle_color") or ""
         live_vtype = locked_v.get("vehicle_type") or profile.get("vehicle_type") or ""

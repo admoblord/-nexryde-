@@ -749,6 +749,69 @@ async def put_driver_online(
     return result
 
 
+def _flag_on(name: str) -> bool:
+    return (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def driver_plate_on_record(profile: dict) -> str:
+    """Plate from any of the shapes the profile has used, uppercased. '' when absent."""
+    direct = str(
+        profile.get("vehicle_plate_number") or profile.get("vehicle_plate") or ""
+    ).strip()
+    if direct:
+        return direct.upper()
+    for vehicle in profile.get("vehicles") or []:
+        if not isinstance(vehicle, dict):
+            continue
+        plate = str(vehicle.get("plate") or vehicle.get("plate_number") or "").strip()
+        if plate:
+            return plate.upper()
+    return ""
+
+
+async def _assert_online_gate(user_id: str, profile: dict) -> None:
+    """Plate + compliance gate for going online.
+
+    Report-only unless the matching env flag is set, because enforcing either
+    check against the current fleet data would leave nobody able to work. Both
+    paths always log so the impact is visible before anyone flips the switch.
+    """
+    plate = driver_plate_on_record(profile or {})
+    if not plate:
+        logger.warning("driver_online_gate: no plate on record driver=%s", user_id)
+        if _flag_on("NEXRYDE_REQUIRE_PLATE_ONLINE"):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "ERR_NO_PLATE",
+                    "message": "Add your vehicle plate number before going online. Riders check the plate before they get in.",
+                },
+            )
+
+    try:
+        from driver_compliance import get_driver_compliance_snapshot
+
+        snapshot = await get_driver_compliance_snapshot(user_id)
+    except Exception:
+        logger.debug("driver_online_gate: compliance snapshot failed", exc_info=True)
+        return
+
+    if snapshot.get("can_go_online") is False:
+        reasons = snapshot.get("blocking_reasons") or ["compliance"]
+        logger.warning(
+            "driver_online_gate: compliance says no driver=%s reasons=%s", user_id, reasons
+        )
+        if _flag_on("NEXRYDE_ENFORCE_ONLINE_COMPLIANCE"):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "ERR_NOT_COMPLIANT",
+                    "message": "Your account is not cleared to go online: " + ", ".join(reasons),
+                    "blocking_reasons": reasons,
+                },
+            )
+
+
 async def apply_driver_online_toggle(
     driver_id: str,
     is_online: bool,
@@ -933,6 +996,19 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
                 raise
             except Exception as compliance_error:
                 logger.warning(f"Document expiry pre-check warning for {user_id}: {compliance_error}")
+
+        # Plate + full compliance gate.
+        #
+        # A driver with no plate on record reaches the rider as "—", which is the
+        # one detail a rider checks before getting into a car. The composite
+        # can_go_online was also computed and then ignored here.
+        #
+        # Both are report-only by default: on the current fleet 26 of 29 drivers
+        # have no plate and every driver is short of monthly re-upload, so
+        # switching these on without first backfilling the data would put nobody
+        # online. Flip NEXRYDE_REQUIRE_PLATE_ONLINE / NEXRYDE_ENFORCE_ONLINE_COMPLIANCE
+        # to "1" once the records are populated.
+        await _assert_online_gate(user_id, profile)
 
         from driver_trial_policy import record_first_go_online
         from routers.payments import _ensure_auto_trial_for_verified_driver, _evaluate_driver_trial

@@ -2055,7 +2055,8 @@ function DriverLiveMapViewInner({
         showsCompass={Boolean(activeTrip)}
         showsPointsOfInterest={false}
         showsBuildings={Boolean(activeTrip)}
-        showsTraffic={Boolean(activeTrip)}
+        // Traffic layer stays off — congestion colours fight the route line.
+        showsTraffic={false}
         showsScale={false}
         rotateEnabled={true}
         pitchEnabled={true}

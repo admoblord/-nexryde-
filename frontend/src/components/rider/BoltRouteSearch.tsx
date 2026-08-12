@@ -7,6 +7,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  Pressable,
   FlatList,
   StyleSheet,
   ActivityIndicator,
@@ -25,12 +26,16 @@ import {
   type RouteSuggestion,
 } from '@/src/services/routeSuggestions';
 
-const GREEN = '#22E180';
-const BG = '#F2F3F5';
-const CARD = '#FFFFFF';
-const TEXT = '#0F172A';
-const MUTED = '#64748B';
-const FIELD_GREY = '#ECEEF1';
+import { colors, radius as RADIUS, space, type as TYPE } from '@/src/theme/tokens';
+
+// Palette resolves from tokens — no hex lives in this file.
+const TOKENS = colors;
+const GREEN = colors.green;
+const BG = colors.bg;
+const CARD = colors.bg;
+const TEXT = colors.textPrimary;
+const MUTED = colors.textSecondary;
+const FIELD_GREY = colors.bgMuted;
 const DEBOUNCE_MS = 300;
 const MIN_CHARS = 3;
 
@@ -376,11 +381,32 @@ export function BoltRouteSearch({
         style={styles.list}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
-          <Text style={styles.empty}>
-            {activeQuery.trim().length >= MIN_CHARS
-              ? searchError || 'No places found'
-              : 'Saved places and recent searches appear here'}
-          </Text>
+          searchError ? (
+            // An upstream failure is not the same as "this place does not exist".
+            // Say the search is unavailable and give the rider a way to retry.
+            <View style={styles.errorState}>
+              <Ionicons name="cloud-offline-outline" size={22} color={TOKENS.textSecondary} />
+              <Text style={styles.errorTitle}>{searchError}</Text>
+              <Pressable
+                onPress={() => {
+                  const q = activeQuery.trim();
+                  if (q.length >= MIN_CHARS) void fetchPlaces(q);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Retry search"
+                style={({ pressed }) => [styles.retryBtn, pressed && { opacity: 0.85 }]}
+              >
+                <Ionicons name="refresh" size={16} color={TOKENS.navy} />
+                <Text style={styles.retryText}>Try again</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Text style={styles.empty}>
+              {activeQuery.trim().length >= MIN_CHARS
+                ? 'No places found'
+                : 'Saved places and recent searches appear here'}
+            </Text>
+          )
         }
       />
     </SafeAreaView>
@@ -501,6 +527,23 @@ const styles = StyleSheet.create({
   sugSub: { fontSize: 13, color: MUTED, marginTop: 2 },
   sugDist: { fontSize: 13, color: MUTED, marginLeft: 8, fontWeight: '500' },
   empty: { textAlign: 'center', color: MUTED, marginTop: 32, paddingHorizontal: 24 },
+  errorState: { alignItems: 'center', marginTop: 40, paddingHorizontal: space.xxl },
+  errorTitle: {
+    ...TYPE.body,
+    color: TOKENS.textPrimary,
+    textAlign: 'center',
+    marginTop: space.md,
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: space.lg,
+    paddingHorizontal: space.xl,
+    paddingVertical: space.md,
+    borderRadius: RADIUS.pill,
+    backgroundColor: TOKENS.green,
+  },
+  retryText: { ...TYPE.bodyBold, color: TOKENS.textOnGreen, marginLeft: space.sm },
 });
 
 export default BoltRouteSearch;
