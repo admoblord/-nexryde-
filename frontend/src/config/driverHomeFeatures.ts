@@ -20,7 +20,7 @@ export function buildDriverPriorityFeatures(_t: {
 }): DriverHomeFeature[] {
   return [
     { id: 'trips', label: 'My Trips', icon: 'list-outline', route: DRIVER_TRIPS_TAB_HREF, color: HOME_PALETTE.accentIndigo },
-    { id: 'bank', label: 'Bank & Vault', icon: 'finger-print', route: '/driver/bank', color: COLORS.accentGreen },
+    { id: 'bank', label: 'Bank details', icon: 'finger-print', route: '/driver/bank', color: COLORS.accentGreen },
     { id: 'heatmap', label: 'Heatmap', icon: 'flame', route: '/driver/heatmap', color: COLORS.warning },
     { id: 'work-zone', label: 'Work Zone', icon: 'map', route: '/driver/work-zone', color: '#22E5A0' },
   ];

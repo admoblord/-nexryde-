@@ -63,7 +63,7 @@ export function BottomSheet({
 
   const settle = useCallback(
     (h: number) => {
-      const entries: Array<[SheetSnap, number]> = [
+      const entries: [SheetSnap, number][] = [
         ['peek', heights.peek],
         ['half', heights.half],
         ['full', heights.full],

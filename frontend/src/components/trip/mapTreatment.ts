@@ -66,7 +66,7 @@ export function toLatLng(c?: Partial<Coord> | null): LatLng | null {
  * box of everything, which is how a live trip ends up showing half of Lagos.
  */
 export function regionForPoints(
-  points: Array<Coord | LatLng | null | undefined>,
+  points: (Coord | LatLng | null | undefined)[],
   opts?: { minDeltaDeg?: number; paddingFactor?: number },
 ): { latitude: number; longitude: number; latitudeDelta: number; longitudeDelta: number } | null {
   const pts: LatLng[] = [];

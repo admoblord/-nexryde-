@@ -8,7 +8,7 @@
 import React from 'react';
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
-import { colors, radius, shadow, space, type } from '@/src/theme/tokens';
+import { alpha, colors, radius, shadow, space, type } from '@/src/theme/tokens';
 
 export type MapBadgeTone = 'navy' | 'amber';
 
@@ -32,7 +32,7 @@ export function MapBadge({
   style?: StyleProp<ViewStyle>;
 }) {
   const bg = tone === 'amber' ? colors.amber : colors.navy;
-  const fg = tone === 'amber' ? colors.navy : '#FFFFFF';
+  const fg = tone === 'amber' ? colors.navy : alpha.white;
   return (
     <View style={[styles.wrap, style]} pointerEvents="none">
       <View style={[styles.body, { backgroundColor: bg }]}>

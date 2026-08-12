@@ -451,12 +451,13 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
           />
         ) : null}
         {isEnRoute && pickup ? (
+          // Amber once the driver is standing at pickup — that badge means act now.
           <EtaRoutePuck
             lat={pickup.lat}
             lng={pickup.lng}
-            etaMin={model.etaMinutes ?? null}
-            label="Pickup"
-            tone="green"
+            etaMin={model.tripStatus === 'arrived' ? null : (model.etaMinutes ?? null)}
+            label={model.tripStatus === 'arrived' ? 'Driver is here' : 'Pickup'}
+            tone={model.tripStatus === 'arrived' ? 'amber' : 'navy'}
           />
         ) : null}
         {isOngoing && stops[0] ? (
@@ -473,8 +474,9 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
             lat={dropoff.lat}
             lng={dropoff.lng}
             etaMin={model.etaMinutes ?? null}
-            label="Drop-off"
-            tone="red"
+            label="Dropoff"
+            tone="navy"
+            valueMode="arrivalClock"
           />
         ) : null}
         {isOngoing && dropoff && stops.length ? (
@@ -482,8 +484,9 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
             lat={dropoff.lat}
             lng={dropoff.lng}
             etaMin={null}
-            label="Drop-off"
-            tone="red"
+            label="Dropoff"
+            tone="navy"
+            valueMode="arrivalClock"
           />
         ) : null}
         {(() => {
