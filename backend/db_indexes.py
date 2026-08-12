@@ -112,8 +112,23 @@ async def ensure_indexes(db):
         await db.trips.create_index([("status", 1), ("created_at", -1)])
         await db.trips.create_index([("rider_id", 1), ("status", 1)])
         await db.trips.create_index([("driver_id", 1), ("status", 1)])
-        await db.trips.create_index([("driver_id", 1), ("created_at", -1)])
-        await db.trips.create_index([("rider_id", 1), ("created_at", -1)])
+        await db.trips.create_index(
+            [("driver_id", 1), ("created_at", -1)],
+            name="trips_driver_created_desc",
+        )
+        await db.trips.create_index(
+            [("rider_id", 1), ("created_at", -1)],
+            name="trips_rider_created_desc",
+        )
+        # Trips list / filtered history: actor + status + newest first.
+        await db.trips.create_index(
+            [("driver_id", 1), ("status", 1), ("created_at", -1)],
+            name="trips_driver_status_created_desc",
+        )
+        await db.trips.create_index(
+            [("rider_id", 1), ("status", 1), ("created_at", -1)],
+            name="trips_rider_status_created_desc",
+        )
         await db.trips.create_index([("driver_id", 1), ("completed_at", -1), ("status", 1)])
         await db.trips.create_index("preferred_driver_id", sparse=True)
         await db.trips.create_index([("status", 1), ("fare_locked_until", 1), ("created_at", -1)])
@@ -158,9 +173,13 @@ async def ensure_indexes(db):
         await db.otp_records.create_index("phone")
         await db.otp_records.create_index("created_at", expireAfterSeconds=600)
         
-        # Notifications
+        # Notifications — list + unread badge (user_id, read, created_at)
         await db.notifications.create_index("user_id")
         await db.notifications.create_index([("user_id", 1), ("created_at", -1)])
+        await db.notifications.create_index(
+            [("user_id", 1), ("read", 1), ("created_at", -1)],
+            name="notifications_user_read_created_desc",
+        )
         
         # Wallets — unique on reference prevents double-credit races on duplicate webhooks
         await db.wallets.create_index("user_id", unique=True)

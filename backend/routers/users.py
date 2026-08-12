@@ -813,11 +813,13 @@ async def verify_face(user_id: str, payload: FaceVerificationRequest, http_reque
 async def get_user_notifications(
     user_id: str,
     request: Request,
-    limit: int = 50,
+    limit: int = 20,
     unread_only: bool = False,
     exclude_engagement: bool = False,
 ):
+    """In-app notification feed / badge. Separate from wallet (wallet is launch-disabled)."""
     verify_owner_strict(request, user_id)
+    safe_limit = max(1, min(int(limit), 40))
     query: dict = {"user_id": user_id}
     if unread_only:
         query["read"] = False
@@ -825,12 +827,46 @@ async def get_user_notifications(
     if exclude_engagement:
         query["category"] = {"$nin": ["driver_engagement", "rider_engagement", "engagement", "daily_slot"]}
         query["source"] = {"$nin": ["engagement", "daily_slot", "reconnect"]}
-    notifications = await db.notifications.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    projection = {
+        "_id": 0,
+        "id": 1,
+        "user_id": 1,
+        "type": 1,
+        "title": 1,
+        "message": 1,
+        "body": 1,
+        "read": 1,
+        "created_at": 1,
+        "data": 1,
+        "category": 1,
+        "source": 1,
+        "urgent": 1,
+    }
+    cursor = db.notifications.find(query, projection).sort("created_at", -1).limit(safe_limit)
+    try:
+        if unread_only:
+            notifications = await cursor.hint(
+                "notifications_user_read_created_desc"
+            ).to_list(safe_limit)
+        else:
+            notifications = await cursor.to_list(safe_limit)
+    except Exception:
+        notifications = await (
+            db.notifications.find(query, projection)
+            .sort("created_at", -1)
+            .limit(safe_limit)
+            .to_list(safe_limit)
+        )
     unread_query = {"user_id": user_id, "read": False}
     if exclude_engagement:
         unread_query["category"] = query["category"]
         unread_query["source"] = query["source"]
-    unread_count = await db.notifications.count_documents(unread_query)
+    try:
+        unread_count = await db.notifications.count_documents(
+            unread_query, hint="notifications_user_read_created_desc"
+        )
+    except Exception:
+        unread_count = await db.notifications.count_documents(unread_query)
     return {"notifications": notifications, "unread_count": unread_count}
 
 @users_router.post("/users/{user_id}/notifications/{notification_id}/read")
