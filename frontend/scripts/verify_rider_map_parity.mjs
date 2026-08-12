@@ -102,8 +102,8 @@ console.log('\nverify_rider_map_parity: 2) sun-auto cartography');
 mustInclude('src/constants/nexrydeMap3d.ts', [/getNexrydeMapStyleAuto/, /isLocalMapNight/, /homePitch/, /peekPitch/], '3d tokens + sun helpers');
 mustInclude(
   'src/components/map/RiderBookingMapNative.tsx',
-  [/getNexrydeMapStyleAuto/],
-  'booking uses sun-auto',
+  [/getBoltRiderCustomMapStyle|getBoltRiderGoogleMapId|BOLT_RIDER_MAP_STYLE|boltMapStyle/],
+  'booking uses Bolt light cloud/JSON style',
 );
 mustInclude(
   'src/components/tracking/live/LiveTrackingMap.native.tsx',

@@ -40,13 +40,13 @@
     "ship:all": "bash ../scripts/one_click_ship.sh all",
     "build:local:apk": "./scripts/local-android-build.sh apk",
     "build:local:aab": "./scripts/local-android-build.sh aab",
-    "build:eas:android": "EAS_SKIP_AUTO_FINGERPRINT=1 eas build --platform android --profile production",
-    "build:eas:android:aab": "EAS_SKIP_AUTO_FINGERPRINT=1 eas build --platform android --profile production --non-interactive",
-    "build:eas:android:aab:clear": "EAS_SKIP_AUTO_FINGERPRINT=1 eas build --platform android --profile production --clear-cache --non-interactive",
-    "build:eas:android:apk": "EAS_SKIP_AUTO_FINGERPRINT=1 eas build --platform android --profile preview",
-    "build:eas:android:apk:clear": "EAS_SKIP_AUTO_FINGERPRINT=1 eas build --platform android --profile preview --clear-cache",
+    "build:eas:android": "eas build --platform android --profile production",
+    "build:eas:android:aab": "eas build --platform android --profile production --non-interactive",
+    "build:eas:android:aab:clear": "eas build --platform android --profile production --clear-cache --non-interactive",
+    "build:eas:android:apk": "eas build --platform android --profile preview",
+    "build:eas:android:apk:clear": "eas build --platform android --profile preview --clear-cache",
     "submit:android": "eas submit --platform android --profile production --latest",
-    "build:eas:ios": "EAS_SKIP_AUTO_FINGERPRINT=1 eas build --platform ios --profile production --non-interactive",
+    "build:eas:ios": "eas build --platform ios --profile production --non-interactive",
     "submit:ios": "eas submit --platform ios --profile production --latest --non-interactive"
   },
   "dependencies": {
@@ -129,7 +129,11 @@
     "typescript": "~5.9.2"
   },
   "overrides": {
-    "brace-expansion": "^2.0.3"
+    "@expo/fingerprint": {
+      "minimatch": {
+        "brace-expansion": "5.0.9"
+      }
+    }
   },
   "expo": {
     "doctor": {

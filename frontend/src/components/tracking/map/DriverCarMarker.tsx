@@ -1,9 +1,10 @@
+/**
+ * Live tracking / arriving / driver-self marker — shared Nexryde car asset,
+ * glides between GPS pings and rotates smoothly (no snap).
+ */
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, Platform, Animated, Easing } from 'react-native';
+import { View, StyleSheet, Platform, Easing, Image } from 'react-native';
 import { MarkerAnimated, AnimatedRegion } from 'react-native-maps';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { PERFECT_TRACKING } from '@/src/components/tracking/trackingMapTokens';
 import { bearingDeg, isValidMapCoord } from '@/src/components/tracking/map/mapUtils';
 import {
   DRIVER_STATIONARY_THRESHOLD,
@@ -15,6 +16,11 @@ import {
   trackVerifyPropsChanged,
   trackVerifyRotation,
 } from '@/src/components/tracking/map/trackVerifyLog';
+import {
+  mapVehicleImageSource,
+  type MapVehicleStatus,
+} from '@/src/components/map/MapVehicleMarker';
+import { MAP_VEHICLE } from '@/src/constants/designSystem';
 
 type Props = {
   lat: number;
@@ -22,20 +28,20 @@ type Props = {
   heading?: number | null;
   moving?: boolean;
   tracksViewChanges?: boolean;
-  /** Glide duration between GPS pings — match stream throttle (~4s). */
   moveDurationMs?: number;
+  size?: number;
+  /** available | on_trip | offline — defaults to on_trip for live tracking. */
+  status?: MapVehicleStatus;
 };
 
 const DEFAULT_MOVE_MS = 4000;
 const ANDROID = Platform.OS === 'android';
 
-/** Shortest-path heading lerp (degrees) for smooth turns. */
 function lerpHeading(from: number, to: number, t: number): number {
-  let delta = ((((to - from) % 360) + 540) % 360) - 180;
+  const delta = ((((to - from) % 360) + 540) % 360) - 180;
   return (from + delta * t + 360) % 360;
 }
 
-/** Premium taxi marker — glides + rotates with Uber/Bolt-class motion. */
 export function DriverCarMarker({
   lat,
   lng,
@@ -43,15 +49,15 @@ export function DriverCarMarker({
   moving = true,
   tracksViewChanges = !ANDROID,
   moveDurationMs = DEFAULT_MOVE_MS,
+  size = 36,
+  status = 'on_trip',
 }: Props) {
-  const glowAnim = useRef(new Animated.Value(0)).current;
-  const carBright = useRef(new Animated.Value(1)).current;
   const lastCoord = useRef<{ lat: number; lng: number } | null>(null);
   const lastHeadingRef = useRef(0);
   const [displayHeading, setDisplayHeading] = useState(0);
   const propSeqRef = useRef(0);
   const mountedRef = useRef(false);
-  const headingAnimRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
+  const headingRafRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (mountedRef.current) return;
@@ -68,50 +74,13 @@ export function DriverCarMarker({
     }),
   ).current;
 
-  // Android needs a brief view-tracking window so the custom marker bitmap
-  // actually rasterizes — but the position is driven natively by AnimatedRegion
-  // and rotation is a native prop, so we must NOT re-capture on every GPS tick
-  // (that was pinning tracksViewChanges on the whole drive = major map jank).
-  // Only re-capture on mount and when the body content can actually change
-  // (the moving/arrow state).
   const [selfCapture, setSelfCapture] = useState(ANDROID);
   useEffect(() => {
     if (!ANDROID) return;
     setSelfCapture(true);
     const t = setTimeout(() => setSelfCapture(false), 3000);
     return () => clearTimeout(t);
-  }, [moving]);
-
-  useEffect(() => {
-    const glowLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(glowAnim, {
-          toValue: 1,
-          duration: 1100,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(glowAnim, {
-          toValue: 0,
-          duration: 1100,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    const brightLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(carBright, { toValue: 1.08, duration: 1100, useNativeDriver: true }),
-        Animated.timing(carBright, { toValue: 1, duration: 1100, useNativeDriver: true }),
-      ]),
-    );
-    glowLoop.start();
-    brightLoop.start();
-    return () => {
-      glowLoop.stop();
-      brightLoop.stop();
-    };
-  }, [glowAnim, carBright]);
+  }, [moving, size, status]);
 
   useEffect(() => {
     if (!isValidMapCoord(lat, lng)) return;
@@ -147,19 +116,21 @@ export function DriverCarMarker({
         : Math.abs(prev.lat - lat) + Math.abs(prev.lng - lng);
 
     if (dist > DRIVER_STATIONARY_THRESHOLD) {
-      // Smooth heading over ~280ms instead of snapping.
-      if (headingAnimRef.current) cancelAnimationFrame(headingAnimRef.current);
+      if (headingRafRef.current != null) cancelAnimationFrame(headingRafRef.current);
       const start = Date.now();
-      const dur = 280;
+      const turn = Math.abs(((((nextHeading - fromHeading) % 360) + 540) % 360) - 180);
+      const dur = Math.min(700, Math.max(280, turn * 4));
       const step = () => {
         const t = Math.min(1, (Date.now() - start) / dur);
-        const eased = 1 - (1 - t) * (1 - t);
+        const eased = Easing.out(Easing.cubic)(t);
         setDisplayHeading(lerpHeading(fromHeading, nextHeading, eased));
         if (t < 1) {
-          headingAnimRef.current = requestAnimationFrame(step);
+          headingRafRef.current = requestAnimationFrame(step);
+        } else {
+          headingRafRef.current = null;
         }
       };
-      headingAnimRef.current = requestAnimationFrame(step);
+      headingRafRef.current = requestAnimationFrame(step);
       trackVerifyRotation(nextHeading, true, movedM);
     } else {
       trackVerifyRotation(nextHeading, false, movedM);
@@ -183,49 +154,21 @@ export function DriverCarMarker({
 
   useEffect(
     () => () => {
-      if (headingAnimRef.current) cancelAnimationFrame(headingAnimRef.current);
+      if (headingRafRef.current != null) cancelAnimationFrame(headingRafRef.current);
     },
     [],
   );
 
   if (!isValidMapCoord(lat, lng)) return null;
 
-  const taxiBody = (
-    <Animated.View style={[styles.taxiBox, { transform: [{ scale: carBright }] }]}>
-      <LinearGradient
-        colors={['#FDE047', '#EAB308', '#CA8A04']}
-        start={{ x: 0.2, y: 0 }}
-        end={{ x: 0.8, y: 1 }}
-        style={styles.taxiGrad}
-      >
-        <Ionicons name="car-sport" size={20} color="#111827" />
-      </LinearGradient>
-    </Animated.View>
-  );
-
-  const markerBody = (
-    <View style={styles.wrap} pointerEvents="none">
-      <Animated.View
-        style={[
-          styles.halo,
-          {
-            opacity: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.32, 0.62] }),
-            transform: [
-              { scale: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.4] }) },
-            ],
-          },
-        ]}
-      />
-      <View style={styles.rotator}>
-        {moving ? (
-          <View style={styles.arrowSlot}>
-            <Ionicons name="navigate" size={16} color={PERFECT_TRACKING.green} />
-          </View>
-        ) : null}
-        {taxiBody}
-      </View>
-    </View>
-  );
+  const carW = size;
+  const carH = Math.round(size * 1.85);
+  const halo =
+    status === 'available'
+      ? MAP_VEHICLE.accentAvailable
+      : status === 'offline'
+        ? MAP_VEHICLE.accentOffline
+        : MAP_VEHICLE.accentOnTrip;
 
   return (
     <MarkerAnimated
@@ -236,52 +179,31 @@ export function DriverCarMarker({
       flat
       rotation={displayHeading}
     >
-      {markerBody}
+      <View style={[styles.wrap, { width: carW + 16, height: carH + 16 }]} pointerEvents="none">
+        {moving ? <View style={[styles.softHalo, { backgroundColor: halo }]} /> : null}
+        <Image
+          source={mapVehicleImageSource(status)}
+          style={{ width: carW, height: carH }}
+          resizeMode="contain"
+          accessibilityLabel={`Nexryde vehicle ${status}`}
+        />
+      </View>
     </MarkerAnimated>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: {
-    width: 56,
-    height: 56,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  halo: {
+  softHalo: {
     position: 'absolute',
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: PERFECT_TRACKING.yellow,
-  },
-  rotator: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  arrowSlot: {
-    marginBottom: 1,
-    width: 22,
-    height: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  taxiBox: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    overflow: 'hidden',
-    borderWidth: 2.5,
-    borderColor: '#FFFFFF',
-    elevation: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-  },
-  taxiGrad: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    opacity: 0.22,
   },
 });
+
+export default DriverCarMarker;

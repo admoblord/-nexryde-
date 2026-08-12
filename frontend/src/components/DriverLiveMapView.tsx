@@ -2360,7 +2360,7 @@ function DriverLiveMapViewInner({
           />
         ) : null}
 
-        {/* Driver car — smooth glide + heading (Bolt-class) */}
+        {/* Driver car — shared Nexryde top-down asset (status accent) */}
         {driverCoords && (
           <DriverCarMarker
             lat={driverCoords.lat}
@@ -2368,6 +2368,7 @@ function DriverLiveMapViewInner({
             heading={driverCoords.heading}
             moving={Boolean(activeTrip) || Boolean(isOnline)}
             moveDurationMs={activeTrip ? 1800 : 2500}
+            status={activeTrip ? 'on_trip' : isOnline ? 'available' : 'offline'}
           />
         )}
       </MapView>

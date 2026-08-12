@@ -2,10 +2,12 @@
  * NEXRYDE Advanced Map Behavior — shared tokens for rider & driver maps.
  */
 import { HYBRID } from '@/src/constants/nexrydeHybridBrand';
+import { BOLT_RIDER_MAP_STYLE } from '@/src/constants/boltMapStyle';
 
 export const MAP = {
   userDot: HYBRID.green,
-  driverTaxi: '#FACC15',
+  /** @deprecated Prefer MAP_VEHICLE / MapVehicleMarker — navy branded cars. */
+  driverTaxi: '#111427',
   pickupPin: HYBRID.green,
   destinationPin: '#FF4444',
   routeTeal: HYBRID.teal,
@@ -70,26 +72,12 @@ export const NEXRYDE_MAP_STYLE = [
   { featureType: 'transit', stylers: [{ visibility: 'off' }] },
 ];
 
-/** Soft light map — same product language for daytime / light theme. */
-export const NEXRYDE_MAP_STYLE_LIGHT = [
-  { elementType: 'geometry', stylers: [{ color: '#f1f5f9' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#334155' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#f8fafc' }] },
-  { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
-  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#cbd5e1' }] },
-  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#64748b' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#e2e8f0' }] },
-  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#94a3b8' }] },
-  { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#f8fafc' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#bfdbfe' }] },
-  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#3b82f6' }] },
-  { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#eef2ff' }] },
-  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#dcfce7', visibility: 'on' }] },
-  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
-  { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#0f172a' }] },
-];
+/**
+ * Soft light map — Bolt-aligned desaturated basemap so the route is the
+ * highest-contrast element (pale parks, white roads, minimal POI).
+ * Prefer cloud Map IDs via getBoltRiderGoogleMapId(); this is the JSON fallback.
+ */
+export const NEXRYDE_MAP_STYLE_LIGHT = BOLT_RIDER_MAP_STYLE;
 
 /** @deprecated Use NEXRYDE_MAP_STYLE — kept for existing imports. */
 export const BOOKING_MAP_DARK_STYLE = NEXRYDE_MAP_STYLE;

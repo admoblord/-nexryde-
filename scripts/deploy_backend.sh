@@ -3,8 +3,13 @@
 # The YAML carries secret-backed env vars; imperative --source deploys can miss
 # those secrets and create revisions that crash at startup.
 # Requires: gcloud auth, project (optional GCP_PROJECT), network.
+#
+# Production deploys MUST run from a clean origin/main checkout.
+# Africa prod: GCP_REGION=africa-south1 CLOUD_RUN_SERVICE_YAML=backend/cloudrun.africa-south1.yaml
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=require_main_for_prod_deploy.sh
+source "$ROOT/scripts/require_main_for_prod_deploy.sh"
 if ! command -v gcloud >/dev/null 2>&1; then
   echo "ERROR: gcloud not found. Install Google Cloud SDK."
   exit 1
@@ -12,7 +17,12 @@ fi
 REGION="${GCP_REGION:-us-central1}"
 SERVICE_YAML="${CLOUD_RUN_SERVICE_YAML:-$ROOT/backend/cloudrun.service.yaml}"
 PROJECT_ID="${GCP_PROJECT:-$(gcloud config get-value project 2>/dev/null)}"
-IMAGE="us-central1-docker.pkg.dev/$PROJECT_ID/nexryde-backend/nexryde-backend:latest"
+if [[ "$REGION" == "africa-south1" ]]; then
+  IMAGE="africa-south1-docker.pkg.dev/$PROJECT_ID/nexryde-backend/nexryde-backend:latest"
+  SERVICE_YAML="${CLOUD_RUN_SERVICE_YAML:-$ROOT/backend/cloudrun.africa-south1.yaml}"
+else
+  IMAGE="us-central1-docker.pkg.dev/$PROJECT_ID/nexryde-backend/nexryde-backend:latest"
+fi
 echo "Deploying production backend to $REGION from $ROOT/backend ..."
 echo "Image: $IMAGE"
 echo "Service file: $SERVICE_YAML"

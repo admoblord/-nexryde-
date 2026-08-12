@@ -287,6 +287,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Refuse production deploy off main
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "ERROR: production deploy only from main (got ${GITHUB_REF})"
+            exit 1
+          fi
+          if [[ "${GITHUB_EVENT_NAME}" != "push" ]]; then
+            echo "ERROR: production deploy only on push to main (got ${GITHUB_EVENT_NAME})"
+            exit 1
+          fi
+          echo "OK — CI production deploy guard (main push)"
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:

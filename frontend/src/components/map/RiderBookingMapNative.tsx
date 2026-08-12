@@ -7,25 +7,32 @@ import {
   Easing,
   ActivityIndicator,
   LayoutChangeEvent,
+  TouchableOpacity,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '@/src/constants/theme';
+import { MAP } from '@/src/constants/nexrydeMapBehavior';
 import {
-  MAP,
-  mapTealRouteLayers,
-} from '@/src/constants/nexrydeMapBehavior';
-import { getNexrydeMapStyleAuto, MAP_3D } from '@/src/constants/nexrydeMap3d';
+  getBoltRiderCustomMapStyle,
+  getBoltRiderGoogleMapId,
+  mapBoltRouteLayers,
+  BOLT_ROUTE_GREEN,
+  BOLT_ROUTE_CASING,
+  BOLT_ROUTE_CASING_WIDTH,
+  BOLT_ROUTE_WIDTH,
+} from '@/src/constants/boltMapStyle';
+import { MAP_3D } from '@/src/constants/nexrydeMap3d';
 import { DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
 import { MapAnimatedTaxiMarker } from '@/src/components/map/MapAnimatedTaxiMarker';
-import { NexrydeMapFloatingControls } from '@/src/components/map/NexrydeMapFloatingControls';
 import { MapClusterMarker } from '@/src/components/map/MapClusterMarker';
 import { MapBookingDestinationPin } from '@/src/components/map/MapBookingDestinationPin';
 import { MapBookingUserPulse } from '@/src/components/map/MapBookingUserPulse';
+import { MapRoutePinBadge } from '@/src/components/map/MapRoutePinBadge';
 import { RiderDemandHeatOverlay } from '@/src/components/map/RiderDemandHeatOverlay';
 import { clusterMapMarkers } from '@/src/utils/mapMarkerCluster';
 import { useAnimatedRouteCoords } from '@/src/hooks/useAnimatedRouteCoords';
 import { useRiderDemandZones } from '@/src/hooks/useRiderDemandZones';
+import { haversineKm, bearingDeg } from '@/src/components/tracking/map/mapUtils';
 import type { HeatZonePoint } from '@/src/utils/driverHeatmapZones';
 
 const ROUTE_FIT_MAX_POINTS = 48;
@@ -133,6 +140,9 @@ const bookingMapStyles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#fff',
   },
+  pinStack: {
+    alignItems: 'center',
+  },
 });
 
 export type RiderBookingMapNativeProps = {
@@ -147,7 +157,10 @@ export type RiderBookingMapNativeProps = {
   pulseDropoffHalo?: boolean;
   searchMode?: boolean;
   matchLocked?: boolean;
-  /** Optional force for map night style; omit for sun-auto (Uber/Bolt). */
+  /**
+   * Legacy night toggle — booking map always uses Bolt light basemap.
+   * Kept so older call sites compile; ignored for styling.
+   */
   isDark?: boolean | null;
   nearbyDrivers: Array<{
     driver_id: string;
@@ -156,6 +169,7 @@ export type RiderBookingMapNativeProps = {
     lng: number;
     status?: string;
     vehicle?: string;
+    heading?: number | null;
   }>;
   /** Fare demand ratio — powers surge blush when heatmap API unavailable. */
   demandRatio?: number | null;
@@ -168,26 +182,98 @@ export type RiderBookingMapNativeProps = {
   debugOverlay?: boolean;
   /** Long-press map to set drop-off (booking only). */
   onLongPressMap?: (coords: { lat: number; lng: number }) => void;
+  /**
+   * Bolt pin badges — prefer structured props; string form "Pickup / 12 min"
+   * still accepted for backward compatibility.
+   */
+  pickupBadge?: string | null;
+  dropoffBadge?: string | null;
+  pickupBadgeTitle?: string;
+  pickupBadgeSubtitle?: string | null;
+  dropoffBadgeTitle?: string;
+  dropoffBadgeSubtitle?: string | null;
 };
 
-/** Rider booking / request map — teal route, traffic, 100m pickup radius, map FABs. */
+function splitBadge(raw: string | null | undefined): { title: string; subtitle: string } {
+  const s = String(raw || '').trim();
+  if (!s) return { title: '', subtitle: '' };
+  const parts = s.split(/\s*\/\s*/);
+  if (parts.length >= 2) return { title: parts[0]!.trim(), subtitle: parts.slice(1).join(' / ').trim() };
+  return { title: s, subtitle: '' };
+}
+
+/** Rider booking map — Bolt light basemap, dark-green route, top-down cars. */
 export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(props: RiderBookingMapNativeProps) {
   const mapRef = useRef<any>(null);
   const dropPulseScale = useRef(new Animated.Value(1)).current;
-  const [trafficOn, setTrafficOn] = useState(true);
   const [latitudeDelta, setLatitudeDelta] = useState(0.04);
-  const mapStyle = getNexrydeMapStyleAuto(
-    props.isDark === true ? true : props.isDark === false ? false : null,
-  );
+  const googleMapId = getBoltRiderGoogleMapId();
+  const customMapStyle = getBoltRiderCustomMapStyle();
+  const driverHeadingRef = useRef<Record<string, { lat: number; lng: number; heading: number }>>({});
   const hookedDemandZones = useRiderDemandZones(
     props.pickupCoords,
-    props.showDemandOverlay !== false && !props.searchMode,
+    // Heat overlay fights the pale Bolt look — keep off unless search mode needs it.
+    Boolean(props.showDemandOverlay) && Boolean(props.searchMode),
     {
       demandRatio: props.demandRatio,
       surgeMultiplier: props.surgeMultiplier,
     },
   );
   const demandZones = props.demandZones ?? hookedDemandZones;
+
+  const pickupBadgeParts = useMemo(() => {
+    if (props.pickupBadgeTitle) {
+      return {
+        title: props.pickupBadgeTitle,
+        subtitle: String(props.pickupBadgeSubtitle || ''),
+      };
+    }
+    return splitBadge(props.pickupBadge);
+  }, [props.pickupBadge, props.pickupBadgeTitle, props.pickupBadgeSubtitle]);
+
+  const dropoffBadgeParts = useMemo(() => {
+    if (props.dropoffBadgeTitle) {
+      return {
+        title: props.dropoffBadgeTitle,
+        subtitle: String(props.dropoffBadgeSubtitle || ''),
+      };
+    }
+    return splitBadge(props.dropoffBadge);
+  }, [props.dropoffBadge, props.dropoffBadgeTitle, props.dropoffBadgeSubtitle]);
+
+  /** Offset badges horizontally when pickup/dropoff are close so they don't overlap. */
+  const badgeOffsets = useMemo(() => {
+    const dest = props.destinationCoords;
+    if (!dest || !pickupBadgeParts.title || !dropoffBadgeParts.title) {
+      return { pickupX: 0, dropoffX: 0 };
+    }
+    const km = haversineKm(
+      props.pickupCoords.lat,
+      props.pickupCoords.lng,
+      dest.lat,
+      dest.lng,
+    );
+    if (km > 1.2) return { pickupX: 0, dropoffX: 0 };
+    const brg = bearingDeg(
+      props.pickupCoords.lat,
+      props.pickupCoords.lng,
+      dest.lat,
+      dest.lng,
+    );
+    // Push badges perpendicular to the route axis.
+    const leftOfRoute = brg > 0 && brg < 180;
+    return {
+      pickupX: leftOfRoute ? -48 : 48,
+      dropoffX: leftOfRoute ? 48 : -48,
+    };
+  }, [
+    props.pickupCoords.lat,
+    props.pickupCoords.lng,
+    props.destinationCoords?.lat,
+    props.destinationCoords?.lng,
+    pickupBadgeParts.title,
+    dropoffBadgeParts.title,
+  ]);
 
   // ── debug overlay state ──────────────────────────────────────────────────
   const [dbgMapReady, setDbgMapReady] = useState(false);
@@ -224,13 +310,29 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
     if (__DEV__) console.log('[RiderMap] onMapLoaded (tiles ready)');
   }, []);
   const routeLen = props.routePolyline.length;
-  const safeDrivers = useMemo(
-    () =>
-      (props.nearbyDrivers || []).filter(
-        (d) => d && Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lng)),
-      ),
-    [props.nearbyDrivers],
-  );
+  const safeDrivers = useMemo(() => {
+    const rows = (props.nearbyDrivers || []).filter(
+      (d) => d && Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lng)),
+    );
+    return rows.map((d) => {
+      const lat = Number(d.lat);
+      const lng = Number(d.lng);
+      let heading =
+        typeof d.heading === 'number' && Number.isFinite(d.heading) ? Number(d.heading) : null;
+      const prev = driverHeadingRef.current[d.driver_id];
+      if (heading == null && prev) {
+        const moved = haversineKm(prev.lat, prev.lng, lat, lng) * 1000;
+        if (moved > 4) {
+          heading = bearingDeg(prev.lat, prev.lng, lat, lng);
+        } else {
+          heading = prev.heading;
+        }
+      }
+      if (heading == null) heading = 0;
+      driverHeadingRef.current[d.driver_id] = { lat, lng, heading };
+      return { ...d, lat, lng, heading };
+    });
+  }, [props.nearbyDrivers]);
   const driverClusters = useMemo(
     () =>
       clusterMapMarkers(
@@ -354,28 +456,14 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
     fitMap,
   ]);
 
-  const zoomStep = useCallback(async (delta: number) => {
-    const m = mapRef.current;
-    if (!m?.getCamera) return;
-    try {
-      const cam = await m.getCamera();
-      const z = Number(cam?.zoom);
-      if (!Number.isFinite(z)) return;
-      await m.animateCamera(
-        { ...cam, zoom: Math.min(MAP.maxZoom, Math.max(MAP.minZoom, z + delta)) },
-        { duration: 300 },
-      );
-    } catch {
-      /* silent */
-    }
-  }, []);
-
   try {
     const { default: MapView, Marker, Polyline, Circle, PROVIDER_GOOGLE } = require('react-native-maps');
     const sm = Boolean(props.searchMode);
     const locked = Boolean(sm && props.matchLocked);
     const routeLayers =
-      animatedRoute.length >= DIRECTIONS_ROUTE_MIN_POINTS ? mapTealRouteLayers(animatedRoute) : null;
+      animatedRoute.length >= DIRECTIONS_ROUTE_MIN_POINTS ? mapBoltRouteLayers(animatedRoute) : null;
+    const showPickupBadge = Boolean(pickupBadgeParts.title);
+    const showDropoffBadge = Boolean(dropoffBadgeParts.title);
 
     return (
       <View style={StyleSheet.absoluteFillObject} onLayout={handleContainerLayout}>
@@ -383,6 +471,7 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
           ref={mapRef}
           style={StyleSheet.absoluteFillObject}
           provider={PROVIDER_GOOGLE}
+          googleMapId={googleMapId || undefined}
           initialRegion={{
             latitude: props.pickupCoords.lat,
             longitude: props.pickupCoords.lng,
@@ -392,18 +481,18 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
           showsUserLocation={false}
           showsMyLocationButton={false}
           loadingEnabled
-          loadingBackgroundColor="#0e1a2d"
-          loadingIndicatorColor="#00D084"
-          showsBuildings
+          loadingBackgroundColor="#EEF3E8"
+          loadingIndicatorColor={BOLT_ROUTE_GREEN}
+          showsBuildings={false}
           pitchEnabled
           showsPointsOfInterest={false}
           showsCompass={false}
           showsIndoors={false}
           toolbarEnabled={false}
-          showsTraffic={trafficOn}
+          showsTraffic={false}
           minZoomLevel={MAP.minZoom}
           maxZoomLevel={MAP.maxZoom}
-          customMapStyle={mapStyle}
+          customMapStyle={customMapStyle}
           mapPadding={sm ? { top: 0, right: 0, bottom: locked ? 260 : 300, left: 0 } : undefined}
           onMapReady={handleMapReady}
           onMapLoaded={handleMapLoaded}
@@ -414,17 +503,12 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
             longitudeDelta: number;
           }) => {
             if (Number.isFinite(region.latitudeDelta)) setLatitudeDelta(region.latitudeDelta);
-            // Skip the debug-camera state update entirely when the overlay is
-            // off — it's an extra re-render on every pan/zoom for no visible UI.
             if (props.debugOverlay && Number.isFinite(region.latitude)) {
               setDbgCam({
                 lat: region.latitude,
                 lng: region.longitude,
                 zoom: Math.round(-Math.log2(region.latitudeDelta / 0.7) * 10) / 10,
               });
-              if (__DEV__) {
-                console.log(`[RiderMap] camera moved lat=${region.latitude.toFixed(5)} lng=${region.longitude.toFixed(5)} Δ=${region.latitudeDelta.toFixed(4)}`);
-              }
             }
           }}
           onLongPress={(e: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) => {
@@ -433,32 +517,23 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
             props.onLongPressMap({ lat: latitude, lng: longitude });
           }}
         >
-          {!sm && demandZones.length > 0 ? (
+          {sm && demandZones.length > 0 ? (
             <RiderDemandHeatOverlay zones={demandZones} maxZones={4} />
           ) : null}
-          {!sm && (
-            <Circle
-              center={{ latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng }}
-              radius={MAP.pickupRadiusM}
-              fillColor="rgba(0,102,255,0.1)"
-              strokeColor="rgba(0,102,255,0.38)"
-              strokeWidth={1}
-            />
-          )}
           {sm && !locked && (
             <>
               <Circle
                 center={{ latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng }}
                 radius={MAP.pickupRadiusM}
-                fillColor="rgba(0,208,132,0.08)"
-                strokeColor="rgba(0,208,132,0.38)"
+                fillColor="rgba(10,122,69,0.08)"
+                strokeColor="rgba(10,122,69,0.35)"
                 strokeWidth={1}
               />
               <Circle
                 center={{ latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng }}
                 radius={190}
-                fillColor="rgba(0,208,132,0.03)"
-                strokeColor="rgba(0,208,132,0.2)"
+                fillColor="rgba(10,122,69,0.03)"
+                strokeColor="rgba(10,122,69,0.18)"
                 strokeWidth={1}
               />
             </>
@@ -466,20 +541,13 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
           {routeLayers && !locked && (
             <>
               <Polyline
-                coordinates={routeLayers.glow.coordinates}
-                strokeColor={routeLayers.glow.strokeColor}
-                strokeWidth={routeLayers.glow.strokeWidth}
+                coordinates={routeLayers.casing.coordinates}
+                strokeColor={routeLayers.casing.strokeColor}
+                strokeWidth={routeLayers.casing.strokeWidth}
                 geodesic
                 lineCap="round"
                 lineJoin="round"
-              />
-              <Polyline
-                coordinates={routeLayers.mid.coordinates}
-                strokeColor={routeLayers.mid.strokeColor}
-                strokeWidth={routeLayers.mid.strokeWidth}
-                geodesic
-                lineCap="round"
-                lineJoin="round"
+                zIndex={1}
               />
               <Polyline
                 coordinates={routeLayers.main.coordinates}
@@ -488,6 +556,7 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
                 geodesic
                 lineCap="round"
                 lineJoin="round"
+                zIndex={2}
               />
             </>
           )}
@@ -495,24 +564,16 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
             <>
               <Polyline
                 coordinates={animatedRoute.length >= 2 ? animatedRoute : props.routePolyline}
-                strokeColor="rgba(0,208,132,0.14)"
-                strokeWidth={24}
+                strokeColor={BOLT_ROUTE_CASING}
+                strokeWidth={BOLT_ROUTE_CASING_WIDTH + 2}
                 geodesic
                 lineCap="round"
                 lineJoin="round"
               />
               <Polyline
                 coordinates={props.routePolyline}
-                strokeColor="rgba(0,217,163,0.55)"
-                strokeWidth={10}
-                geodesic
-                lineCap="round"
-                lineJoin="round"
-              />
-              <Polyline
-                coordinates={props.routePolyline}
-                strokeColor={MAP.routeTeal}
-                strokeWidth={MAP.routeWidth}
+                strokeColor={BOLT_ROUTE_GREEN}
+                strokeWidth={BOLT_ROUTE_WIDTH}
                 geodesic
                 lineCap="round"
                 lineJoin="round"
@@ -520,14 +581,25 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
             </>
           )}
           <Marker
+            key={`pickup-${pickupBadgeParts.subtitle || 'pin'}-${badgeOffsets.pickupX}`}
             coordinate={{ latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng }}
             title="Pickup"
             description={props.pickup}
-            anchor={{ x: 0.5, y: 0.5 }}
+            anchor={{ x: 0.5, y: showPickupBadge ? 0.92 : 0.5 }}
+            centerOffset={{ x: badgeOffsets.pickupX, y: 0 }}
             tracksViewChanges={false}
             zIndex={5}
           >
-            <MapBookingUserPulse size={sm ? 44 : 40} />
+            <View style={bookingMapStyles.pinStack}>
+              {showPickupBadge ? (
+                <MapRoutePinBadge
+                  title={pickupBadgeParts.title}
+                  subtitle={pickupBadgeParts.subtitle}
+                  variant="pickup"
+                />
+              ) : null}
+              <MapBookingUserPulse size={sm ? 44 : 40} />
+            </View>
           </Marker>
           {props.stopCoords ? (
             <Marker
@@ -548,22 +620,30 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
           ) : null}
           {props.destinationCoords ? (
             <Marker
+              key={`drop-${dropoffBadgeParts.subtitle || 'pin'}-${badgeOffsets.dropoffX}`}
               coordinate={{
                 latitude: props.destinationCoords.lat,
                 longitude: props.destinationCoords.lng,
               }}
-            title="Destination"
-            description={props.destination}
-            anchor={{ x: 0.5, y: 0.5 }}
-            // Pulse is a native-driven transform on the marker's own view — the
-            // bitmap content never changes, so tracking view changes here just
-            // forces continuous re-rasterization and is a major jank source.
-            tracksViewChanges={false}
-          >
-            <Animated.View style={{ transform: [{ scale: dropPulseScale }] }}>
-              <MapBookingDestinationPin />
-            </Animated.View>
-          </Marker>
+              title="Destination"
+              description={props.destination}
+              anchor={{ x: 0.5, y: showDropoffBadge ? 0.92 : 0.5 }}
+              centerOffset={{ x: badgeOffsets.dropoffX, y: 0 }}
+              tracksViewChanges={false}
+            >
+              <View style={bookingMapStyles.pinStack}>
+                {showDropoffBadge ? (
+                  <MapRoutePinBadge
+                    title={dropoffBadgeParts.title}
+                    subtitle={dropoffBadgeParts.subtitle}
+                    variant="dropoff"
+                  />
+                ) : null}
+                <Animated.View style={{ transform: [{ scale: dropPulseScale }] }}>
+                  <MapBookingDestinationPin />
+                </Animated.View>
+              </View>
+            </Marker>
           ) : null}
           {driverClusters.map((entry, idx) => {
             if (entry.kind === 'cluster') {
@@ -578,61 +658,52 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
                 </Marker>
               );
             }
-            const d = entry.item;
+            const d = entry.item as {
+              driver_id: string;
+              lat: number;
+              lng: number;
+              heading?: number;
+              status?: string;
+            };
+            const vehicleStatus =
+              d.status === 'offline' ? 'offline' : sm ? 'on_trip' : 'available';
             return (
               <Marker
                 key={d.driver_id}
                 coordinate={{ latitude: d.lat, longitude: d.lng }}
                 tracksViewChanges={false}
                 anchor={{ x: 0.5, y: 0.5 }}
+                rotation={0}
+                flat
               >
-                <MapAnimatedTaxiMarker size={sm ? 32 : 28} searchMode={sm} />
+                <MapAnimatedTaxiMarker
+                  size={sm ? 34 : 32}
+                  heading={d.heading ?? 0}
+                  status={vehicleStatus}
+                />
               </Marker>
             );
           })}
         </MapView>
 
-        <LinearGradient
-          pointerEvents="none"
-          colors={['rgba(15,20,25,0.55)', 'rgba(15,20,25,0.2)', 'transparent']}
-          locations={[0, 0.35, 1]}
-          style={{ position: 'absolute', top: 0, left: 0, right: 0, height: sm ? '32%' : '24%' }}
-        />
-        <LinearGradient
-          pointerEvents="none"
-          colors={['transparent', 'rgba(15,20,25,0.25)', 'rgba(15,20,25,0.45)']}
-          locations={[0, 0.5, 1]}
-          style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '42%' }}
-        />
-        {sm ? (
-          <LinearGradient
-            pointerEvents="none"
-            colors={['transparent', 'rgba(15,20,25,0.22)', 'rgba(15,20,25,0.45)']}
-            locations={[0, 0.55, 1]}
-            style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '38%' }}
-          />
-        ) : null}
-
-        <NexrydeMapFloatingControls
-          side="left"
-          bottom={controlsBottom}
-          left={12}
-          onRecenter={fitMap}
-          onZoomIn={() => zoomStep(0.5)}
-          onZoomOut={() => zoomStep(-0.5)}
-          onTrafficToggle={() => setTrafficOn((v) => !v)}
-          trafficOn={trafficOn}
-          showTraffic
-        />
+        {/* Bolt recenter — circular white, bottom-right above sheet, crosshair */}
+        <TouchableOpacity
+          style={[styles.recenterFab, { bottom: controlsBottom }]}
+          onPress={fitMap}
+          activeOpacity={0.88}
+          accessibilityLabel="Recenter map to full route"
+          accessibilityRole="button"
+        >
+          <Ionicons name="locate-outline" size={22} color="#0F172A" />
+        </TouchableOpacity>
 
         {props.routeLoading ? (
           <View pointerEvents="none" style={styles.routingPill}>
-            <ActivityIndicator size="small" color={MAP.userDot} />
+            <ActivityIndicator size="small" color={BOLT_ROUTE_GREEN} />
             <Text style={styles.routingText}>Routing…</Text>
           </View>
         ) : null}
 
-        {/* ── Debug overlay ─────────────────────────────────────────────── */}
         {props.debugOverlay ? (
           <View pointerEvents="none" style={styles.debugPanel}>
             <Text style={styles.debugRow}>
@@ -658,7 +729,10 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
               </Text>
             </Text>
             <Text style={styles.debugRow}>
-              Style: <Text style={styles.dbgVal}>NEXRYDE_NIGHT ({mapStyle.length} rules)</Text>
+              Style:{' '}
+              <Text style={styles.dbgVal}>
+                {googleMapId ? `cloud:${googleMapId.slice(0, 8)}…` : `bolt-json (${customMapStyle?.length ?? 0})`}
+              </Text>
             </Text>
           </View>
         ) : null}
@@ -681,6 +755,24 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
 });
 
 const styles = StyleSheet.create({
+  recenterFab: {
+    position: 'absolute',
+    right: 14,
+    zIndex: 12,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15,23,42,0.08)',
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
   routingPill: {
     position: 'absolute',
     top: 56,
@@ -691,24 +783,24 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 11,
     borderRadius: 999,
-    backgroundColor: 'rgba(15,20,25,0.92)',
+    backgroundColor: 'rgba(255,255,255,0.94)',
     borderWidth: 1,
-    borderColor: 'rgba(0,208,132,0.28)',
+    borderColor: 'rgba(10,122,69,0.22)',
   },
-  routingText: { color: '#E2E8F0', fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
+  routingText: { color: '#0F172A', fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
   debugPanel: {
     position: 'absolute',
     top: 8,
     right: 8,
-    backgroundColor: 'rgba(0,0,0,0.82)',
+    backgroundColor: 'rgba(15,23,42,0.88)',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(0,208,132,0.4)',
+    borderColor: 'rgba(10,122,69,0.4)',
     padding: 8,
     gap: 3,
   },
   debugRow: { fontSize: 10, color: '#c8d6e0', fontWeight: '700' },
-  dbgGreen: { color: '#00D084' },
+  dbgGreen: { color: '#22E180' },
   dbgRed: { color: '#FF5A5A' },
   dbgVal: { color: '#FACC15' },
 });

@@ -53,7 +53,38 @@ export const BRAND = {
 
   /** Trip-dock mint highlight — derived from primary, used on map overlays */
   primaryMint: '#6DFFC3',
+
+  /**
+   * Map vehicle markers (top-down cars).
+   * Navy body for contrast on pale Bolt landscape + green route; green accent
+   * carries brand (a full-green car vanishes against route/parks).
+   */
+  mapVehicleBody: '#111427',
+  mapVehicleWindow: '#FCFCFC',
+  mapVehicleOutline: '#FCFCFC',
+  /** Available / online accent */
+  mapVehicleAccentAvailable: '#90C048',
+  /** On a trip accent */
+  mapVehicleAccentOnTrip: '#183068',
+  /** Offline accent */
+  mapVehicleAccentOffline: '#9AA0A6',
+  /** Soft route green used on Bolt booking polyline (contrast reference). */
+  mapRouteGreen: '#78B048',
 } as const;
+
+/** Map vehicle marker tokens — prefer this over scattering BRAND.mapVehicle*. */
+export const MAP_VEHICLE = {
+  body: BRAND.mapVehicleBody,
+  window: BRAND.mapVehicleWindow,
+  outline: BRAND.mapVehicleOutline,
+  accentAvailable: BRAND.mapVehicleAccentAvailable,
+  accentOnTrip: BRAND.mapVehicleAccentOnTrip,
+  accentOffline: BRAND.mapVehicleAccentOffline,
+  offlineBodyOpacity: 0.6,
+  routeGreen: BRAND.mapRouteGreen,
+} as const;
+
+export type MapVehicleStatus = 'available' | 'on_trip' | 'offline';
 
 /** Glass surfaces shared across rider/driver dashboards */
 export const SURFACE = {

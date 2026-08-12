@@ -29,6 +29,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import Constants from 'expo-constants';
 import LocationAutocomplete from '@/src/components/LocationAutocomplete';
+import { BoltRouteSearch, type BoltRouteSelection, type RouteField } from '@/src/components/rider/BoltRouteSearch';
 import { useAppStore } from '@/src/store/appStore';
 import { useRiderHasActiveTrip } from '@/src/hooks/useRiderHasActiveTrip';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
@@ -162,6 +163,15 @@ function formatArriveByLabel(minutesFromNow: number): string {
   return new Date(t).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
+/** Bolt collapsed route header: "Peace Garden... -> Abijo G.R.A. R..." */
+function truncateRouteLabel(label: string, max = 16): string {
+  const t = String(label || '').trim();
+  if (!t) return '…';
+  const head = t.split(',')[0]?.trim() || t;
+  if (head.length <= max) return head;
+  return `${head.slice(0, Math.max(1, max - 1))}…`;
+}
+
 /** Parse lock deadline; naive ISO with `T` from the API is treated as UTC (legacy + Python naive UTC). */
 function parseFareLockDeadlineMs(raw: unknown): number {
   if (typeof raw !== 'string' || !raw.trim()) return 0;
@@ -263,7 +273,8 @@ function BookInDriveStyle() {
     () => ({
       bg: colors.background,
       sheet: colors.background,
-      mapBg: isDark ? '#0D1420' : '#EAF4EF',
+      // Booking map always uses Bolt light basemap (#EEF3E8 landscape).
+      mapBg: '#EEF3E8',
       statusBar: colors.statusBar,
       text: colors.text,
       muted: colors.textMuted,
@@ -312,6 +323,10 @@ function BookInDriveStyle() {
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [editingField, setEditingField] = useState<'pickup' | 'destination' | 'stop'>('pickup');
   const [showVehicleModal, setShowVehicleModal] = useState(false);
+  /** Bolt Route screen — open until dropoff is confirmed by suggestion tap. */
+  const [routeSearchOpen, setRouteSearchOpen] = useState(true);
+  const [routeSearchFocus, setRouteSearchFocus] = useState<RouteField>('dropoff');
+  const [showStopField, setShowStopField] = useState(false);
 
   /** Active trip lives on tracking — block overlapping book UI. */
   useFocusEffect(
@@ -358,6 +373,7 @@ function BookInDriveStyle() {
     lng: number;
     status?: string;
     vehicle?: string;
+    heading?: number | null;
   }>>([]);
   const [scheduledRides, setScheduledRides] = useState<Array<{
     id: string;
@@ -610,6 +626,82 @@ function BookInDriveStyle() {
     }, 800);
   };
 
+  const applyBoltRouteSelection = useCallback(
+    async (sel: BoltRouteSelection) => {
+      let desc = String(sel.address || sel.title || '').trim() || 'Selected location';
+      let coords: { lat: number; lng: number } | null =
+        typeof sel.lat === 'number' &&
+        typeof sel.lng === 'number' &&
+        Number.isFinite(sel.lat) &&
+        Number.isFinite(sel.lng)
+          ? { lat: sel.lat, lng: sel.lng }
+          : null;
+
+      // Prefer coords already on the suggestion (local landmarks / saved / recent).
+      // Place Details only when we lack coordinates — keeps Maps budget ≤3/trip.
+      if (!coords && sel.placeId && !sel.placeId.startsWith('prediction-')) {
+        const details = await fetchPlaceDetails(sel.placeId, sel.sessionToken);
+        if (details && Number.isFinite(details.lat) && Number.isFinite(details.lng)) {
+          coords = { lat: details.lat, lng: details.lng };
+          if (details.description) desc = details.description;
+        }
+      }
+      // Last resort only for free-text / recent rows without place_id or coords.
+      if (!coords && !sel.placeId && desc.length >= 3) {
+        const resolved = await resolveAddressToCoords(desc);
+        if (resolved) {
+          coords = { lat: resolved.lat, lng: resolved.lng };
+          desc = String(resolved.address || desc).trim() || desc;
+        }
+      }
+      if (!coords) {
+        Alert.alert(
+          'Could not pin location',
+          'Pick another suggestion so we have a map pin for this place.',
+        );
+        return;
+      }
+
+      if (sel.field === 'pickup') {
+        manualPickupRef.current = true;
+        setPickup(safePickupDisplay(desc));
+        setPickupCoords(coords);
+        setPickupDetecting(false);
+        setRouteSearchFocus('dropoff');
+        return;
+      }
+      if (sel.field === 'stop') {
+        setStop(desc);
+        setStopCoords(coords);
+        invalidateRoutePricing();
+        setRouteSearchFocus('dropoff');
+        return;
+      }
+
+      // Dropoff selection IS confirmation — go straight to map.
+      setDestination(desc);
+      setDestinationCoords(coords);
+      void cacheRecentLocation({
+        address: desc,
+        description: desc,
+        lat: coords.lat,
+        lng: coords.lng,
+      });
+      setRecentDestinations((prev) => {
+        const next = [
+          { address: desc, lat: coords!.lat, lng: coords!.lng },
+          ...prev.filter((p) => String(p.address || p.description) !== desc),
+        ];
+        return next.slice(0, 8);
+      });
+      setRouteSearchOpen(false);
+      setShowLocationModal(false);
+    },
+    // fetchPlaceDetails / resolveAddressToCoords are stable enough for this screen
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   const openDestinationSearch = useCallback(() => {
     // Preload pickup label before rider types destination (feels instant on NG networks).
     if (pickupCoords) {
@@ -619,14 +711,17 @@ function BookInDriveStyle() {
     }
     requestAnimationFrame(() => {
       setEditingField('destination');
-      setShowLocationModal(true);
+      setRouteSearchFocus('dropoff');
+      setRouteSearchOpen(true);
     });
   }, [pickupCoords?.lat, pickupCoords?.lng]);
 
   const openStopSearch = useCallback(() => {
     requestAnimationFrame(() => {
       setEditingField('stop');
-      setShowLocationModal(true);
+      setShowStopField(true);
+      setRouteSearchFocus('stop');
+      setRouteSearchOpen(true);
     });
   }, []);
 
@@ -639,7 +734,8 @@ function BookInDriveStyle() {
   const openPickupEditor = useCallback(() => {
     requestAnimationFrame(() => {
       setEditingField('pickup');
-      setShowLocationModal(true);
+      setRouteSearchFocus('pickup');
+      setRouteSearchOpen(true);
     });
   }, []);
 
@@ -867,14 +963,20 @@ function BookInDriveStyle() {
         if (cancelled) return;
         setNearbyDrivers(
           rows
-            .map((d: any) => ({
-              driver_id: String(d.driver_id || ''),
-              name: String(d.name || 'Driver'),
-              lat: Number(d.current_location?.lat),
-              lng: Number(d.current_location?.lng),
-              status: d.is_online ? 'online' : 'offline',
-              vehicle: d.vehicle_model || d.vehicle_type || 'Car',
-            }))
+            .map((d: any) => {
+              const headingRaw = Number(
+                d.heading ?? d.current_location?.heading ?? d.bearing ?? d.current_location?.bearing,
+              );
+              return {
+                driver_id: String(d.driver_id || ''),
+                name: String(d.name || 'Driver'),
+                lat: Number(d.current_location?.lat),
+                lng: Number(d.current_location?.lng),
+                status: d.is_online ? 'online' : 'offline',
+                vehicle: d.vehicle_model || d.vehicle_type || 'Car',
+                heading: Number.isFinite(headingRaw) ? headingRaw : null,
+              };
+            })
             .filter((d: any) => Number.isFinite(d.lat) && Number.isFinite(d.lng))
             .slice(0, 25),
         );
@@ -1129,8 +1231,9 @@ function BookInDriveStyle() {
         sessionToken && sessionToken.trim().length > 0
           ? `?sessiontoken=${encodeURIComponent(sessionToken.trim())}`
           : '';
-      const res = await fetch(
+      const res = await authedFetch(
         `${BACKEND_URL}/api/places/details/${encodeURIComponent(id)}${sessionQ}`,
+        { method: 'GET', preserveSessionOn401: true },
       );
       const data = await res.json().catch(() => ({}));
       const lat = Number(data?.latitude);
@@ -1187,6 +1290,7 @@ function BookInDriveStyle() {
         if (cancelled) return;
         setDestination(rawDest);
         setDestinationCoords({ lat: dLat, lng: dLng });
+        setRouteSearchOpen(false);
         return;
       }
       if (!rawDest) return;
@@ -1195,6 +1299,7 @@ function BookInDriveStyle() {
       if (g) {
         setDestination(g.address);
         setDestinationCoords({ lat: g.lat, lng: g.lng });
+        setRouteSearchOpen(false);
       } else {
         setDestination(rawDest);
       }
@@ -2141,7 +2246,19 @@ function BookInDriveStyle() {
   };
 
   const veh = selectedVehicle ? availableVehicles.find(v => v.id === selectedVehicle) : null;
-  const routeReady = Boolean(destination?.trim());
+  const routeReady = Boolean(destination?.trim() && destinationCoords);
+  const collapsedRouteTitle = routeReady
+    ? `${truncateRouteLabel(pickup || 'Pickup')} → ${truncateRouteLabel(destination || 'Dropoff')}`
+    : '';
+  const pickupBadgeTitle = routeReady ? 'Pickup' : undefined;
+  const pickupBadgeSubtitle =
+    routeReady && bookingRouteEtaMin != null
+      ? `${Math.max(1, Math.round(bookingRouteEtaMin))} min`
+      : routeReady
+        ? null
+        : null;
+  const dropoffBadgeTitle = routeReady ? 'Dropoff' : undefined;
+  const dropoffBadgeSubtitle = routeReady ? arriveByClockLabel : null;
   const tripOptionsSummary = [
     ridePreferences.length > 0 ? `${ridePreferences.length} mood` : null,
     includeGateCode && estateGateCode.trim() ? 'gate code' : null,
@@ -2215,6 +2332,68 @@ function BookInDriveStyle() {
   };
 
   const useNativeBookingMap = Platform.OS !== 'web';
+
+  // Bolt Route entry — full screen until dropoff suggestion is tapped (selection = confirm).
+  if (routeSearchOpen) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#F2F3F5' }}>
+        <StatusBar barStyle="dark-content" backgroundColor="#F2F3F5" />
+        <BoltRouteSearch
+          userId={riderId}
+          pickupLabel={pickup}
+          dropoffLabel={destination}
+          stopLabel={stop}
+          showStop={showStopField || Boolean(stop?.trim())}
+          origin={
+            pickupCoords ||
+            (currentLocation && Number.isFinite(currentLocation.lat)
+              ? { lat: currentLocation.lat, lng: currentLocation.lng }
+              : null)
+          }
+          initialFocus={routeSearchFocus}
+          onClose={() => {
+            if (destinationCoords && destination?.trim()) {
+              setRouteSearchOpen(false);
+            } else {
+              router.back();
+            }
+          }}
+          onSwap={() => {
+            const p = pickup;
+            const d = destination;
+            const pc = pickupCoords;
+            const dc = destinationCoords;
+            setPickup(d || '');
+            setDestination(p || '');
+            setPickupCoords(dc);
+            setDestinationCoords(pc);
+            if (pc) manualPickupRef.current = true;
+          }}
+          onAddStop={() => {
+            setShowStopField(true);
+            setRouteSearchFocus('stop');
+          }}
+          onPickupChangeText={(t) => {
+            setPickup(t);
+            // Typing over a selected pickup clears the pin until a new suggestion is chosen.
+            if (pickupCoords) setPickupCoords(null);
+          }}
+          onDropoffChangeText={(t) => {
+            setDestination(t);
+            // Do not clear pickup when editing dropoff — only drop the stale dropoff pin.
+            if (destinationCoords) {
+              setDestinationCoords(null);
+              invalidateRoutePricing();
+            }
+          }}
+          onStopChangeText={setStop}
+          onSelect={(sel) => {
+            void applyBoltRouteSelection(sel);
+          }}
+        />
+      </View>
+    );
+  }
 
   if (bookSuspended && bookSuspendedSeconds > 0) {
     const mins = Math.floor(bookSuspendedSeconds / 60);
@@ -2306,7 +2485,7 @@ function BookInDriveStyle() {
       <View
         style={[
           s.mapArea,
-          { backgroundColor: bookingTheme.mapBg, height: routeReady ? '54%' : '46%' },
+          { backgroundColor: bookingTheme.mapBg, height: routeReady ? '58%' : '46%' },
         ]}
       >
         {pickupCoords ? (
@@ -2346,6 +2525,11 @@ function BookInDriveStyle() {
               pulseDropoffHalo={Boolean(destinationCoords && !bookingSheetScrolled)}
               searchMode={false}
               matchLocked={false}
+              isDark={false}
+              pickupBadgeTitle={pickupBadgeTitle}
+              pickupBadgeSubtitle={pickupBadgeSubtitle}
+              dropoffBadgeTitle={dropoffBadgeTitle}
+              dropoffBadgeSubtitle={dropoffBadgeSubtitle}
               nearbyDrivers={nearbyDrivers}
               demandRatio={
                 fareDetails?.demand_ratio != null && Number.isFinite(Number(fareDetails.demand_ratio))
@@ -2358,7 +2542,8 @@ function BookInDriveStyle() {
                   ? Number(fareDetails.surge_multiplier)
                   : null
               }
-              showDemandOverlay
+              showDemandOverlay={false}
+              controlsBottom={24}
             />
           )
         ) : (
@@ -2367,64 +2552,6 @@ function BookInDriveStyle() {
             <Text style={s.mapText}>Turn on location or choose pickup to see the map</Text>
           </View>
         )}
-
-        {destinationCoords &&
-        routeForMapDisplay.length >= DIRECTIONS_ROUTE_MIN_POINTS &&
-        bookingRouteEtaMin != null &&
-        arriveByClockLabel ? (
-          <View pointerEvents="none" style={[s.routeSummaryBarOuter, { left: flow.padH, right: flow.padH }]}>
-            <BlurView
-              intensity={Platform.OS === 'ios' ? 52 : 40}
-              tint="dark"
-              style={StyleSheet.absoluteFillObject}
-            />
-            <LinearGradient
-              colors={['rgba(15,23,42,0.15)', 'rgba(15,23,42,0.72)']}
-              start={{ x: 0.5, y: 0 }}
-              end={{ x: 0.5, y: 1 }}
-              style={s.routeSummaryGradient}
-            >
-              <View style={s.routeSummaryRow}>
-                <View style={s.routeSummaryBlock}>
-                  <Text style={s.routeSummaryKicker}>Trip time</Text>
-                  <Text style={s.routeSummaryHero}>{Math.round(bookingRouteEtaMin)} min</Text>
-                </View>
-                <View style={s.routeSummaryVsep} />
-                <View style={s.routeSummaryMid}>
-                  <Text style={s.routeSummaryKicker}>Arrive</Text>
-                  <Text style={s.routeSummaryArrive}>{arriveByClockLabel}</Text>
-                  {routeQualityLabel ? (
-                    <Text style={s.routeSummaryMeta} numberOfLines={1}>
-                      {routeQualityLabel}
-                    </Text>
-                  ) : null}
-                </View>
-                {routeDistanceLabel ? (
-                  <>
-                    <View style={s.routeSummaryVsep} />
-                    <View style={s.routeSummaryBlockRight}>
-                      <Text style={s.routeSummaryKicker}>Distance</Text>
-                      <Text style={s.routeSummaryDist}>{routeDistanceLabel}</Text>
-                    </View>
-                  </>
-                ) : null}
-              </View>
-              {stopCoords && stopTimeFeeHint ? (
-                <Text style={s.routeSummaryStopTime} numberOfLines={2}>
-                  {stopTimeFeeHint} included in fare
-                </Text>
-              ) : null}
-            </LinearGradient>
-          </View>
-        ) : null}
-
-        {/* Route hint — shown when pickup set, no destination yet */}
-        {pickupCoords && !destinationCoords ? (
-          <View style={[s.mapRouteHint, { left: flow.padH, right: flow.padH }]} pointerEvents="none">
-            <Ionicons name="navigate-circle-outline" size={15} color={COLORS.lime} />
-            <Text style={s.mapRouteHintText}>Set your destination below</Text>
-          </View>
-        ) : null}
 
         {/* GPS error banner */}
         {gpsStatus === 'error' && !pickupCoords ? (
@@ -2439,82 +2566,79 @@ function BookInDriveStyle() {
           </TouchableOpacity>
         ) : null}
 
-        <View style={[s.mapTopBar, { left: flow.padH, right: flow.padH }]}>
-          <TouchableOpacity style={s.backBtnCircle} onPress={() => router.back()} accessibilityLabel="Go back" accessibilityRole="button">
-            <Ionicons name="arrow-back" size={22} color={COLORS.white} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={s.pickupChip}
-            onPress={openPickupEditor}
-            accessibilityLabel="Edit pickup location"
-            accessibilityRole="button"
-            activeOpacity={0.85}
-          >
-            <View style={[s.pickupDot, { backgroundColor: COLORS.green }]} />
-            <AnimatedPickupLabel
-              label={pickup}
-              detecting={pickupDetecting || gpsStatus === 'detecting'}
-              style={s.pickupChipLabel}
-              numberOfLines={1}
-            />
-            <View
-              style={[
-                s.gpsMini,
-                gpsStatus === 'locked' && { backgroundColor: 'rgba(0,212,106,0.2)' },
-                gpsStatus === 'error' && { backgroundColor: 'rgba(255,184,0,0.15)' },
-              ]}
+        {/* Bolt collapsed route header: X · "A → B" · + */}
+        {routeReady ? (
+          <View style={[s.mapTopBar, { left: flow.padH, right: flow.padH }]}>
+            <TouchableOpacity
+              style={s.backBtnCircle}
+              onPress={() => {
+                setRouteSearchFocus('dropoff');
+                setRouteSearchOpen(true);
+              }}
+              accessibilityLabel="Close route"
+              accessibilityRole="button"
             >
-              {(pickupDetecting || gpsStatus === 'detecting') && (
-                <ActivityIndicator size="small" color={COLORS.blue} />
-              )}
-              {!pickupDetecting && gpsStatus === 'locked' && (
-                <Ionicons name="locate" size={14} color={COLORS.green} />
-              )}
-              {gpsStatus === 'error' && !pickupDetecting && (
-                <Ionicons name="warning" size={14} color={COLORS.yellow} />
-              )}
-            </View>
-          </TouchableOpacity>
-        </View>
-
-        {pickupCoords && destinationCoords ? (
-          <View style={[s.mapBidRouteCard, { left: flow.padH, right: flow.padH }]} pointerEvents="none">
-            <LinearGradient
-              colors={['rgba(11,18,32,0.97)', 'rgba(11,18,32,0.9)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[s.mapBidRouteInner, { paddingHorizontal: flow.cardPad }]}
+              <Ionicons name="close" size={22} color={COLORS.white} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.collapsedRouteChip}
+              onPress={openDestinationSearch}
+              accessibilityLabel="Edit route"
+              accessibilityRole="button"
+              activeOpacity={0.88}
             >
-              <View style={s.mapBidRow}>
-                <View style={[s.mapBidDot, { backgroundColor: COLORS.green }]} />
-                <AnimatedPickupLabel
-                  label={pickup}
-                  detecting={pickupDetecting}
-                  style={s.mapBidTxt}
-                  numberOfLines={1}
-                />
-              </View>
-              {stopCoords ? (
-                <>
-                  <View style={s.mapBidLine} />
-                  <View style={s.mapBidRow}>
-                    <View style={[s.mapBidDot, { backgroundColor: '#F59E0B' }]} />
-                    <Text style={s.mapBidTxt} numberOfLines={1}>
-                      {stop?.trim() || 'Stop'}
-                    </Text>
-                  </View>
-                </>
-              ) : null}
-              <View style={s.mapBidLine} />
-              <View style={s.mapBidRow}>
-                <View style={[s.mapBidDot, { backgroundColor: '#F87171' }]} />
-                <Text style={s.mapBidTxt} numberOfLines={1}>
-                  {destination?.trim() || 'Destination'}
-                </Text>
-              </View>
-            </LinearGradient>
+              <Text style={s.collapsedRouteChipText} numberOfLines={1}>
+                {collapsedRouteTitle}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.backBtnCircle}
+              onPress={openStopSearch}
+              accessibilityLabel="Add stop"
+              accessibilityRole="button"
+            >
+              <Ionicons name="add" size={22} color={COLORS.white} />
+            </TouchableOpacity>
           </View>
-        ) : null}
+        ) : (
+          <View style={[s.mapTopBar, { left: flow.padH, right: flow.padH }]}>
+            <TouchableOpacity style={s.backBtnCircle} onPress={() => router.back()} accessibilityLabel="Go back" accessibilityRole="button">
+              <Ionicons name="arrow-back" size={22} color={COLORS.white} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.pickupChip}
+              onPress={openPickupEditor}
+              accessibilityLabel="Edit pickup location"
+              accessibilityRole="button"
+              activeOpacity={0.85}
+            >
+              <View style={[s.pickupDot, { backgroundColor: COLORS.green }]} />
+              <AnimatedPickupLabel
+                label={pickup}
+                detecting={pickupDetecting || gpsStatus === 'detecting'}
+                style={s.pickupChipLabel}
+                numberOfLines={1}
+              />
+              <View
+                style={[
+                  s.gpsMini,
+                  gpsStatus === 'locked' && { backgroundColor: 'rgba(0,212,106,0.2)' },
+                  gpsStatus === 'error' && { backgroundColor: 'rgba(255,184,0,0.15)' },
+                ]}
+              >
+                {(pickupDetecting || gpsStatus === 'detecting') && (
+                  <ActivityIndicator size="small" color={COLORS.blue} />
+                )}
+                {!pickupDetecting && gpsStatus === 'locked' && (
+                  <Ionicons name="locate" size={14} color={COLORS.green} />
+                )}
+                {gpsStatus === 'error' && !pickupDetecting && (
+                  <Ionicons name="warning" size={14} color={COLORS.yellow} />
+                )}
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Preferred driver banner */}
         {requestedDriverId ? (
@@ -2649,41 +2773,47 @@ function BookInDriveStyle() {
             </>
           ) : (
             <View style={s.confirmHeader}>
-              <Text style={s.confirmHeaderTitle}>Confirm your ride</Text>
-              <Text style={s.confirmHeaderSub}>Pick a vehicle · set your offer · request</Text>
+              <Text style={s.confirmHeaderTitle}>Choose a ride</Text>
+              <Text style={s.confirmHeaderSub}>
+                {bookingRouteEtaMin != null
+                  ? `${Math.max(1, Math.round(bookingRouteEtaMin))} min · arrive ${arriveByClockLabel || '—'}`
+                  : 'Live fares · seats · ETA'}
+              </Text>
             </View>
           )}
 
-          <View style={s.bookFlowWhereShell}>
-            <TouchableOpacity
-              style={s.bookFlowWhereMain}
-              onPress={openDestinationSearch}
-              activeOpacity={0.88}
-              accessibilityLabel={destination?.trim() ? 'Edit destination' : 'Where to'}
-              accessibilityRole="button"
-            >
-              <Ionicons name="search" size={22} color={COLORS.dim} />
-              <Text
-                style={[s.bookFlowWhereQuestion, !!destination?.trim() && s.bookFlowWhereFilled]}
-                numberOfLines={1}
+          {!routeReady ? (
+            <View style={s.bookFlowWhereShell}>
+              <TouchableOpacity
+                style={s.bookFlowWhereMain}
+                onPress={openDestinationSearch}
+                activeOpacity={0.88}
+                accessibilityLabel={destination?.trim() ? 'Edit destination' : 'Where to'}
+                accessibilityRole="button"
               >
-                {destination?.trim() ? destination : 'Where to?'}
-              </Text>
-            </TouchableOpacity>
-            <View style={s.bookFlowWhereDivider} />
-            <TouchableOpacity
-              style={s.bookFlowLaterWrap}
-              onPress={openScheduleRide}
-              activeOpacity={0.88}
-              accessibilityLabel="Schedule for later"
-              accessibilityRole="button"
-            >
-              <Ionicons name="calendar-outline" size={20} color={COLORS.bg} />
-              <Text style={s.bookFlowLaterLabel}>Later</Text>
-            </TouchableOpacity>
-          </View>
+                <Ionicons name="search" size={22} color={COLORS.dim} />
+                <Text
+                  style={[s.bookFlowWhereQuestion, !!destination?.trim() && s.bookFlowWhereFilled]}
+                  numberOfLines={1}
+                >
+                  {destination?.trim() ? destination : 'Where to?'}
+                </Text>
+              </TouchableOpacity>
+              <View style={s.bookFlowWhereDivider} />
+              <TouchableOpacity
+                style={s.bookFlowLaterWrap}
+                onPress={openScheduleRide}
+                activeOpacity={0.88}
+                accessibilityLabel="Schedule for later"
+                accessibilityRole="button"
+              >
+                <Ionicons name="calendar-outline" size={20} color={COLORS.bg} />
+                <Text style={s.bookFlowLaterLabel}>Later</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
 
-          {destination?.trim() ? (
+          {!routeReady && destination?.trim() ? (
             stopCoords ? (
               <View style={s.bookFlowStopRow}>
                 <TouchableOpacity
@@ -2815,6 +2945,7 @@ function BookInDriveStyle() {
               const price = fareMatrix[v.id];
               const listOrig = fareMatrixOriginal[v.id];
               const isSelected = selectedVehicle === v.id;
+              const isRecommended = v.id === 'economy';
               const loadingPrice = !!(pickup && destination && !price && isLoading);
               return (
                 <TouchableOpacity
@@ -2836,15 +2967,24 @@ function BookInDriveStyle() {
                   }}
                   activeOpacity={0.75}
                   accessibilityRole="button"
-                  accessibilityLabel={`${v.name}, ${v.desc}${price > 0 ? `, ₦${price.toLocaleString()}` : ''}`}
+                  accessibilityLabel={`${v.name}, ${v.desc}${price > 0 ? `, ₦${price.toLocaleString()}` : ''}${isRecommended ? ', recommended' : ''}`}
                   accessibilityState={{ selected: isSelected }}
                 >
                   <View style={[s.inlineCatIcon, { backgroundColor: v.color + (isSelected ? '28' : '18') }]}>
                     <Ionicons name={v.icon as any} size={26} color={isSelected ? v.color : COLORS.muted} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={[s.inlineCatName, isSelected && { color: v.color }]}>{v.name}</Text>
-                    <Text style={s.inlineCatMeta}>{v.time} · {v.desc}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <Text style={[s.inlineCatName, isSelected && { color: v.color }]}>{v.name}</Text>
+                      {isRecommended ? (
+                        <View style={s.recommendedTag}>
+                          <Text style={s.recommendedTagText}>RECOMMENDED</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={s.inlineCatMeta}>
+                      {v.time} · {v.seats} seats · {v.desc}
+                    </Text>
                   </View>
                   <View style={s.inlineCatPriceCol}>
                     {loadingPrice ? (
@@ -3211,7 +3351,7 @@ function BookInDriveStyle() {
           ) : null}
         </ScrollView>
 
-        {/* Sticky confirm CTA — always visible when fare is ready */}
+        {/* Sticky CTA — Cash selector above full-width Continue */}
         {currentFare > 0 ? (
           <View
             style={[
@@ -3220,10 +3360,43 @@ function BookInDriveStyle() {
             ]}
           >
             <TouchableOpacity
+              style={s.stickyPaySelector}
+              onPress={() => {
+                Haptics.selectionAsync();
+                if (walletEnabled) {
+                  setRidePaymentMethod(ridePaymentMethod === 'wallet' ? 'cash' : 'wallet');
+                } else {
+                  setRidePaymentMethod(ridePaymentMethod === 'transfer' ? 'cash' : 'transfer');
+                }
+              }}
+              accessibilityLabel={`Payment method ${tripPaymentMethod() === 'cash' ? 'Cash' : tripPaymentMethod() === 'transfer' ? 'Transfer' : 'Wallet'}`}
+              accessibilityRole="button"
+            >
+              <Ionicons
+                name={
+                  tripPaymentMethod() === 'wallet'
+                    ? 'wallet'
+                    : tripPaymentMethod() === 'transfer'
+                      ? 'swap-horizontal'
+                      : 'cash'
+                }
+                size={18}
+                color={COLORS.green}
+              />
+              <Text style={s.stickyPaySelectorText}>
+                {tripPaymentMethod() === 'wallet'
+                  ? 'Wallet'
+                  : tripPaymentMethod() === 'transfer'
+                    ? 'Transfer'
+                    : 'Cash'}
+              </Text>
+              <Ionicons name="chevron-down" size={16} color={COLORS.muted} />
+            </TouchableOpacity>
+            <TouchableOpacity
               style={[s.findBtn, isLoading && { opacity: 0.7 }]}
               onPress={findOffers}
               disabled={isLoading}
-              accessibilityLabel={`Confirm ${veh?.name || 'ride'} for ₦${currentFare.toLocaleString()}`}
+              accessibilityLabel={`Continue with ${veh?.name || 'ride'} for ₦${currentFare.toLocaleString()}`}
               accessibilityRole="button"
             >
               <LinearGradient
@@ -3236,12 +3409,9 @@ function BookInDriveStyle() {
                     <Text style={[s.findBtnText, { color: '#fff', fontSize: 16 }]}>Matching drivers…</Text>
                   </View>
                 ) : (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Ionicons name="car-sport" size={22} color="#0D1420" />
-                    <Text style={[s.findBtnText, { color: '#0D1420', fontSize: 17, fontWeight: '900' }]}>
-                      Confirm {veh?.name || 'ride'} · ₦{currentFare.toLocaleString()}
-                    </Text>
-                  </View>
+                  <Text style={[s.findBtnText, { color: '#0D1420', fontSize: 17, fontWeight: '900' }]}>
+                    Continue
+                  </Text>
                 )}
               </LinearGradient>
             </TouchableOpacity>
@@ -3839,6 +4009,57 @@ const s = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     zIndex: 5,
+  },
+  collapsedRouteChip: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(15,23,42,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+  },
+  collapsedRouteChipText: {
+    color: '#F8FAFC',
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  recommendedTag: {
+    backgroundColor: 'rgba(34,225,128,0.16)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  recommendedTagText: {
+    color: '#22E180',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+  },
+  stickyPaySelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'flex-start',
+    marginBottom: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(30,41,59,0.95)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,225,128,0.28)',
+  },
+  stickyPaySelectorText: {
+    color: '#F1F5F9',
+    fontSize: 14,
+    fontWeight: '800',
   },
   backBtnCircle: {
     width: 44,

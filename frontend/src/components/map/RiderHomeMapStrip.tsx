@@ -242,7 +242,7 @@ export function RiderHomeMapStrip({ height = 260, onPress }: Props) {
               tracksViewChanges={false}
               anchor={{ x: 0.5, y: 0.5 }}
             >
-              <MapAnimatedTaxiMarker size={26} />
+              <MapAnimatedTaxiMarker size={26} status="available" />
             </Marker>
           );
         })}
