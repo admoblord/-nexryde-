@@ -74,49 +74,16 @@ fi
 
 echo ""
 echo "== 5/7 Cloud Run deploy (backend/) =="
-if ! command -v gcloud >/dev/null 2>&1; then
-  echo "ERROR: gcloud not found. Install Google Cloud SDK and run: gcloud auth login"
-  exit 1
-fi
-
-REGION="${GCP_REGION:-us-central1}"
-SERVICE="${CLOUD_RUN_SERVICE:-nexryde-backend}"
-
-# New revision inherits most settings from the previous revision when omitted.
-# Avoid "${empty[@]}" under `set -u` (unbound on some Bash versions when array is empty).
-if [[ -n "${GCP_PROJECT:-}" ]]; then
-  gcloud --project="$GCP_PROJECT" run deploy "$SERVICE" \
-    --source="$ROOT/backend" \
-    --platform=managed \
-    --region="$REGION" \
-    --allow-unauthenticated \
-    --memory=1Gi \
-    --cpu=1 \
-    --max-instances=10 \
-    --min-instances=0 \
-    --timeout=300 \
-    --quiet
-else
-  gcloud run deploy "$SERVICE" \
-    --source="$ROOT/backend" \
-    --platform=managed \
-    --region="$REGION" \
-    --allow-unauthenticated \
-    --memory=1Gi \
-    --cpu=1 \
-    --max-instances=10 \
-    --min-instances=0 \
-    --timeout=300 \
-    --quiet
-fi
+# Production only from main — prefer the checked-in YAML deploy path.
+bash "$ROOT/scripts/deploy_backend.sh"
 
 echo ""
 echo "== 6/7 EAS Android APK (profile: preview) =="
-(cd "$ROOT/frontend" && EAS_SKIP_AUTO_FINGERPRINT=1 npx eas-cli build --platform android --profile preview --non-interactive)
+(cd "$ROOT/frontend" && npx eas-cli build --platform android --profile preview --non-interactive)
 
 echo ""
 echo "== 7/7 EAS Android AAB (profile: production / app-bundle) =="
-(cd "$ROOT/frontend" && EAS_SKIP_AUTO_FINGERPRINT=1 npx eas-cli build --platform android --profile production --non-interactive)
+(cd "$ROOT/frontend" && npx eas-cli build --platform android --profile production --non-interactive)
 
 echo ""
 echo "✅ all complete — backend deployed, EAS builds queued. Check https://expo.dev for build status."

@@ -8,8 +8,7 @@
       "distribution": "internal",
       "node": "20.19.4",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-backend-staging-993913300770.us-central1.run.app",
-        "EAS_SKIP_AUTO_FINGERPRINT": "1"
+        "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-backend-staging-993913300770.us-central1.run.app"
       },
       "autoIncrement": false,
       "android": {
@@ -28,7 +27,6 @@
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-backend-993913300770.africa-south1.run.app",
         "EXPO_PUBLIC_GRPC_RIDE_PUSH_URL": "https://nexryde-grpc-ridepush-993913300770.africa-south1.run.app",
-        "EAS_SKIP_AUTO_FINGERPRINT": "1",
         "SENTRY_ALLOW_FAILURE": "true",
         "RCT_USE_PREBUILT_RNCORE": "0"
       },
