@@ -3,7 +3,7 @@
     "name": "NEXRYDE",
     "slug": "nexryde",
     "version": "1.3.37",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "nexryde",
     "userInterfaceStyle": "automatic",
@@ -70,7 +70,7 @@
       }
     },
     "android": {
-      "versionCode": 300,
+      "versionCode": 301,
       "config": {
         "googleMaps": {
           "apiKey": "GOOGLE_MAPS_KEY_REDACTED"
@@ -136,6 +136,8 @@
     "plugins": [
       "./plugins/withSafeAppearanceTurboModule.js",
       "./plugins/withDriverExperiencePackage.js",
+      "./plugins/withAndroid16KbPageSize.js",
+      "./plugins/withAndroidLargeScreenSupport.js",
       [
         "expo-cronet",
         {
