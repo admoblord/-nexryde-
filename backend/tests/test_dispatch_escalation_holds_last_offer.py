@@ -109,3 +109,38 @@ async def test_escalation_rotates_when_another_driver_exists(monkeypatch):
     assert escalated == 1
     assert db.trip_offers.update_many_calls, "stale wave should be expired"
     assert created and "driver-1" in created[0][1], "slow driver is blocked for the next wave"
+
+
+@pytest.mark.asyncio
+async def test_sweep_holds_offer_while_driver_window_open(monkeypatch):
+    """The 45s ledger sweep must not close an offer the driver can still accept."""
+    from datetime import datetime, timedelta, timezone
+
+    from realtime_platform import delivery_guarantee as dgu
+
+    future = (datetime.now(timezone.utc) + timedelta(minutes=4)).isoformat()
+    past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    open_offer = {"id": "offer-open", "trip_id": "trip-1", "driver_id": "driver-1", "expires_at": future}
+    lapsed_offer = {"id": "offer-lapsed", "trip_id": "trip-2", "driver_id": "driver-1", "expires_at": past}
+
+    db = _FakeDb([], [open_offer, lapsed_offer])
+    import database
+
+    monkeypatch.setattr(database, "db", db)
+
+    async def _no_reassign(*_a, **_k):
+        return {"ok": False, "reason": "no_candidate"}
+
+    finalized = []
+
+    async def _finalize(offer_id, **kw):
+        finalized.append(offer_id)
+        return {"ok": True}
+
+    monkeypatch.setattr(dgu, "reassign_offer", _no_reassign)
+    monkeypatch.setattr(dgu, "finalize_outcome", _finalize)
+
+    await dgu.sweep_unknown_offers(older_than_sec=45)
+
+    assert "offer-open" not in finalized, "still-valid offer must stay acceptable"
+    assert "offer-lapsed" in finalized, "offer past its own window should close"

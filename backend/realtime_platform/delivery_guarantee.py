@@ -312,6 +312,14 @@ async def sweep_unknown_offers(*, older_than_sec: int = 90, limit: int = 40) -> 
         try:
             result = await reassign_offer(offer, reason="unknown_sweep")
             if not result.get("ok"):
+                # No one else can take it. Closing the offer here removed the trip's
+                # only acceptable offer 45s in, so a driver still holding a live
+                # request (their app shows the 5 minute window) got 403 on accept.
+                # Wait for the driver-facing window to actually lapse.
+                expires_at = str(offer.get("expires_at") or "")
+                if expires_at and expires_at > datetime.now(timezone.utc).isoformat():
+                    incr("delivery_guarantee.sweep_held_window_open")
+                    continue
                 await finalize_outcome(
                     oid,
                     outcome="expired",
