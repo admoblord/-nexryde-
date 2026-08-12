@@ -355,11 +355,8 @@ async def websocket_user_inbox(websocket: WebSocket, user_id: str):
         await websocket.close(code=1008, reason="Unauthorized")
         return
     await user_inbox_hub.connect(websocket, user_id)
-    # Push current badge immediately so clients aren't stuck waiting for a write.
-    try:
-        await publish_notification_badge(user_id)
-    except Exception:
-        logger.debug("inbox connect badge push failed user=%s", user_id, exc_info=True)
+    # Non-blocking — never stall the WS handshake/receive loop on Mongo.
+    asyncio.create_task(publish_notification_badge(user_id))
     try:
         while True:
             data = await asyncio.wait_for(websocket.receive_text(), timeout=90)
