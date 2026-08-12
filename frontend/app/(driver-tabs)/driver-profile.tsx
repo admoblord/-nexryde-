@@ -25,7 +25,6 @@ import {
   getDriverProfile,
   getDriverSubscriptionStatus,
   getUserTrustSummary,
-  updateUser,
   BACKEND_URL,
   getAuthHeaders,
 } from '@/src/services/api';
@@ -41,6 +40,11 @@ import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useThemeColors } from '@/src/constants/theme';
 import { useWalletEnabled } from '@/src/services/clientConfig';
 import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
+import { hydrateProfileImageUri } from '@/src/utils/hydrateProfileImage';
+import {
+  persistProfilePhoto,
+  profilePhotoErrorMessage,
+} from '@/src/utils/profilePhotoUpload';
 
 const PROFILE_GREEN = BRAND.primary;
 const PROFILE_GREEN_SOFT = BRAND.primaryMuted;
@@ -337,11 +341,38 @@ export default function DriverProfileScreen() {
     return () => { mounted = false; };
   }, [canCallAuthedApi, driverId]);
 
-  const saveProfileImage = async (uri: string) => {
-    setProfileImage(uri);
-    if (user && driverId && canCallAuthedApi) {
-      setUser({ ...user, profile_image: uri });
-      try { await updateUser(driverId, { profile_image: uri }); } catch { /* silent */ }
+  useEffect(() => {
+    let mounted = true;
+    if (!driverId || !canCallAuthedApi) return undefined;
+    void (async () => {
+      const uri = await hydrateProfileImageUri(driverId, user);
+      if (!mounted || !uri) return;
+      setProfileImage(uri);
+      if (user && user.profile_image !== uri) {
+        setUser({ ...user, profile_image: uri, has_profile_image: true });
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [canCallAuthedApi, driverId, user?.has_profile_image]);
+
+  const saveProfileImage = async (
+    uri: string,
+    meta?: { fileName?: string | null; mimeType?: string | null },
+  ) => {
+    if (!driverId) return;
+    try {
+      await persistProfilePhoto({
+        userId: driverId,
+        localUri: uri,
+        user,
+        setUser,
+        setProfileImage,
+        pickerMeta: meta,
+      });
+    } catch (err) {
+      Alert.alert('Photo', profilePhotoErrorMessage(err));
     }
   };
 
@@ -353,7 +384,12 @@ export default function DriverProfileScreen() {
           const { status } = await ImagePicker.requestCameraPermissionsAsync();
           if (status !== 'granted') return;
           const r = await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.85 });
-          if (!r.canceled && r.assets[0]) await saveProfileImage(r.assets[0].uri);
+          if (!r.canceled && r.assets[0]) {
+            await saveProfileImage(r.assets[0].uri, {
+              fileName: r.assets[0].fileName,
+              mimeType: r.assets[0].mimeType,
+            });
+          }
         },
       },
       {
@@ -362,7 +398,12 @@ export default function DriverProfileScreen() {
           const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
           if (status !== 'granted') return;
           const r = await ImagePicker.launchImageLibraryAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.85 });
-          if (!r.canceled && r.assets[0]) await saveProfileImage(r.assets[0].uri);
+          if (!r.canceled && r.assets[0]) {
+            await saveProfileImage(r.assets[0].uri, {
+              fileName: r.assets[0].fileName,
+              mimeType: r.assets[0].mimeType,
+            });
+          }
         },
       },
       { text: 'Cancel', style: 'cancel' },

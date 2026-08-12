@@ -20,7 +20,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL, deleteUserAccount, getUser, getUserTrustSummary, getAuthHeaders, updateUser } from '@/src/services/api';
+import { BACKEND_URL, deleteUserAccount, getUser, getUserTrustSummary, getAuthHeaders } from '@/src/services/api';
 import { buildInviteUrl, buildShareMessage } from '@/src/services/referralService';
 import { sentryTestCrash } from '@/src/utils/sentry';
 import { shareTextViaWhatsApp } from '@/src/services/socialWhatsApp';
@@ -45,6 +45,11 @@ import {
 } from '@/src/constants/commercialOffers';
 import { useWalletEnabled } from '@/src/services/clientConfig';
 import { BRAND, RADIUS, SPACING, SURFACE, TYPOGRAPHY } from '@/src/constants/designSystem';
+import { hydrateProfileImageUri } from '@/src/utils/hydrateProfileImage';
+import {
+  persistProfilePhoto,
+  profilePhotoErrorMessage,
+} from '@/src/utils/profilePhotoUpload';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -119,13 +124,11 @@ function LockedBadgeChip({ badge }: { badge: RiderAchievementBadgeMeta }) {
 function ActionTile({
   icon,
   label,
-  gradColors,
   onPress,
   tileWidth,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
-  gradColors: [string, string];
   onPress: () => void;
   tileWidth: number;
 }) {
@@ -145,9 +148,9 @@ function ActionTile({
         onPress={press}
         activeOpacity={1}
       >
-        <LinearGradient colors={gradColors} style={s.actionTileIcon} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-          <Ionicons name={icon} size={22} color="#FFF" />
-        </LinearGradient>
+        <View style={[s.actionTileIcon, { backgroundColor: PROFILE_GREEN_SOFT }]}>
+          <Ionicons name={icon} size={22} color={PROFILE_GREEN} />
+        </View>
         <Text style={[s.actionTileLabel, { color: colors.text }]}>{label}</Text>
       </TouchableOpacity>
     </Animated.View>
@@ -157,7 +160,6 @@ function ActionTile({
 /* ─── Menu row ───────────────────────────────────────────────── */
 function MenuRow({
   icon,
-  gradColors,
   title,
   subtitle,
   onPress,
@@ -165,7 +167,6 @@ function MenuRow({
   badge,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
-  gradColors: [string, string];
   title: string;
   subtitle?: string;
   onPress: () => void;
@@ -175,9 +176,16 @@ function MenuRow({
   const { colors } = useThemeColors();
   return (
     <TouchableOpacity style={[s.menuRow, { borderTopColor: colors.border }]} onPress={onPress} activeOpacity={0.75}>
-      <LinearGradient colors={danger ? ['#7f1d1d', '#991b1b'] : gradColors} style={s.menuIconWrap} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-        <Ionicons name={icon} size={18} color="#FFF" />
-      </LinearGradient>
+      <View
+        style={[
+          s.menuIconWrap,
+          {
+            backgroundColor: danger ? 'rgba(239,68,68,0.14)' : PROFILE_GREEN_SOFT,
+          },
+        ]}
+      >
+        <Ionicons name={icon} size={18} color={danger ? BRAND.danger : PROFILE_GREEN} />
+      </View>
       <View style={s.menuRowBody}>
         <Text style={[s.menuTitle, { color: colors.text }, danger && { color: '#F87171' }]}>{title}</Text>
         {subtitle ? <Text style={[s.menuSubtitle, { color: colors.textMuted }]}>{subtitle}</Text> : null}
@@ -293,6 +301,10 @@ export default function RiderProfileScreen() {
                 ? Number(d.rider_reputation_trip_count)
                 : undefined,
           });
+          const hasImg = Boolean(d.has_profile_image);
+          if (user && user.has_profile_image !== hasImg) {
+            setUser({ ...user, has_profile_image: hasImg });
+          }
         }
       } catch { /* non-critical — fall back to store for badges */ }
 
@@ -301,6 +313,22 @@ export default function RiderProfileScreen() {
     void load();
     return () => { mounted = false; };
   }, [canCallAuthedApi, userId, user?.rating, user?.total_trips]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!userId || !canCallAuthedApi) return undefined;
+    void (async () => {
+      const uri = await hydrateProfileImageUri(userId, user);
+      if (!mounted || !uri) return;
+      setProfileImage(uri);
+      if (user && user.profile_image !== uri) {
+        setUser({ ...user, profile_image: uri, has_profile_image: true });
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [canCallAuthedApi, userId, user?.has_profile_image]);
 
   useEffect(() => {
     let mounted = true;
@@ -322,11 +350,19 @@ export default function RiderProfileScreen() {
     };
   }, [canCallAuthedApi, userId]);
 
-  const saveProfileImage = async (uri: string) => {
-    setProfileImage(uri);
-    if (user && userId && canCallAuthedApi) {
-      setUser({ ...user, profile_image: uri });
-      try { await updateUser(userId, { profile_image: uri }); } catch { /* silent */ }
+  const saveProfileImage = async (uri: string, meta?: { fileName?: string | null; mimeType?: string | null }) => {
+    if (!userId) return;
+    try {
+      await persistProfilePhoto({
+        userId,
+        localUri: uri,
+        user,
+        setUser,
+        setProfileImage,
+        pickerMeta: meta,
+      });
+    } catch (err) {
+      Alert.alert('Photo', profilePhotoErrorMessage(err));
     }
   };
 
@@ -338,7 +374,12 @@ export default function RiderProfileScreen() {
           const { status } = await ImagePicker.requestCameraPermissionsAsync();
           if (status !== 'granted') return;
           const r = await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.85 });
-          if (!r.canceled && r.assets[0]) await saveProfileImage(r.assets[0].uri);
+          if (!r.canceled && r.assets[0]) {
+            await saveProfileImage(r.assets[0].uri, {
+              fileName: r.assets[0].fileName,
+              mimeType: r.assets[0].mimeType,
+            });
+          }
         },
       },
       {
@@ -347,7 +388,12 @@ export default function RiderProfileScreen() {
           const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
           if (status !== 'granted') return;
           const r = await ImagePicker.launchImageLibraryAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.85 });
-          if (!r.canceled && r.assets[0]) await saveProfileImage(r.assets[0].uri);
+          if (!r.canceled && r.assets[0]) {
+            await saveProfileImage(r.assets[0].uri, {
+              fileName: r.assets[0].fileName,
+              mimeType: r.assets[0].mimeType,
+            });
+          }
         },
       },
       { text: 'Cancel', style: 'cancel' },
@@ -513,25 +559,20 @@ export default function RiderProfileScreen() {
           </View>
 
           <Animated.View style={[s.avatarWrap, { transform: [{ scale: avatarScale }] }]}>
-            <LinearGradient
-              colors={[PROFILE_GREEN, BRAND.info, BRAND.accentPurple]}
-              style={s.avatarRing}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
+            <View style={s.avatarRing}>
               <TouchableOpacity style={s.avatarInner} onPress={pickImage} activeOpacity={0.85}>
                 {profileImage ? (
                   <Image source={{ uri: profileImage }} style={s.avatarImg} />
                 ) : (
-                  <LinearGradient colors={[BRAND.bgElevated, BRAND.bgDeep]} style={s.avatarFallback}>
+                  <View style={s.avatarFallback}>
                     <Text style={s.avatarInitial}>{initial}</Text>
-                  </LinearGradient>
+                  </View>
                 )}
                 <View style={s.avatarEditBadge}>
                   <Ionicons name="camera" size={11} color={BRAND.textInverse} />
                 </View>
               </TouchableOpacity>
-            </LinearGradient>
+            </View>
           </Animated.View>
 
           <Animated.View
@@ -709,14 +750,14 @@ export default function RiderProfileScreen() {
         <View style={s.gridSection}>
           <Text style={[s.gridTitle, { color: colors.textMuted }]}>Shortcuts</Text>
           <View style={[s.grid, { gap: flow.isTablet ? 14 : 12 }]}>
-            <ActionTile icon="create" label="Edit profile" gradColors={['#1D4ED8', '#2563EB']} tileWidth={actionTileW} onPress={() => router.push('/edit-profile')} />
-            <ActionTile icon="time" label="My trips" gradColors={['#5B21B6', '#7C3AED']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-trips' as any)} />
-            <ActionTile icon="location" label="Saved places" gradColors={['#065F46', '#059669']} tileWidth={actionTileW} onPress={() => router.push('/rider/saved-places' as any)} />
-            <ActionTile icon="heart-circle" label="Favourites" gradColors={['#9D174D', '#EC4899']} tileWidth={actionTileW} onPress={() => router.push('/rider/favorite-drivers')} />
+            <ActionTile icon="create" label="Edit profile" tileWidth={actionTileW} onPress={() => router.push('/edit-profile')} />
+            <ActionTile icon="time" label="My trips" tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-trips' as any)} />
+            <ActionTile icon="location" label="Saved places" tileWidth={actionTileW} onPress={() => router.push('/rider/saved-places' as any)} />
+            <ActionTile icon="heart-circle" label="Favourites" tileWidth={actionTileW} onPress={() => router.push('/rider/favorite-drivers')} />
             {walletEnabled ? (
-              <ActionTile icon="wallet" label="Wallet" gradColors={['#0369A1', '#0EA5E9']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-wallet' as any)} />
+              <ActionTile icon="wallet" label="Wallet" tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-wallet' as any)} />
             ) : null}
-            <ActionTile icon="notifications" label="Updates" gradColors={['#7C2D12', '#EA580C']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-notifications' as any)} />
+            <ActionTile icon="notifications" label="Updates" tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-notifications' as any)} />
           </View>
         </View>
 
@@ -730,7 +771,7 @@ export default function RiderProfileScreen() {
           </Section>
         ) : trustSummary ? (
           <Section title="NEXRYDE score">
-            <LinearGradient colors={[PROFILE_GREEN_SOFT, 'rgba(56,189,248,0.06)']} style={s.scoreHero}>
+            <LinearGradient colors={[PROFILE_GREEN_SOFT, 'rgba(34,225,128,0.04)']} style={s.scoreHero}>
               <View style={s.scoreHeroLeft}>
                 <Text style={[s.scoreMainValue, { color: colors.text }]}>
                   {Math.round(trustSummary.nexryde_score)}
@@ -753,7 +794,7 @@ export default function RiderProfileScreen() {
             <View style={s.scoreBreak}>
               <ScoreBar label="Service" value={trustSummary.score_breakdown?.service_quality ?? 0} color={PROFILE_GREEN} />
               <ScoreBar label="Punctuality" value={trustSummary.score_breakdown?.punctuality ?? 0} color={BRAND.info} />
-              <ScoreBar label="Verification" value={trustSummary.score_breakdown?.verification ?? 0} color={BRAND.accentPurple} />
+              <ScoreBar label="Verification" value={trustSummary.score_breakdown?.verification ?? 0} color={BRAND.primaryDark} />
               <ScoreBar label="Payments" value={trustSummary.score_breakdown?.payment_behavior ?? 0} color={BRAND.warning} />
             </View>
 
@@ -809,26 +850,26 @@ export default function RiderProfileScreen() {
               <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.6)" />
             </LinearGradient>
           </TouchableOpacity>
-          <MenuRow icon="shield-checkmark" gradColors={['#78350F', '#D97706']} title="Safety Center" subtitle="Emergency contacts & trip protection" onPress={() => router.push('/(rider-tabs)/rider-safety' as any)} />
-          <MenuRow icon="ribbon" gradColors={['#134E4A', '#0D9488']} title="NEXRYDE Shield" subtitle="Disputes and ride protection" onPress={() => router.push('/shield-disputes')} />
+          <MenuRow icon="shield-checkmark" title="Safety Center" subtitle="Emergency contacts & trip protection" onPress={() => router.push('/(rider-tabs)/rider-safety' as any)} />
+          <MenuRow icon="ribbon" title="NEXRYDE Shield" subtitle="Disputes and ride protection" onPress={() => router.push('/shield-disputes')} />
         </Section>
 
         {/* ── ACCOUNT & PREFERENCES ── */}
         <Section title="Preferences">
-          <MenuRow icon="settings" gradColors={['#166534', PROFILE_GREEN]} title="Settings" subtitle="App preferences & defaults" onPress={() => router.push('/settings')} />
-          <MenuRow icon="car-sport" gradColors={['#3730A3', '#4F46E5']} title="Switch to Driver Mode" subtitle="Drive and earn on NEXRYDE" onPress={() => setShowDriverModal(true)} />
+          <MenuRow icon="settings" title="Settings" subtitle="App preferences & defaults" onPress={() => router.push('/settings')} />
+          <MenuRow icon="car-sport" title="Switch to Driver Mode" subtitle="Drive and earn on NEXRYDE" onPress={() => setShowDriverModal(true)} />
         </Section>
 
         {/* ── SUPPORT & LEGAL ── */}
         <Section title="Support & legal">
-          <MenuRow icon="help-circle" gradColors={['#7C2D12', '#EA580C']} title="Help & Support" onPress={() => router.push('/support')} />
-          <MenuRow icon="document-text" gradColors={['#4C1D95', '#7C3AED']} title="Privacy Policy" onPress={() => router.push('/privacy-policy')} />
-          <MenuRow icon="reader" gradColors={['#0C4A6E', '#0EA5E9']} title="Terms of Service" onPress={() => router.push('/terms-of-service')} />
+          <MenuRow icon="help-circle" title="Help & Support" onPress={() => router.push('/support')} />
+          <MenuRow icon="document-text" title="Privacy Policy" onPress={() => router.push('/privacy-policy')} />
+          <MenuRow icon="reader" title="Terms of Service" onPress={() => router.push('/terms-of-service')} />
         </Section>
 
         {/* ── ACCOUNT ── */}
         <Section title="Account">
-          <MenuRow icon="trash" gradColors={['#7f1d1d', '#991b1b']} title="Delete Account" subtitle="Permanently deactivate this profile" onPress={handleDelete} danger />
+          <MenuRow icon="trash" title="Delete Account" subtitle="Permanently deactivate this profile" onPress={handleDelete} danger />
         </Section>
 
         <TouchableOpacity
@@ -861,15 +902,15 @@ export default function RiderProfileScreen() {
             <TouchableOpacity style={s.modalCloseBtn} onPress={() => setShowDriverModal(false)}>
               <Ionicons name="close" size={22} color="#64748B" />
             </TouchableOpacity>
-            <LinearGradient colors={['rgba(99,102,241,0.15)', 'transparent']} style={s.modalIconWrap}>
-              <Ionicons name="car-sport" size={36} color="#818CF8" />
+            <LinearGradient colors={['rgba(34,225,128,0.12)', 'transparent']} style={s.modalIconWrap}>
+              <Ionicons name="car-sport" size={36} color={PROFILE_GREEN} />
             </LinearGradient>
             <Text style={s.modalTitle}>Switch to Driver?</Text>
             <Text style={s.modalSubtitle}>
               You'll use the driver experience to go online and earn. Switch back to rider anytime from your profile.
             </Text>
             <TouchableOpacity style={s.modalConfirmBtn} onPress={confirmDriverSwitch}>
-              <LinearGradient colors={['#4F46E5', '#6366F1']} style={s.modalConfirmGrad}>
+              <LinearGradient colors={[PROFILE_GREEN, BRAND.primaryDark]} style={s.modalConfirmGrad}>
                 <Text style={s.modalConfirmText}>Switch to Driver</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -933,6 +974,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 3,
+    backgroundColor: PROFILE_GREEN,
   },
   avatarInner: {
     width: 98,
@@ -948,6 +990,7 @@ const s = StyleSheet.create({
     borderRadius: 49,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: BRAND.bgElevated,
   },
   avatarInitial: { fontSize: 36, fontWeight: '900', color: BRAND.textPrimary, letterSpacing: -1 },
   avatarEditBadge: {

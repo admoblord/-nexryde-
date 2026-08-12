@@ -291,6 +291,12 @@ export function postDriverFortressVerify(payload: {
 export const getUser = (userId: string) => 
   api.get(`/users/${userId}`);
 
+/** Avatar blob — kept off GET /users so profile/tab prefetch stays lean. */
+export const getProfilePicture = (userId: string) =>
+  api.get<{ profile_image?: string | null; updated_at?: string | null }>(
+    `/users/${userId}/profile-picture`,
+  );
+
 export const getUserPreferences = (userId: string) =>
   api.get(`/users/${userId}/preferences`);
 

@@ -11,6 +11,8 @@ export interface User {
   role: 'rider' | 'driver' | 'admin';
   is_verified: boolean;
   profile_image: string | null;
+  /** True when avatar exists on server but was omitted from GET /users. */
+  has_profile_image?: boolean;
   rating: number;
   /** How many trips include a driver→rider rating; used for trust / achievements. */
   rider_reputation_trip_count?: number;

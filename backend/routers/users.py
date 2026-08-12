@@ -154,6 +154,19 @@ async def get_user(user_id: str, request: Request):
     user["_id"] = str(user["_id"])
     safe = strip_sensitive_pii(user)
     safe.update(public_nin_fields(user))
+    # Full avatar lives on GET /users/{id}/profile-picture — keep tab loads lean.
+    # PROFILE_API_PROJECTION excludes profile_image, so prefer updated_at; fall back
+    # to an existence-only probe for legacy rows that never set updated_at.
+    has_img = bool(user.get("profile_image_updated_at"))
+    if not has_img:
+        exists = await db.users.find_one(
+            {"id": user_id, "profile_image": {"$exists": True, "$nin": [None, ""]}},
+            {"_id": 1},
+            max_time_ms=QUERY_MAX_TIME_MS,
+        )
+        has_img = exists is not None
+    safe["has_profile_image"] = has_img
+    safe.pop("profile_image", None)
     return safe
 
 
