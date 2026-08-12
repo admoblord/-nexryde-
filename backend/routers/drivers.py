@@ -388,11 +388,31 @@ async def get_driver_profile(user_id: str, request: Request):
     if isinstance(hit, dict) and hit.get("user_id"):
         return hit
 
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
+    # Exclude legacy inline binaries at the Mongo layer — post-fetch truncation still
+    # paid the Atlas transfer cost and slowed driver home when docs lived on profiles.
+    profile = await db.driver_profiles.find_one(
+        {"user_id": user_id},
+        {
+            "face_image": 0,
+            "face_anchor_image": 0,
+            "liveness_probe_image": 0,
+            "face_capture_meta": 0,
+            "passport_photo": 0,
+            "drivers_license": 0,
+            "insurance": 0,
+            "vehicle_registration": 0,
+            "vehicle_license": 0,
+            "hacking_permit": 0,
+            "road_worthiness": 0,
+            "vehicle_front": 0,
+            "vehicle_interior": 0,
+            "vehicle_ac": 0,
+        },
+    )
     if not profile:
         raise HTTPException(status_code=404, detail="Driver profile not found")
     profile["_id"] = str(profile["_id"])
-    # Never cache huge binary blobs in Redis.
+    # Defensive: never cache huge binary blobs in Redis if a legacy field sneaks through.
     for heavy in ("face_image", "passport_photo", "drivers_license", "insurance"):
         if isinstance(profile.get(heavy), str) and len(profile[heavy]) > 5000:
             profile[heavy] = ""
@@ -1733,7 +1753,20 @@ async def get_available_drivers(vehicle_type: Optional[str] = None, lat: Optiona
         query = {"is_online": True, "verification_status": "approved"}
         if vehicle_type:
             query["vehicle_type"] = vehicle_type
-        drivers = await db.driver_profiles.find(query, {"_id": 0}).to_list(200)
+        drivers = await db.driver_profiles.find(
+            query,
+            {
+                "_id": 0,
+                "user_id": 1,
+                "name": 1,
+                "rating": 1,
+                "total_rides": 1,
+                "vehicle_type": 1,
+                "vehicle_plate": 1,
+                "vehicle_model": 1,
+                "current_location": 1,
+            },
+        ).to_list(200)
         driver_ids = [d.get("user_id") for d in drivers if d.get("user_id")]
         active_subscriptions = await db.subscriptions.find(
             {"driver_id": {"$in": driver_ids}, "status": {"$in": ["active", "trial", "grace_period"]}},

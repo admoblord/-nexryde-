@@ -1151,7 +1151,10 @@ LEGACY_FARE_CONFIG = {
 
 # ==================== SUBSCRIPTION ENDPOINTS ====================
 async def _assert_driver_can_activate_subscription(driver_id: str):
-    profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
+    profile = await db.driver_profiles.find_one(
+        {"user_id": driver_id},
+        {"_id": 0, "documents_verified": 1, "verification_status": 1},
+    ) or {}
     if not profile.get("documents_verified") or profile.get("verification_status") != "approved":
         raise HTTPException(
             status_code=403,

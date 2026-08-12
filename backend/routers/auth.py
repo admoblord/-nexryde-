@@ -58,6 +58,7 @@ logger = logging.getLogger('server')
 auth_router = APIRouter(prefix="/api", tags=["Auth"])
 
 # Login must not pull multi-MB face blobs over Atlas — causes NetworkTimeout on existing users.
+# profile_image is often a 20–50KB data-URI; clients hydrate via GET /users/{id}/profile-picture.
 _LOGIN_USER_PROJECTION = {
     "_id": 1,
     "id": 1,
@@ -65,7 +66,7 @@ _LOGIN_USER_PROJECTION = {
     "name": 1,
     "role": 1,
     "phone": 1,
-    "profile_image": 1,
+    "profile_image_updated_at": 1,
     "rating": 1,
     "verification_status": 1,
     "driver_verification_status": 1,
@@ -83,7 +84,70 @@ _LOGIN_USER_PROJECTION = {
     "privacy_accepted_at": 1,
     "rider_verification_completed": 1,
     "onboarding_complete": 1,
+    "is_verified": 1,
+    "total_trips": 1,
+    "gender": 1,
 }
+
+
+def _sanitize_login_user(user: dict) -> dict:
+    """Return a login-safe user payload (no biometric / avatar blobs)."""
+    out = dict(user)
+    if "_id" in out:
+        out["_id"] = str(out["_id"])
+    has_img = bool(out.pop("profile_image_updated_at", None) or out.get("profile_image"))
+    out.pop("profile_image", None)
+    out.pop("face_image", None)
+    out.pop("face_anchor_image", None)
+    out.pop("liveness_probe_image", None)
+    out.pop("face_capture_meta", None)
+    out["has_profile_image"] = has_img
+    out["profile_image"] = None
+    return out
+
+
+async def _complete_existing_user_email_login(user: dict, device_id: Optional[str] = None) -> dict:
+    """
+    Issue JWT for an existing user (passwordless email).
+    Caller must pass the user document — avoids a second DB round-trip.
+    """
+    if not user:
+        raise HTTPException(status_code=500, detail="Internal error")
+
+    user = _sanitize_login_user(user)
+    role = user.get("role", "rider")
+    uid = user["id"]
+
+    access_token = create_access_token(uid, role)
+    raw_refresh = create_refresh_token(uid, role)
+    refresh_hash = _hashlib.sha256(raw_refresh.encode()).hexdigest()
+
+    from db_resilience import with_mongo_retry
+
+    await with_mongo_retry(
+        lambda: db.refresh_tokens.insert_one({
+            "token_hash": refresh_hash,
+            "user_id": uid,
+            "role": role,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=JWT_REFRESH_EXPIRY_DAYS)).isoformat(),
+            "revoked": False,
+        }),
+        label="refresh_token_insert",
+    )
+
+    return {
+        "message":       "Login successful",
+        "is_new_user":   False,
+        "user":          user,
+        # New clients use access_token / refresh_token.
+        # Legacy clients still receive "token" for backward compatibility.
+        "token":         access_token,
+        "access_token":  access_token,
+        "refresh_token": raw_refresh,
+        "token_type":    "bearer",
+        "expires_in":    JWT_ACCESS_EXPIRY_MINUTES * 60,
+    }
 
 # Config
 def _env_truthy(name: str) -> bool:
@@ -202,52 +266,6 @@ class UnifiedEmailOtpVerifyBody(BaseModel):
 
     email: EmailStr
     otp: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
-
-
-async def _complete_existing_user_email_login(user: dict, device_id: Optional[str] = None) -> dict:
-    """
-    Issue JWT for an existing user (passwordless email).
-    Caller must pass the user document — avoids a second DB round-trip.
-    """
-    if not user:
-        raise HTTPException(status_code=500, detail="Internal error")
-
-    user = dict(user)
-    if "_id" in user:
-        user["_id"] = str(user["_id"])
-    role = user.get("role", "rider")
-    uid = user["id"]
-
-    access_token = create_access_token(uid, role)
-    raw_refresh = create_refresh_token(uid, role)
-    refresh_hash = _hashlib.sha256(raw_refresh.encode()).hexdigest()
-
-    from db_resilience import with_mongo_retry
-
-    await with_mongo_retry(
-        lambda: db.refresh_tokens.insert_one({
-            "token_hash": refresh_hash,
-            "user_id": uid,
-            "role": role,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "expires_at": (datetime.now(timezone.utc) + timedelta(days=JWT_REFRESH_EXPIRY_DAYS)).isoformat(),
-            "revoked": False,
-        }),
-        label="refresh_token_insert",
-    )
-
-    return {
-        "message":       "Login successful",
-        "is_new_user":   False,
-        "user":          user,
-        # New clients use access_token / refresh_token.
-        # Legacy clients still receive "token" for backward compatibility.
-        "token":         access_token,
-        "access_token":  access_token,
-        "refresh_token": raw_refresh,
-        "token_type":    "bearer",
-        "expires_in":    JWT_ACCESS_EXPIRY_MINUTES * 60,
-    }
 
 
 class DriverFortressVerifyRequest(BaseModel):
@@ -842,11 +860,15 @@ async def verify_otp(request: OTPVerify, http_request: Request):
         del otp_store[normalized_phone]
     
     # Check if user exists (use normalized phone for consistency)
-    user = await db.users.find_one({"phone": normalized_phone})
+    user = await db.users.find_one(
+        {"phone": normalized_phone},
+        _LOGIN_USER_PROJECTION,
+        max_time_ms=LOGIN_MAX_TIME_MS,
+    )
     if user:
         await db.users.update_one({"phone": normalized_phone}, {"$set": {"is_verified": True}})
+        user = _sanitize_login_user(user)
         user["is_verified"] = True
-        user["_id"] = str(user["_id"])
         clear_login_attempts(request.phone)
         _uid  = user["id"]
         _role = user.get("role", "rider")
@@ -946,8 +968,12 @@ async def exchange_google_session(request: SessionExchangeRequest, response: Res
             logger.info(f"Emergent Auth returned user: {user_data.get('email', 'unknown')}")
             session_data = SessionDataResponse(**user_data)
         
-        # Check if user exists by email
-        existing_user = await db.users.find_one({"email": session_data.email}, {"_id": 0})
+        # Check if user exists by email (lean projection — never pull avatar/face blobs)
+        existing_user = await db.users.find_one(
+            {"email": session_data.email},
+            _LOGIN_USER_PROJECTION,
+            max_time_ms=LOGIN_MAX_TIME_MS,
+        )
         
         if existing_user:
             # Update existing user
@@ -957,16 +983,24 @@ async def exchange_google_session(request: SessionExchangeRequest, response: Res
             }
             if session_data.name and not existing_user.get("name"):
                 update_data["name"] = session_data.name
-            if session_data.picture and not existing_user.get("profile_image"):
+            if session_data.picture and not (
+                existing_user.get("profile_image_updated_at") or existing_user.get("profile_image")
+            ):
                 update_data["profile_image"] = session_data.picture
+                update_data["profile_image_updated_at"] = datetime.now(timezone.utc).isoformat()
             
             await db.users.update_one(
                 {"email": session_data.email}, 
                 {"$set": update_data}
             )
             
-            # Get updated user
-            user = await db.users.find_one({"email": session_data.email}, {"_id": 0})
+            # Get updated user (lean)
+            user = await db.users.find_one(
+                {"email": session_data.email},
+                _LOGIN_USER_PROJECTION,
+                max_time_ms=LOGIN_MAX_TIME_MS,
+            )
+            user = _sanitize_login_user(user or existing_user)
             
             # Store session
             await db.user_sessions.insert_one({
@@ -1019,7 +1053,11 @@ async def google_sign_in(request: GoogleSignInRequest):
     """Handle Google Sign-In authentication (legacy)"""
     try:
         # Check if user exists by email
-        user = await db.users.find_one({"email": request.email})
+        user = await db.users.find_one(
+            {"email": request.email},
+            _LOGIN_USER_PROJECTION,
+            max_time_ms=LOGIN_MAX_TIME_MS,
+        )
 
         # Optional emergency bypass is disabled by default.
         # Keep this guarded to prevent verification/subscription bypass in production.
@@ -1033,12 +1071,14 @@ async def google_sign_in(request: GoogleSignInRequest):
             update_data = {"is_verified": True}
             if request.name and not user.get("name"):
                 update_data["name"] = request.name
-            if request.photo_url and not user.get("profile_image"):
+            if request.photo_url and not (
+                user.get("profile_image_updated_at") or user.get("profile_image")
+            ):
                 update_data["profile_image"] = request.photo_url
+                update_data["profile_image_updated_at"] = datetime.now(timezone.utc).isoformat()
             
             await db.users.update_one({"email": request.email}, {"$set": update_data})
-            user.update(update_data)
-            user["_id"] = str(user["_id"])
+            user = _sanitize_login_user({**user, **update_data})
             
             return {
                 "message": "Login successful",

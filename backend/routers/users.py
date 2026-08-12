@@ -178,7 +178,22 @@ async def get_user_trust_summary(user_id: str, request: Request):
         raise HTTPException(status_code=404, detail="User not found")
     driver_profile = None
     if user.get("role") == "driver":
-        driver_profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0})
+        driver_profile = await db.driver_profiles.find_one(
+            {"user_id": user_id},
+            {
+                "_id": 0,
+                "safety_rating": 1,
+                "completion_rate": 1,
+                "cancellation_count": 1,
+                "nin_verified": 1,
+                "selfie_verified": 1,
+                "license_uploaded": 1,
+                "vehicle_docs_uploaded": 1,
+                "fatigue_warning": 1,
+                "documents_verified": 1,
+                "verification_status": 1,
+            },
+        )
     summary = build_trust_summary(user, driver_profile)
     await db.users.update_one(
         {"id": user_id},
