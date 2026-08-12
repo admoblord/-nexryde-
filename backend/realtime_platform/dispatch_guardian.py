@@ -86,8 +86,28 @@ async def _escalate_expired_offers(limit: int = 30) -> int:
         oldest = min(str(o.get("created_at") or cutoff) for o in open_offers)
         if oldest > cutoff:
             continue
-        # Expire current wave
+
         declined = [str(o.get("driver_id") or "") for o in open_offers if o.get("driver_id")]
+        blocked = list({*(trip.get("blocked_drivers") or []), *declined})
+        full = await db.trips.find_one({"id": tid}, {"_id": 0}) or trip
+
+        # Only rotate the wave when there is somewhere else to send it. Expiring the
+        # open offers also blocks those drivers for this trip, so with a small online
+        # pool (often a single driver) escalation used to strand the rider: the offer
+        # went 403 on accept while still showing as live on the driver's screen, and
+        # the redispatch had nobody left to ask.
+        try:
+            from routers.trips import _get_eligible_drivers_for_trip
+
+            fresh = await _get_eligible_drivers_for_trip(full, blocked)
+        except Exception:
+            logger.exception("dispatch escalate eligibility check failed trip=%s", tid)
+            incr("guardian.dispatch.escalate_error")
+            continue
+        if not fresh:
+            incr("guardian.dispatch.escalate_held", drivers=len(open_offers))
+            continue
+
         await db.trip_offers.update_many(
             {"trip_id": tid, "status": {"$in": ["offered", "seen"]}},
             {
@@ -99,12 +119,10 @@ async def _escalate_expired_offers(limit: int = 30) -> int:
                 }
             },
         )
-        blocked = list({*(trip.get("blocked_drivers") or []), *declined})
         await db.trips.update_one({"id": tid}, {"$set": {"blocked_drivers": blocked}})
         try:
             from routers.trips import _create_trip_offers
 
-            full = await db.trips.find_one({"id": tid}, {"_id": 0}) or trip
             offers = await _create_trip_offers(full, blocked)
             escalated += 1
             incr("guardian.dispatch.escalated", offers=len(offers or []))
