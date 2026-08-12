@@ -822,11 +822,41 @@ async def verify_face(user_id: str, payload: FaceVerificationRequest, http_reque
 
 # ==================== NOTIFICATIONS ====================
 
+_NOTIF_LIST_PROJECTION = {
+    "_id": 0,
+    "id": 1,
+    "type": 1,
+    "title": 1,
+    "message": 1,
+    "data": 1,
+    "created_at": 1,
+    "read": 1,
+}
+
+
+def _slim_notification(doc: dict) -> dict:
+    """Drop null-heavy enforcement payloads; keep keys the app actually uses."""
+    data = doc.get("data")
+    if isinstance(data, dict):
+        data = {k: v for k, v in data.items() if v is not None}
+        if not data:
+            data = None
+    return {
+        "id": doc.get("id"),
+        "type": doc.get("type"),
+        "title": doc.get("title"),
+        "message": doc.get("message"),
+        "data": data,
+        "created_at": doc.get("created_at"),
+        "read": bool(doc.get("read")),
+    }
+
+
 @users_router.get("/users/{user_id}/notifications")
 async def get_user_notifications(
     user_id: str,
     request: Request,
-    limit: int = 50,
+    limit: int = 25,
     unread_only: bool = False,
     exclude_engagement: bool = False,
 ):
@@ -838,13 +868,22 @@ async def get_user_notifications(
     if exclude_engagement:
         query["category"] = {"$nin": ["driver_engagement", "rider_engagement", "engagement", "daily_slot"]}
         query["source"] = {"$nin": ["engagement", "daily_slot", "reconnect"]}
-    notifications = await db.notifications.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    safe_limit = max(1, min(int(limit or 25), 50))
+    notifications = (
+        await db.notifications.find(query, _NOTIF_LIST_PROJECTION)
+        .sort("created_at", -1)
+        .limit(safe_limit)
+        .to_list(safe_limit)
+    )
     unread_query = {"user_id": user_id, "read": False}
     if exclude_engagement:
         unread_query["category"] = query["category"]
         unread_query["source"] = query["source"]
     unread_count = await db.notifications.count_documents(unread_query)
-    return {"notifications": notifications, "unread_count": unread_count}
+    return {
+        "notifications": [_slim_notification(n) for n in notifications],
+        "unread_count": unread_count,
+    }
 
 @users_router.post("/users/{user_id}/notifications/{notification_id}/read")
 async def mark_notification_read(user_id: str, notification_id: str, request: Request):

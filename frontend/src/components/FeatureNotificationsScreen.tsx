@@ -144,7 +144,7 @@ export default function FeatureNotificationsScreen({ role }: Props) {
     }
     try {
       const res = await authedFetch(
-        `${BACKEND_URL}/api/users/${userId}/notifications?limit=40`,
+        `${BACKEND_URL}/api/users/${userId}/notifications?limit=25`,
         { timeoutMs: 10_000, preserveSessionOn401: true },
       );
       if (res.ok) {

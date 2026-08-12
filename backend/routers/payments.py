@@ -4026,15 +4026,33 @@ async def estimate_fare(request: FareEstimateRequest, http_request: Request):
 
 
 # ==================== WALLET ENDPOINTS ====================
+
+# List views never need Squad/webhook blobs (often multi-KB per row).
+_WALLET_TX_LIST_PROJECTION = {
+    "_id": 0,
+    "id": 1,
+    "trip_id": 1,
+    "type": 1,
+    "source": 1,
+    "amount": 1,
+    "status": 1,
+    "timestamp": 1,
+    "payment_method": 1,
+    "reference": 1,
+    "description": 1,
+    "direction": 1,
+}
+
+
 @payments_router.get("/wallet/me")
-async def get_wallet_me(request: Request, limit: int = 25):
+async def get_wallet_me(request: Request, limit: int = 15):
     """Authenticated user: balance + recent transactions (must be before /wallet/{user_id})."""
     user_id = require_authenticated(request)
     verify_owner_strict(request, user_id)
     user = await find_user_by_id(user_id, {"_id": 0, "wallet_balance": 1})
     safe_limit = max(1, min(limit, 100))
     rows = (
-        await db.transactions.find({"user_id": user_id}, {"_id": 0})
+        await db.transactions.find({"user_id": user_id}, _WALLET_TX_LIST_PROJECTION)
         .sort("timestamp", -1)
         .limit(safe_limit)
         .to_list(safe_limit)
@@ -4218,7 +4236,7 @@ async def get_wallet_transactions(user_id: str, request: Request, limit: int = 3
     safe_limit = max(1, min(limit, 100))
     rows = await db.transactions.find(
         {"user_id": user_id},
-        {"_id": 0}
+        _WALLET_TX_LIST_PROJECTION,
     ).sort("timestamp", -1).limit(safe_limit).to_list(safe_limit)
     for tx in rows:
         ts = tx.get("timestamp")

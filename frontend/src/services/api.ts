@@ -1008,7 +1008,7 @@ export const getWallet = (userId: string) =>
   api.get(`/wallet/${userId}`);
 
 /** Balance + recent transactions for the authenticated user (single round-trip). */
-export const getWalletMe = (limit = 25) =>
+export const getWalletMe = (limit = 15) =>
   api.get<{
     balance: number;
     user_id: string;

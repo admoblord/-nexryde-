@@ -53,7 +53,7 @@ export async function prefetchRiderTabs(userId: string): Promise<void> {
       queryFn: async () => {
         const [rows, res] = await Promise.all([
           fetchFeatureAnnouncements('rider'),
-          authedFetch(`${BACKEND_URL}/api/users/${userId}/notifications?limit=40`, {
+          authedFetch(`${BACKEND_URL}/api/users/${userId}/notifications?limit=20`, {
             timeoutMs: 10_000,
             preserveSessionOn401: true,
           }),
@@ -119,7 +119,7 @@ export async function prefetchDriverTabs(userId: string): Promise<void> {
       queryFn: async () => {
         const [rows, res] = await Promise.all([
           fetchFeatureAnnouncements('driver'),
-          authedFetch(`${BACKEND_URL}/api/users/${userId}/notifications?limit=40`, {
+          authedFetch(`${BACKEND_URL}/api/users/${userId}/notifications?limit=20`, {
             timeoutMs: 10_000,
             preserveSessionOn401: true,
           }),
