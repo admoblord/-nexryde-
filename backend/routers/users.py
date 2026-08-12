@@ -876,28 +876,35 @@ async def get_user_notifications(
     exclude_engagement: bool = False,
 ):
     verify_owner_strict(request, user_id)
-    query: dict = {"user_id": user_id}
-    if unread_only:
-        query["read"] = False
-    # Map bell / badge: exclude engagement + daily_slot so reconnect spam never inflates the count.
-    if exclude_engagement:
-        query["category"] = {"$nin": ["driver_engagement", "rider_engagement", "engagement", "daily_slot"]}
-        query["source"] = {"$nin": ["engagement", "daily_slot", "reconnect"]}
+    from notification_catalog import unread_badge_query
+
+    # List: full inbox by default. Badge path (unread_only + exclude_engagement)
+    # filters engagement/marketing/surge so tab dots stay actionable.
+    if unread_only and exclude_engagement:
+        list_query = unread_badge_query(user_id, exclude_engagement=True)
+    else:
+        list_query = {"user_id": user_id}
+        if unread_only:
+            list_query["read"] = False
+
     safe_limit = max(1, min(int(limit or 25), 50))
     notifications = (
-        await db.notifications.find(query, _NOTIF_LIST_PROJECTION)
+        await db.notifications.find(list_query, _NOTIF_LIST_PROJECTION)
         .sort("created_at", -1)
         .limit(safe_limit)
         .to_list(safe_limit)
     )
-    unread_query = {"user_id": user_id, "read": False}
-    if exclude_engagement:
-        unread_query["category"] = query["category"]
-        unread_query["source"] = query["source"]
-    unread_count = await db.notifications.count_documents(unread_query)
+    unread_full = await db.notifications.count_documents(
+        unread_badge_query(user_id, exclude_engagement=False)
+    )
+    unread_excl = await db.notifications.count_documents(
+        unread_badge_query(user_id, exclude_engagement=True)
+    )
+    unread_count = unread_excl if exclude_engagement else unread_full
     return {
         "notifications": [_slim_notification(n) for n in notifications],
         "unread_count": unread_count,
+        "unread_count_excl_engagement": unread_excl,
     }
 
 @users_router.post("/users/{user_id}/notifications/{notification_id}/read")

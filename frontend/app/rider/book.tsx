@@ -637,7 +637,7 @@ function BookInDriveStyle() {
           ? { lat: sel.lat, lng: sel.lng }
           : null;
 
-      // Prefer coords already on the suggestion (local landmarks / saved / recent).
+      // Prefer coords already on the suggestion (local landmarks / saved / recent / geocode fallback).
       // Place Details only when we lack coordinates — keeps Maps budget ≤3/trip.
       if (!coords && sel.placeId && !sel.placeId.startsWith('prediction-')) {
         const details = await fetchPlaceDetails(sel.placeId, sel.sessionToken);
@@ -646,8 +646,8 @@ function BookInDriveStyle() {
           if (details.description) desc = details.description;
         }
       }
-      // Last resort only for free-text / recent rows without place_id or coords.
-      if (!coords && !sel.placeId && desc.length >= 3) {
+      // Fall through to address geocode when details fail (synthetic ids, 404, quota).
+      if (!coords && desc.length >= 3) {
         const resolved = await resolveAddressToCoords(desc);
         if (resolved) {
           coords = { lat: resolved.lat, lng: resolved.lng };

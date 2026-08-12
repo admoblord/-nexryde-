@@ -470,8 +470,8 @@ async def push_rider_trip_update(rider_id: str, payload: dict) -> int:
     return await rider_trip_hub.send_json(rider_id, payload)
 
 
-_ENGAGEMENT_CATEGORY_NIN = ("driver_engagement", "rider_engagement", "engagement", "daily_slot")
-_ENGAGEMENT_SOURCE_NIN = ("engagement", "daily_slot", "reconnect")
+_ENGAGEMENT_CATEGORY_NIN = ("driver_engagement", "rider_engagement", "engagement", "daily_slot", "marketing")
+_ENGAGEMENT_SOURCE_NIN = ("engagement", "daily_slot", "reconnect", "smart_surge")
 
 
 async def publish_notification_badge(user_id: str, unread_count: int | None = None) -> int:
@@ -481,6 +481,7 @@ async def publish_notification_badge(user_id: str, unread_count: int | None = No
         return 0
     try:
         from database import db
+        from notification_catalog import unread_badge_query
 
         if unread_count is None:
             unread_count = int(
@@ -493,12 +494,7 @@ async def publish_notification_badge(user_id: str, unread_count: int | None = No
         else:
             excl = int(
                 await db.notifications.count_documents(
-                    {
-                        "user_id": uid,
-                        "read": False,
-                        "category": {"$nin": list(_ENGAGEMENT_CATEGORY_NIN)},
-                        "source": {"$nin": list(_ENGAGEMENT_SOURCE_NIN)},
-                    }
+                    unread_badge_query(uid, exclude_engagement=True)
                 )
             )
         return await user_inbox_hub.send_json(

@@ -210,12 +210,14 @@ export default function LocationAutocomplete({
           const normalized = (data.predictions || []).map((p: any, index: number) =>
             normalizePrediction(p, index),
           );
-          storeCachedPredictions(input, normalized);
+          // Do not cache empty results — intermittent Google empties would stick for the TTL.
+          if (normalized.length > 0) {
+            storeCachedPredictions(input, normalized);
+          }
           setPredictions(normalized);
           setShowSuggestions(normalized.length > 0);
           setSearchError(null);
         } else if (data.status === 'ZERO_RESULTS') {
-          storeCachedPredictions(input, []);
           setPredictions([]);
           setShowSuggestions(false);
           setSearchError(null);

@@ -206,6 +206,41 @@ def get_kind_meta(kind: Optional[str]) -> dict[str, Any]:
     return meta
 
 
+# Categories / sources that inflate tab badges without being actionable.
+BADGE_NOISY_CATEGORIES = frozenset(
+    {
+        NotificationCategory.DRIVER_ENGAGEMENT.value,
+        NotificationCategory.RIDER_ENGAGEMENT.value,
+        NotificationCategory.MARKETING.value,
+        "engagement",
+        "daily_slot",
+    }
+)
+BADGE_NOISY_SOURCES = frozenset({"engagement", "daily_slot", "reconnect", "smart_surge"})
+
+
+def badge_noisy_types() -> list[str]:
+    """Inbox `type` values that should not count toward the tab/map badge."""
+    return [
+        kind
+        for kind, meta in NOTIFICATION_KIND_META.items()
+        if str(getattr(meta.get("category"), "value", meta.get("category")) or "")
+        in BADGE_NOISY_CATEGORIES
+    ]
+
+
+def unread_badge_query(user_id: str, *, exclude_engagement: bool = False) -> dict[str, Any]:
+    """Mongo filter for unread inbox rows (optionally excluding engagement noise)."""
+    q: dict[str, Any] = {"user_id": user_id, "read": False}
+    if exclude_engagement:
+        q["$nor"] = [
+            {"category": {"$in": list(BADGE_NOISY_CATEGORIES)}},
+            {"source": {"$in": list(BADGE_NOISY_SOURCES)}},
+            {"type": {"$in": badge_noisy_types()}},
+        ]
+    return q
+
+
 def enrich_push_data(data: Optional[dict]) -> dict[str, Any]:
     """Merge catalog defaults (e.g. Android channel) onto outbound push data."""
     out: dict[str, Any] = dict(data or {})

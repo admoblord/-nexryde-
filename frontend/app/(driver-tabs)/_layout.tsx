@@ -115,7 +115,7 @@ export default function DriverTabLayout() {
     const fetchUnread = async () => {
       try {
         const res = await authedFetch(
-          `${BACKEND_URL}/api/users/${userId}/notifications?unread_only=true&limit=1`,
+          `${BACKEND_URL}/api/users/${userId}/notifications?unread_only=true&limit=1&exclude_engagement=true`,
         );
         if (res.ok) {
           const data = await res.json();
@@ -131,7 +131,9 @@ export default function DriverTabLayout() {
     void fetchUnread();
     inboxSocket.acquire(userId);
     const unsub = inboxSocket.subscribeBadge((msg) => {
-      if (!cancelled) setUnreadCount(Number(msg.unread_count) || 0);
+      const excl = (msg as { unread_count_excl_engagement?: number }).unread_count_excl_engagement;
+      const count = excl != null ? Number(excl) : Number(msg.unread_count) || 0;
+      if (!cancelled) setUnreadCount(count);
     });
     return () => {
       cancelled = true;

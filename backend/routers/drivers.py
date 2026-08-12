@@ -827,6 +827,12 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
                     }
                 },
             )
+            try:
+                from hot_cache import invalidate_driver_hot_cache
+
+                await invalidate_driver_hot_cache(user_id)
+            except Exception:
+                logger.debug("driver hot-cache invalidate (already online) failed", exc_info=True)
             return {"message": "Driver is now online", "already_online": True}
 
         # Lean projection — never pull bloated profile blobs on this hot path.
@@ -1047,6 +1053,12 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
                     {"user_id": user_id},
                     {"$set": {"is_online": False}},
                 )
+                try:
+                    from hot_cache import invalidate_driver_hot_cache
+
+                    await invalidate_driver_hot_cache(user_id)
+                except Exception:
+                    logger.debug("driver hot-cache invalidate (already offline) failed", exc_info=True)
                 return {"message": "Driver is now offline", "already_offline": True}
 
     profile_online_update: dict = {"$set": {"is_online": is_online}}

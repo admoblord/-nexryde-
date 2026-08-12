@@ -77,14 +77,12 @@ function StatChip({ value, label, color }: { value: string; label: string; color
 function ActionTile({
   icon,
   label,
-  gradColors,
   badge,
   onPress,
   tileWidth,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
-  gradColors: [string, string];
   badge?: string;
   onPress: () => void;
   tileWidth: number;
@@ -112,9 +110,9 @@ function ActionTile({
         activeOpacity={1}
       >
         <View style={s.actionTileTop}>
-          <LinearGradient colors={gradColors} style={s.actionTileIcon} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-            <Ionicons name={icon} size={20} color="#FFF" />
-          </LinearGradient>
+          <View style={[s.actionTileIcon, { backgroundColor: PROFILE_GREEN_SOFT }]}>
+            <Ionicons name={icon} size={20} color={PROFILE_GREEN} />
+          </View>
           {badge ? (
             <View style={s.actionTileBadge}>
               <Text style={s.actionTileBadgeText}>{badge}</Text>
@@ -130,7 +128,6 @@ function ActionTile({
 /* ─── Menu row ───────────────────────────────────────────────── */
 function MenuRow({
   icon,
-  gradColors,
   title,
   subtitle,
   onPress,
@@ -138,7 +135,6 @@ function MenuRow({
   badge,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
-  gradColors: [string, string];
   title: string;
   subtitle?: string;
   onPress: () => void;
@@ -152,14 +148,14 @@ function MenuRow({
       onPress={onPress}
       activeOpacity={0.75}
     >
-      <LinearGradient
-        colors={danger ? ['#7f1d1d', '#991b1b'] : gradColors}
-        style={s.menuIconWrap}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
+      <View
+        style={[
+          s.menuIconWrap,
+          { backgroundColor: danger ? 'rgba(239,68,68,0.14)' : PROFILE_GREEN_SOFT },
+        ]}
       >
-        <Ionicons name={icon} size={17} color="#FFF" />
-      </LinearGradient>
+        <Ionicons name={icon} size={17} color={danger ? BRAND.danger : PROFILE_GREEN} />
+      </View>
       <View style={s.menuRowBody}>
         <Text style={[s.menuTitle, { color: colors.text }, danger && { color: BRAND.danger }]}>
           {title}
@@ -564,29 +560,25 @@ export default function DriverProfileScreen() {
           </View>
 
           <Animated.View style={[s.avatarWrap, { transform: [{ scale: avatarScale }] }]}>
-            <LinearGradient
-              colors={
-                isApproved
-                  ? [PROFILE_GREEN, BRAND.info]
-                  : [BRAND.warning, BRAND.danger]
-              }
-              style={s.avatarRing}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
+            <View
+              style={[
+                s.avatarRing,
+                { backgroundColor: isApproved ? PROFILE_GREEN : BRAND.warning },
+              ]}
             >
               <TouchableOpacity style={s.avatarInner} onPress={pickImage} activeOpacity={0.85}>
                 {profileImage ? (
                   <Image source={{ uri: profileImage }} style={s.avatarImg} />
                 ) : (
-                  <LinearGradient colors={[BRAND.bgElevated, BRAND.bgDeep]} style={s.avatarFallback}>
+                  <View style={[s.avatarFallback, { backgroundColor: BRAND.bgElevated }]}>
                     <Text style={s.avatarInitial}>{initial}</Text>
-                  </LinearGradient>
+                  </View>
                 )}
                 <View style={s.avatarEditBadge}>
                   <Ionicons name="camera" size={11} color={BRAND.textInverse} />
                 </View>
               </TouchableOpacity>
-            </LinearGradient>
+            </View>
           </Animated.View>
 
           <Animated.View
@@ -809,16 +801,16 @@ export default function DriverProfileScreen() {
         <View style={s.gridSection}>
           <Text style={[s.gridTitle, { color: colors.textMuted }]}>Quick access</Text>
           <View style={s.grid}>
-            <ActionTile icon="create" label="Edit Profile" gradColors={['#1D4ED8', '#2563EB']} tileWidth={actionTileW} onPress={() => router.push('/edit-profile')} />
-            <ActionTile icon="list" label="Trip History" gradColors={['#5B21B6', '#7C3AED']} tileWidth={actionTileW} onPress={() => router.push(DRIVER_TRIPS_TAB_HREF as any)} />
-            <ActionTile icon="car-sport" label="My Vehicle" gradColors={['#065F46', '#059669']} tileWidth={actionTileW} onPress={() => router.push('/driver/vehicle')} />
-            <ActionTile icon="document-text" label="Documents" gradColors={['#7C2D12', '#EA580C']} tileWidth={actionTileW} onPress={() => router.push('/driver/documents')} />
+            <ActionTile icon="create" label="Edit Profile" tileWidth={actionTileW} onPress={() => router.push('/edit-profile')} />
+            <ActionTile icon="list" label="Trip History" tileWidth={actionTileW} onPress={() => router.push(DRIVER_TRIPS_TAB_HREF as any)} />
+            <ActionTile icon="car-sport" label="My Vehicle" tileWidth={actionTileW} onPress={() => router.push('/driver/vehicle')} />
+            <ActionTile icon="document-text" label="Documents" tileWidth={actionTileW} onPress={() => router.push('/driver/documents')} />
             {walletEnabled ? (
-              <ActionTile icon="arrow-up-circle" label="Withdraw" gradColors={['#14532D', '#16A34A']} tileWidth={actionTileW} onPress={() => router.push('/driver/withdrawal')} />
+              <ActionTile icon="arrow-up-circle" label="Withdraw" tileWidth={actionTileW} onPress={() => router.push('/driver/withdrawal')} />
             ) : (
-              <ActionTile icon="card" label="Bank details" gradColors={['#14532D', '#16A34A']} tileWidth={actionTileW} onPress={() => router.push('/driver/bank')} />
+              <ActionTile icon="card" label="Bank details" tileWidth={actionTileW} onPress={() => router.push('/driver/bank')} />
             )}
-            <ActionTile icon="analytics" label="Performance" gradColors={['#0C4A6E', BRAND.info]} tileWidth={actionTileW} onPress={() => router.push('/driver/performance')} />
+            <ActionTile icon="analytics" label="Performance" tileWidth={actionTileW} onPress={() => router.push('/driver/performance')} />
           </View>
         </View>
 
@@ -866,7 +858,7 @@ export default function DriverProfileScreen() {
             <View style={s.scoreBreak}>
               <ScoreBar label="Service Quality" value={trustSummary.score_breakdown?.service_quality ?? 0} color={PROFILE_GREEN} />
               <ScoreBar label="Punctuality" value={trustSummary.score_breakdown?.punctuality ?? 0} color={BRAND.info} />
-              <ScoreBar label="Verification" value={trustSummary.score_breakdown?.verification ?? 0} color={BRAND.accentPurple} />
+              <ScoreBar label="Verification" value={trustSummary.score_breakdown?.verification ?? 0} color={BRAND.primaryDark} />
               <ScoreBar label="Payments" value={trustSummary.score_breakdown?.payment_behavior ?? 0} color={BRAND.warning} />
             </View>
 
@@ -921,27 +913,27 @@ export default function DriverProfileScreen() {
               <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.6)" />
             </LinearGradient>
           </TouchableOpacity>
-          <MenuRow icon="shield-checkmark" gradColors={['#78350F', '#D97706']} title="Safety Alerts" subtitle="Danger zones & emergency protection" onPress={() => router.push('/driver/safety-alerts')} />
-          <MenuRow icon="ribbon" gradColors={['#134E4A', '#0D9488']} title="NEXRYDE Shield" subtitle="Disputes and ride protection" onPress={() => router.push('/shield-disputes')} />
+          <MenuRow icon="shield-checkmark" title="Safety Alerts" subtitle="Danger zones & emergency protection" onPress={() => router.push('/driver/safety-alerts')} />
+          <MenuRow icon="ribbon" title="NEXRYDE Shield" subtitle="Disputes and ride protection" onPress={() => router.push('/shield-disputes')} />
         </Section>
 
         {/* ── MODE ── */}
         <Section title="Mode & preferences">
-          <MenuRow icon="settings" gradColors={['#166534', PROFILE_GREEN]} title="Settings" subtitle="App preferences & defaults" onPress={() => router.push('/settings')} />
-          <MenuRow icon="swap-horizontal" gradColors={['#3730A3', '#4F46E5']} title="Switch to Rider Mode" subtitle="Book rides as a passenger" onPress={() => setShowSwitchModal(true)} />
-          <MenuRow icon="business" gradColors={['#0F4C75', '#0C7BB3']} title="NEXRYDE Wallet as Bank" subtitle="Coming soon — interest, transfers & more" onPress={() => {}} badge="Soon" />
+          <MenuRow icon="settings" title="Settings" subtitle="App preferences & defaults" onPress={() => router.push('/settings')} />
+          <MenuRow icon="swap-horizontal" title="Switch to Rider Mode" subtitle="Book rides as a passenger" onPress={() => setShowSwitchModal(true)} />
+          <MenuRow icon="business" title="NEXRYDE Wallet as Bank" subtitle="Coming soon — interest, transfers & more" onPress={() => {}} badge="Soon" />
         </Section>
 
         {/* ── SUPPORT & LEGAL ── */}
         <Section title="Support & legal">
-          <MenuRow icon="help-circle" gradColors={['#7C2D12', '#EA580C']} title="Help & Support" onPress={() => router.push('/support')} />
-          <MenuRow icon="document-text" gradColors={['#4C1D95', '#7C3AED']} title="Privacy Policy" onPress={() => router.push('/privacy-policy')} />
-          <MenuRow icon="reader" gradColors={['#0C4A6E', BRAND.info]} title="Terms of Service" onPress={() => router.push('/terms-of-service')} />
+          <MenuRow icon="help-circle" title="Help & Support" onPress={() => router.push('/support')} />
+          <MenuRow icon="document-text" title="Privacy Policy" onPress={() => router.push('/privacy-policy')} />
+          <MenuRow icon="reader" title="Terms of Service" onPress={() => router.push('/terms-of-service')} />
         </Section>
 
         {/* ── ACCOUNT ── */}
         <Section title="Account">
-          <MenuRow icon="trash" gradColors={['#7f1d1d', '#991b1b']} title="Delete Account" subtitle="Permanently deactivate driver account" onPress={handleDelete} danger />
+          <MenuRow icon="trash" title="Delete Account" subtitle="Permanently deactivate driver account" onPress={handleDelete} danger />
         </Section>
 
         <TouchableOpacity
@@ -974,19 +966,19 @@ export default function DriverProfileScreen() {
             <TouchableOpacity style={s.modalCloseBtn} onPress={() => setShowSwitchModal(false)}>
               <Ionicons name="close" size={22} color={BRAND.textMuted} />
             </TouchableOpacity>
-            <LinearGradient colors={['rgba(56,189,248,0.15)', 'transparent']} style={s.modalIconWrap}>
-              <Ionicons name="person" size={36} color={BRAND.info} />
+            <LinearGradient colors={['rgba(34,225,128,0.12)', 'transparent']} style={s.modalIconWrap}>
+              <Ionicons name="person" size={36} color={PROFILE_GREEN} />
             </LinearGradient>
             <Text style={s.modalTitle}>Switch to Rider?</Text>
             <Text style={s.modalSubtitle}>
               Book rides as a passenger. Your driver account, earnings, and subscription stay active — switch back anytime.
             </Text>
             <View style={s.modalNote}>
-              <Ionicons name="information-circle-outline" size={18} color={BRAND.info} />
+              <Ionicons name="information-circle-outline" size={18} color={PROFILE_GREEN} />
               <Text style={s.modalNoteText}>Subscription and earnings remain unchanged.</Text>
             </View>
             <TouchableOpacity style={s.modalConfirmBtn} onPress={confirmRiderSwitch}>
-              <LinearGradient colors={['#0369A1', BRAND.info]} style={s.modalConfirmGrad}>
+              <LinearGradient colors={[PROFILE_GREEN, BRAND.primaryDark]} style={s.modalConfirmGrad}>
                 <Text style={s.modalConfirmText}>Switch to Rider</Text>
               </LinearGradient>
             </TouchableOpacity>

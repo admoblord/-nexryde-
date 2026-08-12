@@ -150,7 +150,9 @@ export default function FeatureNotificationsScreen({ role }: Props) {
       if (res.ok) {
         const data = await res.json();
         const list = Array.isArray(data.notifications) ? data.notifications : [];
-        const unread = Number(data.unread_count || 0);
+        const unread = Number(
+          data.unread_count_excl_engagement ?? data.unread_count ?? 0,
+        );
         setBackendNotifs(list);
         setUnreadBackend(unread);
         return { backendNotifs: list, unreadBackend: unread };

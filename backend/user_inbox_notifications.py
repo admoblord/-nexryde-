@@ -26,6 +26,16 @@ async def insert_user_notification(
 ) -> dict[str, Any]:
     """Insert a ``notifications`` row and push ``notification_badge`` over inbox WS."""
     uid = str(user_id or "").strip()
+    # Stamp catalog category so badge exclusion works without per-caller wiring.
+    if "category" not in extra:
+        try:
+            from notification_catalog import get_kind_meta
+
+            cat = get_kind_meta(type).get("category")
+            if cat is not None:
+                extra["category"] = getattr(cat, "value", str(cat))
+        except Exception:
+            logger.debug("notification category stamp failed type=%s", type, exc_info=True)
     doc: dict[str, Any] = {
         "id": id or str(uuid.uuid4()),
         "user_id": uid,
