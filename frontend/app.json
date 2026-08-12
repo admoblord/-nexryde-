@@ -3,7 +3,7 @@
     "name": "NEXRYDE",
     "slug": "nexryde",
     "version": "1.3.37",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "nexryde",
     "userInterfaceStyle": "automatic",
@@ -136,7 +136,11 @@
     "plugins": [
       "./plugins/withSafeAppearanceTurboModule.js",
       "./plugins/withDriverExperiencePackage.js",
+<<<<<<< HEAD
       "./plugins/withAndroid16KbPageSize.js",
+=======
+      "./plugins/withAndroidLargeScreenSupport.js",
+>>>>>>> origin/cursor/large-screen-orientation-1fc9
       [
         "expo-cronet",
         {
