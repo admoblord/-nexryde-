@@ -129,7 +129,11 @@
     "typescript": "~5.9.2"
   },
   "overrides": {
-    "brace-expansion": "^5.0.5"
+    "@expo/fingerprint": {
+      "minimatch": {
+        "brace-expansion": "5.0.9"
+      }
+    }
   },
   "expo": {
     "doctor": {
