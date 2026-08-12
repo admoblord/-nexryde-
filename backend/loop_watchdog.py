@@ -36,6 +36,12 @@ def _stall_threshold_sec() -> float:
         return 5.0
 
 
+def _emit(text: str) -> None:
+    # Straight to stderr: a stalled loop is exactly when logging handlers are
+    # least trustworthy, and Cloud Run captures stderr regardless of log config.
+    print(text, file=sys.stderr, flush=True)
+
+
 def _dump_stacks(stalled_for: float) -> None:
     lines = [f"LOOP STALL: event loop blocked for {stalled_for:.1f}s — thread dump follows"]
     frames = sys._current_frames()
@@ -45,7 +51,7 @@ def _dump_stacks(stalled_for: float) -> None:
             continue
         lines.append(f"--- thread {thread.name} (daemon={thread.daemon}) ---")
         lines.extend(x.rstrip() for x in traceback.format_stack(frame))
-    logger.error("\n".join(lines))
+    _emit("\n".join(lines))
 
 
 def _watch(loop: asyncio.AbstractEventLoop) -> None:
@@ -73,7 +79,7 @@ def _watch(loop: asyncio.AbstractEventLoop) -> None:
                 _dump_stacks(stalled_for)
                 dumped_for_current_stall = True
         elif dumped_for_current_stall:
-            logger.error("LOOP STALL: recovered after %.1fs", stalled_for)
+            _emit(f"LOOP STALL: recovered after {stalled_for:.1f}s")
             dumped_for_current_stall = False
 
 
@@ -93,7 +99,7 @@ def start_loop_watchdog() -> None:
         target=_watch, args=(loop,), name="nexryde-loop-watchdog", daemon=True
     )
     _thread.start()
-    logger.info("loop watchdog started threshold=%.1fs", _stall_threshold_sec())
+    _emit(f"loop watchdog started threshold={_stall_threshold_sec():.1f}s")
 
 
 def stop_loop_watchdog() -> None:

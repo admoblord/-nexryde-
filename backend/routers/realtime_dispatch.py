@@ -106,6 +106,14 @@ async def _redis_publish(channel: str, payload: dict) -> bool:
 
 # ── Hub ───────────────────────────────────────────────────────────────────────
 
+# Blocking read window per poll — bounds delivery latency without busy-looping.
+_MESSAGE_POLL_S = 1.0
+# Sleep while this instance has no subscribers on the hub.
+_IDLE_POLL_S = 0.5
+# Cap on any subscribe/unsubscribe so Redis trouble degrades instead of hanging.
+_SUBSCRIBE_TIMEOUT_S = 5.0
+
+
 class _UserSocketHub:
     """
     Per-hub in-process socket registry + Redis pub/sub subscriber.
@@ -127,18 +135,26 @@ class _UserSocketHub:
     def _ch(self, user_id: str) -> str:
         return f"ws:{self._name}:{user_id}"
 
+    def _new_pubsub(self) -> None:
+        """Fresh pubsub handle. Callers must hold no assumption about subscriptions."""
+        import redis.asyncio as aioredis  # type: ignore[import]
+
+        r = aioredis.from_url(REDIS_URL, decode_responses=True, socket_timeout=5)
+        self._pubsub = r.pubsub(ignore_subscribe_messages=True)
+        self._subscribed.clear()
+
     async def _ensure_listener(self) -> bool:
-        """Lazily create the pubsub connection and start the listener task."""
-        if self._pubsub is not None:
-            return True
+        """Lazily create the pubsub connection and start the single listener task."""
         if not REDIS_URL:
             return False
         try:
-            import redis.asyncio as aioredis  # type: ignore[import]
-            r = aioredis.from_url(REDIS_URL, decode_responses=True, socket_timeout=5)
-            self._pubsub = r.pubsub(ignore_subscribe_messages=True)
-            self._listener_task = asyncio.create_task(self._listen_loop())
-            logger.info("realtime_dispatch: hub=%s pubsub listener started", self._name)
+            if self._pubsub is None:
+                self._new_pubsub()
+            if self._listener_task is None or self._listener_task.done():
+                self._listener_task = asyncio.create_task(
+                    self._listen_loop(), name=f"nexryde-hub-{self._name}"
+                )
+                logger.info("realtime_dispatch: hub=%s pubsub listener started", self._name)
             return True
         except Exception as exc:
             if REDIS_REQUIRED:
@@ -146,38 +162,75 @@ class _UserSocketHub:
             logger.warning("realtime_dispatch: hub=%s pubsub init failed: %s", self._name, exc)
             return False
 
+    async def _resubscribe_all(self) -> None:
+        """After a reconnect the new handle has no subscriptions — restore them."""
+        async with self._lock:
+            users = set(self._sockets.keys()) | set(self._streams.keys())
+        for user_id in users:
+            ch = self._ch(user_id)
+            if ch in self._subscribed or self._pubsub is None:
+                continue
+            try:
+                await asyncio.wait_for(self._pubsub.subscribe(ch), timeout=_SUBSCRIBE_TIMEOUT_S)
+                self._subscribed.add(ch)
+            except Exception as exc:
+                logger.warning("realtime_dispatch: resubscribe ch=%s: %s", ch, exc)
+
     async def _listen_loop(self) -> None:
-        """Background task: forward Redis messages to local WebSocket clients."""
+        """Background task: forward Redis messages to local WebSocket clients.
+
+        Polls with a timeout rather than iterating `pubsub.listen()`. `listen()`
+        returns immediately while no channel is subscribed, so iterating it here
+        spun a tight no-await loop that starved the event loop: every request on
+        the instance hung, the liveness probe missed, and Cloud Run killed the
+        container mid-request (503s across the whole API).
+        """
         prefix = f"ws:{self._name}:"
         while True:
             try:
-                if self._pubsub is None:
-                    await asyncio.sleep(3)
+                pubsub = self._pubsub
+                if pubsub is None:
+                    await asyncio.sleep(1.0)
+                    if self._pubsub is None and REDIS_URL:
+                        self._new_pubsub()
+                        await self._resubscribe_all()
                     continue
-                async for msg in self._pubsub.listen():
-                    if not isinstance(msg, dict) or msg.get("type") != "message":
-                        continue
-                    ch = str(msg.get("channel") or "")
-                    if not ch.startswith(prefix):
-                        continue
-                    user_id = ch[len(prefix):]
-                    try:
-                        data = json.loads(msg["data"])
-                        await self._deliver_locally(user_id, data)
-                    except Exception:
-                        pass
+                if not pubsub.subscribed:
+                    # Idle: nobody is connected to this hub on this instance.
+                    await asyncio.sleep(_IDLE_POLL_S)
+                    continue
+                msg = await pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=_MESSAGE_POLL_S
+                )
+                if not isinstance(msg, dict) or msg.get("type") != "message":
+                    continue
+                ch = str(msg.get("channel") or "")
+                if not ch.startswith(prefix):
+                    continue
+                user_id = ch[len(prefix):]
+                try:
+                    data = json.loads(msg["data"])
+                    await self._deliver_locally(user_id, data)
+                except Exception:
+                    pass
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
                 logger.warning("realtime_dispatch: hub=%s listener error: %s — reconnecting", self._name, exc)
                 self._pubsub = None
+                # Never spawn another listener here: the old code called
+                # _ensure_listener() from this handler, so every error added a
+                # task that also spun.
                 await asyncio.sleep(3)
-                await self._ensure_listener()
 
     async def _ensure_channel(self, user_id: str) -> None:
         if await self._ensure_listener() and self._pubsub:
             ch = self._ch(user_id)
             if ch not in self._subscribed:
                 try:
-                    await self._pubsub.subscribe(ch)
+                    # Bounded: a socket connect or session heal must never hang
+                    # a request thread on Redis.
+                    await asyncio.wait_for(self._pubsub.subscribe(ch), timeout=_SUBSCRIBE_TIMEOUT_S)
                     self._subscribed.add(ch)
                 except Exception as exc:
                     logger.warning("realtime_dispatch: subscribe ch=%s: %s", ch, exc)
@@ -190,7 +243,7 @@ class _UserSocketHub:
         ch = self._ch(user_id)
         if ch in self._subscribed:
             try:
-                await self._pubsub.unsubscribe(ch)
+                await asyncio.wait_for(self._pubsub.unsubscribe(ch), timeout=_SUBSCRIBE_TIMEOUT_S)
                 self._subscribed.discard(ch)
             except Exception:
                 pass
