@@ -15,6 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import type { DriverPermissionItem, DriverPermissionPreflight } from '@/src/services/driverPermissionPreflight';
 import { requestNativeOverlayPermission } from '@/src/services/driverNativeExperience';
+import { colors, alpha, radius, type as TYPE } from '@/src/theme/tokens';
 
 type Props = {
   preflight: DriverPermissionPreflight | null;
@@ -72,7 +73,7 @@ export function DriverGoOnlinePermissionGate({
           );
         })}
       <TouchableOpacity style={styles.refreshBtn} onPress={onRefresh} activeOpacity={0.85}>
-        <Ionicons name="refresh" size={16} color="#93C5FD" />
+        <Ionicons name="refresh" size={16} color={colors.blue} />
         <Text style={styles.refreshText}>I enabled them — check again</Text>
       </TouchableOpacity>
 
@@ -84,7 +85,7 @@ export function DriverGoOnlinePermissionGate({
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Ionicons name="layers-outline" size={36} color="#00D47E" />
+            <Ionicons name="layers-outline" size={36} color={colors.green} />
             <Text style={styles.modalTitle}>Enable Driver Bubble</Text>
             <Text style={styles.modalBody}>
               Turn on “Display over other apps” for NEXRYDE so ride requests appear over WhatsApp,
@@ -121,15 +122,15 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 4,
     padding: 14,
-    borderRadius: 16,
-    backgroundColor: 'rgba(251,191,36,0.08)',
+    borderRadius: radius.button,
+    backgroundColor: alpha.amberSoft,
     borderWidth: 1,
-    borderColor: 'rgba(251,191,36,0.28)',
+    borderColor: colors.amber,
     gap: 8,
   },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  title: { flex: 1, fontSize: 14, fontWeight: '800', color: '#FDE68A' },
-  sub: { fontSize: 12, fontWeight: '500', color: '#94A3B8', lineHeight: 17 },
+  title: { flex: 1, ...TYPE.bodyBold, color: colors.textPrimary },
+  sub: { ...TYPE.caption, color: colors.textSecondary, lineHeight: 17 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -137,11 +138,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 10,
     borderRadius: 12,
+    backgroundColor: colors.bg,
   },
-  rowBlocked: { backgroundColor: 'rgba(15,23,42,0.55)' },
-  rowSoft: { backgroundColor: 'rgba(15,23,42,0.35)' },
-  rowLabel: { flex: 1, fontSize: 13, fontWeight: '600', color: '#E2E8F0' },
-  rowAction: { fontSize: 12, fontWeight: '800', color: '#00D47E' },
+  rowBlocked: { backgroundColor: colors.bgMuted },
+  rowSoft: { backgroundColor: colors.bgMuted },
+  rowLabel: { flex: 1, ...TYPE.caption, fontWeight: '600', color: colors.textPrimary },
+  rowAction: { ...TYPE.label, color: colors.greenDark },
   refreshBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -149,10 +151,10 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: 8,
   },
-  refreshText: { fontSize: 12, fontWeight: '700', color: '#93C5FD' },
+  refreshText: { ...TYPE.label, color: colors.blue },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(2,6,14,0.78)',
+    backgroundColor: colors.overlay,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
@@ -160,32 +162,31 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: 360,
-    borderRadius: 20,
-    backgroundColor: '#0F172A',
+    borderRadius: radius.card,
+    backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.2)',
+    borderColor: colors.border,
     padding: 22,
     alignItems: 'center',
     gap: 12,
   },
-  modalTitle: { fontSize: 20, fontWeight: '900', color: '#F8FAFC', textAlign: 'center' },
+  modalTitle: { ...TYPE.title, color: colors.textPrimary, textAlign: 'center' },
   modalBody: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#94A3B8',
+    ...TYPE.caption,
+    color: colors.textSecondary,
     textAlign: 'center',
     lineHeight: 21,
   },
-  modalHint: { fontSize: 12, fontWeight: '700', color: '#FBBF24', textAlign: 'center' },
+  modalHint: { ...TYPE.label, color: colors.amber, textAlign: 'center' },
   modalPrimary: {
     marginTop: 6,
     width: '100%',
-    backgroundColor: '#00D47E',
-    borderRadius: 14,
+    backgroundColor: colors.green,
+    borderRadius: radius.button,
     paddingVertical: 14,
     alignItems: 'center',
   },
-  modalPrimaryText: { fontSize: 15, fontWeight: '800', color: '#022C22' },
+  modalPrimaryText: { ...TYPE.bodyBold, color: colors.textOnGreen },
   modalSecondary: { paddingVertical: 8 },
-  modalSecondaryText: { fontSize: 14, fontWeight: '600', color: '#64748B' },
+  modalSecondaryText: { ...TYPE.caption, color: colors.textSecondary },
 });

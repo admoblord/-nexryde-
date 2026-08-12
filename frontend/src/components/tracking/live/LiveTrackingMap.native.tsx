@@ -14,9 +14,6 @@ import * as Location from 'expo-location';
 import { DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
 import type { TrackingMapModel } from '@/src/components/tracking/types';
 import {
-  getPerfectTrackingMapStyle,
-} from '@/src/components/tracking/trackingMapTokens';
-import {
   bearingDeg,
   isValidMapCoord,
   sanitizeMapCoords,
@@ -49,6 +46,16 @@ import {
 import { LIVE } from '@/src/components/tracking/live/liveTrackingTheme';
 import { DriverConnectingOverlay } from '@/src/components/tracking/map/DriverConnectingOverlay';
 import { useThemeColors } from '@/src/constants/theme';
+import {
+  getBoltRiderCustomMapStyle,
+  getBoltRiderGoogleMapId,
+} from '@/src/constants/boltMapStyle';
+import {
+  tripMapViewProps,
+  routeCasingProps,
+  routeLineProps,
+  MAP_FIT_PADDING,
+} from '@/src/components/trip/mapTreatment';
 
 export type LiveTrackingMapHandle = {
   recenter: () => void;
@@ -295,7 +302,7 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
       followRef.current = true;
       try {
         mapRef.current.fitToCoordinates(fitCoords, {
-          edgePadding: { top: 130, right: 48, bottom: 260, left: 48 },
+          edgePadding: MAP_FIT_PADDING,
           animated: true,
         });
       } catch {
@@ -376,18 +383,21 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
 
     if (!canRender) return null;
 
+    const googleMapId = getBoltRiderGoogleMapId();
+    const customMapStyle = getBoltRiderCustomMapStyle();
+
     return (
       <>
       <MapView
         ref={mapRef}
         style={[styles.map, { backgroundColor: LIVE.mapBg || colors.surface }]}
         provider={PROVIDER_GOOGLE}
-        customMapStyle={getPerfectTrackingMapStyle()}
+        googleMapId={googleMapId || undefined}
+        customMapStyle={customMapStyle}
         initialRegion={initialRegion}
+        {...tripMapViewProps}
         showsUserLocation={false}
         showsMyLocationButton={false}
-        showsCompass
-        showsBuildings
         showsTraffic={trafficOn}
         rotateEnabled
         pitchEnabled
@@ -400,22 +410,26 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
         {routeRemaining.trip.length >= DIRECTIONS_ROUTE_MIN_POINTS ? (
           <Polyline
             coordinates={routeRemaining.trip}
-            strokeColor="rgba(0,208,132,0.22)"
-            strokeWidth={7}
-            lineCap="round"
-            lineJoin="round"
-            zIndex={2}
+            {...routeCasingProps}
+          />
+        ) : null}
+        {routeRemaining.trip.length >= DIRECTIONS_ROUTE_MIN_POINTS ? (
+          <Polyline
+            coordinates={routeRemaining.trip}
+            {...routeLineProps}
           />
         ) : null}
 
         {routeRemaining.approach.length >= DIRECTIONS_ROUTE_MIN_POINTS ? (
           <Polyline
             coordinates={routeRemaining.approach}
-            strokeColor={LIVE.green}
-            strokeWidth={9}
-            lineCap="round"
-            lineJoin="round"
-            zIndex={4}
+            {...routeCasingProps}
+          />
+        ) : null}
+        {routeRemaining.approach.length >= DIRECTIONS_ROUTE_MIN_POINTS ? (
+          <Polyline
+            coordinates={routeRemaining.approach}
+            {...routeLineProps}
           />
         ) : null}
 

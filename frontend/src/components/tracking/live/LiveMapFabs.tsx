@@ -3,6 +3,7 @@ import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LIVE } from '@/src/components/tracking/live/liveTrackingTheme';
 import { LIVE_LAYOUT } from '@/src/components/tracking/live/liveTrackingLayout';
+import { colors, alpha, shadow } from '@/src/theme/tokens';
 
 type Props = {
   bottomOffset: number;
@@ -22,7 +23,7 @@ function LiveMapFabsInner({ bottomOffset, onSos, onRecenter, onToggleLayers, tra
         accessibilityRole="button"
         accessibilityLabel="Emergency SOS"
       >
-        <Ionicons name="warning" size={22} color="#FFF" />
+        <Ionicons name="warning" size={22} color={alpha.white} />
       </TouchableOpacity>
       <TouchableOpacity
         style={styles.fab}
@@ -31,7 +32,7 @@ function LiveMapFabsInner({ bottomOffset, onSos, onRecenter, onToggleLayers, tra
         accessibilityRole="button"
         accessibilityLabel="Recenter map"
       >
-        <Ionicons name="locate" size={21} color={LIVE.green} />
+        <Ionicons name="locate" size={21} color={colors.navy} />
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.fab, trafficOn && styles.fabActive]}
@@ -40,7 +41,7 @@ function LiveMapFabsInner({ bottomOffset, onSos, onRecenter, onToggleLayers, tra
         accessibilityRole="button"
         accessibilityLabel="Toggle map traffic layer"
       >
-        <Ionicons name="layers" size={21} color={trafficOn ? LIVE.greenInk : LIVE.green} />
+        <Ionicons name="layers" size={21} color={trafficOn ? colors.textOnGreen : colors.navy} />
       </TouchableOpacity>
     </View>
   );
@@ -65,11 +66,7 @@ const styles = StyleSheet.create({
     borderColor: LIVE.hairline,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.42,
-    shadowRadius: 12,
-    elevation: 10,
+    ...shadow,
   },
   fabActive: {
     backgroundColor: LIVE.green,

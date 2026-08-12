@@ -683,7 +683,7 @@ export default function LiveTrackingScreen() {
       : undefined;
     return (
       <View style={styles.root}>
-        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+        <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
         <FindingDriverScreenV2
           pickupCoords={mapModel.pickup ?? null}
           destinationCoords={mapModel.dropoff ?? null}
@@ -713,7 +713,7 @@ export default function LiveTrackingScreen() {
   if (isPaymentPhase) {
     return (
       <View style={styles.root}>
-        <StatusBar barStyle="light-content" />
+          <StatusBar barStyle="dark-content" />
 
         {/* Map faded behind payment — keeps geographic context like Uber */}
         {canMountMap ? (
@@ -754,7 +754,7 @@ export default function LiveTrackingScreen() {
     if (loading) {
       return (
         <View style={styles.root}>
-          <StatusBar barStyle="light-content" backgroundColor={LIVE.bg} />
+          <StatusBar barStyle="dark-content" backgroundColor={LIVE.bg} />
           <LiveTrackingSkeleton />
           {cancelSheet}
           {routeEditSheet}
@@ -763,21 +763,21 @@ export default function LiveTrackingScreen() {
     }
     return (
       <View style={[styles.root, { justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
-        <StatusBar barStyle="light-content" backgroundColor={LIVE.bg} />
-        <Ionicons name="map-outline" size={48} color="#64748B" />
-        <Text style={{ color: '#F8FAFC', fontSize: 18, fontWeight: '800', marginTop: 16, textAlign: 'center' }}>
+        <StatusBar barStyle="dark-content" backgroundColor={LIVE.bg} />
+        <Ionicons name="map-outline" size={48} color={LIVE.faint} />
+        <Text style={{ color: LIVE.text, fontSize: 18, fontWeight: '800', marginTop: 16, textAlign: 'center' }}>
           This trip isn&apos;t live
         </Text>
-        <Text style={{ color: '#94A3B8', fontSize: 14, fontWeight: '600', marginTop: 8, textAlign: 'center', lineHeight: 20 }}>
+        <Text style={{ color: LIVE.sub, fontSize: 14, fontWeight: '600', marginTop: 8, textAlign: 'center', lineHeight: 20 }}>
           It may have ended or been cancelled. You can open the receipt or go back home.
         </Text>
         <TouchableOpacity
-          style={{ marginTop: 20, backgroundColor: '#22C55E', borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12 }}
+          style={{ marginTop: 20, backgroundColor: LIVE.green, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12 }}
           onPress={() => void actions.retrySync()}
           accessibilityRole="button"
           accessibilityLabel="Retry loading trip"
         >
-          <Text style={{ color: '#022C22', fontWeight: '800' }}>Retry</Text>
+          <Text style={{ color: LIVE.greenInk, fontWeight: '800' }}>Retry</Text>
         </TouchableOpacity>
         {effectiveTripId ? (
           <TouchableOpacity
@@ -786,11 +786,11 @@ export default function LiveTrackingScreen() {
               router.replace({ pathname: '/rider/trip-receipt', params: { tripId: effectiveTripId } } as any)
             }
           >
-            <Text style={{ color: '#22C55E', fontWeight: '700' }}>View receipt</Text>
+            <Text style={{ color: LIVE.green, fontWeight: '700' }}>View receipt</Text>
           </TouchableOpacity>
         ) : null}
         <TouchableOpacity style={{ marginTop: 4, paddingVertical: 10 }} onPress={actions.onBack}>
-          <Text style={{ color: '#94A3B8', fontWeight: '600' }}>Go back</Text>
+          <Text style={{ color: LIVE.sub, fontWeight: '600' }}>Go back</Text>
         </TouchableOpacity>
       </View>
     );
@@ -799,7 +799,7 @@ export default function LiveTrackingScreen() {
   // ── Live phase ──────────────────────────────────────────────────────────────
   return (
     <View style={styles.root}>
-      <StatusBar barStyle="light-content" backgroundColor={LIVE.bg} />
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
 
       {/* Map */}
       <View style={styles.mapLayer}>
@@ -988,9 +988,9 @@ const styles = StyleSheet.create({
     borderColor: LIVE.hairline,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
+    shadowColor: LIVE.text,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.1,
     shadowRadius: 10,
     elevation: 8,
   },
@@ -1021,12 +1021,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: LIVE.radiusPill,
-    backgroundColor: 'rgba(4,14,28,0.94)',
+    backgroundColor: LIVE.glass,
     borderWidth: 1,
-    borderColor: 'rgba(56,189,248,0.35)',
-    shadowColor: '#38BDF8',
+    borderColor: LIVE.hairline,
+    shadowColor: LIVE.text,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 5,
   },
@@ -1068,7 +1068,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: LIVE.radiusPill,
-    backgroundColor: 'rgba(6,12,22,0.82)',
+    backgroundColor: LIVE.glass,
     borderWidth: 1,
     borderColor: LIVE.hairline,
     maxWidth: '88%',

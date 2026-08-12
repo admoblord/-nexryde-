@@ -23,6 +23,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 import { LIVE, liveGlassCard } from '@/src/components/tracking/live/liveTrackingTheme';
 import { LIVE_LAYOUT } from '@/src/components/tracking/live/liveTrackingLayout';
+import { VehicleStrip } from '@/src/components/trip/PersonRow';
+import { arrivalClockTime } from '@/src/components/trip/MapBadge';
+import { colors, alpha } from '@/src/theme/tokens';
 
 type TripPhase = 'accepted' | 'arrived' | 'ongoing';
 
@@ -66,28 +69,6 @@ type Props = {
   waitCard?: React.ReactElement | null;
 };
 
-const COLOR_SWATCHES: Record<string, string> = {
-  black: '#111827',
-  white: '#F8FAFC',
-  silver: '#C3CBD6',
-  grey: '#6B7280',
-  gray: '#6B7280',
-  red: '#EF4444',
-  blue: '#3B82F6',
-  green: '#22C55E',
-  yellow: '#FACC15',
-  gold: '#D97706',
-  brown: '#92400E',
-  orange: '#F97316',
-  maroon: '#7F1D1D',
-};
-
-function swatch(color: string | null): string {
-  if (!color) return '#64748B';
-  const key = color.trim().toLowerCase().split(/[\s/-]+/)[0];
-  return COLOR_SWATCHES[key] || '#64748B';
-}
-
 function fmtEta(minutes: number | null): string {
   if (minutes == null || !Number.isFinite(minutes)) return '—';
   if (minutes <= 0) return 'Now';
@@ -129,24 +110,24 @@ const badgeStyles = StyleSheet.create({
   arrived: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999,
-    backgroundColor: 'rgba(245,158,11,0.18)', borderWidth: 1, borderColor: 'rgba(245,158,11,0.5)',
+    backgroundColor: alpha.amberSoft,
   },
-  arrivedDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#F59E0B' },
-  arrivedTxt: { fontSize: 11, fontWeight: '900', color: '#FBBF24', letterSpacing: 0.2 },
+  arrivedDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.amber },
+  arrivedTxt: { fontSize: 11, fontWeight: '900', color: colors.amber, letterSpacing: 0.2 },
   ongoing: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999,
-    backgroundColor: 'rgba(56,189,248,0.14)', borderWidth: 1, borderColor: 'rgba(56,189,248,0.4)',
+    backgroundColor: alpha.blueSoft,
   },
-  ongoingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#38BDF8' },
-  ongoingTxt: { fontSize: 11, fontWeight: '900', color: '#7DD3FC', letterSpacing: 0.2 },
+  ongoingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.blue },
+  ongoingTxt: { fontSize: 11, fontWeight: '900', color: colors.blue, letterSpacing: 0.2 },
   accepted: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999,
-    backgroundColor: LIVE.greenSoft, borderWidth: 1, borderColor: 'rgba(34,225,128,0.4)',
+    backgroundColor: alpha.greenSoft,
   },
-  acceptedDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: LIVE.green },
-  acceptedTxt: { fontSize: 11, fontWeight: '900', color: LIVE.green, letterSpacing: 0.2 },
+  acceptedDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.green },
+  acceptedTxt: { fontSize: 11, fontWeight: '900', color: colors.greenDark, letterSpacing: 0.2 },
 });
 
 function LiveDriverSheetInner({
@@ -228,15 +209,15 @@ function LiveDriverSheetInner({
 
   const displayName = hydrated ? driverName : 'Your driver';
   const displayVehicle = hydrated && vehicle !== 'Vehicle' ? vehicle : 'Loading…';
-  const displayPlate = hydrated && plate ? plate.toUpperCase() : '—';
+  const displayPlate = hydrated && plate ? plate.toUpperCase() : null;
 
   // Collapsed row right-side value — phase specific
   const collapsedRight = (() => {
     if (tripPhase === 'arrived') return { top: 'Here', sub: 'Pickup' };
     if (tripPhase === 'ongoing') {
       return destEtaMinutes != null && destEtaMinutes > 0
-        ? { top: `${destEtaMinutes} min`, sub: 'Dest. ETA' }
-        : { top: '—', sub: 'On Trip' };
+        ? { top: arrivalClockTime(destEtaMinutes), sub: 'Arrive by' }
+        : { top: 'On trip', sub: 'Dropoff' };
     }
     return { top: fmtEta(etaMinutes), sub: 'ETA' };
   })();
@@ -288,7 +269,7 @@ function LiveDriverSheetInner({
           <Text style={styles.collapsedName} numberOfLines={1}>{displayName}</Text>
           <View style={styles.collapsedBadgeRow}>
             <PhaseBadge phase={tripPhase} />
-            {displayPlate !== '—' ? (
+            {displayPlate ? (
               <View style={styles.collapsedPlateChip}>
                 <Text style={styles.collapsedPlateTxt} numberOfLines={1}>{displayPlate}</Text>
               </View>
@@ -298,8 +279,8 @@ function LiveDriverSheetInner({
         <View style={styles.collapsedEta}>
           <Text style={[
             styles.collapsedEtaVal,
-            tripPhase === 'arrived' && { color: '#F59E0B' },
-            tripPhase === 'ongoing' && { color: LIVE.blue },
+            tripPhase === 'arrived' && { color: colors.amber },
+            tripPhase === 'ongoing' && { color: colors.navy },
           ]} numberOfLines={1}>{collapsedRight.top}</Text>
           <Text style={styles.collapsedEtaSub} numberOfLines={1}>{collapsedRight.sub}</Text>
         </View>
@@ -350,7 +331,7 @@ function LiveDriverSheetInner({
               ) : null}
             </View>
             {/* Phase status line */}
-            <Text style={[styles.phaseLine, tripPhase === 'arrived' && { color: '#F59E0B' }, tripPhase === 'ongoing' && { color: LIVE.blue }]} numberOfLines={1}>
+            <Text style={[styles.phaseLine, tripPhase === 'arrived' && { color: colors.amber }, tripPhase === 'ongoing' && { color: colors.blue }]} numberOfLines={1}>
               {tripPhase === 'arrived'
                 ? 'Meet them at your pickup point'
                 : tripPhase === 'ongoing'
@@ -397,7 +378,7 @@ function LiveDriverSheetInner({
               <Text style={styles.destLabel}>Destination</Text>
               <Text style={styles.destValue} numberOfLines={2}>{destAddress}</Text>
               {destEtaMinutes != null && destEtaMinutes > 0 ? (
-                <Text style={styles.destEta}>{destEtaMinutes} min away</Text>
+                <Text style={styles.destEta}>Arrive by {arrivalClockTime(destEtaMinutes)}</Text>
               ) : null}
             </View>
           </View>
@@ -408,23 +389,7 @@ function LiveDriverSheetInner({
           <Text style={styles.vehicleSectionLabel}>
             {tripPhase === 'arrived' ? 'Look for this car' : 'Your vehicle'}
           </Text>
-          <View style={styles.vehicleGrid}>
-            <View style={styles.vehicleCell}>
-              <Text style={styles.cellLabel}>Car</Text>
-              <Text style={styles.cellValue} numberOfLines={2}>{displayVehicle}</Text>
-            </View>
-            <View style={styles.vehicleCell}>
-              <Text style={styles.cellLabel}>Color</Text>
-              <View style={styles.colorRow}>
-                <View style={[styles.colorDot, { backgroundColor: swatch(vehicleColor) }]} />
-                <Text style={styles.cellValue} numberOfLines={1}>{vehicleColor || '—'}</Text>
-              </View>
-            </View>
-            <View style={styles.vehicleCell}>
-              <Text style={styles.cellLabel}>Plate</Text>
-              <Text style={[styles.cellValue, styles.plateValue]} numberOfLines={1}>{displayPlate}</Text>
-            </View>
-          </View>
+          <VehicleStrip model={displayVehicle} colour={vehicleColor} plate={displayPlate} />
         </View>
 
         {/* Action buttons */}
@@ -511,10 +476,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   grabber: {
-    width: 44,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
   },
   collapsed: {
     height: LIVE_LAYOUT.sheetCollapsedH - LIVE_LAYOUT.sheetGrabberH,
@@ -538,14 +503,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 6,
-    backgroundColor: 'rgba(34,197,94,0.12)',
+    backgroundColor: colors.bgMuted,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(34,197,94,0.28)',
+    borderColor: colors.border,
   },
   collapsedPlateTxt: {
     fontSize: 10,
     fontWeight: '800',
-    color: LIVE.greenBright,
+    color: colors.textPrimary,
     letterSpacing: 0.8,
   },
   collapsedEta: { alignItems: 'flex-end', minWidth: 52 },
@@ -605,8 +570,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(239,68,68,0.28)',
   },
   cancelTextCol: { flex: 1, gap: 2 },
-  cancelTxt: { fontSize: 13, fontWeight: '800', color: '#FCA5A5' },
-  cancelFee: { fontSize: 11, fontWeight: '600', color: '#FDE68A' },
+  cancelTxt: { fontSize: 13, fontWeight: '800', color: colors.red },
+  cancelFee: { fontSize: 11, fontWeight: '600', color: colors.amber },
   vehicleSection: { gap: 8 },
   vehicleSectionLabel: { fontSize: 11, fontWeight: '700', color: LIVE.faint, letterSpacing: 0.5 },
   vehicleGrid: { flexDirection: 'row', gap: 8, height: 64 },
@@ -647,8 +612,8 @@ const styles = StyleSheet.create({
   pickupCodeValue: { fontSize: 26, fontWeight: '900', color: LIVE.green, letterSpacing: 5, marginTop: 2 },
   destCard: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 12,
-    backgroundColor: 'rgba(56,189,248,0.08)', borderRadius: LIVE.radiusSm,
-    borderWidth: 1, borderColor: 'rgba(56,189,248,0.25)', padding: 14,
+    backgroundColor: alpha.blueSoft, borderRadius: LIVE.radiusSm,
+    padding: 14,
   },
   destTextCol: { flex: 1, gap: 2 },
   destLabel: { fontSize: 10, fontWeight: '800', color: LIVE.blue, letterSpacing: 0.5 },

@@ -517,7 +517,7 @@ export default function ModernDriverHome() {
   const autoActionFiredRef = useRef(false);
   const { language, setLanguage, availableLanguages, t } = useLanguage();
   const { colors, isDark } = useThemeColors();
-  const dashboardBg = isDark ? '#0a0f1e' : colors.background;
+  const dashboardBg = '#F5F6F7';
   const operationalState = useDriverSessionStore((s) => s.operationalState);
   const isDashboardVisible = useDriverSessionStore((s) => s.isDashboardVisible);
   const connectionPhase = useDriverSessionStore((s) => s.connectionPhase);
@@ -3044,7 +3044,7 @@ export default function ModernDriverHome() {
     return (
       <View style={{ flex: 1, backgroundColor: dashboardBg }}>
         <StatusBar
-          barStyle={isDark ? 'light-content' : 'dark-content'}
+          barStyle="dark-content"
           backgroundColor="transparent"
           translucent
         />
@@ -3185,9 +3185,9 @@ export default function ModernDriverHome() {
   // Option 1: never paint map/GO while documents are still outstanding.
   if (verificationStatus === 'not_submitted') {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F172A' }}>
-        <ActivityIndicator size="large" color="#4ADE80" />
-        <Text style={{ marginTop: 14, color: '#E2E8F0', fontSize: 15, fontWeight: '600' }}>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F6F7' }}>
+        <ActivityIndicator size="large" color="#90C048" />
+        <Text style={{ marginTop: 14, color: '#111427', fontSize: 15, fontWeight: '600' }}>
           Continue document setup…
         </Text>
       </View>

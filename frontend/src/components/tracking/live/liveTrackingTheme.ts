@@ -1,36 +1,39 @@
 /**
- * NEXRYDE Live Tracking — premium dark glass design system.
+ * NEXRYDE Live Tracking — light trip theme.
+ *
+ * Rider live screens sit on the pale Bolt map. Chrome is white, text is navy,
+ * and primary actions are lime with navy labels (white on lime fails contrast).
  */
 import type { ViewStyle } from 'react-native';
-import { BRAND, SURFACE } from '@/src/constants/designSystem';
+import { alpha, colors, radius, shadow, space } from '@/src/theme/tokens';
 
 export const LIVE = {
-  bg: '#030810',
-  mapBg: '#0A111C',
-  glass: SURFACE.glass,
-  glassSoft: SURFACE.glassSoft,
-  glassBorder: SURFACE.glassBorder,
-  hairline: SURFACE.hairline,
-  tile: SURFACE.tile,
-  green: BRAND.primary,
-  greenBright: BRAND.primaryLight,
-  greenGlow: BRAND.primaryMuted,
-  greenSoft: 'rgba(34,225,128,0.14)',
-  greenInk: '#022C22',
-  text: BRAND.textPrimary,
-  sub: BRAND.textSecondary,
-  faint: BRAND.textMuted,
-  gold: BRAND.warning,
-  red: BRAND.danger,
-  redSoft: 'rgba(239,68,68,0.16)',
-  blue: BRAND.info,
-  radiusXl: 28,
-  radius: 22,
-  radiusSm: 14,
-  radiusPill: 999,
-  pad: 16,
-  gap: 12,
-  edge: 16,
+  bg: colors.bg,
+  mapBg: colors.bgMuted,
+  glass: colors.bg,
+  glassSoft: colors.bgMuted,
+  glassBorder: colors.border,
+  hairline: colors.border,
+  tile: colors.bgMuted,
+  green: colors.green,
+  greenBright: colors.greenLight,
+  greenGlow: alpha.greenSoft,
+  greenSoft: alpha.greenSoft,
+  greenInk: colors.textOnGreen,
+  text: colors.textPrimary,
+  sub: colors.textSecondary,
+  faint: colors.textTertiary,
+  gold: colors.amber,
+  red: colors.red,
+  redSoft: alpha.redSoft,
+  blue: colors.blue,
+  radiusXl: radius.sheet,
+  radius: radius.card,
+  radiusSm: radius.button,
+  radiusPill: radius.pill,
+  pad: space.lg,
+  gap: space.md,
+  edge: space.lg,
 } as const;
 
 export const liveGlassCard: ViewStyle = {
@@ -38,9 +41,5 @@ export const liveGlassCard: ViewStyle = {
   borderRadius: LIVE.radius,
   borderWidth: 1,
   borderColor: LIVE.hairline,
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 10 },
-  shadowOpacity: 0.48,
-  shadowRadius: 24,
-  elevation: 14,
+  ...shadow,
 };
