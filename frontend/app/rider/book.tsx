@@ -101,6 +101,12 @@ import { FIRST_RIDE_DISCOUNT_PCT } from '@/src/constants/commercialOffers';
 import { RIDER_PRIMARY_CTA_GRADIENT } from '@/src/constants/riderRideChrome';
 import { BookingBidInput } from '@/src/components/rider/BookingBidInput';
 import { BRAND, SURFACE } from '@/src/constants/designSystem';
+import {
+  colors as TRIP,
+  radius as TRIP_RADIUS,
+  shadow as TRIP_SHADOW,
+  type as TRIP_TYPE,
+} from '@/src/theme/tokens';
 
 /** Set `EXPO_PUBLIC_BOOKING_PROMO=false` to hide the booking promo strip entirely. */
 const BOOKING_PROMO_ENABLED = String(process.env.EXPO_PUBLIC_BOOKING_PROMO ?? 'true').toLowerCase() !== 'false';
@@ -2482,13 +2488,9 @@ function BookInDriveStyle() {
   return (
     <SafeAreaView style={[s.container, { backgroundColor: bookingTheme.bg }]} edges={['top']}>
       <StatusBar barStyle={bookingTheme.statusBar} backgroundColor={bookingTheme.bg} />
-      {/* MAP SECTION */}
-      <View
-        style={[
-          s.mapArea,
-          { backgroundColor: bookingTheme.mapBg, height: routeReady ? '58%' : '46%' },
-        ]}
-      >
+      {/* MAP — full bleed. It runs to the bottom edge with the sheet floating
+          over it, rather than being cropped into a box above the sheet. */}
+      <View style={[s.mapArea, { backgroundColor: bookingTheme.mapBg }]}>
         {pickupCoords ? (
           !useNativeBookingMap ? (
             <MapComponent
@@ -2661,11 +2663,13 @@ function BookInDriveStyle() {
 
       </View>
 
-      {/* BOTTOM SHEET */}
+      {/* BOTTOM SHEET — floats over the map; height is capped so the map stays
+          visible above it instead of the sheet claiming the rest of the screen. */}
       <Animated.View
         style={[
           s.sheet,
           { backgroundColor: bookingTheme.sheet },
+          { maxHeight: routeReady ? '62%' : '52%' },
           { transform: [{ translateY: sheetSlide }] },
         ]}
       >
@@ -3333,19 +3337,33 @@ function BookInDriveStyle() {
                   accessibilityLabel="Get fare estimate"
                   accessibilityRole="button"
                 >
-                  <LinearGradient
-                    colors={selectedVehicle ? [...RIDER_PRIMARY_CTA_GRADIENT] : ['#334155', '#475569']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={[s.calcBtnGrad, { paddingVertical: 16 }]}
+                  {/* Lime with navy text. White on this green is ~2.1:1 and fails. */}
+                  <View
+                    style={[
+                      s.calcBtnGrad,
+                      {
+                        paddingVertical: 16,
+                        backgroundColor: selectedVehicle ? TRIP.green : TRIP.bgMuted,
+                      },
+                    ]}
                   >
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Ionicons name={selectedVehicle ? 'pricetag' : 'car-outline'} size={20} color="#0D1420" />
-                      <Text style={[s.calcBtnText, { color: '#0D1420', fontSize: 16, fontWeight: '900' }]}>
+                      <Ionicons
+                        name={selectedVehicle ? 'pricetag' : 'car-outline'}
+                        size={20}
+                        color={selectedVehicle ? TRIP.textOnGreen : TRIP.textTertiary}
+                      />
+                      <Text
+                        style={[
+                          s.calcBtnText,
+                          TRIP_TYPE.bodyBold,
+                          { color: selectedVehicle ? TRIP.textOnGreen : TRIP.textTertiary },
+                        ]}
+                      >
                         {selectedVehicle ? 'Get fare estimate' : 'Select a ride above'}
                       </Text>
                     </View>
-                  </LinearGradient>
+                  </View>
                 </TouchableOpacity>
               )}
             </View>
@@ -3400,21 +3418,29 @@ function BookInDriveStyle() {
               accessibilityLabel={`Continue with ${veh?.name || 'ride'} for ₦${currentFare.toLocaleString()}`}
               accessibilityRole="button"
             >
-              <LinearGradient
-                colors={isLoading ? ['#64748b', '#475569'] : [...RIDER_PRIMARY_CTA_GRADIENT]}
-                style={[s.btnGrad, { paddingVertical: 17 }]}
+              {/* Primary action: lime with navy text, per the contrast rule. */}
+              <View
+                style={[
+                  s.btnGrad,
+                  {
+                    paddingVertical: 17,
+                    backgroundColor: isLoading ? TRIP.bgMuted : TRIP.green,
+                  },
+                ]}
               >
                 {isLoading ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <ActivityIndicator color="#fff" size="small" />
-                    <Text style={[s.findBtnText, { color: '#fff', fontSize: 16 }]}>Matching drivers…</Text>
+                    <ActivityIndicator color={TRIP.textSecondary} size="small" />
+                    <Text style={[s.findBtnText, TRIP_TYPE.bodyBold, { color: TRIP.textSecondary }]}>
+                      Matching drivers…
+                    </Text>
                   </View>
                 ) : (
-                  <Text style={[s.findBtnText, { color: '#0D1420', fontSize: 17, fontWeight: '900' }]}>
+                  <Text style={[s.findBtnText, TRIP_TYPE.bodyBold, { color: TRIP.textOnGreen }]}>
                     Continue
                   </Text>
                 )}
-              </LinearGradient>
+              </View>
             </TouchableOpacity>
           </View>
         ) : null}
@@ -3756,7 +3782,8 @@ function BookInDriveStyle() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  mapArea: { height: '46%', position: 'relative', backgroundColor: BRAND.bgDeep, overflow: 'hidden' },
+  // Full-bleed: the map is the background of the screen, not a panel in it.
+  mapArea: { ...StyleSheet.absoluteFillObject, backgroundColor: BRAND.bgDeep, overflow: 'hidden' },
   confirmHeader: { marginBottom: 2 },
   confirmHeaderTitle: {
     fontSize: 20,
@@ -4340,14 +4367,16 @@ const s = StyleSheet.create({
   preferredText: { fontSize: 13, fontWeight: '800', color: '#FCA5A5' },
   preferredSub: { marginTop: 3, fontSize: 11, fontWeight: '600', color: 'rgba(252,211,231,0.85)', lineHeight: 15 },
   sheet: {
-    flex: 1,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: COLORS.bg,
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
-    marginTop: -24,
+    borderTopLeftRadius: TRIP_RADIUS.sheet,
+    borderTopRightRadius: TRIP_RADIUS.sheet,
     paddingTop: 10,
     overflow: 'hidden',
-    position: 'relative',
+    ...TRIP_SHADOW,
   },
   sheetHidden: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 0, overflow: 'hidden', opacity: 0, marginTop: 0, paddingTop: 0 },
   sheetContent: { flexGrow: 1 },
