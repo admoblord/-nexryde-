@@ -1,6 +1,6 @@
 /**
- * Live tracking / arriving driver marker — top-down car that glides + rotates.
- * Same asset as booking nearby drivers (MapAnimatedTaxiMarker).
+ * Live tracking / arriving / driver-self marker — shared Nexryde car asset,
+ * glides between GPS pings and rotates smoothly (no snap).
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, Platform, Easing, Image } from 'react-native';
@@ -16,6 +16,11 @@ import {
   trackVerifyPropsChanged,
   trackVerifyRotation,
 } from '@/src/components/tracking/map/trackVerifyLog';
+import {
+  mapVehicleImageSource,
+  type MapVehicleStatus,
+} from '@/src/components/map/MapVehicleMarker';
+import { MAP_VEHICLE } from '@/src/constants/designSystem';
 
 type Props = {
   lat: number;
@@ -23,23 +28,20 @@ type Props = {
   heading?: number | null;
   moving?: boolean;
   tracksViewChanges?: boolean;
-  /** Glide duration between GPS pings — match stream throttle (~4s). */
   moveDurationMs?: number;
-  /** Visual size of the top-down car (width). */
   size?: number;
+  /** available | on_trip | offline — defaults to on_trip for live tracking. */
+  status?: MapVehicleStatus;
 };
 
 const DEFAULT_MOVE_MS = 4000;
 const ANDROID = Platform.OS === 'android';
-const CAR_SRC = require('../../../../assets/images/map/car-top.png');
 
-/** Shortest-path heading lerp (degrees). */
 function lerpHeading(from: number, to: number, t: number): number {
   const delta = ((((to - from) % 360) + 540) % 360) - 180;
   return (from + delta * t + 360) % 360;
 }
 
-/** Top-down car — glides between GPS pings, rotates smoothly (no snap). */
 export function DriverCarMarker({
   lat,
   lng,
@@ -48,6 +50,7 @@ export function DriverCarMarker({
   tracksViewChanges = !ANDROID,
   moveDurationMs = DEFAULT_MOVE_MS,
   size = 36,
+  status = 'on_trip',
 }: Props) {
   const lastCoord = useRef<{ lat: number; lng: number } | null>(null);
   const lastHeadingRef = useRef(0);
@@ -71,14 +74,13 @@ export function DriverCarMarker({
     }),
   ).current;
 
-  // Android: brief bitmap capture on mount / when moving state changes.
   const [selfCapture, setSelfCapture] = useState(ANDROID);
   useEffect(() => {
     if (!ANDROID) return;
     setSelfCapture(true);
     const t = setTimeout(() => setSelfCapture(false), 3000);
     return () => clearTimeout(t);
-  }, [moving, size]);
+  }, [moving, size, status]);
 
   useEffect(() => {
     if (!isValidMapCoord(lat, lng)) return;
@@ -161,6 +163,12 @@ export function DriverCarMarker({
 
   const carW = size;
   const carH = Math.round(size * 1.85);
+  const halo =
+    status === 'available'
+      ? MAP_VEHICLE.accentAvailable
+      : status === 'offline'
+        ? MAP_VEHICLE.accentOffline
+        : MAP_VEHICLE.accentOnTrip;
 
   return (
     <MarkerAnimated
@@ -172,12 +180,12 @@ export function DriverCarMarker({
       rotation={displayHeading}
     >
       <View style={[styles.wrap, { width: carW + 16, height: carH + 16 }]} pointerEvents="none">
-        {moving ? <View style={styles.softHalo} /> : null}
+        {moving ? <View style={[styles.softHalo, { backgroundColor: halo }]} /> : null}
         <Image
-          source={CAR_SRC}
+          source={mapVehicleImageSource(status)}
           style={{ width: carW, height: carH }}
           resizeMode="contain"
-          accessibilityLabel="Driver vehicle"
+          accessibilityLabel={`Nexryde vehicle ${status}`}
         />
       </View>
     </MarkerAnimated>
@@ -194,7 +202,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: 'rgba(250, 204, 21, 0.22)',
+    opacity: 0.22,
   },
 });
 

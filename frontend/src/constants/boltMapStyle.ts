@@ -7,10 +7,11 @@
 import { Platform } from 'react-native';
 import type { MapStyleElement } from 'react-native-maps';
 import { getGoogleMapIdForPlatform } from '@/src/constants/mapEngines';
+import { MAP_VEHICLE } from '@/src/constants/designSystem';
 
-/** Nexryde dark green — high-contrast route on pale Bolt basemap. */
-export const BOLT_ROUTE_GREEN = '#0A7A45';
-export const BOLT_ROUTE_CASING = '#FFFFFF';
+/** Nexryde route green — from MAP_VEHICLE tokens (contrast vs navy car). */
+export const BOLT_ROUTE_GREEN = MAP_VEHICLE.routeGreen;
+export const BOLT_ROUTE_CASING = MAP_VEHICLE.outline;
 export const BOLT_ROUTE_WIDTH = 9;
 export const BOLT_ROUTE_CASING_WIDTH = 11;
 

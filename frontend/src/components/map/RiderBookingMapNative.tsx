@@ -663,7 +663,10 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
               lat: number;
               lng: number;
               heading?: number;
+              status?: string;
             };
+            const vehicleStatus =
+              d.status === 'offline' ? 'offline' : sm ? 'on_trip' : 'available';
             return (
               <Marker
                 key={d.driver_id}
@@ -673,7 +676,11 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
                 rotation={0}
                 flat
               >
-                <MapAnimatedTaxiMarker size={sm ? 34 : 32} heading={d.heading ?? 0} />
+                <MapAnimatedTaxiMarker
+                  size={sm ? 34 : 32}
+                  heading={d.heading ?? 0}
+                  status={vehicleStatus}
+                />
               </Marker>
             );
           })}

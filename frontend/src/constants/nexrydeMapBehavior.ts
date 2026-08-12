@@ -6,7 +6,8 @@ import { BOLT_RIDER_MAP_STYLE } from '@/src/constants/boltMapStyle';
 
 export const MAP = {
   userDot: HYBRID.green,
-  driverTaxi: '#FACC15',
+  /** @deprecated Prefer MAP_VEHICLE / MapVehicleMarker — navy branded cars. */
+  driverTaxi: '#111427',
   pickupPin: HYBRID.green,
   destinationPin: '#FF4444',
   routeTeal: HYBRID.teal,

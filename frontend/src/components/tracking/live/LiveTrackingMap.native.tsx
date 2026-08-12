@@ -463,6 +463,7 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
             moving={isEnRoute || isOngoing}
             tracksViewChanges={markerTracks}
             moveDurationMs={RIDER_TRACKING_LOCATION_THROTTLE_MS}
+            status="on_trip"
           />
         ) : null}
       </MapView>
