@@ -379,7 +379,15 @@ export default function SubscriptionScreen() {
   );
 
   const subscriptionIsActive = subscription ? ['trial', 'active', 'grace_period'].includes(subscription.status) : false;
-  const subscriptionIsPending = subscription ? ['pending_payment', 'pending_verification'].includes(subscription.status) : false;
+  /**
+   * pending_payment only means the trial is over and the driver owes a payment. It
+   * does not mean money is in flight. Treating the two the same replaced the
+   * Subscribe button with a dead "Processing payment…" label, so a driver whose
+   * trial had ended could never actually pay. Only pending_verification — set once a
+   * checkout has been submitted — is a real in-flight payment.
+   */
+  const subscriptionIsPending = subscription?.status === 'pending_verification';
+  const subscriptionNeedsPayment = subscription?.status === 'pending_payment';
   const pendingTierLabel = subscription?.tier === 'road_warrior' ? 'Road Warrior' : 'City Rider';
   const tierConfig = getTierBadgeConfig(subscriptionIsActive ? (subscription?.tier || 'none') : 'none');
 
@@ -419,6 +427,18 @@ export default function SubscriptionScreen() {
             },
           ]}
         >
+          {subscriptionNeedsPayment && (
+            <View style={[styles.flowBanner, styles.pendingFlowBanner]}>
+              <Ionicons name="card" size={18} color="#FBBF24" style={{ marginTop: 2 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.flowBannerText}>
+                  Pick a tier below to pay with card, USSD or bank transfer. Your plan
+                  activates as soon as Squad confirms it.
+                </Text>
+              </View>
+            </View>
+          )}
+
           {subscriptionIsPending && (
             <View style={[styles.flowBanner, styles.pendingFlowBanner]}>
               <Ionicons name="time" size={18} color="#FBBF24" style={{ marginTop: 2 }} />

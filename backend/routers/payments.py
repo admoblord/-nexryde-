@@ -1964,34 +1964,64 @@ async def verify_pending_subscription_checkout(
     if not verify_result.get("verified"):
         reason_txt = str(verify_result.get("reason") or "").lower()
         tx_status = str(verify_result.get("transaction_status") or "").lower()
+        provider_status = str((verify_result.get("provider_status") or "")).lower()
+        effective_status = tx_status or provider_status
         if "timeout" in reason_txt or "connect" in reason_txt:
             reason_code = "network_timeout"
-        elif tx_status in ("pending", "processing"):
+        elif effective_status in ("pending", "processing"):
             reason_code = "payment_pending"
-        elif tx_status in ("failed", "declined", "reversed"):
+        elif effective_status in ("failed", "declined", "reversed"):
             reason_code = "payment_failed"
+        elif effective_status in ("abandoned", "cancelled", "canceled", "expired"):
+            reason_code = "payment_abandoned"
         else:
             reason_code = "gateway_failed"
-        logger.info(
-            "sub_verify_not_verified: driver=%s ref=%s reason=%s tx_status=%s",
-            driver_id, ref, reason_code, tx_status,
+
+        # A driver who walked away from the Squad page left an intent that stayed
+        # "pending" for good, so the app kept saying "payment is processing" and the
+        # Subscribe button stayed disabled — with the trial over, that is a driver who
+        # can never pay. Close anything Squad calls terminal, and sweep intents too old
+        # to be real, so a fresh checkout can start.
+        terminal = effective_status in (
+            "abandoned", "cancelled", "canceled", "expired", "failed", "declined", "reversed",
         )
+        created = intent.get("created_at")
+        if isinstance(created, str):
+            try:
+                created = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            except Exception:
+                created = None
+        if created is not None and created.tzinfo is not None:
+            created = created.replace(tzinfo=None)
+        stale = bool(created and (datetime.utcnow() - created) > timedelta(hours=24))
+        close_intent = terminal or (stale and reason_code != "payment_pending")
+
+        logger.info(
+            "sub_verify_not_verified: driver=%s ref=%s reason=%s tx_status=%s closing=%s",
+            driver_id, ref, reason_code, effective_status or "(none)", close_intent,
+        )
+        set_fields: dict = {
+            "failed_reason": reason_code,
+            "failure_reason": reason_code,
+            "last_verify_result": verify_result,
+            "updated_at": datetime.utcnow(),
+        }
+        if close_intent:
+            set_fields["status"] = "failed" if reason_code == "payment_failed" else "abandoned"
+            set_fields["closed_at"] = datetime.utcnow()
+            set_fields["closed_by"] = "verify_pending_terminal"
         await db.subscription_payment_intents.update_one(
             {"id": intent.get("id"), "status": "pending"},
-            {
-                "$set": {
-                    "failed_reason": reason_code,
-                    "failure_reason": reason_code,
-                    "last_verify_result": verify_result,
-                    "updated_at": datetime.utcnow(),
-                }
-            },
+            {"$set": set_fields},
         )
         return {
             "verified": False,
             "reason": reason_code,
             "verify_result": verify_result,
-            "transaction_status": tx_status or None,
+            "transaction_status": effective_status or None,
+            # Tells the app to drop the "processing" banner and re-enable Subscribe.
+            "checkout_closed": close_intent,
+            "can_retry": True,
         }
 
     expected_amount = _normalize_amount(intent.get("amount_ngn"))
