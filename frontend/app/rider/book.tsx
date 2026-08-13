@@ -102,6 +102,7 @@ import { RIDER_PRIMARY_CTA_GRADIENT } from '@/src/constants/riderRideChrome';
 import { BookingBidInput } from '@/src/components/rider/BookingBidInput';
 import { BRAND, SURFACE } from '@/src/constants/designSystem';
 import {
+  alpha as TRIP_ALPHA,
   colors as TRIP,
   radius as TRIP_RADIUS,
   shadow as TRIP_SHADOW,
@@ -207,22 +208,31 @@ function normalizeFareEstimatePayload(data: unknown): FareEstimateResponse {
   return { ...o, estimate_id, price_valid_until } as FareEstimateResponse;
 }
 
+/**
+ * Booking screen palette — light Bolt theme from `src/theme/tokens`.
+ *
+ * The keys keep their historic names so every style below reads the same, but they
+ * now resolve to the light surfaces: white sheets, navy text, lime primary. `white`
+ * is the primary *text* colour on this screen, which is navy in a light theme —
+ * renaming it across ~400 call sites would be churn for no visual gain.
+ */
 const COLORS = {
-  bg: BRAND.bgDeep,
-  card: BRAND.bgCard,
-  cardLight: BRAND.bgElevated,
-  green: BRAND.primary,
-  blue: BRAND.info,
-  accentBlue: BRAND.info,
-  /** Inner route highlight on map (NEXRYDE mint, not generic sky-blue). */
-  routeHighlight: BRAND.primaryMint,
-  lime: BRAND.primaryLight,
-  white: BRAND.white,
-  muted: BRAND.textSecondary,
-  dim: BRAND.textMuted,
-  yellow: BRAND.warning,
-  red: BRAND.danger,
-  purple: BRAND.accentPurple,
+  bg: TRIP.bg,
+  card: TRIP.bgMuted,
+  cardLight: TRIP.bg,
+  green: TRIP.greenDark,
+  blue: TRIP.blue,
+  accentBlue: TRIP.blue,
+  /** Inner route highlight on map — brand lime reads over pale Bolt roads. */
+  routeHighlight: TRIP.green,
+  lime: TRIP.green,
+  white: TRIP.textPrimary,
+  muted: TRIP.textSecondary,
+  dim: TRIP.textTertiary,
+  yellow: TRIP.amber,
+  red: TRIP.red,
+  purple: TRIP.blue,
+  border: TRIP.border,
 };
 
 type BookingVehicle = {
@@ -3783,7 +3793,7 @@ function BookInDriveStyle() {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   // Full-bleed: the map is the background of the screen, not a panel in it.
-  mapArea: { ...StyleSheet.absoluteFillObject, backgroundColor: BRAND.bgDeep, overflow: 'hidden' },
+  mapArea: { ...StyleSheet.absoluteFillObject, backgroundColor: TRIP.bgMuted, overflow: 'hidden' },
   confirmHeader: { marginBottom: 2 },
   confirmHeaderTitle: {
     fontSize: 20,
@@ -3823,7 +3833,7 @@ const s = StyleSheet.create({
     marginBottom: 4,
   },
   fareBandChip: {
-    backgroundColor: SURFACE.cardElevated,
+    backgroundColor: TRIP.bgMuted,
     borderRadius: 20,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -3831,9 +3841,9 @@ const s = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     borderWidth: 1,
-    borderColor: SURFACE.hairline,
+    borderColor: TRIP.border,
   },
-  fareBandChipText: { color: BRAND.textPrimary, fontSize: 12, fontWeight: '700' },
+  fareBandChipText: { color: TRIP.textPrimary, fontSize: 12, fontWeight: '700' },
   fareSurgeChip: {
     backgroundColor: 'rgba(245,158,11,0.14)',
     borderRadius: 20,
@@ -3845,9 +3855,9 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(245,158,11,0.4)',
   },
-  fareSurgeChipText: { color: '#fbbf24', fontSize: 11, fontWeight: '800' },
+  fareSurgeChipText: { color: TRIP.textPrimary, fontSize: 11, fontWeight: '800' },
   fareGiftChip: {
-    backgroundColor: BRAND.primaryMuted,
+    backgroundColor: TRIP_ALPHA.greenSoft,
     borderRadius: 20,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -3855,9 +3865,9 @@ const s = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     borderWidth: 1,
-    borderColor: SURFACE.glassBorder,
+    borderColor: TRIP.border,
   },
-  fareGiftChipText: { color: BRAND.primary, fontSize: 11, fontWeight: '800' },
+  fareGiftChipText: { color: TRIP.greenDark, fontSize: 11, fontWeight: '800' },
   fareRefreshChip: {
     width: 32,
     height: 32,
@@ -4448,8 +4458,8 @@ const s = StyleSheet.create({
     position: 'relative',
   },
   inlineCatRowActive: {
-    backgroundColor: 'rgba(34,225,128,0.08)',
-    shadowColor: BRAND.primary,
+    backgroundColor: TRIP_ALPHA.greenSoft,
+    shadowColor: TRIP.navy,
     shadowOpacity: 0.22,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
@@ -4516,9 +4526,9 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: BRAND.primaryMuted,
+    backgroundColor: TRIP_ALPHA.greenSoft,
     borderWidth: 1,
-    borderColor: SURFACE.glassBorder,
+    borderColor: TRIP.border,
     borderRadius: 14,
     padding: 12,
     marginBottom: 12,
@@ -4527,19 +4537,19 @@ const s = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 12,
-    backgroundColor: 'rgba(34,225,128,0.18)',
+    backgroundColor: TRIP_ALPHA.greenRing,
     alignItems: 'center',
     justifyContent: 'center',
   },
   firstRideBannerTitle: {
     fontSize: 13,
     fontWeight: '800',
-    color: BRAND.primary,
+    color: TRIP.greenDark,
     marginBottom: 2,
   },
   firstRideBannerSub: {
     fontSize: 11,
-    color: '#A7F3D0',
+    color: TRIP.textSecondary,
     fontWeight: '500',
     lineHeight: 16,
   },
@@ -4547,7 +4557,7 @@ const s = StyleSheet.create({
     position: 'absolute',
     top: 8,
     right: 8,
-    backgroundColor: BRAND.primary,
+    backgroundColor: TRIP.green,
     borderRadius: 8,
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -4555,10 +4565,10 @@ const s = StyleSheet.create({
   firstRideBadgeText: {
     fontSize: 10,
     fontWeight: '900',
-    color: BRAND.bgDeep,
+    color: TRIP.textOnGreen,
   },
   routeSafetyCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: TRIP.bgMuted,
     borderRadius: 16,
     padding: 14,
     marginBottom: 16,
