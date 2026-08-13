@@ -33,6 +33,7 @@ def rider_trip_payload_from_doc(trip: Optional[dict]) -> dict[str, Any]:
         mid_trip_wait_payload = compute_mid_trip_wait_payload(trip)
     except Exception:
         wait_payload = {"free_wait_total_sec": 180, "wait_phase": "idle"}
+        mid_trip_wait_payload = {}
     return {
         "id": trip.get("id"),
         "status": trip.get("status"),
@@ -86,4 +87,7 @@ def rider_trip_payload_from_doc(trip: Optional[dict]) -> dict[str, Any]:
             if trip.get("pickup_code_required", False)
             else None
         ),
+        "guardian_alert": trip.get("guardian_alert"),
+        "driver_stop_reason": trip.get("driver_stop_reason"),
+        "safe_arrival_check": trip.get("safe_arrival_check"),
     }

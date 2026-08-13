@@ -1133,14 +1133,24 @@ export const triggerOneTouchPoliceConnect = (data: {
     police_sms_sent: number;
   }>('/sos/police-connect', data);
 
-export const confirmSafeArrival = (tripId: string) =>
-  api.post(`/trips/${tripId}/confirm-safe-arrival`);
+export const confirmSafeArrival = (tripId: string, payload?: { safe?: boolean }) =>
+  api.post(`/trips/${tripId}/confirm-safe-arrival`, payload ?? {});
 
 export const resolveSOS = (sosId: string, resolution: string) =>
   api.post(`/sos/${sosId}/resolve?resolution=${resolution}`);
 
 export const respondToSafetyCheck = (checkId: string, response: string) =>
   api.post('/safety/respond', { check_id: checkId, response });
+
+export const respondToTripSafetyCheck = (
+  tripId: string,
+  response: 'safe' | 'need_help',
+  checkId?: string,
+) =>
+  api.post(`/trips/${tripId}/safety-check-response`, {
+    response,
+    ...(checkId ? { check_id: checkId } : {}),
+  });
 
 export const submitDriverStopReason = (tripId: string, reason: string) =>
   api.post(`/trips/${tripId}/stop-reason`, { reason });

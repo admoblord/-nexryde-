@@ -25,12 +25,14 @@ def test_rider_trip_payload_from_doc_shapes():
         "vehicle_plate": "ABC",
         "vehicle_color": "Silver",
         "payment_status": "pending",
+        "guardian_alert": {"active": True, "type": "abnormal_stop", "check_id": "c1"},
     }
     p = rider_trip_payload_from_doc(doc)
     assert p["id"] == "t1"
     assert p["status"] == "accepted"
     assert p["driver_name"] == "Ada"
     assert p["pickup_location"]["address"] == "A"
+    assert p["guardian_alert"]["check_id"] == "c1"
 
 
 def test_rider_trip_payload_from_doc_empty():

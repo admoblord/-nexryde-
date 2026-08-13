@@ -47,6 +47,7 @@ async def run_safe_arrival_guardian(limit: int = BATCH_LIMIT) -> dict[str, Any]:
         query = {
             "safe_arrival_check.required": True,
             "safe_arrival_check.confirmed_at": None,
+            "safe_arrival_check.unsafe_reported_at": None,
             # Fully escalated trips have nothing left to do.
             "safe_arrival_check.emergency_notified_at": None,
             "safe_arrival_check.confirm_deadline_at": {"$lte": now.isoformat()},

@@ -43,11 +43,14 @@ import { TripMapErrorBoundary } from '@/src/components/TripMapErrorBoundary';
 import CancellationReasonModal from '@/src/components/shared/CancellationReasonModal';
 import { PickupWaitTimerCard } from '@/src/components/shared/PickupWaitTimerCard';
 import { ChangeTripRouteModal } from '@/src/components/tracking/live/ChangeTripRouteModal';
+import RiderSafetyCheckModal from '@/src/components/tracking/live/RiderSafetyCheckModal';
+import { riderSafetyCheckIsActive } from '@/src/utils/tripSafetyPrompts';
 import { useThrottledValue } from '@/src/hooks/useThrottledValue';
 import { RIDER_TRACKING_DISPLAY_THROTTLE_MS } from '@/src/constants/tripRealtimeRhythm';
 import { useDevDriverMovementSim } from '@/src/components/tracking/hooks/useDevDriverMovementSim';
 import { DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
-import { getAvailableDrivers } from '@/src/services/api';
+import { getAvailableDrivers, respondToTripSafetyCheck } from '@/src/services/api';
+import { useAppStore } from '@/src/store/appStore';
 import { setForegroundInterval } from '@/src/utils/foregroundInterval';
 import { trackVerifyPing } from '@/src/components/tracking/map/trackVerifyLog';
 import { TrackingLiveDebugPanel } from '@/src/components/tracking/v2/TrackingLiveDebugPanel';
@@ -316,6 +319,58 @@ export default function LiveTrackingScreen() {
     riderId,
     actions,
   } = session;
+
+  const setCurrentTrip = useAppStore((s) => s.setCurrentTrip);
+  const [safetyBusy, setSafetyBusy] = useState(false);
+  const guardianAlert = currentTrip?.guardian_alert ?? null;
+  const showSafetyCheck =
+    riderSafetyCheckIsActive(guardianAlert) &&
+    (tripStatus === 'accepted' || tripStatus === 'arrived' || tripStatus === 'ongoing');
+
+  const handleSafetyResponse = useCallback(
+    async (response: 'safe' | 'need_help') => {
+      if (!effectiveTripId || safetyBusy) return;
+      setSafetyBusy(true);
+      try {
+        await respondToTripSafetyCheck(
+          effectiveTripId,
+          response,
+          typeof guardianAlert?.check_id === 'string' ? guardianAlert.check_id : undefined,
+        );
+        const latest = useAppStore.getState().currentTrip;
+        if (response === 'safe') {
+          if (latest?.id === effectiveTripId) {
+            setCurrentTrip({ ...latest, guardian_alert: null });
+          }
+        } else {
+          Alert.alert(
+            'Help is on the way',
+            'NEXRYDE safety and your emergency contacts have been alerted.',
+          );
+          if (latest?.id === effectiveTripId) {
+            setCurrentTrip({
+              ...latest,
+              guardian_alert: {
+                ...(latest.guardian_alert || {}),
+                active: true,
+                type: 'abnormal_stop',
+                escalated: true,
+                rider_response: 'need_help',
+              },
+            });
+          }
+        }
+      } catch (e: unknown) {
+        const detail =
+          (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+          'Could not send your check-in. Try again.';
+        Alert.alert('Could not send', String(detail));
+      } finally {
+        setSafetyBusy(false);
+      }
+    },
+    [effectiveTripId, safetyBusy, guardianAlert?.check_id, setCurrentTrip],
+  );
 
   const [routeEditMode, setRouteEditMode] = useState<'destination' | 'stop' | null>(null);
   const phaseForCancel = (tripStatus || 'pending') as NormalizedTripStatus;
@@ -965,6 +1020,13 @@ export default function LiveTrackingScreen() {
       ) : null}
 
       <TrackingLiveDebugPanel debug={tripSyncDebug} />
+      <RiderSafetyCheckModal
+        visible={showSafetyCheck}
+        alert={guardianAlert}
+        submitting={safetyBusy}
+        onSafe={() => void handleSafetyResponse('safe')}
+        onNeedHelp={() => void handleSafetyResponse('need_help')}
+      />
       {cancelSheet}
       {routeEditSheet}
     </View>

@@ -183,6 +183,7 @@ interface TripData {
   safe_arrival_check?: {
     required?: boolean;
     confirmed_at?: string | null;
+    unsafe_reported_at?: string | null;
     check_in_status?: string | null;
   } | null;
 }
@@ -190,7 +191,7 @@ interface TripData {
 /** Rider still owes a safe-arrival check-in — escalates to emergency contacts if ignored. */
 function needsSafeArrivalConfirm(trip?: TripData | null): boolean {
   const check = trip?.safe_arrival_check;
-  return Boolean(check?.required) && !check?.confirmed_at;
+  return Boolean(check?.required) && !check?.confirmed_at && !check?.unsafe_reported_at;
 }
 
 function isPendingReceiptPayment(trip?: TripData | null): boolean {
@@ -264,6 +265,7 @@ export default function TripReceiptScreen() {
   const [ratingComment,   setRatingComment]   = useState('');
   const [confirmingPayment, setConfirmingPayment] = useState(false);
   const [confirmingSafeArrival, setConfirmingSafeArrival] = useState(false);
+  const [reportingUnsafeArrival, setReportingUnsafeArrival] = useState(false);
 
   const [tipNgn, setTipNgn] = useState(0);
   const [tipPickerOpen, setTipPickerOpen] = useState(false);
@@ -570,10 +572,10 @@ export default function TripReceiptScreen() {
   };
 
   const handleConfirmSafeArrival = async () => {
-    if (!trip?.id || confirmingSafeArrival) return;
+    if (!trip?.id || confirmingSafeArrival || reportingUnsafeArrival) return;
     setConfirmingSafeArrival(true);
     try {
-      await confirmSafeArrival(trip.id);
+      await confirmSafeArrival(trip.id, { safe: true });
       setTrip((prev) =>
         prev
           ? {
@@ -597,6 +599,52 @@ export default function TripReceiptScreen() {
     } finally {
       setConfirmingSafeArrival(false);
     }
+  };
+
+  const handleReportUnsafeArrival = async () => {
+    if (!trip?.id || confirmingSafeArrival || reportingUnsafeArrival) return;
+    Alert.alert(
+      "I don't feel safe",
+      'NEXRYDE will alert your emergency contacts and safety team right now.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Alert contacts',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setReportingUnsafeArrival(true);
+              try {
+                await confirmSafeArrival(trip.id, { safe: false });
+                setTrip((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        safe_arrival_check: {
+                          ...(prev.safe_arrival_check || {}),
+                          unsafe_reported_at: new Date().toISOString(),
+                          check_in_status: 'unsafe_reported',
+                        },
+                      }
+                    : prev,
+                );
+                Alert.alert(
+                  'Help is on the way',
+                  'Your emergency contacts and NEXRYDE safety have been alerted.',
+                );
+              } catch (e: any) {
+                Alert.alert(
+                  'Could not send',
+                  e?.response?.data?.detail || 'We could not send the alert. Try SOS from Safety if you still need help.',
+                );
+              } finally {
+                setReportingUnsafeArrival(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
   };
 
   const handleShareBlackBox = async () => {
@@ -799,7 +847,7 @@ export default function TripReceiptScreen() {
             <TouchableOpacity
               style={[s.safeArrivalBtn, confirmingSafeArrival && { opacity: 0.6 }]}
               onPress={handleConfirmSafeArrival}
-              disabled={confirmingSafeArrival}
+              disabled={confirmingSafeArrival || reportingUnsafeArrival}
               activeOpacity={0.9}
               accessibilityRole="button"
               accessibilityLabel="Confirm I arrived safely"
@@ -813,6 +861,23 @@ export default function TripReceiptScreen() {
                 </>
               )}
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.safeArrivalUnsafeBtn, reportingUnsafeArrival && { opacity: 0.6 }]}
+              onPress={() => void handleReportUnsafeArrival()}
+              disabled={confirmingSafeArrival || reportingUnsafeArrival}
+              activeOpacity={0.9}
+              accessibilityRole="button"
+              accessibilityLabel="I do not feel safe"
+            >
+              {reportingUnsafeArrival ? (
+                <ActivityIndicator color="#FECACA" />
+              ) : (
+                <>
+                  <Ionicons name="warning" size={18} color="#FECACA" />
+                  <Text style={s.safeArrivalUnsafeTxt}>No, I don&apos;t feel safe</Text>
+                </>
+              )}
+            </TouchableOpacity>
           </View>
         ) : null}
 
@@ -820,6 +885,13 @@ export default function TripReceiptScreen() {
           <View style={s.safeArrivalDone}>
             <Ionicons name="shield-checkmark" size={16} color="#22C55E" />
             <Text style={s.safeArrivalDoneTxt}>Safe arrival confirmed</Text>
+          </View>
+        ) : null}
+
+        {userId === trip?.rider_id && trip?.safe_arrival_check?.unsafe_reported_at ? (
+          <View style={s.safeArrivalUnsafeDone}>
+            <Ionicons name="warning" size={16} color="#FCA5A5" />
+            <Text style={s.safeArrivalUnsafeDoneTxt}>Emergency contacts alerted</Text>
           </View>
         ) : null}
 
@@ -1461,6 +1533,19 @@ function createReceiptStyles(C: ReceiptPalette) {
     minHeight: 50,
   },
   safeArrivalBtnTxt: { fontSize: 15.5, fontWeight: '900', color: '#022C22' },
+  safeArrivalUnsafeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(229,72,77,0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(229,72,77,0.45)',
+    minHeight: 50,
+  },
+  safeArrivalUnsafeTxt: { fontSize: 15.5, fontWeight: '900', color: '#FECACA' },
   safeArrivalDone: {
     marginTop: 12,
     flexDirection: 'row',
@@ -1474,6 +1559,19 @@ function createReceiptStyles(C: ReceiptPalette) {
     borderColor: 'rgba(34,197,94,0.28)',
   },
   safeArrivalDoneTxt: { fontSize: 13, fontWeight: '800', color: '#4ADE80' },
+  safeArrivalUnsafeDone: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(229,72,77,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(229,72,77,0.35)',
+  },
+  safeArrivalUnsafeDoneTxt: { fontSize: 13, fontWeight: '800', color: '#FCA5A5' },
 
   routeMapCard: {
     marginTop: 10,

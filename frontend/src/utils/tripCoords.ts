@@ -136,8 +136,18 @@ export function mergeTripFromStatusPayload(
       (data.invisible_shield_mode as Trip['invisible_shield_mode']) ??
       prev?.invisible_shield_mode ??
       null,
+    guardian_alert:
+      data.guardian_alert !== undefined
+        ? (data.guardian_alert as Trip['guardian_alert'])
+        : prev?.guardian_alert ?? null,
+    driver_stop_reason:
+      data.driver_stop_reason !== undefined
+        ? (data.driver_stop_reason as Trip['driver_stop_reason'])
+        : prev?.driver_stop_reason ?? null,
     safe_arrival_check:
-      (data.safe_arrival_check as Trip['safe_arrival_check']) ?? prev?.safe_arrival_check ?? null,
+      data.safe_arrival_check !== undefined
+        ? (data.safe_arrival_check as Trip['safe_arrival_check'])
+        : prev?.safe_arrival_check ?? null,
     route_preview_coordinates: (() => {
       const raw = data.route_preview_coordinates ?? prev?.route_preview_coordinates;
       return Array.isArray(raw) ? (raw as Trip['route_preview_coordinates']) : prev?.route_preview_coordinates;

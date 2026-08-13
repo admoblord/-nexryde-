@@ -353,7 +353,6 @@ async def get_trip_sos(trip_id: str, request: Request):
 @support_router.post("/safety/respond")
 async def respond_to_safety_check(request: SafetyResponseRequest, http_request: Request):
     actor_id = require_authenticated(http_request)
-    now = datetime.now(timezone.utc)
     check = await db.safety_checks.find_one({"id": request.check_id})
     if not check:
         raise HTTPException(status_code=404, detail="Safety check not found")
@@ -364,28 +363,14 @@ async def respond_to_safety_check(request: SafetyResponseRequest, http_request: 
     if actor_id != trip.get("rider_id"):
         raise HTTPException(status_code=403, detail="Only rider can respond to safety check")
 
-    await db.safety_checks.update_one(
-        {"id": request.check_id},
-        {"$set": {"rider_response": request.response, "responded_at": now, "status": "resolved"}}
-    )
+    from routers.trips import apply_rider_safety_check_response
 
-    # Clear active guardian prompt once rider responds.
-    await db.trips.update_one(
-        {"id": check.get("trip_id")},
-        {"$set": {"guardian_alert": None, "guardian_state.pending_check_id": None}}
+    return await apply_rider_safety_check_response(
+        str(check.get("trip_id") or ""),
+        actor_id,
+        request.response,
+        request.check_id,
     )
-
-    if request.response == "need_help":
-        trip = await db.trips.find_one({"id": check.get("trip_id")}) or {}
-        sos = SOSAlert(
-            trip_id=check["trip_id"],
-            user_id=trip.get("rider_id", ""),
-            user_role="rider",
-            location=check.get("location", {}),
-            auto_triggered=True
-        )
-        await db.sos_alerts.insert_one(sos.model_dump() if hasattr(sos, "model_dump") else sos.dict())
-    return {"message": "Response recorded"}
 
 
 @support_router.post("/trips/{trip_id}/risk-alert")

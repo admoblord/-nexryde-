@@ -93,7 +93,11 @@ NOTIFICATION_KIND_META: dict[str, dict[str, Any]] = {
     "gps_spoofing_alert": _meta(audience=NotificationAudience.RIDER, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
     "gps_spoofing_driver": _meta(audience=NotificationAudience.DRIVER, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
     "abnormal_stop": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
-    "safe_arrival_checkin": _meta(audience=NotificationAudience.RIDER, category=NotificationCategory.SAFETY, channel_id="rides"),
+    # Auto Stop Safety Check — rider "Are you safe?" / driver "why did you stop?"
+    "safety_check": _meta(audience=NotificationAudience.RIDER, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
+    "stop_reason_requested": _meta(audience=NotificationAudience.DRIVER, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
+    "trip_paused": _meta(audience=NotificationAudience.RIDER, category=NotificationCategory.RIDES, channel_id="rides"),
+    "safe_arrival_checkin": _meta(audience=NotificationAudience.RIDER, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
     "shield_driver_sos": _meta(audience=NotificationAudience.DRIVER, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
     "shield_case_created": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
     "shield_case_responded": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.SAFETY, channel_id="rides"),

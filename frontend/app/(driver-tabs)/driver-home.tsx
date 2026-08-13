@@ -59,6 +59,7 @@ import {
   rateTrip,
   confirmTripPayment,
   triggerSOS,
+  submitDriverStopReason,
 } from '@/src/services/api';
 import CancellationReasonModal from '@/src/components/shared/CancellationReasonModal';
 import {
@@ -381,6 +382,8 @@ import {
   type NavigationAppId,
 } from '@/src/utils/driverNavigationApps';
 import DriverNavigationAppSheet from '@/src/components/driver/DriverNavigationAppSheet';
+import DriverStopReasonSheet from '@/src/components/driver/DriverStopReasonSheet';
+import { driverStopReasonIsNeeded } from '@/src/utils/tripSafetyPrompts';
 import { useThemeColors } from '@/src/constants/theme';
 
 /** Map backend `ride_offer` WebSocket payload to the trip shape used by the offer modal + accept API. */
@@ -1334,6 +1337,46 @@ export default function ModernDriverHome() {
   const [midTripWait, setMidTripWait] = useState<MidTripWait | null>(null);
   const midTripWaitRef = useRef<MidTripWait | null>(null);
   midTripWaitRef.current = midTripWait;
+  const [stopReasonBusy, setStopReasonBusy] = useState(false);
+  const [stopReasonError, setStopReasonError] = useState<string | null>(null);
+  const showStopReasonSheet = driverStopReasonIsNeeded(
+    currentTrip?.guardian_alert,
+    currentTrip?.driver_stop_reason,
+  ) && ['accepted', 'arrived', 'ongoing'].includes(String(currentTrip?.status || '').toLowerCase());
+
+  const handleSubmitStopReason = useCallback(
+    async (reason: string) => {
+      const tripId = currentTrip?.id;
+      if (!tripId || stopReasonBusy) return;
+      setStopReasonBusy(true);
+      setStopReasonError(null);
+      try {
+        const res = await submitDriverStopReason(tripId, reason);
+        const payload = (res?.data || {}) as {
+          driver_stop_reason?: Trip['driver_stop_reason'];
+          guardian_alert?: Trip['guardian_alert'];
+        };
+        const latest = useAppStore.getState().currentTrip;
+        if (latest?.id === tripId) {
+          setCurrentTrip({
+            ...latest,
+            driver_stop_reason: payload.driver_stop_reason || {
+              reason,
+              submitted_at: new Date().toISOString(),
+            },
+            guardian_alert: payload.guardian_alert ?? latest.guardian_alert,
+          });
+        }
+        toast.show('Reason shared with your rider.', 'success');
+      } catch (e: unknown) {
+        const msg = messageFromAxiosError(e, 'Could not share the stop reason. Try again.');
+        setStopReasonError(msg);
+      } finally {
+        setStopReasonBusy(false);
+      }
+    },
+    [currentTrip?.id, stopReasonBusy, setCurrentTrip, toast],
+  );
 
   /**
    * Pause / Resume the mid-trip wait meter. The rider asked to stop somewhere, so
@@ -2236,7 +2279,7 @@ export default function ModernDriverHome() {
     };
 
     void sync();
-    const iv = setInterval(sync, 15000);
+    const iv = setInterval(sync, 8000);
     return () => {
       cancelled = true;
       clearInterval(iv);
@@ -3269,6 +3312,14 @@ export default function ModernDriverHome() {
           destinationLabel={navigationAppPrompt?.label}
           onSelect={handleNavigationAppSelected}
           onClose={() => setNavigationAppPrompt(null)}
+        />
+
+        <DriverStopReasonSheet
+          visible={showStopReasonSheet}
+          alert={currentTrip?.guardian_alert}
+          submitting={stopReasonBusy}
+          errorMessage={stopReasonError}
+          onSubmit={(reason) => void handleSubmitStopReason(reason)}
         />
 
         <CancellationReasonModal
