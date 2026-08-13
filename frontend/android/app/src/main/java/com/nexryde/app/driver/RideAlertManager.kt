@@ -119,6 +119,16 @@ class RideAlertManager(
 
   fun isOnline(): Boolean = online
 
+  /**
+   * Draw the shift bubble without disturbing an offer card that already owns the
+   * surface. Used when JS asserts the bubble as the app is minimised.
+   */
+  fun ensureVisible(status: String) {
+    online = true
+    if (stateManager.state.isExpanded) return
+    renderState(status)
+  }
+
   fun showOnline() {
     if (!online) return
     render(stateManager.online())

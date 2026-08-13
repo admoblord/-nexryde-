@@ -106,6 +106,7 @@ import {
   requestNativeFullScreenIntentPermission,
   requestNativeOverlayPermission,
   refreshNativeDriverSession,
+  showNativeDriverBubble,
   startNativeDriverExperience,
   stopNativeDriverExperience,
   stopNativeRideAlert,
@@ -554,6 +555,8 @@ export default function ModernDriverHome() {
   const isOnlineRef = useRef(connectionPhase !== 'offline');
   isOnlineRef.current = connectionPhase !== 'offline';
   const [appInForeground, setAppInForeground] = useState(AppState.currentState === 'active');
+  const appInForegroundRef = useRef(appInForeground);
+  appInForegroundRef.current = appInForeground;
   const bridgeActiveRef = useRef(false);
   const nativeOverlayPromptedRef = useRef(false);
   const nativeFullScreenPromptedRef = useRef(false);
@@ -776,16 +779,27 @@ export default function ModernDriverHome() {
             code: preflight.firstBlockingCode,
             missing: preflight.missing.map((m) => m.key),
           });
-          stopNativeDriverExperience();
-          // Never dump a live trip offline from a permission blip during reconnect.
-          if (!bridgeActiveRef.current) {
-            confirmOffline();
-            setPermissionPreflight(preflight);
-            markPermissionsCompleted(false);
+          // This re-check runs on every reconnect, and backgrounding drops the socket.
+          // Tearing the service down here ended shifts silently: the driver bubble
+          // vanished the moment the app was minimised, the native heartbeat stopped
+          // with it, and the server's 3-minute idle sweep signed the driver off. A
+          // shift may only end from the foreground gate or an explicit Go Offline.
+          if (!appInForegroundRef.current || bridgeActiveRef.current) {
+            driverFlowLog('FGS_KEEP_ALIVE_BACKGROUND', {
+              code: preflight.firstBlockingCode,
+              liveTrip: bridgeActiveRef.current,
+            });
+            return;
           }
+          stopNativeDriverExperience();
+          confirmOffline();
+          setPermissionPreflight(preflight);
+          markPermissionsCompleted(false);
           return;
         }
         void startNativeDriverExperience(driverId);
+        // Bubble is the driver's only NEXRYDE surface once the app is minimised.
+        showNativeDriverBubble(bridgeActiveRef.current ? 'on_trip' : 'online');
         sessionRefresh = setInterval(() => {
           void refreshNativeDriverSession();
         }, 60 * 1000);
@@ -815,6 +829,12 @@ export default function ModernDriverHome() {
         return;
       }
       nativeOverlayPromptedRef.current = true;
+      // Same rule as the pre-flight effect: an online shift is never ended from the
+      // background, and never during a live trip. Re-prompt on the next foreground.
+      if (!appInForegroundRef.current || bridgeActiveRef.current) {
+        nativeOverlayPromptedRef.current = false;
+        return;
+      }
       // Do not dump into Settings mid-flow without explainer — return driver to offline gate.
       stopNativeDriverExperience();
       confirmOffline();
@@ -1641,10 +1661,15 @@ export default function ModernDriverHome() {
             void startDriverBackgroundLocation();
           });
         }
-      } else if (isOnlineRef.current && !bridgeActiveRef.current) {
-        import('@/src/tasks/backgroundLocationTask').then(({ stopDriverBackgroundLocation }) => {
-          void stopDriverBackgroundLocation();
-        });
+      } else if (isOnlineRef.current) {
+        // Minimised while online: the bubble is the driver's only NEXRYDE surface, so
+        // assert it here rather than trusting that the service already drew it.
+        showNativeDriverBubble(bridgeActiveRef.current ? 'on_trip' : 'online');
+        if (!bridgeActiveRef.current) {
+          import('@/src/tasks/backgroundLocationTask').then(({ stopDriverBackgroundLocation }) => {
+            void stopDriverBackgroundLocation();
+          });
+        }
       }
     });
     return () => {

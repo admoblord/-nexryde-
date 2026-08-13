@@ -48,7 +48,15 @@ object DriverOverlayBubbleController {
   }
 
   fun show(context: Context, status: String = "online", badge: Int = 0) {
-    rideAlertManager?.renderState(status)
+    val manager = rideAlertManager ?: return
+    if (status == "offline") {
+      manager.renderState(status)
+      return
+    }
+    // JS asserts the bubble when the app is minimised. renderState() only draws while
+    // the manager already believes the shift is live, so a plain call was a no-op
+    // whenever the service had been restarted underneath it.
+    manager.ensureVisible(status)
   }
 
   fun showOfferCard(context: Context, offer: Map<String, String>) {
