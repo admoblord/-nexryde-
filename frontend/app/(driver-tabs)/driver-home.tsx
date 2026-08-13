@@ -943,6 +943,9 @@ export default function ModernDriverHome() {
    *  first heartbeat's FORCE_OFFLINE while Mongo is_online is briefly still false —
    *  otherwise "tap GO → You were signed offline" flashes before the PUT lands. */
   const goOnlineCommitInFlightRef = useRef(false);
+  /** Bumped on each hydrate start and on GO ONLINE so in-flight profile reads cannot
+   *  apply a stale is_online=false and bounce a successful shift. */
+  const hydrateGenRef = useRef(0);
   const [earningsLoading, setEarningsLoading] = useState(true);
   const [earningsError, setEarningsError] = useState(false);
   const [walletBalance, setWalletBalance] = useState(0);
@@ -1551,8 +1554,10 @@ export default function ModernDriverHome() {
 
   const hydrateOnlineState = async () => {
     if (!driverId) return;
-    // Do not fight an in-flight optimistic go-offline / go-online toggle.
-    if (onlineToggleInFlightRef.current) return;
+    // Do not fight an in-flight optimistic go-offline / go-online toggle, and do not
+    // apply a profile snapshot taken before the go-online PUT committed.
+    if (onlineToggleInFlightRef.current || goOnlineCommitInFlightRef.current) return;
+    const hydrateGen = ++hydrateGenRef.current;
     startupStepStart('profile_hydrate');
     startupLog('PROFILE_FETCH_START', { source: 'hydrateOnlineState' });
     try {
@@ -1564,7 +1569,17 @@ export default function ModernDriverHome() {
         startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', { ok: false, status: response.status });
         return;
       }
-      if (onlineToggleInFlightRef.current) return;
+      if (
+        hydrateGen !== hydrateGenRef.current ||
+        onlineToggleInFlightRef.current ||
+        goOnlineCommitInFlightRef.current
+      ) {
+        startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
+          ok: true,
+          skipped: 'stale_or_commit_inflight',
+        });
+        return;
+      }
       const profile = await response.json();
       const serverOnline = Boolean(profile?.is_online);
       const localPhase = useDriverSessionStore.getState().connectionPhase;
@@ -1626,22 +1641,15 @@ export default function ModernDriverHome() {
             });
             return;
           }
+          // Keep local Offline (no FGS auto-start) but do NOT PUT the server offline.
+          // Prod log 2026-08-13 loopy9ice: PUT is_online=true at 10:53:01 then this
+          // hydrate path PUT is_online=false at 10:53:37 — "tap GO took him offline".
+          // Ghost presence is already cleared by the 3-minute heartbeat watchdog.
           driverFlowLog('GO_ONLINE_DESYNC', {
             action: 'hydrate_keep_offline_require_go_online',
             serverOnline: true,
+            leaveServerOnline: true,
           });
-          hydrateServerOnline(false);
-          driverOffersSocket.disconnect();
-          stopNativeDriverExperience();
-          const requestId = createStatusRequestId('offline');
-          void fetchWithTimeout(
-            buildOnlineToggleUrl(BACKEND_URL, { driverId, isOnline: false, requestId }),
-            {
-              method: 'PUT',
-              headers: { ...getAuthHeaders(), 'X-Request-Id': requestId },
-              timeoutMs: 8000,
-            },
-          ).catch(() => {});
           void refreshPermissionPreflight();
           startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
             ok: true,
@@ -1654,6 +1662,19 @@ export default function ModernDriverHome() {
         hydrateServerOnline(true);
         driverOffersSocket.connect(driverId);
       } else if (!serverOnline && (localPhase === 'confirmed' || localPhase === 'reconnecting')) {
+        if (goOnlineCommitInFlightRef.current) {
+          driverFlowLog('GO_ONLINE_DESYNC', {
+            action: 'ignore_hydrate_force_offline_commit_inflight',
+            serverOnline: false,
+            localPhase,
+          });
+          startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
+            ok: true,
+            isOnline: true,
+            skipped: 'commit_inflight',
+          });
+          return;
+        }
         if (bridgeActiveRef.current) {
           driverFlowLog('GO_ONLINE_DESYNC', {
             action: 'ignore_server_offline_active_trip',
@@ -1666,24 +1687,14 @@ export default function ModernDriverHome() {
           driverOffersSocket.disconnect();
         }
       } else if (serverOnline && Platform.OS === 'android' && localPhase !== 'confirmed' && localPhase !== 'reconnecting') {
-        // Any non-online local phase on Android: stay offline; user must GO ONLINE.
+        // Any non-online local phase on Android: stay offline locally; user must GO ONLINE.
+        // Do not PUT is_online=false — same bounce as hydrate_keep_offline_require_go_online.
         driverFlowLog('GO_ONLINE_DESYNC', {
           action: 'hydrate_keep_offline_require_go_online_else',
           serverOnline: true,
           localPhase,
+          leaveServerOnline: true,
         });
-        hydrateServerOnline(false);
-        driverOffersSocket.disconnect();
-        stopNativeDriverExperience();
-        const requestId = createStatusRequestId('offline');
-        void fetchWithTimeout(
-          buildOnlineToggleUrl(BACKEND_URL, { driverId, isOnline: false, requestId }),
-          {
-            method: 'PUT',
-            headers: { ...getAuthHeaders(), 'X-Request-Id': requestId },
-            timeoutMs: 8000,
-          },
-        ).catch(() => {});
         startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
           ok: true,
           isOnline: false,
@@ -1802,18 +1813,24 @@ export default function ModernDriverHome() {
   }, [pendingAction]);
 
   useEffect(() => {
+    let resumeTimer: ReturnType<typeof setTimeout> | null = null;
     const sub = AppState.addEventListener('change', (state) => {
       const active = state === 'active';
       setAppInForeground(active);
       if (active) {
         void checkNativeOverlayPermission();
-        hydrateOnlineState();
         void getQueueSize().then(setOfflineQueueCount);
         void syncQueuedRequests();
-        boot.refresh();
-        if (isOnlineRef.current) {
-          void fetchIncomingRide();
-        }
+        if (resumeTimer) clearTimeout(resumeTimer);
+        // Overlay / FSI / notification shade can flicker AppState every few hundred
+        // ms (loopy9ice 14:26 profile+onboarding storm). Debounce hydrate/refresh.
+        resumeTimer = setTimeout(() => {
+          hydrateOnlineState();
+          boot.refresh();
+          if (isOnlineRef.current) {
+            void fetchIncomingRide();
+          }
+        }, 800);
         if (isOnlineRef.current && !bridgeActiveRef.current) {
           import('@/src/tasks/backgroundLocationTask').then(({ startDriverBackgroundLocation }) => {
             void startDriverBackgroundLocation();
@@ -1831,6 +1848,7 @@ export default function ModernDriverHome() {
       }
     });
     return () => {
+      if (resumeTimer) clearTimeout(resumeTimer);
       sub.remove();
     };
   }, [driverId, boot.refresh, fetchIncomingRide, checkNativeOverlayPermission]);
@@ -2849,6 +2867,7 @@ export default function ModernDriverHome() {
         clearGoOnlineWatchdog();
         // Idempotent if already confirmed (optimistic path).
         if (isConnectingOnly()) confirmOnline();
+        hydrateGenRef.current += 1;
         driverFlowLog('GO_ONLINE_RESULT', {
           ok: true,
           status: res.status,
@@ -3169,6 +3188,9 @@ export default function ModernDriverHome() {
         // Guard the commit window BEFORE flipping to Online so the heartbeat that
         // starts on connectionPhase='confirmed' cannot FORCE_OFFLINE us before the PUT.
         goOnlineCommitInFlightRef.current = true;
+        // Drop in-flight login hydrates — a stale is_online=false snapshot must not
+        // bounce this shift after the PUT lands.
+        hydrateGenRef.current += 1;
         confirmOnline();
         void import('@/src/realtime/criticalActions').then(({ recordOnline }) =>
           recordOnline(driverId!),
@@ -3180,10 +3202,14 @@ export default function ModernDriverHome() {
 
         void (async () => {
           try {
-            try {
-              const live = await getDriverSubscriptionStatus();
-              const liveStatus = String(live?.data?.status || '');
-              if (liveStatus) {
+            // PUT first — the server is the plan gate. A pre-PUT subscription GET
+            // delayed commit so hydrate/heartbeat still saw is_online=false and
+            // bounced a successful GO ONLINE (loopy9ice 2026-08-13).
+            await syncOnlineStatusBackground(true);
+            void getDriverSubscriptionStatus()
+              .then((live) => {
+                const liveStatus = String(live?.data?.status || '');
+                if (!liveStatus) return;
                 useDriverDisplayStore.getState().setDriverDisplay({
                   driverId: driverId!,
                   subscriptionStatus: liveStatus,
@@ -3191,28 +3217,8 @@ export default function ModernDriverHome() {
                   trialTripsTarget: Number(live?.data?.trial_trips_target ?? 0) || undefined,
                   displayHydrated: true,
                 });
-                if (['pending_payment', 'expired', 'none'].includes(liveStatus)) {
-                  confirmOffline();
-                  Alert.alert(
-                    liveStatus === 'pending_payment' ? 'Trial ended' : 'Activation needed',
-                    liveStatus === 'pending_payment'
-                      ? 'Your free trial has ended. Subscribe to keep receiving trips.'
-                      : 'Start the verified-driver trial or complete payment before going online.',
-                    [
-                      { text: 'Later', style: 'cancel' },
-                      {
-                        text: 'Open activation',
-                        onPress: () => guardedPush('/driver/subscription'),
-                      },
-                    ],
-                  );
-                  return;
-                }
-              }
-            } catch {
-              /* non-fatal — PUT still attempts */
-            }
-            await syncOnlineStatusBackground(true);
+              })
+              .catch(() => {});
           } catch {
             confirmOffline();
             toast.show('Couldn’t go online. Tap GO to retry.', 'error');

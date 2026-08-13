@@ -130,6 +130,11 @@ if (home.includes('hydrate_keep_offline_require_go_online')) {
 } else {
   fail('Android hydrate still auto-restores online on login');
 }
+if (home.includes('leaveServerOnline: true')) {
+  pass('Android hydrate leaves server online (does not PUT is_online=false)');
+} else {
+  fail('Android hydrate may still PUT the server offline after a successful GO');
+}
 if (home.includes('hydrate_restore_online') && home.includes("Platform.OS === 'android'")) {
   // restore online should only be on non-Android branch
   const restoreIdx = home.indexOf("action: 'hydrate_restore_online'");

@@ -227,6 +227,29 @@ function main() {
     ),
   );
 
+  const androidKeepOfflineSlice = home.slice(
+    home.indexOf("action: 'hydrate_keep_offline_require_go_online'"),
+    home.indexOf("action: 'hydrate_restore_online'"),
+  );
+  const androidKeepOfflineElseSlice = home.slice(
+    home.indexOf("action: 'hydrate_keep_offline_require_go_online_else'"),
+    home.indexOf("hydrateServerOnline(serverOnline)"),
+  );
+  results.push(
+    printRow(
+      '16',
+      'Android hydrate must not PUT is_online=false (bounce after successful GO)',
+      home.includes("action: 'hydrate_keep_offline_require_go_online'") &&
+        home.includes('leaveServerOnline: true') &&
+        home.includes('hydrateGenRef') &&
+        home.includes('stale_or_commit_inflight') &&
+        androidKeepOfflineSlice.length > 0 &&
+        !androidKeepOfflineSlice.includes('buildOnlineToggleUrl') &&
+        !androidKeepOfflineElseSlice.includes('buildOnlineToggleUrl'),
+      null,
+    ),
+  );
+
   const all = results.every(Boolean);
   console.log(`\nOverall: ${all ? 'PASS' : 'FAIL'}`);
   process.exit(all ? 0 : 1);
