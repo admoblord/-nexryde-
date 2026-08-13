@@ -185,6 +185,13 @@ import { DriverUberStyleOfflineHome } from '@/src/components/driver/DriverUberSt
 
 const { width } = Dimensions.get('window');
 
+/**
+ * Once a driver has a default navigation app, Navigate stops asking. Tapping it
+ * again this soon after an automatic launch is read as "not that one" and
+ * reopens the picker, so a default is never a one-way door.
+ */
+const NAV_RESWITCH_WINDOW_MS = 8000;
+
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -358,7 +365,12 @@ function tripToCompletionPayload(merged: Trip & Record<string, unknown>): TripCo
 // Navigation helpers are imported from the shared utility
 import {
   hasFullScreenInAppNavigation,
+  hasAskedToDefaultNavigationApp,
+  markAskedToDefaultNavigationApp,
+  navigationAppLabel,
   openExternalNavigationApp,
+  readDefaultNavigationApp,
+  saveDefaultNavigationApp,
   saveLastUsedNavigationApp,
   type NavigationAppId,
 } from '@/src/utils/driverNavigationApps';
@@ -930,6 +942,8 @@ export default function ModernDriverHome() {
   const [tripCompletion, setTripCompletion] = useState<TripCompletionPayload | null>(null);
   const [completeTripConfirmOpen, setCompleteTripConfirmOpen] = useState(false);
   /** Destination waiting on the driver to pick a navigation app. */
+  /** Second Navigate tap within this window reopens the app picker. */
+  const navAutoLaunchedAtRef = useRef(0);
   const [navigationAppPrompt, setNavigationAppPrompt] = useState<{
     lat: number;
     lng: number;
@@ -1025,22 +1039,12 @@ export default function ModernDriverHome() {
     [currentTrip, driverProfile],
   );
 
-  /** Ask which app should guide this leg — NEXRYDE, Google Maps, Apple Maps or Waze. */
-  const launchDriverNavigation = useCallback(
-    (dest: { lat: number; lng: number; label?: string; phase?: string }) => {
-      if (!Number.isFinite(dest.lat) || !Number.isFinite(dest.lng)) return;
-      setNavigationAppPrompt(dest);
-    },
-    [],
-  );
-
-  const handleNavigationAppSelected = useCallback(
-    (appId: NavigationAppId) => {
-      const dest = navigationAppPrompt;
-      setNavigationAppPrompt(null);
-      if (!dest) return;
-      void saveLastUsedNavigationApp(appId);
-
+  /** Start guidance in a specific app: NEXRYDE turn-by-turn, Google Maps, Apple Maps or Waze. */
+  const runDriverNavigationWith = useCallback(
+    (
+      appId: NavigationAppId,
+      dest: { lat: number; lng: number; label?: string; phase?: string },
+    ) => {
       if (appId === 'in_app') {
         if (hasFullScreenInAppNavigation()) {
           guardedPush({
@@ -1063,7 +1067,73 @@ export default function ModernDriverHome() {
 
       openExternalNavigationApp(appId, dest);
     },
-    [currentTrip?.id, currentTrip?.status, guardedPush, navigationAppPrompt, toast],
+    [currentTrip?.id, currentTrip?.status, guardedPush, toast],
+  );
+
+  /**
+   * Navigate opens the driver's default app straight away. Until they set one,
+   * it asks. Tapping Navigate again inside NAV_RESWITCH_WINDOW_MS reopens the
+   * picker, which is how a driver changes a default they already chose.
+   */
+  const launchDriverNavigation = useCallback(
+    (
+      dest: { lat: number; lng: number; label?: string; phase?: string },
+      opts?: { forceChooser?: boolean },
+    ) => {
+      if (!Number.isFinite(dest.lat) || !Number.isFinite(dest.lng)) return;
+      if (opts?.forceChooser) {
+        navAutoLaunchedAtRef.current = 0;
+        setNavigationAppPrompt(dest);
+        return;
+      }
+      void (async () => {
+        const preferred = await readDefaultNavigationApp();
+        const reSwitching = Date.now() - navAutoLaunchedAtRef.current < NAV_RESWITCH_WINDOW_MS;
+        if (!preferred || reSwitching) {
+          navAutoLaunchedAtRef.current = 0;
+          setNavigationAppPrompt(dest);
+          return;
+        }
+        navAutoLaunchedAtRef.current = Date.now();
+        toast.show(
+          `Navigating with ${navigationAppLabel(preferred)} — tap Navigate again to switch`,
+          'info',
+        );
+        runDriverNavigationWith(preferred, dest);
+      })();
+    },
+    [runDriverNavigationWith, toast],
+  );
+
+  /** Offer the pick as a default, once per app, right after it has opened. */
+  const offerNavigationAppAsDefault = useCallback(async (appId: NavigationAppId) => {
+    const [current, alreadyAsked] = await Promise.all([
+      readDefaultNavigationApp(),
+      hasAskedToDefaultNavigationApp(appId),
+    ]);
+    if (current === appId || alreadyAsked) return;
+    await markAskedToDefaultNavigationApp(appId);
+    const label = navigationAppLabel(appId);
+    Alert.alert(
+      `Always use ${label}?`,
+      `NEXRYDE will open ${label} the moment you tap Navigate. To switch later, tap Navigate twice.`,
+      [
+        { text: 'Ask me each time', style: 'cancel' },
+        { text: `Use ${label}`, onPress: () => void saveDefaultNavigationApp(appId) },
+      ],
+    );
+  }, []);
+
+  const handleNavigationAppSelected = useCallback(
+    (appId: NavigationAppId) => {
+      const dest = navigationAppPrompt;
+      setNavigationAppPrompt(null);
+      if (!dest) return;
+      void saveLastUsedNavigationApp(appId);
+      runDriverNavigationWith(appId, dest);
+      void offerNavigationAppAsDefault(appId);
+    },
+    [navigationAppPrompt, offerNavigationAppAsDefault, runDriverNavigationWith],
   );
 
   const handleTripOpenNavigation = useCallback(() => {

@@ -1,7 +1,10 @@
 /**
  * Asks the driver which app should guide this leg — NEXRYDE's own navigation,
- * Google Maps, Apple Maps (iOS) or Waze. Shown every time Navigate is tapped,
- * with the last pick surfaced first so it stays a single tap.
+ * Google Maps, Apple Maps (iOS) or Waze.
+ *
+ * Shown until the driver sets a default; after that Navigate opens the default
+ * straight away and this sheet only reappears when they ask for it. The current
+ * default is tagged so it is obvious which app Navigate will open.
  */
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Modal, Pressable, TouchableOpacity, Platform } from 'react-native';
@@ -12,6 +15,7 @@ import * as Haptics from 'expo-haptics';
 import {
   listNavigationAppChoices,
   orderChoicesByLastUsed,
+  readDefaultNavigationApp,
   readLastUsedNavigationApp,
   type NavigationAppChoice,
   type NavigationAppId,
@@ -34,17 +38,22 @@ export default function DriverNavigationAppSheet({
   const insets = useSafeAreaInsets();
   const [choices, setChoices] = useState<NavigationAppChoice[]>(() => listNavigationAppChoices());
   const [lastUsed, setLastUsed] = useState<NavigationAppId | null>(null);
+  const [defaultApp, setDefaultApp] = useState<NavigationAppId | null>(null);
 
   useEffect(() => {
     if (!visible) return;
     if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     let cancelled = false;
-    void readLastUsedNavigationApp().then((stored) => {
-      if (cancelled) return;
-      setLastUsed(stored);
-      setChoices(orderChoicesByLastUsed(listNavigationAppChoices(), stored));
-    });
+    void Promise.all([readLastUsedNavigationApp(), readDefaultNavigationApp()]).then(
+      ([stored, preferred]) => {
+        if (cancelled) return;
+        setLastUsed(stored);
+        setDefaultApp(preferred);
+        // The default leads; otherwise the last pick does.
+        setChoices(orderChoicesByLastUsed(listNavigationAppChoices(), preferred ?? stored));
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -68,10 +77,16 @@ export default function DriverNavigationAppSheet({
           <Text style={styles.sub} numberOfLines={2}>
             {destinationLabel?.trim() || 'Choose how you want directions for this trip'}
           </Text>
+          <Text style={styles.hint}>
+            {defaultApp
+              ? 'Pick another app to switch. We will ask before changing your default.'
+              : 'Pick one and we will offer to open it automatically next time.'}
+          </Text>
 
           <View style={styles.list}>
             {choices.map((choice) => {
-              const isLastUsed = choice.id === lastUsed;
+              const isDefault = choice.id === defaultApp;
+              const isLastUsed = isDefault || choice.id === lastUsed;
               return (
                 <TouchableOpacity
                   key={choice.id}
@@ -88,7 +103,11 @@ export default function DriverNavigationAppSheet({
                   <View style={styles.rowText}>
                     <View style={styles.rowTitleLine}>
                       <Text style={styles.rowTitle}>{choice.label}</Text>
-                      {isLastUsed ? (
+                      {isDefault ? (
+                        <View style={styles.lastUsedTag}>
+                          <Text style={styles.lastUsedTagTxt}>Default</Text>
+                        </View>
+                      ) : isLastUsed ? (
                         <View style={styles.lastUsedTag}>
                           <Text style={styles.lastUsedTagTxt}>Last used</Text>
                         </View>
@@ -148,6 +167,14 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     textAlign: 'center',
     lineHeight: 18,
+    marginBottom: 6,
+  },
+  hint: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 15,
     marginBottom: 14,
   },
   list: { gap: 8 },
