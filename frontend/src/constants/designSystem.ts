@@ -56,20 +56,24 @@ export const BRAND = {
 
   /**
    * Map vehicle markers (top-down cars).
-   * Navy body for contrast on pale Bolt landscape + green route; green accent
-   * carries brand (a full-green car vanishes against route/parks).
+   * Lime body with navy glass — the logo pairing, so a NEXRYDE car is
+   * recognisable on the map without reading a label. A white keyline keeps it
+   * off the route line and park fills, which is what a flat green car lost
+   * itself in before.
    */
-  mapVehicleBody: '#111427',
-  mapVehicleWindow: '#FCFCFC',
-  mapVehicleOutline: '#FCFCFC',
+  mapVehicleBody: '#90C048',
+  mapVehicleWindow: '#111427',
+  mapVehicleOutline: '#FFFFFF',
   /** Available / online accent */
   mapVehicleAccentAvailable: '#90C048',
   /** On a trip accent */
   mapVehicleAccentOnTrip: '#183068',
   /** Offline accent */
   mapVehicleAccentOffline: '#9AA0A6',
-  /** Soft route green used on Bolt booking polyline (contrast reference). */
-  mapRouteGreen: '#78B048',
+  /** Route core — brand lime, drawn over the navy casing below. */
+  mapRouteGreen: '#90C048',
+  /** Route casing — brand navy, so the line has an edge on white roads. */
+  mapRouteCasing: '#111427',
 } as const;
 
 /** Map vehicle marker tokens — prefer this over scattering BRAND.mapVehicle*. */
@@ -82,6 +86,7 @@ export const MAP_VEHICLE = {
   accentOffline: BRAND.mapVehicleAccentOffline,
   offlineBodyOpacity: 0.6,
   routeGreen: BRAND.mapRouteGreen,
+  routeCasing: BRAND.mapRouteCasing,
 } as const;
 
 export type MapVehicleStatus = 'available' | 'on_trip' | 'offline';
