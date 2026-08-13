@@ -56,10 +56,22 @@ export function getMapboxAccessToken(): string {
 }
 
 /**
+ * Cloud Map IDs are opt-in. The Map IDs provisioned through the Map Management API
+ * were created as `mapType: VECTOR`, which only the Maps JavaScript API can render —
+ * the Android/iOS SDKs draw an empty canvas for them, so every native map went blank.
+ * Until a raster, platform-correct Map ID is verified on a device, the app styles maps
+ * with the Bolt JSON stylesheet instead.
+ */
+export function isGoogleMapIdEnabled(): boolean {
+  return envFlag('EXPO_PUBLIC_GOOGLE_MAP_ID_ENABLED', false);
+}
+
+/**
  * Google Cloud Map ID for cloud-styled maps (preferred over JSON customMapStyle).
  * Set EXPO_PUBLIC_GOOGLE_MAP_ID_ANDROID / _IOS (or shared EXPO_PUBLIC_GOOGLE_MAP_ID).
  */
 export function getGoogleMapIdForPlatform(os: string = Platform.OS): string {
+  if (!isGoogleMapIdEnabled()) return '';
   if (os === 'android') {
     return (
       envString('EXPO_PUBLIC_GOOGLE_MAP_ID_ANDROID') ||

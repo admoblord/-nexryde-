@@ -1,6 +1,15 @@
 # Bolt-style rider map (Google Cloud Map IDs)
 
-Prefer cloud Map Styles over JSON `customMapStyle` (legacy).
+> **Cloud Map IDs are disabled.** The IDs below were created with `mapType: VECTOR`,
+> which only the Maps JavaScript API renders. Handing a vector Map ID to the Android
+> or iOS SDK produces a blank map — no tiles, no route, no markers — which is what
+> shipped in 1.3.38/1.3.39 until the app was moved back to the JSON stylesheet.
+>
+> The app now ships the JSON Bolt style and ignores these Map IDs unless
+> `EXPO_PUBLIC_GOOGLE_MAP_ID_ENABLED=true`. Before turning that on: recreate the
+> Map IDs as `RASTER` for the mobile platforms, then confirm tiles render on a real
+> device. The JSON style in `boltRiderLight.json` is the same visual design, so there
+> is no user-facing reason to re-enable this until it is verified.
 
 ## Live resources (project `nexryde-app`)
 
