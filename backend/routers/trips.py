@@ -4456,6 +4456,31 @@ async def _update_trip_location_impl(trip_id: str, request: LocationUpdate, http
                 })
                 pending_check_id = check_id
                 last_prompt_at = now.isoformat()
+                # A safety check the rider is never told about is not a safety check.
+                try:
+                    await send_notification_to_user(
+                        trip.get("rider_id"),
+                        "Are you safe?",
+                        "We noticed your trip has been stopped for a while. Tap to check in.",
+                        {
+                            "type": "safety_check",
+                            "trip_id": trip_id,
+                            "check_id": check_id,
+                            "check_type": "abnormal_stop",
+                        },
+                    )
+                    await send_notification_to_user(
+                        trip.get("driver_id"),
+                        "Stopped for a while",
+                        "Let your rider know why you stopped — tap to share a reason.",
+                        {
+                            "type": "stop_reason_requested",
+                            "trip_id": trip_id,
+                            "check_id": check_id,
+                        },
+                    )
+                except Exception:
+                    logger.debug("abnormal_stop fanout failed trip=%s", trip_id, exc_info=True)
                 guardian_alert = {
                     "active": True,
                     "check_id": check_id,
@@ -5145,6 +5170,11 @@ async def get_trip_status(trip_id: str, request: Request):
         "completed_at": _iso(trip.get("completed_at")),
         # Pickup wait payload for rider wait timer
         "mid_trip_wait": compute_mid_trip_wait_payload(trip),
+        # Auto Stop Safety Check: the alert was written onto the trip but never handed
+        # to the client, so the rider prompt the feature promises had nothing to
+        # render from.
+        "guardian_alert": trip.get("guardian_alert") or None,
+        "safe_arrival_check": trip.get("safe_arrival_check") or None,
         "pickup_wait": {
             **compute_pickup_wait_payload(trip),
             "free_wait_secs": int(trip.get("pickup_free_wait_seconds") or PICKUP_FREE_WAIT_SECONDS),
