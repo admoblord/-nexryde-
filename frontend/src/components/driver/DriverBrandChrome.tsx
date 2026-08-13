@@ -5,6 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { HEADER_BLUR_DEFAULT, HEADER_BLUR_INCOMING } from '@/src/components/driver/driverDockTheme';
 import { BRAND } from '@/src/constants/designSystem';
+import { NexrydeMark } from '@/src/components/brand/NexrydeMark';
 import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 
 export type DriverBrandHeaderVariant = 'default' | 'incoming' | 'trip-light';
@@ -168,7 +169,7 @@ export function DriverBrandHeaderRow({
               end={{ x: 1, y: 1 }}
               style={lightStyles.logo}
             >
-              <Text style={lightStyles.logoTxt}>NX</Text>
+              <NexrydeMark size={26} framed={false} />
             </LinearGradient>
             <Text style={lightStyles.brand}>NEXRYDE</Text>
           </View>
@@ -206,7 +207,7 @@ export function DriverBrandHeaderRow({
             end={{ x: 1, y: 1 }}
             style={styles.logo}
           >
-            <Text style={styles.logoTxt}>NX</Text>
+            <NexrydeMark size={26} framed={false} />
           </LinearGradient>
           <Text style={styles.brand}>NEXRYDE</Text>
         </View>

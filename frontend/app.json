@@ -27,7 +27,7 @@
         "webcredentials:nexryde.app"
       ],
       "requireFullScreen": true,
-      "backgroundColor": "#0D1420",
+      "backgroundColor": "#0B111B",
       "infoPlist": {
         "CFBundleDisplayName": "NEXRYDE",
         "CFBundleName": "NEXRYDE",
@@ -78,7 +78,7 @@
       },
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#0D1420"
+        "backgroundColor": "#0B111B"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.nexryde.app",
@@ -183,9 +183,9 @@
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
+          "imageWidth": 240,
           "resizeMode": "contain",
-          "backgroundColor": "#0D1420"
+          "backgroundColor": "#0B111B"
         }
       ],
       [

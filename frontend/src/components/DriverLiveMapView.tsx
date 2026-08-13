@@ -2057,7 +2057,9 @@ function DriverLiveMapViewInner({
         showsUserLocation={false}
         showsMyLocationButton={false}
         showsCompass={Boolean(activeTrip)}
-        showsBuildings={Boolean(activeTrip)}
+        // Buildings are what makes the tilted camera read as 3D, so they stay on for
+        // the whole shift rather than only during a trip.
+        showsBuildings={isOnline || Boolean(activeTrip)}
         showsTraffic={false}
         showsScale={false}
         rotateEnabled={true}

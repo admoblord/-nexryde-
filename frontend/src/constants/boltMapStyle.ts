@@ -24,15 +24,16 @@ export const BOLT_ROUTE_CASING_WIDTH = 13;
 /**
  * Mutable array for react-native-maps customMapStyle.
  *
- * Palette is NEXRYDE's: land carries a faint lime cast, water a faint navy-blue
- * one, and labels are navy-grey rather than neutral slate. Roads stay pure white
+ * Palette derives from the locked brand values: land carries a faint emerald cast
+ * from the logo green, water a faint cast of the logo blue, and labels are
+ * navy-grey rather than neutral slate. Roads stay pure white
  * with a three-step hairline hierarchy (highway darkest, local lightest) so the
  * lime route and the navy-glassed car are the only saturated things on screen.
  */
 export const BOLT_RIDER_MAP_STYLE: MapStyleElement[] = [
-  { elementType: 'geometry', stylers: [{ color: '#F4F6F1' }] },
+  { elementType: 'geometry', stylers: [{ color: '#F2F5F2' }] },
   { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#7C8494' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#79828E' }] },
   { elementType: 'labels.text.stroke', stylers: [{ color: '#FFFFFF' }, { weight: 2.5 }] },
 
   { featureType: 'administrative', elementType: 'geometry', stylers: [{ visibility: 'off' }] },
@@ -41,7 +42,7 @@ export const BOLT_RIDER_MAP_STYLE: MapStyleElement[] = [
   {
     featureType: 'administrative.locality',
     elementType: 'labels.text.fill',
-    stylers: [{ color: '#5A6272' }],
+    stylers: [{ color: '#4E5866' }],
   },
   {
     featureType: 'administrative.locality',
@@ -49,9 +50,9 @@ export const BOLT_RIDER_MAP_STYLE: MapStyleElement[] = [
     stylers: [{ color: '#FFFFFF' }, { weight: 3 }],
   },
 
-  { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#F0F3EA' }] },
-  { featureType: 'landscape.natural', elementType: 'geometry', stylers: [{ color: '#E7F0DC' }] },
-  { featureType: 'landscape.man_made', elementType: 'geometry', stylers: [{ color: '#F6F7F4' }] },
+  { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#EDF4EE' }] },
+  { featureType: 'landscape.natural', elementType: 'geometry', stylers: [{ color: '#DEEFE2' }] },
+  { featureType: 'landscape.man_made', elementType: 'geometry', stylers: [{ color: '#F5F7F5' }] },
 
   { featureType: 'poi', stylers: [{ visibility: 'off' }] },
   { featureType: 'poi.business', stylers: [{ visibility: 'off' }] },
@@ -63,7 +64,7 @@ export const BOLT_RIDER_MAP_STYLE: MapStyleElement[] = [
   {
     featureType: 'poi.park',
     elementType: 'geometry',
-    stylers: [{ color: '#E2EFD2', visibility: 'on' }],
+    stylers: [{ color: '#D8EDDC', visibility: 'on' }],
   },
   { featureType: 'poi.park', elementType: 'labels', stylers: [{ visibility: 'off' }] },
   { featureType: 'poi.park', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
@@ -72,7 +73,7 @@ export const BOLT_RIDER_MAP_STYLE: MapStyleElement[] = [
   {
     featureType: 'road',
     elementType: 'geometry.stroke',
-    stylers: [{ color: '#E1E5EA', weight: 0.5 }],
+    stylers: [{ color: '#DFE4E9', weight: 0.5 }],
   },
   { featureType: 'road', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
   { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#98A0AC' }] },
@@ -110,9 +111,9 @@ export const BOLT_RIDER_MAP_STYLE: MapStyleElement[] = [
   { featureType: 'transit.line', stylers: [{ visibility: 'off' }] },
   { featureType: 'transit.station', stylers: [{ visibility: 'off' }] },
 
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#DBE5F1' }] },
-  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#8B9CB4' }] },
-  { featureType: 'water', elementType: 'labels.text.stroke', stylers: [{ color: '#DBE5F1' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#D8E6F2' }] },
+  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#7F98B4' }] },
+  { featureType: 'water', elementType: 'labels.text.stroke', stylers: [{ color: '#D8E6F2' }] },
 ];
 
 /**

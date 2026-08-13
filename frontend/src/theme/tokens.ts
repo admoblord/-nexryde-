@@ -9,14 +9,39 @@
  * `colors.textOnGreen` is navy by definition — never override it to white.
  */
 
+/**
+ * Locked brand palette — sampled straight out of `assets/images/icon.png`, the
+ * shipped app icon, so screen colour and logo colour cannot drift apart.
+ *
+ *   green   #74E956 → #37BE6A   the N, top of the gradient to the bottom
+ *   blue    #3581C1 → #2A6CA1   the right-hand bar
+ *   navy    #0B111B             the icon field
+ *
+ * These six values are the brand. Everything else in the app derives from them;
+ * nothing should introduce another green, blue or near-black.
+ */
+export const brand = {
+  /** Primary green, mid-gradient — actions, route, available cars. */
+  green: '#3FD46B',
+  /** Gradient top — highlights, glows, GO button top stop. */
+  greenBright: '#74E956',
+  /** Gradient bottom — pressed states, route core on white. */
+  greenDeep: '#37BE6A',
+  /** Logo blue — on-trip state, secondary actions, dropoff. */
+  blue: '#2A6CA1',
+  blueBright: '#3581C1',
+  /** Logo field — text on light surfaces, casings, dark backgrounds. */
+  navy: '#0B111B',
+} as const;
+
 // ── Colour ──────────────────────────────────────────────────────────────────
 export const colors = {
   /** Brand — sampled from the official Nexryde logo. */
-  green: '#90C048',
-  greenDark: '#78B048',
-  greenLight: '#B8D860',
-  navy: '#111427',
-  blue: '#183068',
+  green: brand.green,
+  greenDark: brand.greenDeep,
+  greenLight: brand.greenBright,
+  navy: brand.navy,
+  blue: brand.blue,
 
   /** Light theme surfaces. */
   bg: '#FFFFFF',
@@ -25,11 +50,11 @@ export const colors = {
   overlay: 'rgba(17,20,39,0.45)',
 
   /** Text. */
-  textPrimary: '#111427',
+  textPrimary: brand.navy,
   textSecondary: '#6B7280',
   textTertiary: '#9AA0A6',
   /** Navy, not white — see the contrast note above. */
-  textOnGreen: '#111427',
+  textOnGreen: brand.navy,
 
   /** Status. */
   amber: '#F5A623',
@@ -39,12 +64,12 @@ export const colors = {
 
 /** Translucent brand fills derived from the palette above. */
 export const alpha = {
-  greenSoft: 'rgba(144,192,72,0.16)',
-  greenRing: 'rgba(144,192,72,0.28)',
+  greenSoft: 'rgba(63,212,107,0.16)',
+  greenRing: 'rgba(63,212,107,0.30)',
   amberSoft: 'rgba(245,166,35,0.14)',
   redSoft: 'rgba(229,72,77,0.12)',
   blueSoft: 'rgba(24,48,104,0.12)',
-  navySoft: 'rgba(17,20,39,0.06)',
+  navySoft: 'rgba(11,17,27,0.06)',
   white: '#FFFFFF',
 } as const;
 

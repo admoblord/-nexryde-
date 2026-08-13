@@ -6,21 +6,23 @@
  * tokens instead of hardcoded values, ensuring visual consistency on par
  * with Uber / Bolt.
  *
- * Color palette: dark-first. The app uses a dark background (#0D1420) with
- * neon-green primary (#22E180), deep-blue secondary, and a warm white text.
+ * Colour comes from the locked brand palette in `src/theme/tokens` (sampled from
+ * the app icon): green #74E956 → #37BE6A, blue #2A6CA1, navy #0B111B. Do not
+ * introduce another green, blue or near-black here.
  */
+import { brand } from '@/src/theme/tokens';
 
 // ── Core Palette ──────────────────────────────────────────────────────────────
 
 export const BRAND = {
-  /** Primary call-to-action. Matches NEXRYDE logotype green. */
-  primary: '#22E180',
-  primaryDark: '#16C76A',
-  primaryLight: '#6DFFC3',
-  primaryMuted: 'rgba(34,225,128,0.15)',
+  /** Primary call-to-action — the green of the logo N. */
+  primary: brand.green,
+  primaryDark: brand.greenDeep,
+  primaryLight: brand.greenBright,
+  primaryMuted: 'rgba(63,212,107,0.15)',
 
-  /** App background — deep navy matching splash screen. */
-  bgDeep: '#0D1420',
+  /** App background — the icon's own field, so icon and app agree. */
+  bgDeep: brand.navy,
   bgCard: '#121C2E',
   bgElevated: '#1A2640',
   bgOverlay: 'rgba(13,20,32,0.92)',
@@ -29,10 +31,10 @@ export const BRAND = {
   textPrimary: '#F0F4FA',
   textSecondary: '#8FA3BC',
   textMuted: '#4D6480',
-  textInverse: '#0D1420',
+  textInverse: brand.navy,
 
   /** Semantic */
-  success: '#22E180',
+  success: brand.green,
   warning: '#F59E0B',
   danger: '#EF4444',
   info: '#38BDF8',
@@ -49,10 +51,10 @@ export const BRAND = {
   gray: '#8FA3BC',
 
   /** Secondary brand blue (driver accent, links) */
-  accentBlue: '#0066FF',
+  accentBlue: brand.blue,
 
   /** Trip-dock mint highlight — derived from primary, used on map overlays */
-  primaryMint: '#6DFFC3',
+  primaryMint: brand.greenBright,
 
   /**
    * Map vehicle markers (top-down cars).
@@ -61,19 +63,19 @@ export const BRAND = {
    * off the route line and park fills, which is what a flat green car lost
    * itself in before.
    */
-  mapVehicleBody: '#90C048',
-  mapVehicleWindow: '#111427',
+  mapVehicleBody: brand.green,
+  mapVehicleWindow: brand.navy,
   mapVehicleOutline: '#FFFFFF',
   /** Available / online accent */
-  mapVehicleAccentAvailable: '#90C048',
+  mapVehicleAccentAvailable: brand.green,
   /** On a trip accent */
-  mapVehicleAccentOnTrip: '#183068',
+  mapVehicleAccentOnTrip: brand.blue,
   /** Offline accent */
   mapVehicleAccentOffline: '#9AA0A6',
   /** Route core — brand lime, drawn over the navy casing below. */
-  mapRouteGreen: '#90C048',
+  mapRouteGreen: brand.greenDeep,
   /** Route casing — brand navy, so the line has an edge on white roads. */
-  mapRouteCasing: '#111427',
+  mapRouteCasing: brand.navy,
 } as const;
 
 /** Map vehicle marker tokens — prefer this over scattering BRAND.mapVehicle*. */

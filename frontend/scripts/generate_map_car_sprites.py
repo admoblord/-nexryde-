@@ -11,8 +11,11 @@ from PIL import Image, ImageDraw, ImageFilter
 W, H = 64, 128
 SS = 8
 
-LIME = (144, 192, 72, 255)        # #90C048
-NAVY = (17, 20, 39, 255)          # #111427
+# Locked brand values (sampled from assets/images/icon.png).
+GREEN = (63, 212, 107, 255)       # #3FD46B  logo N, mid gradient
+GREEN_BRIGHT = (116, 233, 86, 255)  # #74E956 gradient top
+NAVY = (11, 17, 27, 255)          # #0B111B  icon field
+BLUE = (42, 108, 161, 255)        # #2A6CA1  logo bar
 WHITE = (255, 255, 255, 255)
 GLASS_COOL = (214, 226, 240, 255)
 GREY = (154, 160, 166, 255)
@@ -21,8 +24,8 @@ TAIL = (229, 72, 77, 240)
 
 STATES = {
     # body, glass, roof accent
-    'available': (LIME, NAVY, LIME),
-    'on_trip': (NAVY, GLASS_COOL, LIME),
+    'available': (GREEN, NAVY, GREEN_BRIGHT),
+    'on_trip': (BLUE, GLASS_COOL, GREEN_BRIGHT),
     'offline': (GREY, GLASS_COOL, GREY_DARK),
 }
 

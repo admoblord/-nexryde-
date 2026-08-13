@@ -400,6 +400,7 @@ const LiveTrackingMapInner = forwardRef<LiveTrackingMapHandle, LiveTrackingMapPr
         showsMyLocationButton={false}
         showsTraffic={trafficOn}
         rotateEnabled
+        showsBuildings
         pitchEnabled
         onPanDrag={pauseAutoFollow}
         onMapReady={() => {
