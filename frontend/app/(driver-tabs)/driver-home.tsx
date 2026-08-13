@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useLocalSearchParams } from 'expo-router';
 import { useErrorToast } from '@/src/components/shared/ErrorToast';
 import {
-  saveDriverState,
+  loadDriverState,
   updateDriverOnlineStatus,
   updateDriverLastScreen,
 } from '@/src/services/driverStateService';
@@ -805,10 +805,12 @@ export default function ModernDriverHome() {
           // vanished the moment the app was minimised, the native heartbeat stopped
           // with it, and the server's 3-minute idle sweep signed the driver off. A
           // shift may only end from the foreground gate or an explicit Go Offline.
-          if (!appInForegroundRef.current || bridgeActiveRef.current) {
+          const recentGoOnline = Date.now() - lastGoOnlineAtRef.current < PERMISSION_BOUNCE_GUARD_MS;
+          if (!appInForegroundRef.current || bridgeActiveRef.current || recentGoOnline) {
             driverFlowLog('FGS_KEEP_ALIVE_BACKGROUND', {
               code: preflight.firstBlockingCode,
               liveTrip: bridgeActiveRef.current,
+              recentGoOnline,
             });
             return;
           }
@@ -835,9 +837,9 @@ export default function ModernDriverHome() {
         if (sessionRefresh) clearInterval(sessionRefresh);
       };
     }
-    if (connectionPhase === 'offline') {
-      stopNativeDriverExperience();
-    }
+    // Do not stop FGS when phase is Offline. Remount defaults to Offline before
+    // hydrate and that used to kill a live shift (no heartbeat → bounce).
+    // Explicit Go Offline, FORCE_OFFLINE, and failGoOnline already stop it.
     return undefined;
   }, [confirmOffline, connectionPhase, driverId, markPermissionsCompleted]);
 
@@ -852,7 +854,11 @@ export default function ModernDriverHome() {
       nativeOverlayPromptedRef.current = true;
       // Same rule as the pre-flight effect: an online shift is never ended from the
       // background, and never during a live trip. Re-prompt on the next foreground.
-      if (!appInForegroundRef.current || bridgeActiveRef.current) {
+      if (
+        !appInForegroundRef.current ||
+        bridgeActiveRef.current ||
+        Date.now() - lastGoOnlineAtRef.current < PERMISSION_BOUNCE_GUARD_MS
+      ) {
         nativeOverlayPromptedRef.current = false;
         return;
       }
@@ -873,6 +879,10 @@ export default function ModernDriverHome() {
     nativeFullScreenPromptedRef.current = true;
     void checkNativeFullScreenIntentPermission().then((allowed) => {
       if (allowed) return;
+      if (Date.now() - lastGoOnlineAtRef.current < PERMISSION_BOUNCE_GUARD_MS) {
+        nativeFullScreenPromptedRef.current = false;
+        return;
+      }
       // Uber-grade: never stay Online without full-screen intent (ringtone-without-UI is a P0).
       stopNativeDriverExperience();
       confirmOffline();
@@ -946,6 +956,11 @@ export default function ModernDriverHome() {
   /** Bumped on each hydrate start and on GO ONLINE so in-flight profile reads cannot
    *  apply a stale is_online=false and bounce a successful shift. */
   const hydrateGenRef = useRef(0);
+  /** Wall clock of the last user GO ONLINE confirm. Permission re-checks in this
+   *  window must not dump the shift — that is the 36s bounce after a successful PUT. */
+  const lastGoOnlineAtRef = useRef(0);
+  const SHIFT_RESUME_MAX_AGE_MS = 15 * 60 * 1000;
+  const PERMISSION_BOUNCE_GUARD_MS = 2 * 60 * 1000;
   const [earningsLoading, setEarningsLoading] = useState(true);
   const [earningsError, setEarningsError] = useState(false);
   const [walletBalance, setWalletBalance] = useState(0);
@@ -1641,7 +1656,41 @@ export default function ModernDriverHome() {
             });
             return;
           }
-          // Keep local Offline (no FGS auto-start) but do NOT PUT the server offline.
+          const persisted = await loadDriverState(driverId);
+          if (
+            hydrateGen !== hydrateGenRef.current ||
+            onlineToggleInFlightRef.current ||
+            goOnlineCommitInFlightRef.current
+          ) {
+            startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
+              ok: true,
+              skipped: 'stale_or_commit_inflight',
+            });
+            return;
+          }
+          const resumeRecentShift =
+            Boolean(persisted?.isOnline) &&
+            typeof persisted?.savedAt === 'number' &&
+            Date.now() - persisted.savedAt < SHIFT_RESUME_MAX_AGE_MS;
+          if (resumeRecentShift) {
+            // This device started the shift recently (JS remount / process death).
+            // Restore Online + let the FGS effect start with preflight — do not PUT offline.
+            driverFlowLog('GO_ONLINE_DESYNC', {
+              action: 'hydrate_resume_recent_shift',
+              serverOnline: true,
+              savedAt: persisted?.savedAt,
+            });
+            lastGoOnlineAtRef.current = Date.now();
+            hydrateServerOnline(true);
+            driverOffersSocket.connect(driverId);
+            startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
+              ok: true,
+              isOnline: true,
+              skipped: 'android_resume_recent_shift',
+            });
+            return;
+          }
+          // Cold login: keep local Offline (no FGS auto-start) but do NOT PUT the server offline.
           // Prod log 2026-08-13 loopy9ice: PUT is_online=true at 10:53:01 then this
           // hydrate path PUT is_online=false at 10:53:37 — "tap GO took him offline".
           // Ghost presence is already cleared by the 3-minute heartbeat watchdog.
@@ -1685,6 +1734,7 @@ export default function ModernDriverHome() {
           driverFlowLog('GO_ONLINE_DESYNC', { action: 'hydrate_force_offline', serverOnline: false });
           hydrateServerOnline(false);
           driverOffersSocket.disconnect();
+          stopNativeDriverExperience();
         }
       } else if (serverOnline && Platform.OS === 'android' && localPhase !== 'confirmed' && localPhase !== 'reconnecting') {
         // Any non-online local phase on Android: stay offline locally; user must GO ONLINE.
@@ -1776,12 +1826,9 @@ export default function ModernDriverHome() {
 
     hydrateOnlineState();
 
-    void saveDriverState({
-      isOnline: isOnlineRef.current,
-      lastScreen: 'home',
-      activeTripId: null,
-      userId: driverId,
-    });
+    // Do not write isOnline from the default Offline phase — remount would wipe a
+    // live shift and hydrate could not resume it.
+    void updateDriverLastScreen('home', driverId);
   }, [driverId]);
 
   // ── Auto online actions from widget / shortcut / persistent notification ─────────────────
@@ -3191,6 +3238,7 @@ export default function ModernDriverHome() {
         // Drop in-flight login hydrates — a stale is_online=false snapshot must not
         // bounce this shift after the PUT lands.
         hydrateGenRef.current += 1;
+        lastGoOnlineAtRef.current = Date.now();
         confirmOnline();
         void import('@/src/realtime/criticalActions').then(({ recordOnline }) =>
           recordOnline(driverId!),

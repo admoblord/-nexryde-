@@ -135,6 +135,11 @@ if (home.includes('leaveServerOnline: true')) {
 } else {
   fail('Android hydrate may still PUT the server offline after a successful GO');
 }
+if (home.includes('hydrate_resume_recent_shift')) {
+  pass('Android hydrate resumes a recent persisted shift instead of bouncing Offline');
+} else {
+  fail('Android hydrate does not resume a recent shift after JS remount');
+}
 if (home.includes('hydrate_restore_online') && home.includes("Platform.OS === 'android'")) {
   // restore online should only be on non-Android branch
   const restoreIdx = home.indexOf("action: 'hydrate_restore_online'");
@@ -162,7 +167,7 @@ if (
   home.includes('void startNativeDriverExperience(driverId)')
 ) {
   const fgsEffectIdx = home.indexOf('Keep FGS + token refresh across reconnect blips');
-  const slice = fgsEffectIdx >= 0 ? home.slice(fgsEffectIdx, fgsEffectIdx + 1800) : '';
+  const slice = fgsEffectIdx >= 0 ? home.slice(fgsEffectIdx, fgsEffectIdx + 2800) : '';
   if (
     slice.includes('evaluateDriverPermissionPreflight') &&
     slice.includes('startNativeDriverExperience') &&

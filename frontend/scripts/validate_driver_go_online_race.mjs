@@ -250,6 +250,19 @@ function main() {
     ),
   );
 
+  results.push(
+    printRow(
+      '17',
+      'Remount resumes a recent shift and does not kill FGS on default Offline',
+      home.includes("action: 'hydrate_resume_recent_shift'") &&
+        home.includes('loadDriverState') &&
+        home.includes('PERMISSION_BOUNCE_GUARD_MS') &&
+        home.includes('Do not stop FGS when phase is Offline') &&
+        home.includes('Do not write isOnline from the default Offline phase'),
+      null,
+    ),
+  );
+
   const all = results.every(Boolean);
   console.log(`\nOverall: ${all ? 'PASS' : 'FAIL'}`);
   process.exit(all ? 0 : 1);
