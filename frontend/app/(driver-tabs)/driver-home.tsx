@@ -61,6 +61,12 @@ import {
   triggerSOS,
 } from '@/src/services/api';
 import CancellationReasonModal from '@/src/components/shared/CancellationReasonModal';
+import {
+  formatWaitMeter,
+  pauseTripForRider,
+  resumeTripAfterWait,
+  type MidTripWait,
+} from '@/src/services/tripPauseApi';
 import { parseDriverOnlineError } from '@/src/constants/driverOnlineErrors';
 import {
   evaluateDriverPermissionPreflight,
@@ -1325,23 +1331,62 @@ export default function ModernDriverHome() {
     );
   }, [currentTrip?.id]);
 
-  const handleTripPauseFromDock = useCallback(() => {
-    Alert.alert(
-      'Need a moment?',
-      'Pull over safely. Use Call or Message to update your rider. Trip pause logging is coming soon.',
-      [
-        { text: 'OK', style: 'cancel' },
-        {
-          text: 'Message rider',
-          onPress: () => {
-            if (currentTrip?.id) {
-              guardedPush(`/chat?tripId=${encodeURIComponent(currentTrip.id)}&role=driver` as Href);
-            }
-          },
-        },
-      ],
+  const [midTripWait, setMidTripWait] = useState<MidTripWait | null>(null);
+  const midTripWaitRef = useRef<MidTripWait | null>(null);
+  midTripWaitRef.current = midTripWait;
+
+  /**
+   * Pause / Resume the mid-trip wait meter. The rider asked to stop somewhere, so
+   * waiting bills from the tap at the server's rate (₦80/min in Lagos, capped at
+   * 30 billable minutes) and lands on the fare at completion.
+   */
+  const handleTripPauseFromDock = useCallback(async () => {
+    const tripId = currentTrip?.id;
+    if (!tripId) return;
+    const wasPaused = Boolean(midTripWaitRef.current?.paused);
+    // Optimistic flip so the button never sits dead while the write lands.
+    setMidTripWait((prev) => (prev ? { ...prev, paused: !wasPaused } : prev));
+    const next = wasPaused ? await resumeTripAfterWait(tripId) : await pauseTripForRider(tripId);
+    if (!next) {
+      setMidTripWait((prev) => (prev ? { ...prev, paused: wasPaused } : prev));
+      toast.show(
+        wasPaused ? 'Could not resume — tap Resume trip again.' : 'Could not start waiting — tap Pause trip again.',
+        'error',
+      );
+      return;
+    }
+    setMidTripWait(next);
+    toast.show(
+      next.paused
+        ? `Waiting for rider — ₦${Math.round(next.wait_per_min_ngn)}/min from now`
+        : `Waiting added: ₦${Math.round(next.estimated_wait_fee_ngn)} (${next.billable_wait_min} min)`,
+      'info',
     );
-  }, [currentTrip?.id, guardedPush]);
+  }, [currentTrip?.id, toast]);
+
+  // Tick the meter locally while paused so the driver sees it move between polls.
+  useEffect(() => {
+    if (!midTripWait?.paused) return;
+    const id = setInterval(() => {
+      setMidTripWait((prev) => {
+        if (!prev?.paused) return prev;
+        const total = prev.total_wait_sec + 1;
+        const min = Math.ceil(total / 60);
+        return {
+          ...prev,
+          total_wait_sec: total,
+          current_pause_sec: prev.current_pause_sec + 1,
+          billable_wait_min: min,
+          estimated_wait_fee_ngn: min * prev.wait_per_min_ngn,
+        };
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [midTripWait?.paused]);
+
+  useEffect(() => {
+    if (!currentTrip?.id || currentTrip.status !== 'ongoing') setMidTripWait(null);
+  }, [currentTrip?.id, currentTrip?.status]);
 
   const handleCompletionConfirmCash = useCallback(async () => {
     const tid = tripCompletion?.tripId;
@@ -3198,6 +3243,8 @@ export default function ModernDriverHome() {
           onTripRiderNoShow={handleTripRiderNoShow}
           onTripComplete={handleTripComplete}
           onTripPause={handleTripPauseFromDock}
+          tripPaused={Boolean(midTripWait?.paused)}
+          waitMeterLabel={formatWaitMeter(midTripWait)}
           onTripCallRider={handleTripCallRider}
           onTripMessageRider={handleTripMessageRider}
           onTripEmergency={handleTripEmergency}

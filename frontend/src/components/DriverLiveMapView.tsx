@@ -367,6 +367,9 @@ interface Props {
   onTripComplete?: () => void | Promise<void>;
   /** Optional — e.g. hold / report issue while metered (UI may show “coming soon”). */
   onTripPause?: () => void | Promise<void>;
+  /** Mid-trip wait meter state, surfaced on the Pause / Resume control. */
+  tripPaused?: boolean;
+  waitMeterLabel?: string | null;
   onTripCallRider?: () => void | Promise<void>;
   onTripMessageRider?: () => void | Promise<void>;
   /** Real SOS — not just open Safety tab. */
@@ -546,6 +549,8 @@ function DriverLiveMapViewInner({
   onTripRiderNoShow,
   onTripComplete,
   onTripPause,
+  tripPaused,
+  waitMeterLabel,
   onTripCallRider,
   onTripMessageRider,
   onTripEmergency,
@@ -3139,6 +3144,8 @@ function DriverLiveMapViewInner({
                   if (onShieldPress) void onShieldPress();
                 }}
                 onPauseTrip={onTripPause}
+                tripPaused={tripPaused}
+                waitMeterLabel={waitMeterLabel}
               />
             ) : (
               <View style={[styles.ongoingCollapsedWrap, { paddingBottom: Math.max(4, insets.bottom) }]}>

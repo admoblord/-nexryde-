@@ -39,6 +39,7 @@ from trip_ws_payload import rider_trip_payload_from_doc
 from trip_fare_adjustments import (
     compute_completion_fare_adjustments,
     compute_mid_trip_route_fare,
+    compute_mid_trip_wait_payload,
     compute_pickup_wait_payload,
 )
 from fare_config import PICKUP_FREE_WAIT_SECONDS
@@ -3954,6 +3955,101 @@ async def confirm_safe_arrival(trip_id: str, request: Request):
     return {"success": True, "safe_arrival_check": check}
 
 
+@trips_router.post("/trips/{trip_id}/pause")
+async def pause_trip_for_rider(trip_id: str, request: Request):
+    """Driver taps Pause trip: start the mid-trip wait meter (₦80/min in Lagos).
+
+    Used when the rider asks to stop somewhere on the way. Idempotent — a second
+    tap while already paused returns the running meter instead of restarting it.
+    """
+    driver_id = require_authenticated(request)
+    trip = await db.trips.find_one({"id": trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if trip.get("driver_id") != driver_id:
+        raise HTTPException(status_code=403, detail="Only the assigned driver can pause this trip")
+    if str(trip.get("status") or "").lower() != "ongoing":
+        raise HTTPException(status_code=400, detail="Only an ongoing trip can be paused")
+
+    state = trip.get("mid_trip_pause") if isinstance(trip.get("mid_trip_pause"), dict) else {}
+    if state.get("active"):
+        return {
+            "success": True,
+            "already_paused": True,
+            "mid_trip_wait": compute_mid_trip_wait_payload(trip),
+        }
+
+    now = datetime.now(timezone.utc)
+    next_state = {
+        "active": True,
+        "paused_at": now.isoformat(),
+        "paused_seconds": max(0, int(state.get("paused_seconds") or 0)),
+        "pause_count": int(state.get("pause_count") or 0) + 1,
+        "last_resumed_at": state.get("last_resumed_at"),
+    }
+    await db.trips.update_one({"id": trip_id}, {"$set": {"mid_trip_pause": next_state}})
+    updated = await db.trips.find_one({"id": trip_id}, {"_id": 0}) or {**trip, "mid_trip_pause": next_state}
+    payload = compute_mid_trip_wait_payload(updated)
+    await _log_trip_event(trip_id, "trip_paused_for_rider", driver_id, {
+        "pause_count": next_state["pause_count"],
+        "wait_per_min_ngn": payload.get("wait_per_min_ngn"),
+    })
+    try:
+        await _emit_rider_trip_realtime(trip_id)
+        await send_notification_to_user(
+            trip.get("rider_id"),
+            "Waiting for you",
+            f"Your driver is waiting. Waiting time is charged at ₦{int(payload['wait_per_min_ngn'])}/min.",
+            {"type": "trip_paused", "trip_id": trip_id},
+        )
+    except Exception:
+        logger.debug("pause fanout failed", exc_info=True)
+    return {"success": True, "paused": True, "mid_trip_wait": payload}
+
+
+@trips_router.post("/trips/{trip_id}/resume")
+async def resume_trip_after_wait(trip_id: str, request: Request):
+    """Driver taps Resume trip: bank the waited seconds and stop the meter."""
+    driver_id = require_authenticated(request)
+    trip = await db.trips.find_one({"id": trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if trip.get("driver_id") != driver_id:
+        raise HTTPException(status_code=403, detail="Only the assigned driver can resume this trip")
+
+    state = trip.get("mid_trip_pause") if isinstance(trip.get("mid_trip_pause"), dict) else {}
+    if not state.get("active"):
+        return {
+            "success": True,
+            "already_running": True,
+            "mid_trip_wait": compute_mid_trip_wait_payload(trip),
+        }
+
+    now = datetime.now(timezone.utc)
+    paused_at = _parse_iso_dt(state.get("paused_at"))
+    open_sec = max(0, int((now - paused_at).total_seconds())) if paused_at else 0
+    next_state = {
+        "active": False,
+        "paused_at": None,
+        "paused_seconds": max(0, int(state.get("paused_seconds") or 0)) + open_sec,
+        "pause_count": int(state.get("pause_count") or 0),
+        "last_resumed_at": now.isoformat(),
+    }
+    await db.trips.update_one({"id": trip_id}, {"$set": {"mid_trip_pause": next_state}})
+    updated = await db.trips.find_one({"id": trip_id}, {"_id": 0}) or {**trip, "mid_trip_pause": next_state}
+    payload = compute_mid_trip_wait_payload(updated)
+    await _log_trip_event(trip_id, "trip_resumed_after_wait", driver_id, {
+        "this_pause_sec": open_sec,
+        "billable_min": payload.get("billable_wait_min"),
+        "fee_ngn": payload.get("estimated_wait_fee_ngn"),
+    })
+    try:
+        await _emit_rider_trip_realtime(trip_id)
+    except Exception:
+        logger.debug("resume fanout failed", exc_info=True)
+    return {"success": True, "resumed": True, "mid_trip_wait": payload}
+
+
 @trips_router.put("/trips/{trip_id}/arrive")
 async def arrive_at_pickup(trip_id: str, request: dict, http_request: Request):
     driver_id = require_authenticated(http_request)
@@ -5048,6 +5144,7 @@ async def get_trip_status(trip_id: str, request: Request):
         "started_at": _iso(trip.get("started_at")),
         "completed_at": _iso(trip.get("completed_at")),
         # Pickup wait payload for rider wait timer
+        "mid_trip_wait": compute_mid_trip_wait_payload(trip),
         "pickup_wait": {
             **compute_pickup_wait_payload(trip),
             "free_wait_secs": int(trip.get("pickup_free_wait_seconds") or PICKUP_FREE_WAIT_SECONDS),
@@ -5300,6 +5397,8 @@ async def complete_trip(trip_id: str, request: Request):
         "booking_fare": fare_adj.get("booking_fare") or trip_before.get("fare"),
         "pickup_wait_fee": fare_adj.get("pickup_wait_fee", 0),
         "pickup_wait_min": fare_adj.get("pickup_wait_min", 0),
+        "mid_trip_wait_fee": fare_adj.get("mid_trip_wait_fee", 0),
+        "mid_trip_wait_min": fare_adj.get("mid_trip_wait_min", 0),
         "traffic_excess_fee": fare_adj.get("traffic_excess_fee", 0),
         "traffic_excess_min": fare_adj.get("traffic_excess_min", 0),
         "fare_additions_ngn": fare_adj.get("fare_additions_ngn", 0),

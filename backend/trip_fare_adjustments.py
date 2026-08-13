@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from fare_config import (
+    MID_TRIP_WAIT_MAX_BILLABLE_MIN,
+    MID_TRIP_WAIT_PER_MIN_NGN,
     PICKUP_FREE_WAIT_SECONDS,
     ROUTE_CHANGE_FEE_NGN,
     TRAFFIC_EXCESS_BUFFER_MIN,
@@ -104,6 +106,53 @@ def compute_pickup_wait_fee(trip: dict) -> dict[str, float | int | bool]:
     }
 
 
+def compute_mid_trip_wait_payload(trip: dict, *, now: Optional[datetime] = None) -> dict[str, Any]:
+    """Live mid-trip pause meter for both apps.
+
+    The driver taps Pause trip when the rider asks to stop somewhere. Unlike the
+    pickup wait there is no free window: the rider chose this wait, so it bills from
+    the tap at ``MID_TRIP_WAIT_PER_MIN_NGN``. ``paused_seconds`` accumulates across
+    every pause on the trip, and an open pause keeps accruing until resume or
+    completion, capped at ``MID_TRIP_WAIT_MAX_BILLABLE_MIN``.
+    """
+    now = now or datetime.now(timezone.utc)
+    state = trip.get("mid_trip_pause") if isinstance(trip.get("mid_trip_pause"), dict) else {}
+    banked = max(0, int(state.get("paused_seconds") or 0))
+    paused_at = parse_trip_datetime(state.get("paused_at")) if state.get("active") else None
+    open_sec = max(0, int((now - paused_at).total_seconds())) if paused_at else 0
+
+    total_sec = banked + open_sec
+    cap_sec = MID_TRIP_WAIT_MAX_BILLABLE_MIN * 60
+    billable_sec = min(total_sec, cap_sec)
+    billable_min = math.ceil(billable_sec / 60.0) if billable_sec > 0 else 0
+    fee = round(billable_min * MID_TRIP_WAIT_PER_MIN_NGN, 2) if billable_min > 0 else 0.0
+
+    return {
+        "paused": bool(paused_at),
+        "paused_at": paused_at.isoformat() if paused_at else None,
+        "pause_count": int(state.get("pause_count") or 0),
+        "current_pause_sec": open_sec,
+        "total_wait_sec": total_sec,
+        "billable_wait_sec": billable_sec,
+        "billable_wait_min": billable_min,
+        "wait_per_min_ngn": MID_TRIP_WAIT_PER_MIN_NGN,
+        "estimated_wait_fee_ngn": fee,
+        "cap_min": MID_TRIP_WAIT_MAX_BILLABLE_MIN,
+        "cap_reached": total_sec >= cap_sec,
+    }
+
+
+def compute_mid_trip_wait_fee(trip: dict, *, now: Optional[datetime] = None) -> dict[str, float | int | bool]:
+    payload = compute_mid_trip_wait_payload(trip, now=now)
+    fee = float(payload.get("estimated_wait_fee_ngn") or 0)
+    return {
+        "mid_trip_wait_fee": fee,
+        "mid_trip_wait_min": int(payload.get("billable_wait_min") or 0),
+        "mid_trip_wait_per_min": float(payload.get("wait_per_min_ngn") or 0),
+        "mid_trip_wait_applied": fee > 0,
+    }
+
+
 def compute_traffic_excess_fee(trip: dict, completed_at: datetime) -> dict[str, float | int | bool]:
     started = parse_trip_datetime(trip.get("started_at"))
     if not started:
@@ -159,9 +208,14 @@ def compute_completion_fare_adjustments(trip: dict, completed_at: datetime) -> d
     booking_fare = float(trip.get("booking_fare") or base_fare)
 
     wait = compute_pickup_wait_fee(trip)
+    paused = compute_mid_trip_wait_fee(trip, now=completed_at)
     traffic = compute_traffic_excess_fee(trip, completed_at)
 
-    additions = float(wait["pickup_wait_fee"]) + float(traffic["traffic_excess_fee"])
+    additions = (
+        float(wait["pickup_wait_fee"])
+        + float(paused["mid_trip_wait_fee"])
+        + float(traffic["traffic_excess_fee"])
+    )
     final_fare = round(base_fare + additions, 2)
     final_fare = max(final_fare, booking_fare)
 
@@ -170,6 +224,11 @@ def compute_completion_fare_adjustments(trip: dict, completed_at: datetime) -> d
         parts.append(
             f"pickup wait ₦{int(wait['pickup_wait_fee'])} "
             f"({wait['pickup_wait_min']}min)"
+        )
+    if paused["mid_trip_wait_applied"]:
+        parts.append(
+            f"paused wait ₦{int(paused['mid_trip_wait_fee'])} "
+            f"({paused['mid_trip_wait_min']}min)"
         )
     if traffic["traffic_excess_applied"]:
         parts.append(
@@ -185,6 +244,9 @@ def compute_completion_fare_adjustments(trip: dict, completed_at: datetime) -> d
         "pickup_wait_fee": float(wait["pickup_wait_fee"]),
         "pickup_wait_min": int(wait["pickup_wait_min"]),
         "pickup_wait_applied": bool(wait["pickup_wait_applied"]),
+        "mid_trip_wait_fee": float(paused["mid_trip_wait_fee"]),
+        "mid_trip_wait_min": int(paused["mid_trip_wait_min"]),
+        "mid_trip_wait_applied": bool(paused["mid_trip_wait_applied"]),
         "traffic_excess_fee": float(traffic["traffic_excess_fee"]),
         "traffic_excess_min": int(traffic.get("traffic_excess_min") or 0),
         "traffic_excess_applied": bool(traffic["traffic_excess_applied"]),

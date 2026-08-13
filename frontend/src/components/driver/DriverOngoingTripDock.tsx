@@ -64,6 +64,10 @@ export type DriverOngoingTripDockProps = {
   onSafetyPress: () => void;
   onEmergencyPress: () => void;
   onPauseTrip?: () => void | Promise<void>;
+  /** True while the mid-trip wait meter is running. */
+  tripPaused?: boolean;
+  /** "2:35 waiting · ₦240" — rendered under the button while paused. */
+  waitMeterLabel?: string | null;
 };
 
 const NEON = '#22C55E';
@@ -146,6 +150,8 @@ export default function DriverOngoingTripDock({
   onSafetyPress,
   onEmergencyPress,
   onPauseTrip,
+  tripPaused = false,
+  waitMeterLabel,
 }: DriverOngoingTripDockProps) {
   const busy = !!tripActionBusy;
   const { height: winH } = useWindowDimensions();
@@ -393,10 +399,15 @@ export default function DriverOngoingTripDock({
               activeOpacity={0.88}
               hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
               accessibilityRole="button"
-              accessibilityLabel="Pause trip"
+              accessibilityLabel={tripPaused ? 'Resume trip' : 'Pause trip and start waiting'}
             >
-              <Ionicons name="pause" size={20} color="#FFF" />
-              <Text style={st.pauseTxt}>Pause trip</Text>
+              <Ionicons name={tripPaused ? 'play' : 'pause'} size={20} color="#FFF" />
+              <View>
+                <Text style={st.pauseTxt}>{tripPaused ? 'Resume trip' : 'Pause trip'}</Text>
+                {tripPaused && waitMeterLabel ? (
+                  <Text style={st.pauseMeterTxt}>{waitMeterLabel}</Text>
+                ) : null}
+              </View>
             </TouchableOpacity>
             <TouchableOpacity
               style={[st.emergencyBtn, busy && st.disabled]}
@@ -685,6 +696,7 @@ const st = StyleSheet.create({
   callBtn: { backgroundColor: 'rgba(34,197,94,0.15)', borderColor: 'rgba(34,197,94,0.45)' },
   circleBtnOff: { opacity: 0.45 },
   actionRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  pauseMeterTxt: { color: '#FDE68A', fontSize: 11, fontWeight: '700', marginTop: 1 },
   disabled: { opacity: 0.55 },
   pauseBtn: {
     flex: 1,
