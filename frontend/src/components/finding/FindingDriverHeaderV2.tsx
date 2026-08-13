@@ -5,6 +5,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { NexrydeMark } from '@/src/components/brand/NexrydeMark';
 import { FV2 } from '@/src/components/finding/findingV2Theme';
 
 type Props = {
@@ -29,13 +30,7 @@ export function FindingDriverHeaderV2({ timeElapsedSec, phase = 'searching' }: P
   return (
     <View style={styles.wrap}>
       <View style={styles.brandRow}>
-        <View style={styles.logoBadge}>
-          <Ionicons
-            name={phase === 'error' ? 'alert-circle' : phase === 'matched' ? 'checkmark' : 'navigate'}
-            size={15}
-            color={FV2.greenInk}
-          />
-        </View>
+        <NexrydeMark size={28} />
         <Text style={styles.brandTxt}>NEXRYDE</Text>
         {phase === 'searching' && timeElapsedSec != null && timeElapsedSec >= 5 ? (
           <Text

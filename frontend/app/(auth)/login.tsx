@@ -36,6 +36,7 @@ import { warmBackendConnection, warmBackendWhileWaiting } from '@/src/utils/warm
 import { OnboardingPhotoHero } from '@/src/components/onboarding/OnboardingPhotoHero';
 
 import { BRAND } from '@/src/constants/designSystem';
+import { NexrydeMark } from '@/src/components/brand/NexrydeMark';
 
 const LOGIN_HERO = require('../../assets/images/onboarding/login-hero.png');
 
@@ -306,6 +307,7 @@ export default function LoginScreen() {
             bounces={false}
           >
             <View style={[styles.heroBrand, { paddingTop: 12 }]}>
+              <NexrydeMark size={78} style={{ marginBottom: 14 }} />
               <Text style={styles.brandMark}>
                 <Text style={styles.brandNex}>NEX</Text>
                 <Text style={styles.brandRyde}>RYDE</Text>
