@@ -2870,10 +2870,22 @@ export default function ModernDriverHome() {
     setStatusToggleBusy(true);
     const toggleGen = ++goOnlineToggleGenRef.current;
 
+    // Instant paint. Every gate below (permissions, entitlement, session, FSI, native
+    // session push) used to run before the UI moved, so GO could sit dead for seconds
+    // on a cold token or a slow bridge call. CONNECTING is applied on the tap itself
+    // and each gate rolls it back, which is the same contract Go Offline already had.
+    beginConnecting();
+
     const releaseGoOnlineLock = () => {
       if (goOnlineToggleGenRef.current !== toggleGen) return;
       onlineToggleInFlightRef.current = false;
       setStatusToggleBusy(false);
+    };
+
+    /** Release the tap lock and undo the optimistic CONNECTING paint. */
+    const failGoOnline = () => {
+      releaseGoOnlineLock();
+      if (useDriverSessionStore.getState().connectionPhase === 'connecting') abortConnecting();
     };
 
     const PLAN_OK = new Set(['trial', 'active', 'grace_period']);
@@ -2897,7 +2909,7 @@ export default function ModernDriverHome() {
           if (goOnlineToggleGenRef.current !== toggleGen) return;
           setPermissionPreflight(preflight);
           if (!preflight.ready) {
-            releaseGoOnlineLock();
+            failGoOnline();
             markPermissionsCompleted(false);
             const code = preflight.firstBlockingCode || 'ERR_UNKNOWN';
             const names = preflight.missing.map((m) => m.label).join(', ');
@@ -2916,7 +2928,7 @@ export default function ModernDriverHome() {
             entitlementStatus = result.verificationStatus ?? entitlementStatus;
           }
           if (entitlementStatus !== 'approved' && !isLocallyApproved(driverId)) {
-            releaseGoOnlineLock();
+            failGoOnline();
             Alert.alert(
               'Verification in review',
               'You can go online after your documents are approved.',
@@ -2930,7 +2942,7 @@ export default function ModernDriverHome() {
           const knownBad = ['pending_payment', 'expired', 'none', 'locked_until_approval'];
           const planHint = subscriptionStatus || boot.subscriptionStatus;
           if (planHint && knownBad.includes(String(planHint))) {
-            releaseGoOnlineLock();
+            failGoOnline();
             const isTrialEnded = String(planHint) === 'pending_payment';
             Alert.alert(
               isTrialEnded ? 'Trial ended' : 'Activation needed',
@@ -2949,7 +2961,8 @@ export default function ModernDriverHome() {
           }
         }
 
-        if (useDriverSessionStore.getState().connectionPhase !== 'offline') {
+        if (useDriverSessionStore.getState().connectionPhase !== 'connecting') {
+          // Another path (hydrate, offer accept, Go Offline) owns the phase now.
           releaseGoOnlineLock();
           return;
         }
@@ -2961,7 +2974,7 @@ export default function ModernDriverHome() {
           return;
         }
         if (!session.ok || !session.token) {
-          releaseGoOnlineLock();
+          failGoOnline();
           Alert.alert(
             'Session needs refresh',
             'Sign in again so you can stay online and accept rides.',
@@ -2976,7 +2989,7 @@ export default function ModernDriverHome() {
             return;
           }
           if (!fsiOk) {
-            releaseGoOnlineLock();
+            failGoOnline();
             void refreshPermissionPreflight();
             Alert.alert(
               'Enable full-screen ride alerts',
