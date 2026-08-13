@@ -89,6 +89,10 @@ import {
   startupStepEnd,
 } from '@/src/utils/driverStartupTrace';
 import { driverFlowLog } from '@/src/utils/driverOnlineFlowLog';
+import {
+  decideHydrateOnlineAction,
+  shouldResumeRecentShift,
+} from '@/src/utils/driverHydrateOnlineDecision';
 import { useDriverSessionStore } from '@/src/store/driverSessionStore';
 import { useDriverDisplayStore } from '@/src/store/driverDisplayStore';
 import { driverOffersSocket } from '@/src/services/driverOffersSocket';
@@ -1584,173 +1588,130 @@ export default function ModernDriverHome() {
         startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', { ok: false, status: response.status });
         return;
       }
-      if (
+      const staleAfterFetch =
         hydrateGen !== hydrateGenRef.current ||
         onlineToggleInFlightRef.current ||
-        goOnlineCommitInFlightRef.current
-      ) {
-        startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
-          ok: true,
-          skipped: 'stale_or_commit_inflight',
-        });
-        return;
-      }
-      const profile = await response.json();
+        goOnlineCommitInFlightRef.current;
+      const profile = staleAfterFetch ? null : await response.json();
       const serverOnline = Boolean(profile?.is_online);
       const localPhase = useDriverSessionStore.getState().connectionPhase;
-      if (localPhase === 'connecting') {
+      const liveTrip = useAppStore.getState().currentTrip;
+      const liveStatus = String(liveTrip?.status || '').toLowerCase();
+      const hasLiveTrip = Boolean(
+        liveTrip?.id && ['accepted', 'arrived', 'ongoing'].includes(liveStatus),
+      );
+      let resumeRecentShift = false;
+      if (
+        !staleAfterFetch &&
+        Platform.OS === 'android' &&
+        serverOnline &&
+        localPhase === 'offline' &&
+        !desiredOfflineUntilSyncedRef.current &&
+        !hasLiveTrip
+      ) {
+        const persisted = await loadDriverState(driverId);
+        resumeRecentShift = shouldResumeRecentShift({
+          persistedOnline: Boolean(persisted?.isOnline),
+          savedAt: persisted?.savedAt,
+          maxAgeMs: SHIFT_RESUME_MAX_AGE_MS,
+        });
+      }
+      const decision = decideHydrateOnlineAction({
+        serverOnline,
+        localPhase,
+        platform: Platform.OS === 'ios' ? 'ios' : Platform.OS === 'web' ? 'web' : 'android',
+        toggleInFlight: onlineToggleInFlightRef.current,
+        commitInFlight: goOnlineCommitInFlightRef.current,
+        stale: staleAfterFetch || hydrateGen !== hydrateGenRef.current,
+        desiredOffline: desiredOfflineUntilSyncedRef.current,
+        hasLiveTrip: hasLiveTrip || bridgeActiveRef.current,
+        resumeRecentShift,
+      });
+      if (decision.action === 'skip') {
         startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
           ok: true,
           isOnline: serverOnline,
-          skipped: 'connecting',
+          skipped: decision.reason,
         });
         return;
       }
-      if (serverOnline && localPhase === 'offline') {
-        if (desiredOfflineUntilSyncedRef.current) {
-          // Driver just went offline locally — keep Offline and keep reconciling server.
-          driverFlowLog('GO_ONLINE_DESYNC', {
-            action: 'ignore_hydrate_restore_desired_offline',
-            serverOnline: true,
-          });
-          const requestId = createStatusRequestId('offline');
-          void fetchWithTimeout(
-            buildOnlineToggleUrl(BACKEND_URL, { driverId, isOnline: false, requestId }),
-            {
-              method: 'PUT',
-              headers: { ...getAuthHeaders(), 'X-Request-Id': requestId },
-              timeoutMs: 8000,
-            },
-          )
-            .then((res) => {
-              if (res.ok) desiredOfflineUntilSyncedRef.current = false;
-            })
-            .catch(() => {});
-          startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
-            ok: true,
-            isOnline: false,
-            skipped: 'desired_offline',
-          });
-          return;
+      if (decision.action === 'put_offline') {
+        driverFlowLog('GO_ONLINE_DESYNC', {
+          action: 'ignore_hydrate_restore_desired_offline',
+          serverOnline: true,
+        });
+        const requestId = createStatusRequestId('offline');
+        void fetchWithTimeout(
+          buildOnlineToggleUrl(BACKEND_URL, { driverId, isOnline: false, requestId }),
+          {
+            method: 'PUT',
+            headers: { ...getAuthHeaders(), 'X-Request-Id': requestId },
+            timeoutMs: 8000,
+          },
+        )
+          .then((res) => {
+            if (res.ok) desiredOfflineUntilSyncedRef.current = false;
+          })
+          .catch(() => {});
+        startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
+          ok: true,
+          isOnline: false,
+          skipped: 'desired_offline',
+        });
+        return;
+      }
+      if (decision.action === 'restore_online') {
+        driverFlowLog('GO_ONLINE_DESYNC', {
+          action:
+            decision.reason === 'android_active_trip'
+              ? 'hydrate_keep_online_active_trip'
+              : decision.reason === 'android_resume_recent_shift'
+                ? 'hydrate_resume_recent_shift'
+                : 'hydrate_restore_online',
+          serverOnline: true,
+          tripId: liveTrip?.id,
+        });
+        if (decision.reason === 'android_resume_recent_shift') {
+          lastGoOnlineAtRef.current = Date.now();
         }
-        // Android: never auto-restore online on login/hydrate.
-        // Going online is an explicit GO ONLINE action (permissions + typed FGS).
-        // Auto-start was the process-death path on API 34+ (MissingForegroundServiceType /
-        // ForegroundServiceDidNotStartInTime).
-        if (Platform.OS === 'android') {
-          // Keep server online when a live trip is already in memory (process death mid-trip).
-          const liveTrip = useAppStore.getState().currentTrip;
-          const liveStatus = String(liveTrip?.status || '').toLowerCase();
-          if (liveTrip?.id && ['accepted', 'arrived', 'ongoing'].includes(liveStatus)) {
-            driverFlowLog('GO_ONLINE_DESYNC', {
-              action: 'hydrate_keep_online_active_trip',
-              serverOnline: true,
-              tripId: liveTrip.id,
-            });
-            hydrateServerOnline(true);
-            driverOffersSocket.connect(driverId);
-            startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
-              ok: true,
-              isOnline: true,
-              skipped: 'android_active_trip',
-            });
-            return;
-          }
-          const persisted = await loadDriverState(driverId);
-          if (
-            hydrateGen !== hydrateGenRef.current ||
-            onlineToggleInFlightRef.current ||
-            goOnlineCommitInFlightRef.current
-          ) {
-            startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
-              ok: true,
-              skipped: 'stale_or_commit_inflight',
-            });
-            return;
-          }
-          const resumeRecentShift =
-            Boolean(persisted?.isOnline) &&
-            typeof persisted?.savedAt === 'number' &&
-            Date.now() - persisted.savedAt < SHIFT_RESUME_MAX_AGE_MS;
-          if (resumeRecentShift) {
-            // This device started the shift recently (JS remount / process death).
-            // Restore Online + let the FGS effect start with preflight — do not PUT offline.
-            driverFlowLog('GO_ONLINE_DESYNC', {
-              action: 'hydrate_resume_recent_shift',
-              serverOnline: true,
-              savedAt: persisted?.savedAt,
-            });
-            lastGoOnlineAtRef.current = Date.now();
-            hydrateServerOnline(true);
-            driverOffersSocket.connect(driverId);
-            startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
-              ok: true,
-              isOnline: true,
-              skipped: 'android_resume_recent_shift',
-            });
-            return;
-          }
-          // Cold login: keep local Offline (no FGS auto-start) but do NOT PUT the server offline.
-          // Prod log 2026-08-13 loopy9ice: PUT is_online=true at 10:53:01 then this
-          // hydrate path PUT is_online=false at 10:53:37 — "tap GO took him offline".
-          // Ghost presence is already cleared by the 3-minute heartbeat watchdog.
-          driverFlowLog('GO_ONLINE_DESYNC', {
-            action: 'hydrate_keep_offline_require_go_online',
-            serverOnline: true,
-            leaveServerOnline: true,
-          });
-          void refreshPermissionPreflight();
-          startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
-            ok: true,
-            isOnline: false,
-            skipped: 'android_require_go_online',
-          });
-          return;
-        }
-        driverFlowLog('GO_ONLINE_DESYNC', { action: 'hydrate_restore_online', serverOnline: true });
         hydrateServerOnline(true);
         driverOffersSocket.connect(driverId);
-      } else if (!serverOnline && (localPhase === 'confirmed' || localPhase === 'reconnecting')) {
-        if (goOnlineCommitInFlightRef.current) {
-          driverFlowLog('GO_ONLINE_DESYNC', {
-            action: 'ignore_hydrate_force_offline_commit_inflight',
-            serverOnline: false,
-            localPhase,
-          });
-          startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
-            ok: true,
-            isOnline: true,
-            skipped: 'commit_inflight',
-          });
-          return;
-        }
-        if (bridgeActiveRef.current) {
-          driverFlowLog('GO_ONLINE_DESYNC', {
-            action: 'ignore_server_offline_active_trip',
-            localPhase,
-          });
-          markReconnecting();
-        } else {
-          driverFlowLog('GO_ONLINE_DESYNC', { action: 'hydrate_force_offline', serverOnline: false });
-          hydrateServerOnline(false);
-          driverOffersSocket.disconnect();
-          stopNativeDriverExperience();
-        }
-      } else if (serverOnline && Platform.OS === 'android' && localPhase !== 'confirmed' && localPhase !== 'reconnecting') {
-        // Any non-online local phase on Android: stay offline locally; user must GO ONLINE.
-        // Do not PUT is_online=false — same bounce as hydrate_keep_offline_require_go_online.
+        startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
+          ok: true,
+          isOnline: true,
+          skipped: decision.reason,
+        });
+        return;
+      }
+      if (decision.action === 'keep_local_offline_leave_server') {
         driverFlowLog('GO_ONLINE_DESYNC', {
-          action: 'hydrate_keep_offline_require_go_online_else',
+          action:
+            localPhase === 'offline'
+              ? 'hydrate_keep_offline_require_go_online'
+              : 'hydrate_keep_offline_require_go_online_else',
           serverOnline: true,
           localPhase,
           leaveServerOnline: true,
         });
+        if (localPhase === 'offline') void refreshPermissionPreflight();
         startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', {
           ok: true,
           isOnline: false,
           skipped: 'android_require_go_online',
         });
         return;
+      }
+      if (decision.action === 'mark_reconnecting') {
+        driverFlowLog('GO_ONLINE_DESYNC', {
+          action: 'ignore_server_offline_active_trip',
+          localPhase,
+        });
+        markReconnecting();
+      } else if (decision.action === 'force_local_offline') {
+        driverFlowLog('GO_ONLINE_DESYNC', { action: 'hydrate_force_offline', serverOnline: false });
+        hydrateServerOnline(false);
+        driverOffersSocket.disconnect();
+        stopNativeDriverExperience();
       } else {
         hydrateServerOnline(serverOnline);
         if (serverOnline) driverOffersSocket.connect(driverId);

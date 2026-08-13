@@ -227,25 +227,18 @@ function main() {
     ),
   );
 
-  const androidKeepOfflineSlice = home.slice(
-    home.indexOf("action: 'hydrate_keep_offline_require_go_online'"),
-    home.indexOf("action: 'hydrate_restore_online'"),
-  );
-  const androidKeepOfflineElseSlice = home.slice(
-    home.indexOf("action: 'hydrate_keep_offline_require_go_online_else'"),
-    home.indexOf("hydrateServerOnline(serverOnline)"),
-  );
+  const decisionSrc = read('src/utils/driverHydrateOnlineDecision.ts');
   results.push(
     printRow(
       '16',
       'Android hydrate must not PUT is_online=false (bounce after successful GO)',
-      home.includes("action: 'hydrate_keep_offline_require_go_online'") &&
+      home.includes('decideHydrateOnlineAction') &&
         home.includes('leaveServerOnline: true') &&
         home.includes('hydrateGenRef') &&
-        home.includes('stale_or_commit_inflight') &&
-        androidKeepOfflineSlice.length > 0 &&
-        !androidKeepOfflineSlice.includes('buildOnlineToggleUrl') &&
-        !androidKeepOfflineElseSlice.includes('buildOnlineToggleUrl'),
+        decisionSrc.includes("reason: 'android_require_go_online'") &&
+        decisionSrc.includes('putServerOffline: false') &&
+        /action === 'put_offline'[\s\S]{0,400}?isOnline: false/.test(home) &&
+        !/keep_local_offline_leave_server[\s\S]{0,500}?isOnline: false[\s\S]{0,200}?buildOnlineToggleUrl/.test(home),
       null,
     ),
   );
@@ -254,7 +247,7 @@ function main() {
     printRow(
       '17',
       'Remount resumes a recent shift and does not kill FGS on default Offline',
-      home.includes("action: 'hydrate_resume_recent_shift'") &&
+      home.includes('hydrate_resume_recent_shift') &&
         home.includes('loadDriverState') &&
         home.includes('PERMISSION_BOUNCE_GUARD_MS') &&
         home.includes('Do not stop FGS when phase is Offline') &&
