@@ -685,12 +685,20 @@ async def _maybe_escalate_invisible_shield(trip: dict) -> dict:
 
 
 def _parse_iso_dt(value: Optional[str]) -> Optional[datetime]:
+    """Parse a stored timestamp as an aware UTC datetime.
+
+    Route points seeded by older paths carry naive timestamps. Returning one of
+    those and subtracting it from an aware ``now`` raised
+    "can't subtract offset-naive and offset-aware datetimes", which 500'd every
+    driver GPS ping for the whole trip — so the car never moved on the rider's map.
+    """
     if not value:
         return None
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except Exception:
         return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _build_forensic_route_points(actual_route: list[dict]) -> list[dict]:
