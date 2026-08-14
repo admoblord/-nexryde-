@@ -71,5 +71,15 @@ check('the first price of the session is never delayed', /isFirstEstimate\) retu
 check('coordinate churn is still absorbed', scheduling.includes('FARE_ESTIMATE_SETTLE_MS'));
 check('prices are still fetched for all vehicles in one round trip', /await Promise\.all\(\s*availableVehicles\.map/.test(book));
 
+console.log('\n[4] Booking sheet is light + lime accent, not mixed dark/white cards');
+
+check('sheet is locked to the light trip surface', /sheet:\s*TRIP\.bg/.test(book));
+check('system dark theme does not paint the booking sheet', !/sheet:\s*colors\.background/.test(book));
+check('selected ride is a mint wash, not a neon fill', book.includes('inlineCatRowActive') && book.includes('TRIP_ALPHA.greenSoft'));
+check('fares stay navy — selected price is not recolored', !/inlineCatPrice, isSelected && \{ color: v\.color \}/.test(book));
+check('Continue bar is light, not the old navy footer', /stickyCtaBar:[\s\S]*?backgroundColor: TRIP\.bg/.test(book));
+check('payment chip is light', /stickyPaySelector:[\s\S]*?backgroundColor: TRIP\.bgMuted/.test(book));
+check('checkmark is navy on lime', book.includes('color={TRIP.textOnGreen}'));
+
 console.log(`\n═══ Result: ${passed} passed, ${failed} failed ═══\n`);
 process.exit(failed ? 1 : 0);

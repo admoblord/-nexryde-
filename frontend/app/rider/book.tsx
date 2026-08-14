@@ -97,7 +97,6 @@ import {
 import { AnimatedPickupLabel } from '@/src/components/rider/AnimatedPickupLabel';
 import { useWalletEnabled } from '@/src/services/clientConfig';
 import { useFlowLayout } from '@/src/constants/flowLayout';
-import { useThemeColors } from '@/src/constants/theme';
 import { FIRST_RIDE_DISCOUNT_PCT } from '@/src/constants/commercialOffers';
 import { RIDER_PRIMARY_CTA_GRADIENT } from '@/src/constants/riderRideChrome';
 import { BookingBidInput } from '@/src/components/rider/BookingBidInput';
@@ -285,22 +284,26 @@ function BookInDriveStyle() {
   const requestedDriverName = params.driverName || null;
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
-  const { colors, isDark } = useThemeColors();
+  /**
+   * Booking is locked to the light trip theme. A dark sheet over the pale Bolt
+   * map mixed lime-on-navy cards with a white unselected card — that is the
+   * screenshot that looked like two themes at once. Lime stays the accent
+   * (selected ring, Live fares, Continue). Type and fares stay navy.
+   */
   const bookingTheme = useMemo(
     () => ({
-      bg: colors.background,
-      sheet: colors.background,
-      // Booking map always uses Bolt light basemap (#EEF3E8 landscape).
+      bg: TRIP.bg,
+      sheet: TRIP.bg,
       mapBg: '#EEF3E8',
-      statusBar: colors.statusBar,
-      text: colors.text,
-      muted: colors.textMuted,
-      card: isDark ? COLORS.card : colors.card,
-      cardLight: isDark ? COLORS.cardLight : colors.surfaceAlt,
-      border: isDark ? 'rgba(148,163,184,0.2)' : colors.border,
-      mapStyle: getNexrydeMapStyle(isDark),
+      statusBar: 'dark-content' as const,
+      text: TRIP.textPrimary,
+      muted: TRIP.textSecondary,
+      card: TRIP.bg,
+      cardLight: TRIP.bgMuted,
+      border: TRIP.border,
+      mapStyle: getNexrydeMapStyle(false),
     }),
-    [colors, isDark],
+    [],
   );
 
   const [pickup, setPickup] = useState('');
@@ -3029,7 +3032,7 @@ function BookInDriveStyle() {
                       <ActivityIndicator size="small" color={v.color} />
                     ) : price > 0 ? (
                       <>
-                        <Text style={[s.inlineCatPrice, isSelected && { color: v.color }]}>
+                        <Text style={s.inlineCatPrice}>
                           ₦{price.toLocaleString()}
                         </Text>
                         {listOrig != null && listOrig > price ? (
@@ -3049,8 +3052,8 @@ function BookInDriveStyle() {
                       <Text style={s.firstRideBadgeText}>-{FIRST_RIDE_DISCOUNT_PCT}%</Text>
                     </View>
                   ) : isSelected ? (
-                    <View style={[s.inlineCatCheck, { backgroundColor: v.color }]}>
-                      <Ionicons name="checkmark" size={12} color="#FFF" />
+                    <View style={[s.inlineCatCheck, { backgroundColor: TRIP.green }]}>
+                      <Ionicons name="checkmark" size={12} color={TRIP.textOnGreen} />
                     </View>
                   ) : null}
                 </TouchableOpacity>
@@ -3935,9 +3938,9 @@ const s = StyleSheet.create({
     right: 0,
     bottom: 0,
     paddingTop: 10,
-    backgroundColor: 'rgba(13,20,32,0.96)',
+    backgroundColor: TRIP.bg,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: SURFACE.hairline,
+    borderTopColor: TRIP.border,
   },
   mapBidRouteCard: {
     position: 'absolute',
@@ -4093,13 +4096,13 @@ const s = StyleSheet.create({
     letterSpacing: -0.2,
   },
   recommendedTag: {
-    backgroundColor: 'rgba(34,225,128,0.16)',
+    backgroundColor: TRIP_ALPHA.greenSoft,
     borderRadius: 6,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
   recommendedTagText: {
-    color: '#22E180',
+    color: TRIP.greenDark,
     fontSize: 9,
     fontWeight: '900',
     letterSpacing: 0.6,
@@ -4113,12 +4116,12 @@ const s = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: 'rgba(30,41,59,0.95)',
+    backgroundColor: TRIP.bgMuted,
     borderWidth: 1,
-    borderColor: 'rgba(34,225,128,0.28)',
+    borderColor: TRIP.border,
   },
   stickyPaySelectorText: {
-    color: '#F1F5F9',
+    color: TRIP.textPrimary,
     fontSize: 14,
     fontWeight: '800',
   },
@@ -4470,23 +4473,24 @@ const s = StyleSheet.create({
   inlineCatRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.card,
+    backgroundColor: TRIP.bg,
     borderRadius: 18,
     paddingVertical: 14,
     paddingHorizontal: 14,
     marginBottom: 10,
     gap: 12,
     borderWidth: 1.5,
-    borderColor: 'rgba(148,163,184,0.14)',
+    borderColor: TRIP.border,
     position: 'relative',
   },
   inlineCatRowActive: {
     backgroundColor: TRIP_ALPHA.greenSoft,
-    shadowColor: TRIP.navy,
-    shadowOpacity: 0.22,
-    shadowRadius: 12,
+    borderColor: TRIP.green,
+    shadowColor: TRIP.green,
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+    elevation: 3,
   },
   inlineCatIcon: {
     width: 50,
