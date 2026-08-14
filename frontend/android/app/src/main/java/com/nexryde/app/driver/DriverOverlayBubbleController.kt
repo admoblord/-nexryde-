@@ -63,6 +63,11 @@ object DriverOverlayBubbleController {
     rideAlertManager?.present(offer)
   }
 
+  /** Called from MainActivity.onUserLeaveHint — no-op unless a shift is live. */
+  fun onAppMinimized() {
+    rideAlertManager?.onAppMinimized()
+  }
+
   fun update(status: String = "online", badge: Int = 0, offer: Map<String, String> = emptyMap()) {
     rideAlertManager?.renderState(status, offer)
   }

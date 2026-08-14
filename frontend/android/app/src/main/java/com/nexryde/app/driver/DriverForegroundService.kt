@@ -230,8 +230,9 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
     runCatching {
       val json = JSONObject(raw)
       val ts = json.optLong("__ts", 0L)
-      // Ride offers are ~20s TTL — never replay a stale one on a later shift.
-      if (ts <= 0L || System.currentTimeMillis() - ts > 18_000L) return@runCatching
+      // Never replay a stale offer on a later shift. Stays just under the driver
+      // countdown so a replayed offer still has time left to answer.
+      if (ts <= 0L || System.currentTimeMillis() - ts > OFFER_REPLAY_MAX_AGE_MS) return@runCatching
       val replay = Intent(this, DriverForegroundService::class.java).apply {
         action = ACTION_SHOW_OFFER
         val keys = json.keys()
@@ -341,6 +342,7 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
     stopLocationUpdates()
     handler.removeCallbacksAndMessages(null)
     rideAlertManager.hide()
+    driverAlertAudioManager.release()
     DriverOverlayBubbleController.clear(rideAlertManager)
     isDriverServiceOnline = false
     serviceProcessAlive = false
@@ -938,6 +940,8 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
     private const val HEARTBEAT_INTERVAL_MS = 20_000L
     /** Weak-network go-online PUT can take a while; do not tear the shift down inside this window. */
     private const val ONLINE_COMMIT_GRACE_MS = 150_000L
+    /** Just under the driver offer countdown so a replayed offer still has time left. */
+    private const val OFFER_REPLAY_MAX_AGE_MS = 25_000L
     /** Consecutive heartbeat 401s tolerated before ending a shift. */
     private const val AUTH_FAILURES_BEFORE_OFFLINE = 3
     /** Matches Expo BG task + JS idle push — rider pins must not wait on 60s heartbeat. */
