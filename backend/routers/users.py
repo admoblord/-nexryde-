@@ -154,6 +154,19 @@ async def get_user(user_id: str, request: Request):
     user["_id"] = str(user["_id"])
     safe = strip_sensitive_pii(user)
     safe.update(public_nin_fields(user))
+    # Full avatar lives on GET /users/{id}/profile-picture — keep tab loads lean.
+    # PROFILE_API_PROJECTION excludes profile_image, so prefer updated_at; fall back
+    # to an existence-only probe for legacy rows that never set updated_at.
+    has_img = bool(user.get("profile_image_updated_at"))
+    if not has_img:
+        exists = await db.users.find_one(
+            {"id": user_id, "profile_image": {"$exists": True, "$nin": [None, ""]}},
+            {"_id": 1},
+            max_time_ms=QUERY_MAX_TIME_MS,
+        )
+        has_img = exists is not None
+    safe["has_profile_image"] = has_img
+    safe.pop("profile_image", None)
     return safe
 
 
@@ -165,7 +178,22 @@ async def get_user_trust_summary(user_id: str, request: Request):
         raise HTTPException(status_code=404, detail="User not found")
     driver_profile = None
     if user.get("role") == "driver":
-        driver_profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0})
+        driver_profile = await db.driver_profiles.find_one(
+            {"user_id": user_id},
+            {
+                "_id": 0,
+                "safety_rating": 1,
+                "completion_rate": 1,
+                "cancellation_count": 1,
+                "nin_verified": 1,
+                "selfie_verified": 1,
+                "license_uploaded": 1,
+                "vehicle_docs_uploaded": 1,
+                "fatigue_warning": 1,
+                "documents_verified": 1,
+                "verification_status": 1,
+            },
+        )
     summary = build_trust_summary(user, driver_profile)
     await db.users.update_one(
         {"id": user_id},
@@ -809,29 +837,75 @@ async def verify_face(user_id: str, payload: FaceVerificationRequest, http_reque
 
 # ==================== NOTIFICATIONS ====================
 
+_NOTIF_LIST_PROJECTION = {
+    "_id": 0,
+    "id": 1,
+    "type": 1,
+    "title": 1,
+    "message": 1,
+    "data": 1,
+    "created_at": 1,
+    "read": 1,
+}
+
+
+def _slim_notification(doc: dict) -> dict:
+    """Drop null-heavy enforcement payloads; keep keys the app actually uses."""
+    data = doc.get("data")
+    if isinstance(data, dict):
+        data = {k: v for k, v in data.items() if v is not None}
+        if not data:
+            data = None
+    return {
+        "id": doc.get("id"),
+        "type": doc.get("type"),
+        "title": doc.get("title"),
+        "message": doc.get("message"),
+        "data": data,
+        "created_at": doc.get("created_at"),
+        "read": bool(doc.get("read")),
+    }
+
+
 @users_router.get("/users/{user_id}/notifications")
 async def get_user_notifications(
     user_id: str,
     request: Request,
-    limit: int = 50,
+    limit: int = 25,
     unread_only: bool = False,
     exclude_engagement: bool = False,
 ):
     verify_owner_strict(request, user_id)
-    query: dict = {"user_id": user_id}
-    if unread_only:
-        query["read"] = False
-    # Map bell / badge: exclude engagement + daily_slot so reconnect spam never inflates the count.
-    if exclude_engagement:
-        query["category"] = {"$nin": ["driver_engagement", "rider_engagement", "engagement", "daily_slot"]}
-        query["source"] = {"$nin": ["engagement", "daily_slot", "reconnect"]}
-    notifications = await db.notifications.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
-    unread_query = {"user_id": user_id, "read": False}
-    if exclude_engagement:
-        unread_query["category"] = query["category"]
-        unread_query["source"] = query["source"]
-    unread_count = await db.notifications.count_documents(unread_query)
-    return {"notifications": notifications, "unread_count": unread_count}
+    from notification_catalog import unread_badge_query
+
+    # List: full inbox by default. Badge path (unread_only + exclude_engagement)
+    # filters engagement/marketing/surge so tab dots stay actionable.
+    if unread_only and exclude_engagement:
+        list_query = unread_badge_query(user_id, exclude_engagement=True)
+    else:
+        list_query = {"user_id": user_id}
+        if unread_only:
+            list_query["read"] = False
+
+    safe_limit = max(1, min(int(limit or 25), 50))
+    notifications = (
+        await db.notifications.find(list_query, _NOTIF_LIST_PROJECTION)
+        .sort("created_at", -1)
+        .limit(safe_limit)
+        .to_list(safe_limit)
+    )
+    unread_full = await db.notifications.count_documents(
+        unread_badge_query(user_id, exclude_engagement=False)
+    )
+    unread_excl = await db.notifications.count_documents(
+        unread_badge_query(user_id, exclude_engagement=True)
+    )
+    unread_count = unread_excl if exclude_engagement else unread_full
+    return {
+        "notifications": [_slim_notification(n) for n in notifications],
+        "unread_count": unread_count,
+        "unread_count_excl_engagement": unread_excl,
+    }
 
 @users_router.post("/users/{user_id}/notifications/{notification_id}/read")
 async def mark_notification_read(user_id: str, notification_id: str, request: Request):

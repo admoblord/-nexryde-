@@ -209,9 +209,11 @@ export default function DriverArrivalIdentityModal({
   const vtLabel = getVehicleTypeLabel(driver.vehicle_type || driver.vehicle);
   const vtColor = getVehicleTypeColor(driver.vehicle_type || driver.vehicle);
 
+  // A dash here reads as "no plate to check" at the exact moment the rider is
+  // verifying the car. Say plainly that it is missing instead.
   const checkLabels = [
-    `Plate number: ${driver.plate || '—'}`,
-    `Vehicle colour: ${driver.color || '—'}`,
+    `Plate number: ${driver.plate || 'not on record — ask the driver'}`,
+    `Vehicle colour: ${driver.color || 'not on record'}`,
     `Driver face matches photo`,
   ];
 

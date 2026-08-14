@@ -64,6 +64,11 @@ NOTIFICATION_KIND_META: dict[str, dict[str, Any]] = {
     "trip_started": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.RIDES, channel_id="rides"),
     "trip_completed": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.RIDES, channel_id="rides"),
     "route_updated": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.RIDES, channel_id="rides"),
+    # Stuck-trip recovery. Unregistered kinds are dropped before delivery, so both
+    # sides used to be silently left holding a trip the watchdog had already closed.
+    "trip_auto_closed": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.RIDES, channel_id="rides", urgent=True),
+    "trip_auto_completed": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.RIDES, channel_id="rides", urgent=True),
+    "trip_force_completed": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.RIDES, channel_id="rides", urgent=True),
     "rider_route_updated": _meta(audience=NotificationAudience.RIDER, category=NotificationCategory.RIDES, channel_id="rides"),
     # Stable aliases for ride lifecycle (same audiences; keep primary types above for backward compat)
     "searching_for_driver": _meta(audience=NotificationAudience.RIDER, category=NotificationCategory.RIDES, channel_id="rides"),
@@ -93,7 +98,11 @@ NOTIFICATION_KIND_META: dict[str, dict[str, Any]] = {
     "gps_spoofing_alert": _meta(audience=NotificationAudience.RIDER, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
     "gps_spoofing_driver": _meta(audience=NotificationAudience.DRIVER, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
     "abnormal_stop": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
-    "safe_arrival_checkin": _meta(audience=NotificationAudience.RIDER, category=NotificationCategory.SAFETY, channel_id="rides"),
+    # Auto Stop Safety Check — rider "Are you safe?" / driver "why did you stop?"
+    "safety_check": _meta(audience=NotificationAudience.RIDER, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
+    "stop_reason_requested": _meta(audience=NotificationAudience.DRIVER, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
+    "trip_paused": _meta(audience=NotificationAudience.RIDER, category=NotificationCategory.RIDES, channel_id="rides"),
+    "safe_arrival_checkin": _meta(audience=NotificationAudience.RIDER, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
     "shield_driver_sos": _meta(audience=NotificationAudience.DRIVER, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
     "shield_case_created": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.SAFETY, channel_id="rides", urgent=True),
     "shield_case_responded": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.SAFETY, channel_id="rides"),
@@ -204,6 +213,41 @@ def get_kind_meta(kind: Optional[str]) -> dict[str, Any]:
     meta["audience"] = normalize_audience(meta.get("audience"))
     meta["category"] = normalize_category(meta.get("category"))
     return meta
+
+
+# Categories / sources that inflate tab badges without being actionable.
+BADGE_NOISY_CATEGORIES = frozenset(
+    {
+        NotificationCategory.DRIVER_ENGAGEMENT.value,
+        NotificationCategory.RIDER_ENGAGEMENT.value,
+        NotificationCategory.MARKETING.value,
+        "engagement",
+        "daily_slot",
+    }
+)
+BADGE_NOISY_SOURCES = frozenset({"engagement", "daily_slot", "reconnect", "smart_surge"})
+
+
+def badge_noisy_types() -> list[str]:
+    """Inbox `type` values that should not count toward the tab/map badge."""
+    return [
+        kind
+        for kind, meta in NOTIFICATION_KIND_META.items()
+        if str(getattr(meta.get("category"), "value", meta.get("category")) or "")
+        in BADGE_NOISY_CATEGORIES
+    ]
+
+
+def unread_badge_query(user_id: str, *, exclude_engagement: bool = False) -> dict[str, Any]:
+    """Mongo filter for unread inbox rows (optionally excluding engagement noise)."""
+    q: dict[str, Any] = {"user_id": user_id, "read": False}
+    if exclude_engagement:
+        q["$nor"] = [
+            {"category": {"$in": list(BADGE_NOISY_CATEGORIES)}},
+            {"source": {"$in": list(BADGE_NOISY_SOURCES)}},
+            {"type": {"$in": badge_noisy_types()}},
+        ]
+    return q
 
 
 def enrich_push_data(data: Optional[dict]) -> dict[str, Any]:

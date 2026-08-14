@@ -122,8 +122,12 @@ function main() {
     printRow(
       '9',
       'Socket + API independent (connect after confirm; PUT does not cancel GPS)',
-      home.includes('Socket connects only after confirmOnline') &&
-        home.includes('stillConnecting()') &&
+      // Was matching a comment and a `stillConnecting()` helper that were both
+      // renamed, so this row failed on wording rather than behaviour. Assert the
+      // ordering itself: the offers socket opens only after the phase is committed,
+      // and a failed PUT reconciles instead of cancelling GPS.
+      /confirmOnline\(\);[\s\S]{0,600}?driverOffersSocket\.connect\(driverId\)/.test(home) &&
+        home.includes('isConnectingOnly()') &&
         home.includes('reconcileServerOfflineAfterAbort'),
       null,
     ),
@@ -219,6 +223,35 @@ function main() {
         fgs.includes('Listening for rides') &&
         expMod.includes('requestBatteryOptimizationExempt') &&
         expMod.includes('hasBatteryOptimizationExempt'),
+      null,
+    ),
+  );
+
+  const decisionSrc = read('src/utils/driverHydrateOnlineDecision.ts');
+  results.push(
+    printRow(
+      '16',
+      'Android hydrate must not PUT is_online=false (bounce after successful GO)',
+      home.includes('decideHydrateOnlineAction') &&
+        home.includes('leaveServerOnline: true') &&
+        home.includes('hydrateGenRef') &&
+        decisionSrc.includes("reason: 'android_require_go_online'") &&
+        decisionSrc.includes('putServerOffline: false') &&
+        /action === 'put_offline'[\s\S]{0,400}?isOnline: false/.test(home) &&
+        !/keep_local_offline_leave_server[\s\S]{0,500}?isOnline: false[\s\S]{0,200}?buildOnlineToggleUrl/.test(home),
+      null,
+    ),
+  );
+
+  results.push(
+    printRow(
+      '17',
+      'Remount resumes a recent shift and does not kill FGS on default Offline',
+      home.includes('hydrate_resume_recent_shift') &&
+        home.includes('loadDriverState') &&
+        home.includes('PERMISSION_BOUNCE_GUARD_MS') &&
+        home.includes('Do not stop FGS when phase is Offline') &&
+        home.includes('Do not write isOnline from the default Offline phase'),
       null,
     ),
   );

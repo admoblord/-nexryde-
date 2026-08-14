@@ -14,6 +14,9 @@ export type DriverOfferPayload = Record<string, unknown>;
 
 type OfferListener = (offer: DriverOfferPayload) => void;
 type ConnectionListener = (connected: boolean) => void;
+/** Server withdrew outstanding offers (taken by another driver, cancelled, expired). */
+export type OfferWithdrawal = { reason: string; offerId: string; tripId: string };
+type WithdrawListener = (withdrawal: OfferWithdrawal) => void;
 
 function wsBaseUrl(): string {
   const url = BACKEND_URL.replace(/\/$/, '');
@@ -31,6 +34,7 @@ class DriverOffersSocketManager {
   private connectGeneration = 0;
   private offerListeners = new Set<OfferListener>();
   private connectionListeners = new Set<ConnectionListener>();
+  private withdrawListeners = new Set<WithdrawListener>();
   private connectAbort: AbortController | null = null;
   private connectTransport: 'ws' | 'connect-sse' | null = null;
   /** After first Connect-SSE failure on this device, prefer WS for the session. */
@@ -39,6 +43,19 @@ class DriverOffersSocketManager {
   subscribeOffers(listener: OfferListener): () => void {
     this.offerListeners.add(listener);
     return () => this.offerListeners.delete(listener);
+  }
+
+  /**
+   * Server-side withdrawal of outstanding offers. Without this the alert kept
+   * ringing after another driver took the trip, and tapping Accept just failed.
+   */
+  subscribeWithdrawals(listener: WithdrawListener): () => void {
+    this.withdrawListeners.add(listener);
+    return () => this.withdrawListeners.delete(listener);
+  }
+
+  private emitWithdrawal(withdrawal: OfferWithdrawal) {
+    for (const l of this.withdrawListeners) l(withdrawal);
   }
 
   /** True when WS or Connect-SSE is live (or handshaking). */
@@ -136,6 +153,29 @@ class DriverOffersSocketManager {
     }, delay);
   }
 
+  /**
+   * Returns true when the frame was a withdrawal and no offer handling should run.
+   * The server sends this when the trip was taken, cancelled or expired.
+   */
+  private handleWithdrawalMessage(data: unknown): boolean {
+    if (!data || typeof data !== 'object') return false;
+    const frame = data as {
+      type?: string;
+      reason?: string;
+      offer_id?: string;
+      offerId?: string;
+      trip_id?: string;
+      tripId?: string;
+    };
+    if (frame.type !== 'offers_withdrawn' && frame.type !== 'offer_withdrawn') return false;
+    this.emitWithdrawal({
+      reason: String(frame.reason || 'withdrawn'),
+      offerId: String(frame.offer_id || frame.offerId || ''),
+      tripId: String(frame.trip_id || frame.tripId || ''),
+    });
+    return true;
+  }
+
   private handleOfferPayload(offerPayload: DriverOfferPayload, offerId: string) {
     // Paint the offer first — ACK / audit must never delay the incoming-trip UI.
     this.emitOffer(offerPayload);
@@ -214,6 +254,7 @@ class DriverOffersSocketManager {
             type?: string;
             offer?: DriverOfferPayload;
           };
+          if (this.handleWithdrawalMessage(data)) return;
           let offerPayload: DriverOfferPayload | null = null;
           if (data.type === 'new_offer' && data.offer && typeof data.offer === 'object') {
             offerPayload = data.offer;
@@ -314,6 +355,7 @@ class DriverOffersSocketManager {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data as string);
+        if (this.handleWithdrawalMessage(data)) return;
         let offerPayload: DriverOfferPayload | null = null;
         if (data.type === 'new_offer' && data.offer && typeof data.offer === 'object') {
           offerPayload = data.offer as DriverOfferPayload;

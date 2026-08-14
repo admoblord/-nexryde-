@@ -83,7 +83,7 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-let axiosRefreshInFlight: Promise<boolean> | null = null;
+let axiosRefreshInFlight: Promise<{ ok: boolean; outcome: string }> | null = null;
 
 api.interceptors.response.use(
   (response) => response,
@@ -101,15 +101,22 @@ api.interceptors.response.use(
 
       if (isTokenError) {
         originalRequest._retried = true;
+        let outcome = 'unavailable';
         try {
           if (!axiosRefreshInFlight) {
-            const { forceRefresh } = require('@/src/lib/tokenStore');
-            axiosRefreshInFlight = forceRefresh().then((t: string | null) => !!t).finally(() => {
-              axiosRefreshInFlight = null;
-            });
+            const { forceRefreshDetailed } = require('@/src/lib/tokenStore');
+            axiosRefreshInFlight = forceRefreshDetailed()
+              .then((r: { token: string | null; outcome: string }) => ({
+                ok: !!r.token,
+                outcome: r.outcome,
+              }))
+              .finally(() => {
+                axiosRefreshInFlight = null;
+              });
           }
-          const ok = await axiosRefreshInFlight;
-          if (ok) {
+          const result = (await axiosRefreshInFlight) ?? { ok: false, outcome: 'unavailable' };
+          outcome = result.outcome;
+          if (result.ok) {
             const { getCachedToken } = require('@/src/lib/tokenStore');
             const newToken = getCachedToken();
             if (newToken) {
@@ -121,15 +128,18 @@ api.interceptors.response.use(
             return api(originalRequest);
           }
         } catch {
-          /* refresh failed — fall through to logout */
+          outcome = 'unavailable';
         }
-        // Refresh failed: sign the user out
-        try {
-          const { useAppStore } = require('@/src/store/appStore');
-          if (useAppStore.getState().isAuthenticated) {
-            useAppStore.getState().logout();
-          }
-        } catch {}
+        // Sign out only when the server rejected the refresh token. A refresh that
+        // never reached the server (offline/timeout) must keep the driver signed in.
+        if (outcome === 'rejected') {
+          try {
+            const { useAppStore } = require('@/src/store/appStore');
+            if (useAppStore.getState().isAuthenticated) {
+              useAppStore.getState().logout();
+            }
+          } catch {}
+        }
       }
     }
     return Promise.reject(error);
@@ -290,6 +300,12 @@ export function postDriverFortressVerify(payload: {
 // User APIs
 export const getUser = (userId: string) => 
   api.get(`/users/${userId}`);
+
+/** Avatar blob — kept off GET /users so profile/tab prefetch stays lean. */
+export const getProfilePicture = (userId: string) =>
+  api.get<{ profile_image?: string | null; updated_at?: string | null }>(
+    `/users/${userId}/profile-picture`,
+  );
 
 export const getUserPreferences = (userId: string) =>
   api.get(`/users/${userId}/preferences`);
@@ -733,6 +749,21 @@ export const cancelTrip = (
       : {}),
   });
 
+/**
+ * Search again for the same trip, optionally at a higher offer.
+ * Keeps the trip alive — raising a bid used to require cancelling and rebooking,
+ * which also counted against the rider's cancellation limit.
+ */
+export const retryTripDispatch = (tripId: string, offeredFare?: number) =>
+  api.post<{
+    success: boolean;
+    trip_id: string;
+    drivers_notified: number;
+    fare_raised: boolean;
+    offered_fare: number;
+    message: string;
+  }>(`/trips/${tripId}/retry-dispatch`, offeredFare != null ? { offered_fare: offeredFare } : {});
+
 export const rateTrip = (tripId: string, raterId: string, rating: number, comment?: string) =>
   api.put(`/trips/${tripId}/rate?rater_id=${raterId}`, {
     overall_rating: rating,
@@ -1002,7 +1033,7 @@ export const getWallet = (userId: string) =>
   api.get(`/wallet/${userId}`);
 
 /** Balance + recent transactions for the authenticated user (single round-trip). */
-export const getWalletMe = (limit = 25) =>
+export const getWalletMe = (limit = 15) =>
   api.get<{
     balance: number;
     user_id: string;
@@ -1127,14 +1158,24 @@ export const triggerOneTouchPoliceConnect = (data: {
     police_sms_sent: number;
   }>('/sos/police-connect', data);
 
-export const confirmSafeArrival = (tripId: string) =>
-  api.post(`/trips/${tripId}/confirm-safe-arrival`);
+export const confirmSafeArrival = (tripId: string, payload?: { safe?: boolean }) =>
+  api.post(`/trips/${tripId}/confirm-safe-arrival`, payload ?? {});
 
 export const resolveSOS = (sosId: string, resolution: string) =>
   api.post(`/sos/${sosId}/resolve?resolution=${resolution}`);
 
 export const respondToSafetyCheck = (checkId: string, response: string) =>
   api.post('/safety/respond', { check_id: checkId, response });
+
+export const respondToTripSafetyCheck = (
+  tripId: string,
+  response: 'safe' | 'need_help',
+  checkId?: string,
+) =>
+  api.post(`/trips/${tripId}/safety-check-response`, {
+    response,
+    ...(checkId ? { check_id: checkId } : {}),
+  });
 
 export const submitDriverStopReason = (tripId: string, reason: string) =>
   api.post(`/trips/${tripId}/stop-reason`, { reason });

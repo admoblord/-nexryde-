@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BACKEND_URL } from '@/src/services/api';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 
 interface Prediction {
   place_id: string;
@@ -95,6 +96,7 @@ export default function LocationAutocomplete({
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const debounceTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const activeRequestIdRef = useRef(0);
@@ -176,7 +178,13 @@ export default function LocationAutocomplete({
           url += `&location_bias=${encodeURIComponent(`${biasLat},${biasLng}`)}&radius=${r}`;
         }
 
-        const response = await fetch(url);
+        // Places proxy requires a bearer token — a bare fetch always 401s and
+        // leaves pickup/destination search empty after login.
+        const response = await authedFetch(url, {
+          method: 'GET',
+          preserveSessionOn401: true,
+          timeoutMs: 12_000,
+        });
         let data: any = {};
         try {
           data = await response.json();
@@ -188,6 +196,13 @@ export default function LocationAutocomplete({
         if (!response.ok) {
           setPredictions([]);
           setShowSuggestions(false);
+          const detail = data?.detail;
+          const msg =
+            (typeof detail === 'object' && detail?.user_message) ||
+            data?.user_message ||
+            'Search unavailable, try again';
+          console.error('[LocationAutocomplete] places unavailable', response.status, data?.status, msg);
+          setSearchError(msg);
           return;
         }
 
@@ -195,23 +210,29 @@ export default function LocationAutocomplete({
           const normalized = (data.predictions || []).map((p: any, index: number) =>
             normalizePrediction(p, index),
           );
-          storeCachedPredictions(input, normalized);
+          // Do not cache empty results — intermittent Google empties would stick for the TTL.
+          if (normalized.length > 0) {
+            storeCachedPredictions(input, normalized);
+          }
           setPredictions(normalized);
           setShowSuggestions(normalized.length > 0);
+          setSearchError(null);
         } else if (data.status === 'ZERO_RESULTS') {
-          storeCachedPredictions(input, []);
           setPredictions([]);
           setShowSuggestions(false);
+          setSearchError(null);
         } else {
           console.error('Google Places API error:', data.status, data.error_message);
           setPredictions([]);
           setShowSuggestions(false);
+          setSearchError('Search unavailable, try again');
         }
       } catch (error) {
         console.error('Error fetching predictions:', error);
         if (!mountedRef.current || requestId !== activeRequestIdRef.current) return;
         setPredictions([]);
         setShowSuggestions(false);
+        setSearchError('Search unavailable, try again');
       } finally {
         if (mountedRef.current && requestId === activeRequestIdRef.current) {
           setIsLoading(false);
@@ -344,6 +365,10 @@ export default function LocationAutocomplete({
         )}
       </View>
 
+      {!!searchError && predictions.length === 0 && !isLoading ? (
+        <Text style={styles.searchError}>{searchError}</Text>
+      ) : null}
+
       {showSuggestions && predictions.length > 0 && (
         <View style={styles.suggestionsContainer}>
           <FlatList
@@ -368,6 +393,11 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     position: 'relative',
+  },
+  searchError: {
+    marginTop: 8,
+    color: '#F87171',
+    fontSize: 13,
   },
   input: {
     backgroundColor: '#2A2A2A',

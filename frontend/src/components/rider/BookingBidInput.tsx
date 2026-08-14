@@ -7,17 +7,18 @@ import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { bidAdjustStep } from '@/src/utils/bookingPriceBreakdown';
-import { BRAND, SURFACE } from '@/src/constants/designSystem';
+import { alpha, colors } from '@/src/theme/tokens';
 
+/** Light Bolt sheet: the bid card sits on white, so ink is navy and fills are lime. */
 const C = {
-  lime: BRAND.primaryLight,
-  white: BRAND.textPrimary,
-  muted: BRAND.textSecondary,
-  dim: BRAND.textMuted,
-  green: BRAND.primary,
-  border: SURFACE.glassBorder,
-  track: 'rgba(148,163,184,0.35)',
-  card: SURFACE.cardElevated,
+  lime: colors.green,
+  white: colors.textPrimary,
+  muted: colors.textSecondary,
+  dim: colors.textTertiary,
+  green: colors.greenDark,
+  border: colors.border,
+  track: alpha.navySoft,
+  card: colors.bg,
 };
 
 type Props = {
@@ -201,7 +202,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: C.border,
-    backgroundColor: 'rgba(18,28,46,0.72)',
+    backgroundColor: colors.bgMuted,
   },
   label: {
     color: C.muted,
@@ -224,7 +225,7 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     backgroundColor: C.card,
     borderWidth: 1.5,
-    borderColor: 'rgba(34,225,128,0.35)',
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -236,7 +237,7 @@ const styles = StyleSheet.create({
   },
   priceRow: { alignItems: 'center', minWidth: 140 },
   price: {
-    color: C.lime,
+    color: C.white,
     fontSize: 38,
     fontWeight: '900',
     letterSpacing: -0.6,

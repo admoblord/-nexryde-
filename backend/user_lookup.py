@@ -30,8 +30,10 @@ AUTH_CONTEXT_PROJECTION: dict[str, Any] = {
 }
 
 # Profile API: all user fields except multi-KB blobs (defense-in-depth post-migration).
+# profile_image is often a 20–50KB data-URI and must not ride on every tab prefetch.
 PROFILE_API_PROJECTION: dict[str, Any] = {
     **USER_BLOB_EXCLUDE_PROJECTION,
+    "profile_image": 0,
     "_id": 1,
 }
 

@@ -7,6 +7,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  Pressable,
   FlatList,
   StyleSheet,
   ActivityIndicator,
@@ -25,12 +26,16 @@ import {
   type RouteSuggestion,
 } from '@/src/services/routeSuggestions';
 
-const GREEN = '#22E180';
-const BG = '#F2F3F5';
-const CARD = '#FFFFFF';
-const TEXT = '#0F172A';
-const MUTED = '#64748B';
-const FIELD_GREY = '#ECEEF1';
+import { colors, radius as RADIUS, space, type as TYPE } from '@/src/theme/tokens';
+
+// Palette resolves from tokens — no hex lives in this file.
+const TOKENS = colors;
+const GREEN = colors.green;
+const BG = colors.bg;
+const CARD = colors.bg;
+const TEXT = colors.textPrimary;
+const MUTED = colors.textSecondary;
+const FIELD_GREY = colors.bgMuted;
 const DEBOUNCE_MS = 300;
 const MIN_CHARS = 3;
 
@@ -126,10 +131,13 @@ export function BoltRouteSearch({
     return sessionRef.current;
   }, []);
 
+  const [searchError, setSearchError] = useState<string | null>(null);
+
   const fetchPlaces = useCallback(
     async (input: string) => {
       const reqId = ++reqIdRef.current;
       setLoading(true);
+      setSearchError(null);
       try {
         const session = ensureSession();
         let url = `${BACKEND_URL}/api/places/autocomplete?input=${encodeURIComponent(
@@ -138,7 +146,11 @@ export function BoltRouteSearch({
         if (origin && Number.isFinite(origin.lat) && Number.isFinite(origin.lng)) {
           url += `&location_bias=${encodeURIComponent(`${origin.lat},${origin.lng}`)}&radius=45000`;
         }
-        const res = await authedFetch(url, { method: 'GET', preserveSessionOn401: true });
+        const res = await authedFetch(url, {
+          method: 'GET',
+          preserveSessionOn401: true,
+          timeoutMs: 12_000,
+        });
         const data = await res.json().catch(() => ({}));
         if (reqId !== reqIdRef.current) return;
         if (res.ok && data?.status === 'OK') {
@@ -150,11 +162,26 @@ export function BoltRouteSearch({
               session,
             ),
           );
-        } else {
-          setPlaces([]);
+          return;
         }
-      } catch {
-        if (reqId === reqIdRef.current) setPlaces([]);
+        setPlaces([]);
+        // 401/403/503 or Google REQUEST_DENIED must not read as "place does not exist".
+        const detail = data?.detail;
+        const apiMsg =
+          (typeof detail === 'object' && detail?.user_message) ||
+          data?.user_message ||
+          (typeof detail === 'object' && detail?.error_message) ||
+          data?.error_message;
+        if (!res.ok || (data?.status && data.status !== 'OK' && data.status !== 'ZERO_RESULTS')) {
+          console.error('[BoltRouteSearch] places unavailable', res.status, data?.status, apiMsg);
+          setSearchError('Search unavailable, try again');
+        }
+      } catch (err) {
+        console.error('[BoltRouteSearch] places fetch failed', err);
+        if (reqId === reqIdRef.current) {
+          setPlaces([]);
+          setSearchError('Search unavailable, try again');
+        }
       } finally {
         if (reqId === reqIdRef.current) setLoading(false);
       }
@@ -167,6 +194,7 @@ export function BoltRouteSearch({
     const q = activeQuery.trim();
     if (q.length < MIN_CHARS) {
       setPlaces([]);
+      setSearchError(null);
       setLoading(false);
       return;
     }
@@ -353,11 +381,32 @@ export function BoltRouteSearch({
         style={styles.list}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
-          <Text style={styles.empty}>
-            {activeQuery.trim().length >= MIN_CHARS
-              ? 'No places found'
-              : 'Saved places and recent searches appear here'}
-          </Text>
+          searchError ? (
+            // An upstream failure is not the same as "this place does not exist".
+            // Say the search is unavailable and give the rider a way to retry.
+            <View style={styles.errorState}>
+              <Ionicons name="cloud-offline-outline" size={22} color={TOKENS.textSecondary} />
+              <Text style={styles.errorTitle}>{searchError}</Text>
+              <Pressable
+                onPress={() => {
+                  const q = activeQuery.trim();
+                  if (q.length >= MIN_CHARS) void fetchPlaces(q);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Retry search"
+                style={({ pressed }) => [styles.retryBtn, pressed && { opacity: 0.85 }]}
+              >
+                <Ionicons name="refresh" size={16} color={TOKENS.navy} />
+                <Text style={styles.retryText}>Try again</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Text style={styles.empty}>
+              {activeQuery.trim().length >= MIN_CHARS
+                ? 'No places found'
+                : 'Saved places and recent searches appear here'}
+            </Text>
+          )
         }
       />
     </SafeAreaView>
@@ -478,6 +527,23 @@ const styles = StyleSheet.create({
   sugSub: { fontSize: 13, color: MUTED, marginTop: 2 },
   sugDist: { fontSize: 13, color: MUTED, marginLeft: 8, fontWeight: '500' },
   empty: { textAlign: 'center', color: MUTED, marginTop: 32, paddingHorizontal: 24 },
+  errorState: { alignItems: 'center', marginTop: 40, paddingHorizontal: space.xxl },
+  errorTitle: {
+    ...TYPE.body,
+    color: TOKENS.textPrimary,
+    textAlign: 'center',
+    marginTop: space.md,
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: space.lg,
+    paddingHorizontal: space.xl,
+    paddingVertical: space.md,
+    borderRadius: RADIUS.pill,
+    backgroundColor: TOKENS.green,
+  },
+  retryText: { ...TYPE.bodyBold, color: TOKENS.textOnGreen, marginLeft: space.sm },
 });
 
 export default BoltRouteSearch;

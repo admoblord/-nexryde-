@@ -308,21 +308,81 @@ async def run_expiry_check_all_drivers():
 
 # ==================== MONTHLY INTERIOR + SELFIE RE-UPLOAD ====================
 
+# Existence flags / timestamps only — never pull interior_photo / selfie_photo blobs
+# on go-online (those can be multi-MB base64 and would slow every online toggle).
+_MONTHLY_STATUS_PROJECTION = {
+    "_id": 0,
+    "month": 1,
+    "interior_uploaded": 1,
+    "selfie_uploaded": 1,
+    "interior_photo_at": 1,
+    "selfie_photo_at": 1,
+}
+
+
 async def check_monthly_uploads(driver_id: str):
     """Check if driver has uploaded interior photo and selfie this month."""
     now = datetime.now(timezone.utc)
     first_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month_key = first_of_month.strftime("%Y-%m")
 
-    monthly = await db.monthly_verifications.find_one({
-        "driver_id": driver_id,
-        "month": first_of_month.strftime("%Y-%m"),
-    })
+    monthly = await db.monthly_verifications.find_one(
+        {"driver_id": driver_id, "month": month_key},
+        _MONTHLY_STATUS_PROJECTION,
+    )
 
-    has_interior = bool(monthly and monthly.get("interior_photo"))
-    has_selfie = bool(monthly and monthly.get("selfie_photo"))
+    has_interior = bool(
+        monthly
+        and (
+            monthly.get("interior_uploaded")
+            or monthly.get("interior_photo_at")
+        )
+    )
+    has_selfie = bool(
+        monthly
+        and (
+            monthly.get("selfie_uploaded")
+            or monthly.get("selfie_photo_at")
+        )
+    )
+
+    # Legacy rows stored only the photo blob — backfill cheap flags once so go-online
+    # never has to transfer multi-MB base64 again.
+    backfill: dict = {}
+    if monthly and not has_interior:
+        if await db.monthly_verifications.count_documents(
+            {
+                "driver_id": driver_id,
+                "month": month_key,
+                "interior_photo": {"$exists": True, "$nin": [None, ""]},
+            },
+            limit=1,
+        ):
+            has_interior = True
+            backfill["interior_uploaded"] = True
+            if not monthly.get("interior_photo_at"):
+                backfill["interior_photo_at"] = now.isoformat()
+    if monthly and not has_selfie:
+        if await db.monthly_verifications.count_documents(
+            {
+                "driver_id": driver_id,
+                "month": month_key,
+                "selfie_photo": {"$exists": True, "$nin": [None, ""]},
+            },
+            limit=1,
+        ):
+            has_selfie = True
+            backfill["selfie_uploaded"] = True
+            if not monthly.get("selfie_photo_at"):
+                backfill["selfie_photo_at"] = now.isoformat()
+    if backfill:
+        await db.monthly_verifications.update_one(
+            {"driver_id": driver_id, "month": month_key},
+            {"$set": backfill},
+        )
 
     return {
-        "month": first_of_month.strftime("%Y-%m"),
+        "month": month_key,
         "interior_uploaded": has_interior,
         "selfie_uploaded": has_selfie,
         "compliant": has_interior and has_selfie,
@@ -351,6 +411,7 @@ async def upload_monthly_verification(driver_id: str, request: MonthlyPhotoUploa
         {"$set": {
             field: request.photo_data,
             f"{field}_at": now.isoformat(),
+            f"{request.photo_type}_uploaded": True,
             "driver_id": driver_id,
             "month": month_key,
         }},
@@ -475,7 +536,7 @@ async def live_face_verification(driver_id: str, request: MonthlyPhotoUpload, ht
     if request.photo_type != "face":
         raise HTTPException(status_code=400, detail="photo_type must be 'face'")
 
-    profile = await db.driver_profiles.find_one({"user_id": driver_id})
+    profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0, "verification_status": 1})
     if not profile:
         raise HTTPException(status_code=404, detail="Driver profile not found")
 
@@ -483,7 +544,11 @@ async def live_face_verification(driver_id: str, request: MonthlyPhotoUpload, ht
     if not stored_face:
         now = datetime.now(timezone.utc)
         month_key = now.strftime("%Y-%m")
-        monthly = await db.monthly_verifications.find_one({"driver_id": driver_id, "month": month_key})
+        # Only pull the selfie blob when biometrics are missing — never the whole monthly doc.
+        monthly = await db.monthly_verifications.find_one(
+            {"driver_id": driver_id, "month": month_key},
+            {"_id": 0, "selfie_photo": 1},
+        )
         stored_face = (monthly or {}).get("selfie_photo")
 
     if not stored_face:
@@ -510,6 +575,33 @@ async def live_face_verification(driver_id: str, request: MonthlyPhotoUpload, ht
 
 
 # ==================== COMPLIANCE STATUS ENDPOINT ====================
+
+async def get_driver_compliance_snapshot(driver_id: str) -> dict:
+    """Compliance verdict without the HTTP layer, for server-side gates.
+
+    Returns `can_go_online` plus `blocking_reasons` naming what is missing, so a
+    rejection can tell the driver which item to fix instead of a bare refusal.
+    """
+    doc_status = await check_driver_document_expiry(driver_id)
+    monthly_status = await check_monthly_uploads(driver_id)
+    profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
+
+    reasons: list[str] = []
+    if not doc_status.get("compliant", False):
+        expired = ", ".join(d.get("document", "document") for d in (doc_status.get("expired") or []))
+        reasons.append(f"expired documents ({expired})" if expired else "documents not verified")
+    if not monthly_status.get("compliant", False):
+        reasons.append("monthly re-upload due")
+    if not profile.get("has_ac", False):
+        reasons.append("air conditioning not confirmed")
+
+    return {
+        "can_go_online": not reasons,
+        "blocking_reasons": reasons,
+        "documents": doc_status,
+        "monthly_verification": monthly_status,
+    }
+
 
 @compliance_router.get("/drivers/{driver_id}/compliance")
 async def get_driver_compliance(driver_id: str, http_request: Request):

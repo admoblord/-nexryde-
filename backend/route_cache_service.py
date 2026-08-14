@@ -7,7 +7,6 @@ Implements Route Owner gamification system
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException
-from motor.motor_asyncio import AsyncIOMotorClient
 import googlemaps
 import os
 
@@ -63,11 +62,14 @@ TOP_50_ROUTES = [
 
 route_cache_router = APIRouter(prefix="/api/routes", tags=["route-caching"])
 
-# Database helper
+# Database helper — must reuse the shared pool. Building a client per call leaked a
+# connection pool (and its monitor tasks) on every request, and the old MONGO_URL
+# default pointed at localhost in production, so those monitors retried a dead
+# address forever until the event loop stalled and Cloud Run killed the instance.
 def get_db():
-    mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
-    client = AsyncIOMotorClient(mongo_url)
-    return client[os.environ.get('DB_NAME', 'nexryde_db')]
+    from database import db as _shared_db
+
+    return _shared_db
 
 
 # ==================== ROUTE CACHING SERVICE ====================

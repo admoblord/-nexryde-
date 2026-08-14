@@ -26,6 +26,9 @@ export const URGENT_PUSH_TYPES = new Set<string>([
   'gps_spoofing_alert',
   'gps_spoofing_driver',
   'abnormal_stop',
+  'safety_check',
+  'stop_reason_requested',
+  'safe_arrival_checkin',
   'trial_ended',
   'trial_trips_low',
   'trial_days_low',
@@ -107,7 +110,15 @@ export function resolvePushNotificationRoute(
     'driver_stop_reason',
     'route_updated',
     'rider_route_updated',
+    // Auto Stop Safety Check: land the rider on live tracking, where the trip
+    // status carries guardian_alert and the check-in prompt.
+    'safety_check',
   ]);
+
+  // The driver is being asked why the trip stopped; the ongoing dock owns that.
+  if (type === 'stop_reason_requested' && role === 'driver') {
+    return { pathname: DRIVER_HOME };
+  }
 
   // Trip-scoped
   if (tripId) {

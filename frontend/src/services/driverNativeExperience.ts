@@ -76,8 +76,31 @@ export function isDriverNativeExperienceAvailable(): boolean {
   return Platform.OS === 'android' && !!nativeModule;
 }
 
+/**
+ * Start the shift foreground service.
+ *
+ * The service is started with whatever token is already in memory so the native
+ * side reaches startForeground() immediately. Awaiting getValidToken() first
+ * meant a slow refresh on weak data delayed the service start — Android kills the
+ * process when startForeground() is late, which showed up as the app vanishing to
+ * the home screen. Any fresher token is pushed straight after.
+ */
 export async function startNativeDriverExperience(driverId?: string | null): Promise<void> {
   if (!isDriverNativeExperienceAvailable()) return;
+  const cached = getCachedToken();
+  if (cached) {
+    nativeModule?.startDriverService?.(driverId ?? null, cached, BACKEND_URL, null);
+    void (async () => {
+      const [token, refresh] = await Promise.all([
+        getValidToken().catch(() => null),
+        getStoredRefreshToken().catch(() => null),
+      ]);
+      if (token || refresh) {
+        nativeModule?.updateDriverSession?.(token ?? cached, BACKEND_URL, refresh);
+      }
+    })();
+    return;
+  }
   const [token, refresh] = await Promise.all([
     getValidToken().catch(() => null),
     getStoredRefreshToken().catch(() => null),

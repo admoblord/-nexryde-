@@ -77,7 +77,17 @@ import {
   NEXRYDE_MAP_STYLE as SHARED_NEXRYDE_MAP_STYLE,
   MAP,
 } from '@/src/constants/nexrydeMapBehavior';
-import { MAP_3D, getNexrydeMapStyleAuto, isLocalMapNight } from '@/src/constants/nexrydeMap3d';
+import { MAP_3D } from '@/src/constants/nexrydeMap3d';
+import {
+  getBoltRiderCustomMapStyle,
+  getBoltRiderGoogleMapId,
+} from '@/src/constants/boltMapStyle';
+import {
+  tripMapViewProps,
+  routeCasingProps,
+  routeLineProps,
+} from '@/src/components/trip/mapTreatment';
+import { colors, alpha, shadow } from '@/src/theme/tokens';
 import { DriverCarMarker } from '@/src/components/tracking/map/DriverCarMarker';
 import { DriverDemandHeatmapOverlay } from '@/src/components/map/DriverDemandHeatmapOverlay';
 import { EtaRoutePuck } from '@/src/components/map/EtaRoutePuck';
@@ -97,7 +107,7 @@ import {
   clearTripBreadcrumb,
   type MapCoord,
 } from '@/src/utils/tripBreadcrumbTrail';
-import { COLORS as THEME_COLORS, useThemeColors } from '@/src/constants/theme';
+import { COLORS as THEME_COLORS } from '@/src/constants/theme';
 
 /** Advance to next Directions step when the driver is this close to the step end (metres). */
 const NAV_STEP_END_PROXIMITY_M = 40;
@@ -357,6 +367,9 @@ interface Props {
   onTripComplete?: () => void | Promise<void>;
   /** Optional — e.g. hold / report issue while metered (UI may show “coming soon”). */
   onTripPause?: () => void | Promise<void>;
+  /** Mid-trip wait meter state, surfaced on the Pause / Resume control. */
+  tripPaused?: boolean;
+  waitMeterLabel?: string | null;
   onTripCallRider?: () => void | Promise<void>;
   onTripMessageRider?: () => void | Promise<void>;
   /** Real SOS — not just open Safety tab. */
@@ -536,6 +549,8 @@ function DriverLiveMapViewInner({
   onTripRiderNoShow,
   onTripComplete,
   onTripPause,
+  tripPaused,
+  waitMeterLabel,
   onTripCallRider,
   onTripMessageRider,
   onTripEmergency,
@@ -546,7 +561,6 @@ function DriverLiveMapViewInner({
   const { height: winHeight } = useWindowDimensions();
   const flow = useFlowLayout();
   const router = useRouter();
-  const { isDark } = useThemeColors();
   const { user } = useAppStore();
   const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const [mapInboxUnread, setMapInboxUnread] = useState(0);
@@ -588,18 +602,11 @@ function DriverLiveMapViewInner({
   const [cameraUnlocked, setCameraUnlocked] = useState(false);
   const [mapLayout, setMapLayout] = useState<{ width: number; height: number } | null>(null);
   const [breadcrumbTrail, setBreadcrumbTrail] = useState<MapCoord[]>([]);
-  const [mapIsNight, setMapIsNight] = useState(() => isLocalMapNight());
+  const googleMapId = getBoltRiderGoogleMapId();
   const liveMapStyle = useMemo(
-    () => (useDefaultMapStyle ? undefined : getNexrydeMapStyleAuto(mapIsNight)),
-    [useDefaultMapStyle, mapIsNight],
+    () => (useDefaultMapStyle ? undefined : getBoltRiderCustomMapStyle()),
+    [useDefaultMapStyle],
   );
-
-  useEffect(() => {
-    const tick = () => setMapIsNight(isLocalMapNight());
-    tick();
-    const id = setInterval(tick, 5 * 60 * 1000);
-    return () => clearInterval(id);
-  }, []);
 
   useEffect(() => {
     startupLog('MAP_INIT', { component: 'DriverLiveMapView' });
@@ -1381,8 +1388,8 @@ function DriverLiveMapViewInner({
 
   const isHeadingToPickup = String(activeTrip?.status || '') === 'accepted';
 
-  /** While en route to pickup, show full A→B corridor on the map (green route preview). */
-  const showPickupFullRoute = isHeadingToPickup && routeCoords.length >= 2;
+  /** Arriving: only the driver→pickup nav leg. Drawing A→B here is a lie. */
+  const showPickupFullRoute = false;
 
   /** Fainter context when road-snapped leg exists alongside preview */
   const showTripContextPolyline =
@@ -2047,15 +2054,18 @@ function DriverLiveMapViewInner({
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
         provider={PROVIDER_GOOGLE}
+        googleMapId={googleMapId || undefined}
         customMapStyle={liveMapStyle}
         mapType={useTileFallback ? 'none' : 'standard'}
         initialRegion={initialRegion}
+        {...tripMapViewProps}
         showsUserLocation={false}
         showsMyLocationButton={false}
         showsCompass={Boolean(activeTrip)}
-        showsPointsOfInterest={false}
-        showsBuildings={Boolean(activeTrip)}
-        showsTraffic={Boolean(activeTrip)}
+        // Buildings are what makes the tilted camera read as 3D, so they stay on for
+        // the whole shift rather than only during a trip.
+        showsBuildings={isOnline || Boolean(activeTrip)}
+        showsTraffic={false}
         showsScale={false}
         rotateEnabled={true}
         pitchEnabled={true}
@@ -2119,19 +2129,13 @@ function DriverLiveMapViewInner({
           <>
             <Polyline
               coordinates={routeCoords}
-              strokeColor="rgba(34,197,94,0.16)"
-              strokeWidth={14}
+              {...routeCasingProps}
               geodesic
-              lineCap="round"
-              lineJoin="round"
             />
             <Polyline
               coordinates={routeCoords}
-              strokeColor="#22C55E"
-              strokeWidth={6}
+              {...routeLineProps}
               geodesic
-              lineCap="round"
-              lineJoin="round"
             />
           </>
         )}
@@ -2164,19 +2168,13 @@ function DriverLiveMapViewInner({
           <>
             <Polyline
               coordinates={arrivedFullRouteCoords}
-              strokeColor="rgba(34,197,94,0.18)"
-              strokeWidth={14}
+              {...routeCasingProps}
               geodesic
-              lineCap="round"
-              lineJoin="round"
             />
             <Polyline
               coordinates={arrivedFullRouteCoords}
-              strokeColor="#22C55E"
-              strokeWidth={6}
+              {...routeLineProps}
               geodesic
-              lineCap="round"
-              lineJoin="round"
             />
           </>
         ) : null}
@@ -2200,19 +2198,13 @@ function DriverLiveMapViewInner({
           <>
             <Polyline
               coordinates={primaryLineCoords}
-              strokeColor={
-                isHeadingToPickup || isReadyToStartTrip ? 'rgba(52,245,184,0.28)' : 'rgba(66,133,244,0.24)'
-              }
-              strokeWidth={12}
+              {...routeCasingProps}
               geodesic
             />
             <Polyline
               coordinates={primaryLineCoords}
-              strokeColor={isHeadingToPickup || isReadyToStartTrip ? '#34F5B8' : '#4285F4'}
-              strokeWidth={isHeadingToPickup || isReadyToStartTrip ? 6 : 5}
+              {...routeLineProps}
               geodesic
-              lineCap="round"
-              lineJoin="round"
             />
           </>
         )}
@@ -2225,17 +2217,13 @@ function DriverLiveMapViewInner({
             <>
               <Polyline
                 coordinates={routeCoords}
-                strokeColor="rgba(52,245,184,0.22)"
-                strokeWidth={10}
+                {...routeCasingProps}
                 geodesic
               />
               <Polyline
                 coordinates={routeCoords}
-                strokeColor="#34F5B8"
-                strokeWidth={5}
+                {...routeLineProps}
                 geodesic
-                lineCap="round"
-                lineJoin="round"
               />
             </>
           )}
@@ -3156,6 +3144,8 @@ function DriverLiveMapViewInner({
                   if (onShieldPress) void onShieldPress();
                 }}
                 onPauseTrip={onTripPause}
+                tripPaused={tripPaused}
+                waitMeterLabel={waitMeterLabel}
               />
             ) : (
               <View style={[styles.ongoingCollapsedWrap, { paddingBottom: Math.max(4, insets.bottom) }]}>
@@ -3556,7 +3546,7 @@ function DriverLiveMapViewInner({
       {showOnlineIdleChrome && (
         <>
           <LinearGradient
-            colors={['rgba(2,6,23,0)', 'rgba(2,6,23,0.55)', 'rgba(2,6,23,0.88)']}
+            colors={['rgba(245,246,247,0)', 'rgba(245,246,247,0.35)', 'rgba(255,255,255,0.92)']}
             locations={[0, 0.45, 1]}
             style={[styles.onlineIdleFade, { height: Math.min(420, onlineIdleMapPadBottom + 48) }]}
             pointerEvents="none"
@@ -3572,11 +3562,11 @@ function DriverLiveMapViewInner({
               <View style={styles.oiDockBg} />
               <BlurView
                 intensity={DOCK_BLUR_INTENSITY}
-                tint={isDark ? 'dark' : 'light'}
+                tint="light"
                 style={StyleSheet.absoluteFillObject}
               />
               <LinearGradient
-                colors={['rgba(34,225,128,0.07)', 'transparent']}
+                colors={[alpha.greenSoft, 'transparent']}
                 start={{ x: 0.5, y: 0 }}
                 end={{ x: 0.5, y: 1 }}
                 style={styles.oiDockSheen}
@@ -3606,9 +3596,9 @@ function DriverLiveMapViewInner({
                   accessibilityHint="Opens earnings"
                 >
                   <View style={styles.oiTodayLabelRow}>
-                    <Ionicons name="wallet-outline" size={12} color={BRAND.primary} />
+                    <Ionicons name="wallet-outline" size={12} color={colors.greenDark} />
                     <Text style={styles.oiTodayLabel}>Today</Text>
-                    <Ionicons name="chevron-forward" size={11} color={BRAND.textMuted} />
+                    <Ionicons name="chevron-forward" size={11} color={colors.textTertiary} />
                   </View>
                   <View style={styles.oiEarnAmountRow}>
                     <Text style={styles.oiEarnCurrency}>₦</Text>
@@ -3632,7 +3622,7 @@ function DriverLiveMapViewInner({
                   accessibilityRole="button"
                   accessibilityLabel="Safety"
                 >
-                  <Ionicons name="shield-checkmark" size={22} color={BRAND.primary} />
+                  <Ionicons name="shield-checkmark" size={22} color={colors.greenDark} />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.oiGoOfflinePill}
@@ -3643,10 +3633,10 @@ function DriverLiveMapViewInner({
                   accessibilityLabel="Go offline"
                 >
                   {toggling ? (
-                    <ActivityIndicator size="small" color="#FCA5A5" />
+                    <ActivityIndicator size="small" color={colors.red} />
                   ) : (
                     <>
-                      <Ionicons name="power" size={17} color="#F87171" />
+                      <Ionicons name="power" size={17} color={colors.red} />
                       <Text style={styles.oiGoOfflineText}>Go Offline</Text>
                     </>
                   )}
@@ -3658,7 +3648,7 @@ function DriverLiveMapViewInner({
                   accessibilityRole="button"
                   accessibilityLabel="Menu"
                 >
-                  <Ionicons name="menu" size={22} color={BRAND.textSecondary} />
+                  <Ionicons name="menu" size={22} color={colors.navy} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -3743,16 +3733,16 @@ function DriverLiveMapViewInner({
                     accessibilityLabel={toggling ? 'Connecting' : 'Go online'}
                   >
                     <LinearGradient
-                      colors={['#34F5B8', '#22E5A0', '#00C473']}
+                      colors={[colors.green, colors.greenDark]}
                       style={styles.goBtnGrad}
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 1 }}
                     >
                       {toggling ? (
-                        <ActivityIndicator size="small" color="#022C22" />
+                        <ActivityIndicator size="small" color={colors.textOnGreen} />
                       ) : (
                         <>
-                          <Ionicons name="car-sport" size={22} color="#022C22" />
+                          <Ionicons name="car-sport" size={22} color={colors.textOnGreen} />
                           <Text style={styles.goBtnText}>GO</Text>
                         </>
                       )}
@@ -4132,7 +4122,7 @@ const zoomStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#060B18',
+    backgroundColor: colors.bgMuted,
   },
 
   /** Base map surface — siblings use zIndex ≥ 9 so overlays never obscure the underlying map mistakenly as a plain fill. */
@@ -4213,20 +4203,16 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderBottomWidth: 0,
-    borderColor: SURFACE.glassBorder,
+    borderColor: colors.border,
     paddingTop: 6,
     paddingHorizontal: 14,
     paddingBottom: 12,
     gap: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 24,
-    elevation: 16,
+    ...shadow,
   },
   oiDockBg: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(13,20,32,0.96)',
+    backgroundColor: colors.bg,
   },
   oiDockSheen: {
     position: 'absolute',
@@ -4253,23 +4239,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: BRAND.primaryMuted,
+    backgroundColor: alpha.greenSoft,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: SURFACE.glassBorder,
+    borderColor: alpha.greenRing,
   },
   oiOnlineDot: {
     width: 7,
     height: 7,
     borderRadius: 4,
-    backgroundColor: BRAND.primary,
+    backgroundColor: colors.green,
   },
   oiOnlineTxt: {
     fontSize: 12,
     fontWeight: '800',
-    color: BRAND.primary,
+    color: colors.greenDark,
     letterSpacing: 0.15,
   },
   oiEarnCenter: {
@@ -4333,7 +4319,7 @@ const styles = StyleSheet.create({
   oiTodayLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: BRAND.primary,
+    color: colors.greenDark,
     letterSpacing: 0.15,
   },
   oiEarnAmountRow: {
@@ -4345,13 +4331,13 @@ const styles = StyleSheet.create({
   oiEarnCurrency: {
     fontSize: 18,
     fontWeight: '800',
-    color: BRAND.textPrimary,
+    color: colors.textPrimary,
     marginRight: 2,
   },
   oiTodayAmount: {
     fontSize: 28,
     fontWeight: '900',
-    color: BRAND.textPrimary,
+    color: colors.textPrimary,
     letterSpacing: -0.8,
     fontVariant: ['tabular-nums'],
     flexShrink: 1,
@@ -4489,11 +4475,11 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 14,
-    backgroundColor: SURFACE.tile,
+    backgroundColor: colors.bgMuted,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: SURFACE.hairline,
+    borderColor: colors.border,
   },
   oiGoOfflinePill: {
     flex: 1,
@@ -4504,15 +4490,15 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 18,
     borderRadius: 14,
-    backgroundColor: 'rgba(239,68,68,0.12)',
+    backgroundColor: alpha.redSoft,
     borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.35)',
+    borderColor: colors.red,
     minHeight: 52,
   },
   oiGoOfflineText: {
     fontSize: 15,
     fontWeight: '900',
-    color: '#FCA5A5',
+    color: colors.red,
     letterSpacing: 0.5,
   },
   onlineNavFab: {
@@ -6543,20 +6529,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 24,
     paddingTop: 14,
-    backgroundColor: 'rgba(5,9,20,0.99)',
+    backgroundColor: colors.bg,
     zIndex: 10,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(34,229,160,0.18)',
+    borderTopColor: colors.border,
   },
   offlineIconBtn: {
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: colors.bgMuted,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: colors.border,
   },
 
   /* Big GO button — circle */
@@ -6564,9 +6550,9 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    shadowColor: '#1DFFA0',
+    shadowColor: colors.green,
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.6,
+    shadowOpacity: 0.28,
     shadowRadius: 18,
     elevation: 16,
   },
@@ -6584,7 +6570,7 @@ const styles = StyleSheet.create({
   goBtnText: {
     fontSize: 13,
     fontWeight: '900',
-    color: '#022C22',
+    color: colors.textOnGreen,
     letterSpacing: 1.2,
     marginTop: -2,
   },
@@ -6594,7 +6580,7 @@ const styles = StyleSheet.create({
     height: 72,
     borderRadius: 36,
     borderWidth: 2,
-    borderColor: '#1DFFA0',
+    borderColor: colors.green,
   },
 
   /* Pending / Activate states */

@@ -5,7 +5,6 @@ Automatically rewards top-performing drivers with free subscription months
 
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 
@@ -263,10 +262,8 @@ async def run_monthly_rewards_job():
     Entry point for cron job
     Call this function on the 1st of each month
     """
-    mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
-    client = AsyncIOMotorClient(mongo_url)
-    db = client[os.environ.get('DB_NAME', 'nexryde_db')]
-    
+    from database import db
+
     manager = PerformanceRewardsManager(db)
     result = await manager.process_monthly_rewards()
     

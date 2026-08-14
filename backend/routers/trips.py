@@ -1,7 +1,7 @@
 """Trips Router - Trip CRUD, ride flow, and trip management for NEXRYDE."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime, timezone, timedelta
@@ -36,9 +36,15 @@ from favorite_driver_notifications import maybe_send_rider_favorite_engagement_p
 from push_notifications import send_push_notification
 from routers.realtime_dispatch import push_driver_new_offer, push_rider_trip_update
 from trip_ws_payload import rider_trip_payload_from_doc
+from safety_check_prompts import (
+    merge_driver_stop_reason_alert,
+    normalize_safety_check_response,
+    trip_safety_latlng,
+)
 from trip_fare_adjustments import (
     compute_completion_fare_adjustments,
     compute_mid_trip_route_fare,
+    compute_mid_trip_wait_payload,
     compute_pickup_wait_payload,
 )
 from fare_config import PICKUP_FREE_WAIT_SECONDS
@@ -583,6 +589,20 @@ def _trip_biometric_ready(trip: dict) -> bool:
     return rider_ok and driver_ok
 
 
+def _cancelled_by_role(trip: dict) -> Optional[str]:
+    """'driver' | 'rider' | 'system' — derived from the stored actor id."""
+    actor = str(trip.get("cancelled_by") or "").strip()
+    if not actor:
+        return None
+    if actor in ("system", "system:stuck_trip_recovery") or actor.startswith("system"):
+        return "system"
+    if actor == str(trip.get("driver_id") or ""):
+        return "driver"
+    if actor == str(trip.get("rider_id") or ""):
+        return "rider"
+    return None
+
+
 def _distance_from_route_km(route_points: list[dict], lat: float, lng: float) -> float:
     if not route_points:
         return 0.0
@@ -685,12 +705,20 @@ async def _maybe_escalate_invisible_shield(trip: dict) -> dict:
 
 
 def _parse_iso_dt(value: Optional[str]) -> Optional[datetime]:
+    """Parse a stored timestamp as an aware UTC datetime.
+
+    Route points seeded by older paths carry naive timestamps. Returning one of
+    those and subtracting it from an aware ``now`` raised
+    "can't subtract offset-naive and offset-aware datetimes", which 500'd every
+    driver GPS ping for the whole trip — so the car never moved on the rider's map.
+    """
     if not value:
         return None
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except Exception:
         return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _build_forensic_route_points(actual_route: list[dict]) -> list[dict]:
@@ -761,7 +789,11 @@ async def _freeze_trip_fare_for_investigation(trip_id: str, reason: str) -> None
 
 
 async def _notify_emergency_contacts_for_safe_arrival(
-    trip: dict, lat: Optional[float], lng: Optional[float]
+    trip: dict,
+    lat: Optional[float],
+    lng: Optional[float],
+    *,
+    reason: str = "SAFE ARRIVAL",
 ) -> tuple[int, int]:
     """Returns (contacts_reached, contacts_on_file).
 
@@ -784,14 +816,75 @@ async def _notify_emergency_contacts_for_safe_arrival(
         trip_id=str(trip.get("id") or ""),
         lat=lat,
         lng=lng,
-        reason="SAFE ARRIVAL",
+        reason=reason,
     )
     return reached, len(contacts)
 
 
+async def _open_rider_safety_sos(
+    trip: dict,
+    *,
+    source: str,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    reason: str = "RIDER UNSAFE",
+) -> dict:
+    """Create an SOS, text emergency contacts, and tell the driver."""
+    from shield_network import broadcast_sos_to_nearby_nexryde_drivers
+
+    trip_id = str(trip.get("id") or "")
+    if lat is None or lng is None:
+        loc_lat, loc_lng = trip_safety_latlng(trip)
+        lat = lat if lat is not None else loc_lat
+        lng = lng if lng is not None else loc_lng
+    now = datetime.now(timezone.utc)
+    sos_id = str(uuid.uuid4())
+    contact_count, contacts_on_file = await _notify_emergency_contacts_for_safe_arrival(
+        trip, lat, lng, reason=reason
+    )
+    await db.sos_alerts.insert_one({
+        "id": sos_id,
+        "trip_id": trip_id,
+        "user_id": trip.get("rider_id", ""),
+        "user_role": "rider",
+        "location": {"lat": lat, "lng": lng},
+        "auto_triggered": True,
+        "status": "active",
+        "source": source,
+        "emergency_contacts_notified": contact_count,
+        "emergency_contacts_on_file": contacts_on_file,
+        "created_at": now.isoformat(),
+    })
+    await db.trips.update_one(
+        {"id": trip_id},
+        {"$set": {"sos_triggered": True, "sos_triggered_at": now.isoformat()}},
+    )
+    nearby = 0
+    if lat is not None and lng is not None and trip.get("rider_id"):
+        try:
+            nearby = await broadcast_sos_to_nearby_nexryde_drivers(
+                lat, lng, trip["rider_id"], trip_id, sos_id, "Rider"
+            )
+        except Exception:
+            logger.debug("nearby SOS fanout failed trip=%s", trip_id, exc_info=True)
+    if trip.get("driver_id"):
+        await send_push_notification(
+            trip["driver_id"],
+            "Rider needs help",
+            "Your rider said they do not feel safe. Stay put. NEXRYDE safety has been alerted.",
+            {"type": "shield_driver_sos", "trip_id": trip_id},
+        )
+    return {
+        "sos_id": sos_id,
+        "emergency_contacts_notified": contact_count,
+        "emergency_contacts_on_file": contacts_on_file,
+        "nearby_driver_alerts_sent": nearby,
+    }
+
+
 async def _maybe_process_safe_arrival_check(trip: dict) -> dict:
     check = dict(trip.get("safe_arrival_check") or {})
-    if not check.get("required") or check.get("confirmed_at"):
+    if not check.get("required") or check.get("confirmed_at") or check.get("unsafe_reported_at"):
         return trip
     if trip.get("status") not in {"completed", "pending_payment"}:
         return trip
@@ -2056,7 +2149,21 @@ class GeoFenceExplanationRequest(BaseModel):
 
 
 class DriverStopReasonRequest(BaseModel):
-    reason: str = Field(..., min_length=6, max_length=280)
+    reason: str = Field(..., min_length=4, max_length=280)
+
+
+class RiderSafetyCheckResponseRequest(BaseModel):
+    response: str = Field(..., min_length=2, max_length=32)
+    check_id: Optional[str] = None
+
+
+class SafeArrivalConfirmRequest(BaseModel):
+    safe: bool = True
+
+
+class RetryDispatchRequest(BaseModel):
+    """Search again, optionally at a higher offer."""
+    offered_fare: Optional[float] = Field(default=None, ge=0)
 
 
 class FakeDriverAlertRequest(BaseModel):
@@ -2950,10 +3057,15 @@ async def accept_trip(trip_id: str, request: dict, http_request: Request):
     if not gate.get("ok"):
         raise HTTPException(status_code=409, detail=gate.get("reason") or "Trip locked by another accept")
 
-    from realtime_platform.trip_engine import complete_accept_ack, release_trip_lock
+    from realtime_platform.trip_engine import (
+        complete_accept_ack,
+        release_accept_claim,
+        release_trip_lock,
+    )
     accept_event_id = str((gate.get("event") or {}).get("event_id") or "")
+    committed = False
     try:
-        return await _accept_trip_commit(
+        result = await _accept_trip_commit(
             trip_id=trip_id,
             driver_id=driver_id,
             request=request or {},
@@ -2961,11 +3073,24 @@ async def accept_trip(trip_id: str, request: dict, http_request: Request):
             active_offer=active_offer,
             accept_event_id=accept_event_id,
         )
+        committed = True
+        return result
     finally:
         try:
             await release_trip_lock(trip_id)
         except Exception:
             pass
+        if not committed:
+            # The accept did not assign this driver. Hand the key back so the next
+            # tap is a real attempt instead of "Duplicate accept in progress".
+            try:
+                await release_accept_claim(
+                    trip_id=trip_id,
+                    driver_id=driver_id,
+                    client_event_id=client_event_id,
+                )
+            except Exception:
+                pass
 
 
 async def _accept_trip_commit(
@@ -3158,6 +3283,23 @@ async def _accept_trip_commit(
             "driver_account_name": driver_profile.get("account_name"),
             "payment_status": "pending",
         })
+    # Who else was still ringing for this trip? Read before closing the offers.
+    losing_driver_ids: list[str] = []
+    try:
+        losing_offers = await db.trip_offers.find(
+            {
+                "trip_id": trip_id,
+                "driver_id": {"$ne": driver_id},
+                "status": {"$in": ["offered", "seen"]},
+            },
+            {"_id": 0, "driver_id": 1},
+        ).to_list(50)
+        losing_driver_ids = [
+            str(o.get("driver_id")) for o in losing_offers if o.get("driver_id")
+        ]
+    except Exception:
+        logger.debug("accept: could not read losing offers", exc_info=True)
+
     await db.trip_offers.update_many(
         {"trip_id": trip_id, "status": {"$in": ["offered", "seen", "declined", "expired"]}},
         {
@@ -3169,6 +3311,18 @@ async def _accept_trip_commit(
             }
         },
     )
+    # Tell the drivers who lost the race to stop ringing. Without this their alert
+    # ran to its own timeout and Accept just failed on a trip that was gone.
+    if losing_driver_ids:
+        try:
+            from routers.realtime_dispatch import push_driver_offers_withdrawn
+
+            for losing_id in dict.fromkeys(losing_driver_ids):
+                await push_driver_offers_withdrawn(
+                    losing_id, reason="trip_taken", count=1
+                )
+        except Exception:
+            logger.debug("accept: offer withdrawal push failed", exc_info=True)
     # ONE Essentials Compute Routes call: driver → pickup (never per-ping).
     try:
         from route_leg_service import store_active_leg_route
@@ -3473,18 +3627,18 @@ async def submit_driver_stop_reason(trip_id: str, request: DriverStopReasonReque
         "driver_id": actor_id,
         "submitted_at": now,
     }
+    guardian_alert = merge_driver_stop_reason_alert(
+        trip.get("guardian_alert"),
+        reason=request.reason.strip(),
+        now_iso=now,
+        driver_id=actor_id,
+    )
     await db.trips.update_one(
         {"id": trip_id},
         {
             "$set": {
                 "driver_stop_reason": stop_reason,
-                "guardian_alert": {
-                    "active": True,
-                    "type": "driver_stop_reason",
-                    "message": "Driver shared why the vehicle stopped.",
-                    "reason": request.reason.strip(),
-                    "triggered_at": now,
-                },
+                "guardian_alert": guardian_alert,
             }
         },
     )
@@ -3497,7 +3651,119 @@ async def submit_driver_stop_reason(trip_id: str, request: DriverStopReasonReque
             {"type": "driver_stop_reason", "trip_id": trip_id},
         )
     await _emit_rider_trip_realtime(trip_id)
-    return {"success": True, "driver_stop_reason": stop_reason}
+    return {"success": True, "driver_stop_reason": stop_reason, "guardian_alert": guardian_alert}
+
+
+async def apply_rider_safety_check_response(
+    trip_id: str,
+    actor_id: str,
+    response_raw: str,
+    check_id: Optional[str] = None,
+) -> dict:
+    """Record the rider's Auto Stop 'Are you safe?' answer.
+
+    ``safe`` clears the prompt. ``need_help`` opens an SOS and texts emergency
+    contacts. Shared by the trip-scoped endpoint and ``POST /safety/respond``.
+    """
+    trip = await db.trips.find_one({"id": trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if actor_id != trip.get("rider_id"):
+        raise HTTPException(status_code=403, detail="Only the rider can respond to this safety check")
+
+    response = normalize_safety_check_response(response_raw)
+    if response is None:
+        raise HTTPException(status_code=400, detail="Response must be safe or need_help")
+
+    alert = trip.get("guardian_alert") or {}
+    pending_id = (
+        (check_id or "").strip()
+        or str(alert.get("check_id") or "")
+        or str((trip.get("guardian_state") or {}).get("pending_check_id") or "")
+    )
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+
+    if pending_id:
+        await db.safety_checks.update_one(
+            {"id": pending_id},
+            {"$set": {
+                "rider_response": response,
+                "responded_at": now_iso,
+                "status": "resolved" if response == "safe" else "need_help",
+            }},
+        )
+
+    sos_payload: dict = {}
+    if response == "need_help":
+        sos_payload = await _open_rider_safety_sos(
+            trip,
+            source="safety_check_need_help",
+            reason="RIDER SAFETY CHECK",
+        )
+        next_alert = {
+            "active": True,
+            "type": "abnormal_stop",
+            "check_id": pending_id or alert.get("check_id"),
+            "message": "We could not confirm rider safety. Emergency escalation started.",
+            "rider_response": "need_help",
+            "escalated": True,
+            "triggered_at": alert.get("triggered_at") or now_iso,
+            "responded_at": now_iso,
+        }
+        if alert.get("driver_reason"):
+            next_alert["driver_reason"] = alert["driver_reason"]
+            next_alert["reason"] = alert.get("reason") or alert["driver_reason"]
+        await db.trips.update_one(
+            {"id": trip_id},
+            {
+                "$set": {
+                    "guardian_alert": next_alert,
+                    "guardian_state.pending_check_id": None,
+                }
+            },
+        )
+    else:
+        await db.trips.update_one(
+            {"id": trip_id},
+            {
+                "$set": {
+                    "guardian_alert": None,
+                    "guardian_state.pending_check_id": None,
+                    "guardian_state.last_prompt_at": now_iso,
+                }
+            },
+        )
+
+    await _log_trip_event(
+        trip_id,
+        "safety_check_responded",
+        actor_id,
+        {"response": response, "check_id": pending_id or None},
+    )
+    await _emit_rider_trip_realtime(trip_id)
+    return {
+        "success": True,
+        "response": response,
+        "check_id": pending_id or None,
+        **sos_payload,
+    }
+
+
+@trips_router.post("/trips/{trip_id}/safety-check-response")
+async def rider_safety_check_response(
+    trip_id: str,
+    request: RiderSafetyCheckResponseRequest,
+    http_request: Request,
+):
+    actor_id = require_authenticated(http_request)
+    trip = await db.trips.find_one({"id": trip_id}, {"_id": 0, "id": 1, "rider_id": 1, "driver_id": 1})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    verify_trip_participant(http_request, trip)
+    return await apply_rider_safety_check_response(
+        trip_id, actor_id, request.response, request.check_id
+    )
 
 
 @trips_router.post("/trips/{trip_id}/fake-driver-alert")
@@ -3925,7 +4191,11 @@ async def report_vehicle_mismatch(trip_id: str, request: Request):
 
 
 @trips_router.post("/trips/{trip_id}/confirm-safe-arrival")
-async def confirm_safe_arrival(trip_id: str, request: Request):
+async def confirm_safe_arrival(
+    trip_id: str,
+    request: Request,
+    payload: Optional[SafeArrivalConfirmRequest] = Body(default=None),
+):
     actor_id = require_authenticated(request)
     trip = await db.trips.find_one({"id": trip_id}, {"_id": 0})
     if not trip:
@@ -3937,13 +4207,143 @@ async def confirm_safe_arrival(trip_id: str, request: Request):
     if not check.get("required"):
         raise HTTPException(status_code=400, detail="Safe arrival confirmation is not active for this trip")
 
+    safe = True if payload is None else bool(payload.safe)
     now = datetime.now(timezone.utc).isoformat()
-    check["confirmed_at"] = now
-    check["check_in_status"] = "confirmed"
+    if safe:
+        if check.get("unsafe_reported_at") and not check.get("confirmed_at"):
+            raise HTTPException(
+                status_code=400,
+                detail="This check-in was already reported as unsafe. Contact NEXRYDE safety if you need to update it.",
+            )
+        check["confirmed_at"] = now
+        check["check_in_status"] = "confirmed"
+        await db.trips.update_one({"id": trip_id}, {"$set": {"safe_arrival_check": check}})
+        await _log_trip_event(trip_id, "safe_arrival_confirmed", actor_id, {})
+        await _emit_rider_trip_realtime(trip_id)
+        return {"success": True, "safe": True, "safe_arrival_check": check}
+
+    if check.get("confirmed_at"):
+        raise HTTPException(status_code=400, detail="Safe arrival was already confirmed")
+    if check.get("unsafe_reported_at"):
+        return {"success": True, "safe": False, "safe_arrival_check": check, "already_reported": True}
+
+    lat, lng = trip_safety_latlng(trip)
+    sos_payload = await _open_rider_safety_sos(
+        trip,
+        source="safe_arrival_unsafe",
+        lat=lat,
+        lng=lng,
+        reason="UNSAFE ARRIVAL",
+    )
+    check["unsafe_reported_at"] = now
+    check["check_in_status"] = "unsafe_reported"
+    check["emergency_notified_at"] = now
+    check["emergency_contacts_notified"] = sos_payload.get("emergency_contacts_notified")
+    check["emergency_contacts_on_file"] = sos_payload.get("emergency_contacts_on_file")
     await db.trips.update_one({"id": trip_id}, {"$set": {"safe_arrival_check": check}})
-    await _log_trip_event(trip_id, "safe_arrival_confirmed", actor_id, {})
+    await _log_trip_event(trip_id, "safe_arrival_unsafe_reported", actor_id, {"sos_id": sos_payload.get("sos_id")})
     await _emit_rider_trip_realtime(trip_id)
-    return {"success": True, "safe_arrival_check": check}
+    return {
+        "success": True,
+        "safe": False,
+        "safe_arrival_check": check,
+        **sos_payload,
+    }
+
+
+@trips_router.post("/trips/{trip_id}/pause")
+async def pause_trip_for_rider(trip_id: str, request: Request):
+    """Driver taps Pause trip: start the mid-trip wait meter (₦80/min in Lagos).
+
+    Used when the rider asks to stop somewhere on the way. Idempotent — a second
+    tap while already paused returns the running meter instead of restarting it.
+    """
+    driver_id = require_authenticated(request)
+    trip = await db.trips.find_one({"id": trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if trip.get("driver_id") != driver_id:
+        raise HTTPException(status_code=403, detail="Only the assigned driver can pause this trip")
+    if str(trip.get("status") or "").lower() != "ongoing":
+        raise HTTPException(status_code=400, detail="Only an ongoing trip can be paused")
+
+    state = trip.get("mid_trip_pause") if isinstance(trip.get("mid_trip_pause"), dict) else {}
+    if state.get("active"):
+        return {
+            "success": True,
+            "already_paused": True,
+            "mid_trip_wait": compute_mid_trip_wait_payload(trip),
+        }
+
+    now = datetime.now(timezone.utc)
+    next_state = {
+        "active": True,
+        "paused_at": now.isoformat(),
+        "paused_seconds": max(0, int(state.get("paused_seconds") or 0)),
+        "pause_count": int(state.get("pause_count") or 0) + 1,
+        "last_resumed_at": state.get("last_resumed_at"),
+    }
+    await db.trips.update_one({"id": trip_id}, {"$set": {"mid_trip_pause": next_state}})
+    updated = await db.trips.find_one({"id": trip_id}, {"_id": 0}) or {**trip, "mid_trip_pause": next_state}
+    payload = compute_mid_trip_wait_payload(updated)
+    await _log_trip_event(trip_id, "trip_paused_for_rider", driver_id, {
+        "pause_count": next_state["pause_count"],
+        "wait_per_min_ngn": payload.get("wait_per_min_ngn"),
+    })
+    try:
+        await _emit_rider_trip_realtime(trip_id)
+        await send_push_notification(
+            trip.get("rider_id"),
+            "Waiting for you",
+            f"Your driver is waiting. Waiting time is charged at ₦{int(payload['wait_per_min_ngn'])}/min.",
+            {"type": "trip_paused", "trip_id": trip_id},
+        )
+    except Exception:
+        logger.debug("pause fanout failed", exc_info=True)
+    return {"success": True, "paused": True, "mid_trip_wait": payload}
+
+
+@trips_router.post("/trips/{trip_id}/resume")
+async def resume_trip_after_wait(trip_id: str, request: Request):
+    """Driver taps Resume trip: bank the waited seconds and stop the meter."""
+    driver_id = require_authenticated(request)
+    trip = await db.trips.find_one({"id": trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if trip.get("driver_id") != driver_id:
+        raise HTTPException(status_code=403, detail="Only the assigned driver can resume this trip")
+
+    state = trip.get("mid_trip_pause") if isinstance(trip.get("mid_trip_pause"), dict) else {}
+    if not state.get("active"):
+        return {
+            "success": True,
+            "already_running": True,
+            "mid_trip_wait": compute_mid_trip_wait_payload(trip),
+        }
+
+    now = datetime.now(timezone.utc)
+    paused_at = _parse_iso_dt(state.get("paused_at"))
+    open_sec = max(0, int((now - paused_at).total_seconds())) if paused_at else 0
+    next_state = {
+        "active": False,
+        "paused_at": None,
+        "paused_seconds": max(0, int(state.get("paused_seconds") or 0)) + open_sec,
+        "pause_count": int(state.get("pause_count") or 0),
+        "last_resumed_at": now.isoformat(),
+    }
+    await db.trips.update_one({"id": trip_id}, {"$set": {"mid_trip_pause": next_state}})
+    updated = await db.trips.find_one({"id": trip_id}, {"_id": 0}) or {**trip, "mid_trip_pause": next_state}
+    payload = compute_mid_trip_wait_payload(updated)
+    await _log_trip_event(trip_id, "trip_resumed_after_wait", driver_id, {
+        "this_pause_sec": open_sec,
+        "billable_min": payload.get("billable_wait_min"),
+        "fee_ngn": payload.get("estimated_wait_fee_ngn"),
+    })
+    try:
+        await _emit_rider_trip_realtime(trip_id)
+    except Exception:
+        logger.debug("resume fanout failed", exc_info=True)
+    return {"success": True, "resumed": True, "mid_trip_wait": payload}
 
 
 @trips_router.put("/trips/{trip_id}/arrive")
@@ -4352,6 +4752,31 @@ async def _update_trip_location_impl(trip_id: str, request: LocationUpdate, http
                 })
                 pending_check_id = check_id
                 last_prompt_at = now.isoformat()
+                # A safety check the rider is never told about is not a safety check.
+                try:
+                    await send_push_notification(
+                        trip.get("rider_id"),
+                        "Are you safe?",
+                        "We noticed your trip has been stopped for a while. Tap to check in.",
+                        {
+                            "type": "safety_check",
+                            "trip_id": trip_id,
+                            "check_id": check_id,
+                            "check_type": "abnormal_stop",
+                        },
+                    )
+                    await send_push_notification(
+                        trip.get("driver_id"),
+                        "Stopped for a while",
+                        "Let your rider know why you stopped — tap to share a reason.",
+                        {
+                            "type": "stop_reason_requested",
+                            "trip_id": trip_id,
+                            "check_id": check_id,
+                        },
+                    )
+                except Exception:
+                    logger.debug("abnormal_stop fanout failed trip=%s", trip_id, exc_info=True)
                 guardian_alert = {
                     "active": True,
                     "check_id": check_id,
@@ -4888,6 +5313,141 @@ async def generate_trip_share_link(trip_id: str, request: Request):
     }
 
 
+SEARCHING_TRIP_STATUSES = {"pending", "pending_driver_offers"}
+#: Riders can raise a stalled offer, but not to an arbitrary number.
+MAX_RETRY_FARE_MULTIPLIER = 3.0
+
+
+@trips_router.post("/trips/{trip_id}/retry-dispatch")
+async def retry_trip_dispatch(
+    trip_id: str, payload: RetryDispatchRequest, request: Request
+):
+    """
+    Search again for the same trip, optionally at a higher offer.
+
+    "No driver available right now" used to offer a Try Again button that only
+    reset a local countdown — the server was never asked to look again — and the
+    only way to raise the bid was to cancel the trip and rebook, which also
+    counted against the rider's cancellation limit. This keeps the trip and
+    re-runs dispatch.
+    """
+    rider_id = require_authenticated(request)
+    trip = await db.trips.find_one({"id": trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if str(trip.get("rider_id") or "") != str(rider_id):
+        raise HTTPException(status_code=403, detail="Not your trip")
+
+    status = str(trip.get("status") or "").lower()
+    if status not in SEARCHING_TRIP_STATUSES:
+        # A finished trip also carries a driver_id, so check the status itself
+        # rather than assuming any assigned trip is still running.
+        if status in {"accepted", "arrived", "ongoing"}:
+            raise HTTPException(status_code=409, detail="A driver is already on the way.")
+        raise HTTPException(
+            status_code=409,
+            detail="This request is no longer searching. Book a new ride.",
+        )
+
+    # Cheap abuse guard — this fans out to every nearby driver.
+    from security_advanced import general_limiter
+
+    await general_limiter.check_rate_limit(request, f"retry_dispatch:{trip_id}")
+
+    current_fare = float(trip.get("fare") or trip.get("offered_fare") or 0)
+    new_fare = payload.offered_fare
+    fare_raised = False
+    if new_fare is not None:
+        new_fare = round(float(new_fare), 2)
+        if current_fare > 0 and new_fare < current_fare:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Your new offer must be at least ₦{current_fare:,.0f}.",
+            )
+        ceiling = current_fare * MAX_RETRY_FARE_MULTIPLIER if current_fare > 0 else None
+        if ceiling and new_fare > ceiling:
+            raise HTTPException(
+                status_code=400,
+                detail=f"That offer is too high. Maximum is ₦{ceiling:,.0f}.",
+            )
+        if new_fare > current_fare:
+            fare_raised = True
+            await db.trips.update_one(
+                {"id": trip_id, "status": {"$in": list(SEARCHING_TRIP_STATUSES)}},
+                {
+                    "$set": {
+                        "fare": new_fare,
+                        "offered_fare": new_fare,
+                        "fare_raised_by_rider": True,
+                        "fare_raised_at": datetime.now(timezone.utc).isoformat(),
+                        "previous_offered_fare": current_fare,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                },
+            )
+            trip = await db.trips.find_one({"id": trip_id}) or trip
+
+    # Give every nearby driver a fresh look, including ones who let the last
+    # offer lapse — a higher fare is a new decision for them.
+    await db.trip_offers.update_many(
+        {"trip_id": trip_id, "status": {"$in": ["offered", "seen", "expired"]}},
+        {
+            "$set": {
+                "status": "superseded",
+                "superseded_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+    )
+
+    rider = await db.users.find_one({"id": rider_id}, {"_id": 0, "blocked_drivers": 1}) or {}
+    blocked_drivers = rider.get("blocked_drivers", []) or []
+    # Drivers who explicitly declined keep their decision unless the fare went up.
+    if not fare_raised:
+        declined = await db.trip_offers.find(
+            {"trip_id": trip_id, "status": "declined"}, {"_id": 0, "driver_id": 1}
+        ).to_list(50)
+        blocked_drivers = list(
+            {*blocked_drivers, *[str(d.get("driver_id")) for d in declined if d.get("driver_id")]}
+        )
+
+    offers = await _create_trip_offers(trip, blocked_drivers)
+
+    await db.trips.update_one(
+        {"id": trip_id},
+        {
+            "$set": {
+                "status": "pending_driver_offers" if offers else trip.get("status"),
+                "last_redispatch_at": datetime.now(timezone.utc).isoformat(),
+            },
+            "$inc": {"redispatch_count": 1},
+        },
+    )
+    await _log_trip_event(
+        trip_id,
+        "trip_redispatch_requested",
+        rider_id,
+        {
+            "eligible_drivers": len(offers),
+            "fare_raised": fare_raised,
+            "offered_fare": float(trip.get("fare") or current_fare),
+            "previous_fare": current_fare,
+        },
+    )
+
+    return {
+        "success": True,
+        "trip_id": trip_id,
+        "drivers_notified": len(offers),
+        "fare_raised": fare_raised,
+        "offered_fare": float(trip.get("fare") or current_fare),
+        "message": (
+            f"Sent to {len(offers)} nearby driver{'s' if len(offers) != 1 else ''}."
+            if offers
+            else "No drivers nearby yet — we will keep looking."
+        ),
+    }
+
+
 @trips_router.get("/trips/{trip_id}/status")
 async def get_trip_status(trip_id: str, request: Request):
     """Return trip status with optional driver live-location snapshot."""
@@ -4972,7 +5532,11 @@ async def get_trip_status(trip_id: str, request: Request):
 
         # Use locked vehicle data if available (anti-fraud: prevents mid-trip plate swap)
         locked_v = trip.get("locked_vehicle") or {}
-        live_plate = locked_v.get("plate") or profile.get("vehicle_plate") or ""
+        # Plate has been stored under three shapes over time. Reading only one of
+        # them is why riders saw a blank plate for drivers who had registered one.
+        from routers.drivers import driver_plate_on_record
+
+        live_plate = str(locked_v.get("plate") or "").strip().upper() or driver_plate_on_record(profile)
         live_model = locked_v.get("model") or profile.get("vehicle_model") or "Vehicle"
         live_color = locked_v.get("color") or profile.get("vehicle_color") or ""
         live_vtype = locked_v.get("vehicle_type") or profile.get("vehicle_type") or ""
@@ -5030,12 +5594,25 @@ async def get_trip_status(trip_id: str, request: Request):
         "updated_at": _iso(trip.get("updated_at") or trip.get("state_updated_at") or trip.get("created_at")),
         "payment_status": trip.get("payment_status"),
         "payment_method": trip.get("payment_method"),
+        # Who ended the trip and why. The rider app wants to say "your driver
+        # cancelled" but had no field to read, so a driver cancel just bounced the
+        # rider home with no explanation.
+        "cancelled_by": trip.get("cancelled_by"),
+        "cancelled_by_role": _cancelled_by_role(trip),
+        "cancellation_reason": trip.get("cancellation_reason") or trip.get("cancel_reason"),
         # Lifecycle timestamps — required by rider/driver timers
         "accepted_at": _iso(trip.get("accepted_at") or trip.get("assignment_accepted_at")),
         "arrived_at": _iso(trip.get("arrived_at")),
         "started_at": _iso(trip.get("started_at")),
         "completed_at": _iso(trip.get("completed_at")),
         # Pickup wait payload for rider wait timer
+        "mid_trip_wait": compute_mid_trip_wait_payload(trip),
+        # Auto Stop Safety Check: the alert was written onto the trip but never handed
+        # to the client, so the rider prompt the feature promises had nothing to
+        # render from.
+        "guardian_alert": trip.get("guardian_alert") or None,
+        "driver_stop_reason": trip.get("driver_stop_reason") or None,
+        "safe_arrival_check": trip.get("safe_arrival_check") or None,
         "pickup_wait": {
             **compute_pickup_wait_payload(trip),
             "free_wait_secs": int(trip.get("pickup_free_wait_seconds") or PICKUP_FREE_WAIT_SECONDS),
@@ -5051,13 +5628,10 @@ async def get_trip_status(trip_id: str, request: Request):
         "driver_location": driver_location,
         "live_eta": live_eta,
         "current_speed_kmh": trip.get("current_speed_kmh"),
-        "guardian_alert": trip.get("guardian_alert"),
         "geo_fence_trip_lock": trip.get("geo_fence_trip_lock"),
         "speed_spike_alert": trip.get("speed_spike_alert"),
         "gps_spoofing_alert": trip.get("gps_spoofing_alert"),
-        "driver_stop_reason": trip.get("driver_stop_reason"),
         "invisible_shield_mode": trip.get("invisible_shield_mode"),
-        "safe_arrival_check": trip.get("safe_arrival_check"),
         "estate_gate_access": estate_gate_access,
         "locked_vehicle": trip.get("locked_vehicle"),
         "rider_identity_confirmed": bool(trip.get("rider_identity_confirmed")),
@@ -5288,6 +5862,8 @@ async def complete_trip(trip_id: str, request: Request):
         "booking_fare": fare_adj.get("booking_fare") or trip_before.get("fare"),
         "pickup_wait_fee": fare_adj.get("pickup_wait_fee", 0),
         "pickup_wait_min": fare_adj.get("pickup_wait_min", 0),
+        "mid_trip_wait_fee": fare_adj.get("mid_trip_wait_fee", 0),
+        "mid_trip_wait_min": fare_adj.get("mid_trip_wait_min", 0),
         "traffic_excess_fee": fare_adj.get("traffic_excess_fee", 0),
         "traffic_excess_min": fare_adj.get("traffic_excess_min", 0),
         "fare_additions_ngn": fare_adj.get("fare_additions_ngn", 0),
@@ -5891,6 +6467,8 @@ async def get_trip(trip_id: str, request: Request):
     trip["speed_spike_alert"] = trip.get("speed_spike_alert")
     trip["gps_spoofing_alert"] = trip.get("gps_spoofing_alert")
     trip["safe_arrival_check"] = trip.get("safe_arrival_check")
+    trip["guardian_alert"] = trip.get("guardian_alert")
+    trip["driver_stop_reason"] = trip.get("driver_stop_reason")
     # Driver app: expose rider name/phone for call & chat (same active window as rider seeing driver phone)
     if actor_id == trip.get("driver_id") and trip.get("rider_id"):
         trip_status_raw = str(trip.get("status") or "")

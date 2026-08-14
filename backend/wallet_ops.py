@@ -304,9 +304,10 @@ async def apply_driver_wallet_ride_credit(db: Any, driver_id: str, trip_id: str,
             }
         )
     except Exception as exc:
-        # DuplicateKeyError → credit already applied, safe to skip. Detect by
-        # type first (robust); the string checks are a fallback for drivers that
-        # surface the error without a typed class.
+        # DuplicateKeyError → a ledger row already exists. That does NOT prove the
+        # balance was incremented: the process can die between the insert and the
+        # $inc, and the retry used to return here, losing the driver's money for
+        # good. Only skip when the ledger row is marked as settled.
         try:
             from pymongo.errors import DuplicateKeyError
         except Exception:
@@ -316,7 +317,19 @@ async def apply_driver_wallet_ride_credit(db: Any, driver_id: str, trip_id: str,
             or "duplicate" in str(exc).lower()
             or "E11000" in str(exc)
         ):
+            claimed = await db.transactions.find_one_and_update(
+                {"reference": ref, "balance_applied": {"$ne": True}},
+                {"$set": {"balance_applied": True, "balance_applied_at": datetime.now(timezone.utc)}},
+            )
+            if not claimed:
+                return  # already credited
+            await db.users.update_one({"id": driver_id}, {"$inc": {"wallet_balance": amount}})
             return
         raise
-    # Only credit balance after ledger entry is committed
+    # Ledger row is committed and owned by this call — apply the balance, then mark
+    # it settled so a retry can tell "already credited" from "credit still owed".
     await db.users.update_one({"id": driver_id}, {"$inc": {"wallet_balance": amount}})
+    await db.transactions.update_one(
+        {"reference": ref},
+        {"$set": {"balance_applied": True, "balance_applied_at": datetime.now(timezone.utc)}},
+    )

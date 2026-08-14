@@ -1,33 +1,26 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import type { StyleProp, ImageStyle } from 'react-native';
 import { NEXRYDE_BRAND } from '@/src/constants/nexrydeBrand';
+import { NexrydeMark } from '@/src/components/brand/NexrydeMark';
 
 type Props = {
   size?: number;
+  /** False renders the transparent N with no navy field behind it. */
+  framed?: boolean;
+  style?: StyleProp<ImageStyle>;
 };
 
-/** Standard NEXRYDE mark — green circle + car icon (all surfaces). */
-export function NexrydeLogo({ size = NEXRYDE_BRAND.logo.size }: Props) {
-  const iconSize = Math.round(size * 0.5);
-  const radius = size / 2;
-
-  return (
-    <LinearGradient
-      colors={[NEXRYDE_BRAND.green, NEXRYDE_BRAND.greenEnd]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={[styles.circle, { width: size, height: size, borderRadius: radius }]}
-    >
-      <Ionicons name="car-sport" size={iconSize} color="#FFFFFF" />
-    </LinearGradient>
-  );
+/**
+ * Standard NEXRYDE mark for every surface.
+ *
+ * This used to draw a green circle with a generic car glyph from the icon font,
+ * which is not the logo — so headers, the loading screen and the brand row all
+ * showed something the launcher icon does not. It now renders the shipped icon
+ * through `NexrydeMark`, keeping the same `size` API so existing callers are
+ * unchanged.
+ */
+export function NexrydeLogo({ size = NEXRYDE_BRAND.logo.size, framed = true, style }: Props) {
+  return <NexrydeMark size={size} framed={framed} style={style} />;
 }
 
-const styles = StyleSheet.create({
-  circle: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+export default NexrydeLogo;

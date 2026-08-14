@@ -1,6 +1,5 @@
 package com.nexryde.app.driver
 
-import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
@@ -55,13 +54,14 @@ class OverlayRenderer(
   private val pickupText = label("Pickup location", 14f, Color.rgb(203, 213, 225), false)
   private val fareText = label("Fare --", 20f, Color.rgb(253, 230, 138), true)
   private val etaText = label("ETA -- · -- away", 13f, Color.rgb(148, 163, 184), false)
-  private val countdownText = label("15s", 12f, Color.rgb(251, 191, 36), true).apply {
+  private val countdownText = label("30s", 12f, Color.rgb(251, 191, 36), true).apply {
     gravity = Gravity.END
     includeFontPadding = false
   }
   private val acceptButton = actionButton("ACCEPT", Color.rgb(34, 225, 128), Color.rgb(2, 44, 34)) { onAccept() }
   private val declineButton = actionButton("DECLINE", Color.rgb(127, 29, 29), Color.WHITE) { onDecline() }
-  private var pulseAnimator: ValueAnimator? = null
+  /** Last colour actually applied, so a re-bind does not rebuild identical drawables. */
+  private var appliedStatusColor: Int? = null
 
   init {
     val circleContent = LinearLayout(context).apply {
@@ -103,26 +103,42 @@ class OverlayRenderer(
     root.addView(card, FrameLayout.LayoutParams(dp(CARD_W_DP), dp(CARD_H_DP), Gravity.TOP or Gravity.START))
   }
 
+  /**
+   * bind() runs on every countdown tick. Rebuilding the background drawables and
+   * re-setting unchanged text each second made the bubble visibly flicker, so
+   * everything here is applied only when the value actually changed.
+   */
   fun bind(state: OverlayState) {
-    statusBadge.background = circleDrawable(statusColor(state.phase), dp(2), Color.WHITE)
-    circle.background = circleDrawable(Color.rgb(8, 13, 25), dp(2), statusColor(state.phase))
+    val color = statusColor(state.phase)
+    if (appliedStatusColor != color) {
+      appliedStatusColor = color
+      statusBadge.background = circleDrawable(color, dp(2), Color.WHITE)
+      circle.background = circleDrawable(Color.rgb(8, 13, 25), dp(2), color)
+    }
     val offer = state.offer
     if (offer != null) {
-      riderText.text = offer.riderName
-      pickupText.text = offer.pickup
-      fareText.text = "Fare: ${offer.fare}"
-      etaText.text = "ETA ${offer.eta} · ${offer.distance} away"
+      setTextIfChanged(riderText, offer.riderName)
+      setTextIfChanged(pickupText, offer.pickup)
+      setTextIfChanged(fareText, "Fare: ${offer.fare}")
+      setTextIfChanged(etaText, "ETA ${offer.eta} · ${offer.distance} away")
     }
-    countdownText.text = when (state.phase) {
-      OverlayPhase.ACCEPTING -> state.message ?: "Securing ride..."
-      OverlayPhase.DECLINING -> state.message ?: "Closing request..."
-      OverlayPhase.OFFER -> state.message ?: "${state.countdownSeconds.coerceAtLeast(0)}s"
-      else -> "${state.countdownSeconds.coerceAtLeast(0)}s"
-    }
+    setTextIfChanged(
+      countdownText,
+      when (state.phase) {
+        OverlayPhase.ACCEPTING -> state.message ?: "Securing ride..."
+        OverlayPhase.DECLINING -> state.message ?: "Closing request..."
+        OverlayPhase.OFFER -> state.message ?: "${state.countdownSeconds.coerceAtLeast(0)}s"
+        else -> "${state.countdownSeconds.coerceAtLeast(0)}s"
+      },
+    )
     setButtonsEnabled(state.phase != OverlayPhase.ACCEPTING && state.phase != OverlayPhase.DECLINING)
-    acceptButton.text = if (state.phase == OverlayPhase.ACCEPTING) "ACCEPTING..." else "ACCEPT"
-    declineButton.text = if (state.phase == OverlayPhase.DECLINING) "DECLINING..." else "DECLINE"
-    if (state.phase == OverlayPhase.OFFER || state.phase == OverlayPhase.COUNTDOWN) startPulse() else stopPulse()
+    setTextIfChanged(acceptButton, if (state.phase == OverlayPhase.ACCEPTING) "ACCEPTING..." else "ACCEPT")
+    setTextIfChanged(declineButton, if (state.phase == OverlayPhase.DECLINING) "DECLINING..." else "DECLINE")
+  }
+
+  private fun setTextIfChanged(view: TextView, next: String) {
+    if (view.text?.toString() == next) return
+    view.text = next
   }
 
   fun expand() {
@@ -139,38 +155,19 @@ class OverlayRenderer(
   }
 
   fun destroy() {
-    stopPulse()
     root.animate().cancel()
     circle.animate().cancel()
     card.animate().cancel()
+    circle.scaleX = 1f
+    circle.scaleY = 1f
   }
 
   private fun setButtonsEnabled(enabled: Boolean) {
+    if (acceptButton.isEnabled == enabled) return
     acceptButton.isEnabled = enabled
     declineButton.isEnabled = enabled
     acceptButton.alpha = if (enabled) 1f else 0.74f
     declineButton.alpha = if (enabled) 1f else 0.74f
-  }
-
-  private fun startPulse() {
-    if (pulseAnimator?.isRunning == true) return
-    pulseAnimator = ValueAnimator.ofFloat(1f, 1.08f, 1f).apply {
-      duration = 900
-      repeatCount = ValueAnimator.INFINITE
-      addUpdateListener {
-        val s = it.animatedValue as Float
-        circle.scaleX = s
-        circle.scaleY = s
-      }
-      start()
-    }
-  }
-
-  private fun stopPulse() {
-    pulseAnimator?.cancel()
-    pulseAnimator = null
-    circle.scaleX = 1f
-    circle.scaleY = 1f
   }
 
   private fun actionButton(text: String, bg: Int, fg: Int, onClick: () -> Unit): TextView {

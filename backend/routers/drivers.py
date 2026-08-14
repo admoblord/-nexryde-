@@ -388,11 +388,31 @@ async def get_driver_profile(user_id: str, request: Request):
     if isinstance(hit, dict) and hit.get("user_id"):
         return hit
 
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
+    # Exclude legacy inline binaries at the Mongo layer — post-fetch truncation still
+    # paid the Atlas transfer cost and slowed driver home when docs lived on profiles.
+    profile = await db.driver_profiles.find_one(
+        {"user_id": user_id},
+        {
+            "face_image": 0,
+            "face_anchor_image": 0,
+            "liveness_probe_image": 0,
+            "face_capture_meta": 0,
+            "passport_photo": 0,
+            "drivers_license": 0,
+            "insurance": 0,
+            "vehicle_registration": 0,
+            "vehicle_license": 0,
+            "hacking_permit": 0,
+            "road_worthiness": 0,
+            "vehicle_front": 0,
+            "vehicle_interior": 0,
+            "vehicle_ac": 0,
+        },
+    )
     if not profile:
         raise HTTPException(status_code=404, detail="Driver profile not found")
     profile["_id"] = str(profile["_id"])
-    # Never cache huge binary blobs in Redis.
+    # Defensive: never cache huge binary blobs in Redis if a legacy field sneaks through.
     for heavy in ("face_image", "passport_photo", "drivers_license", "insurance"):
         if isinstance(profile.get(heavy), str) and len(profile[heavy]) > 5000:
             profile[heavy] = ""
@@ -729,6 +749,69 @@ async def put_driver_online(
     return result
 
 
+def _flag_on(name: str) -> bool:
+    return (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def driver_plate_on_record(profile: dict) -> str:
+    """Plate from any of the shapes the profile has used, uppercased. '' when absent."""
+    direct = str(
+        profile.get("vehicle_plate_number") or profile.get("vehicle_plate") or ""
+    ).strip()
+    if direct:
+        return direct.upper()
+    for vehicle in profile.get("vehicles") or []:
+        if not isinstance(vehicle, dict):
+            continue
+        plate = str(vehicle.get("plate") or vehicle.get("plate_number") or "").strip()
+        if plate:
+            return plate.upper()
+    return ""
+
+
+async def _assert_online_gate(user_id: str, profile: dict) -> None:
+    """Plate + compliance gate for going online.
+
+    Report-only unless the matching env flag is set, because enforcing either
+    check against the current fleet data would leave nobody able to work. Both
+    paths always log so the impact is visible before anyone flips the switch.
+    """
+    plate = driver_plate_on_record(profile or {})
+    if not plate:
+        logger.warning("driver_online_gate: no plate on record driver=%s", user_id)
+        if _flag_on("NEXRYDE_REQUIRE_PLATE_ONLINE"):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "ERR_NO_PLATE",
+                    "message": "Add your vehicle plate number before going online. Riders check the plate before they get in.",
+                },
+            )
+
+    try:
+        from driver_compliance import get_driver_compliance_snapshot
+
+        snapshot = await get_driver_compliance_snapshot(user_id)
+    except Exception:
+        logger.debug("driver_online_gate: compliance snapshot failed", exc_info=True)
+        return
+
+    if snapshot.get("can_go_online") is False:
+        reasons = snapshot.get("blocking_reasons") or ["compliance"]
+        logger.warning(
+            "driver_online_gate: compliance says no driver=%s reasons=%s", user_id, reasons
+        )
+        if _flag_on("NEXRYDE_ENFORCE_ONLINE_COMPLIANCE"):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "ERR_NOT_COMPLIANT",
+                    "message": "Your account is not cleared to go online: " + ", ".join(reasons),
+                    "blocking_reasons": reasons,
+                },
+            )
+
+
 async def apply_driver_online_toggle(
     driver_id: str,
     is_online: bool,
@@ -807,6 +890,12 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
                     }
                 },
             )
+            try:
+                from hot_cache import invalidate_driver_hot_cache
+
+                await invalidate_driver_hot_cache(user_id)
+            except Exception:
+                logger.debug("driver hot-cache invalidate (already online) failed", exc_info=True)
             return {"message": "Driver is now online", "already_online": True}
 
         # Lean projection — never pull bloated profile blobs on this hot path.
@@ -907,6 +996,19 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
                 raise
             except Exception as compliance_error:
                 logger.warning(f"Document expiry pre-check warning for {user_id}: {compliance_error}")
+
+        # Plate + full compliance gate.
+        #
+        # A driver with no plate on record reaches the rider as "—", which is the
+        # one detail a rider checks before getting into a car. The composite
+        # can_go_online was also computed and then ignored here.
+        #
+        # Both are report-only by default: on the current fleet 26 of 29 drivers
+        # have no plate and every driver is short of monthly re-upload, so
+        # switching these on without first backfilling the data would put nobody
+        # online. Flip NEXRYDE_REQUIRE_PLATE_ONLINE / NEXRYDE_ENFORCE_ONLINE_COMPLIANCE
+        # to "1" once the records are populated.
+        await _assert_online_gate(user_id, profile)
 
         from driver_trial_policy import record_first_go_online
         from routers.payments import _ensure_auto_trial_for_verified_driver, _evaluate_driver_trial
@@ -1027,6 +1129,12 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
                     {"user_id": user_id},
                     {"$set": {"is_online": False}},
                 )
+                try:
+                    from hot_cache import invalidate_driver_hot_cache
+
+                    await invalidate_driver_hot_cache(user_id)
+                except Exception:
+                    logger.debug("driver hot-cache invalidate (already offline) failed", exc_info=True)
                 return {"message": "Driver is now offline", "already_offline": True}
 
     profile_online_update: dict = {"$set": {"is_online": is_online}}
@@ -1091,6 +1199,14 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
         except Exception:
             pass
         await db.driver_profiles.update_one({"user_id": user_id}, profile_online_update)
+
+    # Profile hot-cache must not keep a stale is_online after toggle.
+    try:
+        from hot_cache import invalidate_driver_hot_cache
+
+        await invalidate_driver_hot_cache(user_id)
+    except Exception:
+        logger.debug("driver hot-cache invalidate after online toggle failed", exc_info=True)
 
     return {"message": f"Driver is now {'online' if is_online else 'offline'}"}
 
@@ -1733,7 +1849,20 @@ async def get_available_drivers(vehicle_type: Optional[str] = None, lat: Optiona
         query = {"is_online": True, "verification_status": "approved"}
         if vehicle_type:
             query["vehicle_type"] = vehicle_type
-        drivers = await db.driver_profiles.find(query, {"_id": 0}).to_list(200)
+        drivers = await db.driver_profiles.find(
+            query,
+            {
+                "_id": 0,
+                "user_id": 1,
+                "name": 1,
+                "rating": 1,
+                "total_rides": 1,
+                "vehicle_type": 1,
+                "vehicle_plate": 1,
+                "vehicle_model": 1,
+                "current_location": 1,
+            },
+        ).to_list(200)
         driver_ids = [d.get("user_id") for d in drivers if d.get("user_id")]
         active_subscriptions = await db.subscriptions.find(
             {"driver_id": {"$in": driver_ids}, "status": {"$in": ["active", "trial", "grace_period"]}},
@@ -3150,9 +3279,19 @@ async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWit
     from security_advanced import general_limiter
     await general_limiter.check_rate_limit(http_request, f"withdraw:{driver_id}")
     verify_owner_strict(http_request, driver_id)
-    user = await db.users.find_one({"id": driver_id}, {"_id": 0, "role": 1, "wallet_balance": 1, "profile_image": 1}) or {}
+    user = await db.users.find_one(
+        {"id": driver_id},
+        {"_id": 0, "role": 1, "wallet_balance": 1, "profile_image": 1, "earnings_frozen": 1},
+    ) or {}
     if user.get("role") != "driver":
         raise HTTPException(status_code=403, detail="Driver account required")
+    # The freeze (SIM swap / fraud review) was enforced only in the app, so a direct
+    # API call could still drain a frozen wallet.
+    if bool(user.get("earnings_frozen")):
+        raise HTTPException(
+            status_code=403,
+            detail="Earnings are on hold while we verify your account. Contact support.",
+        )
 
     profile = await db.driver_profiles.find_one(
         {"user_id": driver_id},
@@ -3224,8 +3363,30 @@ async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWit
             },
         }
     )
-    # Debit balance AFTER ledger is committed
-    await db.users.update_one({"id": driver_id}, {"$inc": {"wallet_balance": -amount}})
+    # Debit AFTER the ledger is committed, and only if the balance still covers it.
+    # The earlier read-then-write let two concurrent withdrawals both pass the
+    # balance check and overdraw the wallet.
+    debit = await db.users.update_one(
+        {"id": driver_id, "wallet_balance": {"$gte": amount}},
+        {"$inc": {"wallet_balance": -amount}},
+    )
+    if debit.modified_count != 1:
+        await db.transactions.update_one(
+            {"reference": withdraw_reference},
+            {
+                "$set": {
+                    "status": "failed",
+                    "failure_reason": "insufficient_balance_at_debit",
+                    "failed_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+        fresh = await find_user_by_id(driver_id, {"_id": 0, "wallet_balance": 1}) or {}
+        available = float(fresh.get("wallet_balance", 0.0) or 0.0)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient wallet balance. Available: ₦{available:,.2f}",
+        )
     await db.face_verifications.insert_one(
         {
             "driver_id": driver_id,

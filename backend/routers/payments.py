@@ -1151,7 +1151,10 @@ LEGACY_FARE_CONFIG = {
 
 # ==================== SUBSCRIPTION ENDPOINTS ====================
 async def _assert_driver_can_activate_subscription(driver_id: str):
-    profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
+    profile = await db.driver_profiles.find_one(
+        {"user_id": driver_id},
+        {"_id": 0, "documents_verified": 1, "verification_status": 1},
+    ) or {}
     if not profile.get("documents_verified") or profile.get("verification_status") != "approved":
         raise HTTPException(
             status_code=403,
@@ -1961,34 +1964,64 @@ async def verify_pending_subscription_checkout(
     if not verify_result.get("verified"):
         reason_txt = str(verify_result.get("reason") or "").lower()
         tx_status = str(verify_result.get("transaction_status") or "").lower()
+        provider_status = str((verify_result.get("provider_status") or "")).lower()
+        effective_status = tx_status or provider_status
         if "timeout" in reason_txt or "connect" in reason_txt:
             reason_code = "network_timeout"
-        elif tx_status in ("pending", "processing"):
+        elif effective_status in ("pending", "processing"):
             reason_code = "payment_pending"
-        elif tx_status in ("failed", "declined", "reversed"):
+        elif effective_status in ("failed", "declined", "reversed"):
             reason_code = "payment_failed"
+        elif effective_status in ("abandoned", "cancelled", "canceled", "expired"):
+            reason_code = "payment_abandoned"
         else:
             reason_code = "gateway_failed"
-        logger.info(
-            "sub_verify_not_verified: driver=%s ref=%s reason=%s tx_status=%s",
-            driver_id, ref, reason_code, tx_status,
+
+        # A driver who walked away from the Squad page left an intent that stayed
+        # "pending" for good, so the app kept saying "payment is processing" and the
+        # Subscribe button stayed disabled — with the trial over, that is a driver who
+        # can never pay. Close anything Squad calls terminal, and sweep intents too old
+        # to be real, so a fresh checkout can start.
+        terminal = effective_status in (
+            "abandoned", "cancelled", "canceled", "expired", "failed", "declined", "reversed",
         )
+        created = intent.get("created_at")
+        if isinstance(created, str):
+            try:
+                created = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            except Exception:
+                created = None
+        if created is not None and created.tzinfo is not None:
+            created = created.replace(tzinfo=None)
+        stale = bool(created and (datetime.utcnow() - created) > timedelta(hours=24))
+        close_intent = terminal or (stale and reason_code != "payment_pending")
+
+        logger.info(
+            "sub_verify_not_verified: driver=%s ref=%s reason=%s tx_status=%s closing=%s",
+            driver_id, ref, reason_code, effective_status or "(none)", close_intent,
+        )
+        set_fields: dict = {
+            "failed_reason": reason_code,
+            "failure_reason": reason_code,
+            "last_verify_result": verify_result,
+            "updated_at": datetime.utcnow(),
+        }
+        if close_intent:
+            set_fields["status"] = "failed" if reason_code == "payment_failed" else "abandoned"
+            set_fields["closed_at"] = datetime.utcnow()
+            set_fields["closed_by"] = "verify_pending_terminal"
         await db.subscription_payment_intents.update_one(
             {"id": intent.get("id"), "status": "pending"},
-            {
-                "$set": {
-                    "failed_reason": reason_code,
-                    "failure_reason": reason_code,
-                    "last_verify_result": verify_result,
-                    "updated_at": datetime.utcnow(),
-                }
-            },
+            {"$set": set_fields},
         )
         return {
             "verified": False,
             "reason": reason_code,
             "verify_result": verify_result,
-            "transaction_status": tx_status or None,
+            "transaction_status": effective_status or None,
+            # Tells the app to drop the "processing" banner and re-enable Subscribe.
+            "checkout_closed": close_intent,
+            "can_retry": True,
         }
 
     expected_amount = _normalize_amount(intent.get("amount_ngn"))
@@ -4026,15 +4059,33 @@ async def estimate_fare(request: FareEstimateRequest, http_request: Request):
 
 
 # ==================== WALLET ENDPOINTS ====================
+
+# List views never need Squad/webhook blobs (often multi-KB per row).
+_WALLET_TX_LIST_PROJECTION = {
+    "_id": 0,
+    "id": 1,
+    "trip_id": 1,
+    "type": 1,
+    "source": 1,
+    "amount": 1,
+    "status": 1,
+    "timestamp": 1,
+    "payment_method": 1,
+    "reference": 1,
+    "description": 1,
+    "direction": 1,
+}
+
+
 @payments_router.get("/wallet/me")
-async def get_wallet_me(request: Request, limit: int = 25):
+async def get_wallet_me(request: Request, limit: int = 15):
     """Authenticated user: balance + recent transactions (must be before /wallet/{user_id})."""
     user_id = require_authenticated(request)
     verify_owner_strict(request, user_id)
     user = await find_user_by_id(user_id, {"_id": 0, "wallet_balance": 1})
     safe_limit = max(1, min(limit, 100))
     rows = (
-        await db.transactions.find({"user_id": user_id}, {"_id": 0})
+        await db.transactions.find({"user_id": user_id}, _WALLET_TX_LIST_PROJECTION)
         .sort("timestamp", -1)
         .limit(safe_limit)
         .to_list(safe_limit)
@@ -4218,7 +4269,7 @@ async def get_wallet_transactions(user_id: str, request: Request, limit: int = 3
     safe_limit = max(1, min(limit, 100))
     rows = await db.transactions.find(
         {"user_id": user_id},
-        {"_id": 0}
+        _WALLET_TX_LIST_PROJECTION,
     ).sort("timestamp", -1).limit(safe_limit).to_list(safe_limit)
     for tx in rows:
         ts = tx.get("timestamp")

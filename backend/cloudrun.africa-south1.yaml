@@ -48,6 +48,12 @@ spec:
               value: production
             - name: NEXRYDE_SLOW_REQUEST_MS
               value: "800"
+            # Dumps thread stacks when the loop blocks long enough for Cloud Run's
+            # liveness probe to start missing (3 x 30s), so the culprit shows up in logs.
+            - name: NEXRYDE_LOOP_WATCHDOG
+              value: "1"
+            - name: NEXRYDE_LOOP_STALL_MS
+              value: "5000"
             - name: NEXRYDE_RESPONSE_TIME_HEADER
               value: "1"
             - name: DB_NAME
@@ -197,6 +203,14 @@ spec:
                 secretKeyRef:
                   name: BREVO_API_KEY
                   key: latest
+            # brevo_is_configured() needs BOTH the key and a verified sender.
+            # Without this, email OTP fell through to the unconfigured SMTP path
+            # and every login request returned 503.
+            - name: BREVO_SENDER_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: BREVO_SENDER_EMAIL
+                  key: latest
             - name: GOOGLE_MAPS_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -223,19 +237,23 @@ spec:
               mountPath: /secrets/firebase
               readOnly: true
 
+          # Health checks take ~0.5s when healthy; 1s defaults kill instances
+          # under Mongo/VPC blips and surface as "No places found" / skeleton tabs.
           livenessProbe:
             httpGet:
               path: /api/health
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 30
+            timeoutSeconds: 5
             failureThreshold: 3
 
           readinessProbe:
             httpGet:
               path: /api/health/ready
               port: 8080
-            periodSeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
             failureThreshold: 3
 
           startupProbe:
@@ -244,7 +262,8 @@ spec:
               port: 8080
             initialDelaySeconds: 10
             periodSeconds: 5
-            failureThreshold: 12
+            timeoutSeconds: 5
+            failureThreshold: 24
 
       volumes:
         - name: firebase-service-account

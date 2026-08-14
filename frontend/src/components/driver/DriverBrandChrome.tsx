@@ -5,6 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { HEADER_BLUR_DEFAULT, HEADER_BLUR_INCOMING } from '@/src/components/driver/driverDockTheme';
 import { BRAND } from '@/src/constants/designSystem';
+import { NexrydeMark } from '@/src/components/brand/NexrydeMark';
 import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 
 export type DriverBrandHeaderVariant = 'default' | 'incoming' | 'trip-light';
@@ -46,7 +47,7 @@ function DriverHeaderAvatar({
   );
 }
 
-/** Matches rider booking chrome — NX badge, NEXRYDE wordmark, driver photo (Uber-style). */
+/** Matches rider booking chrome — app icon, NEXRYDE wordmark, driver photo (Uber-style). */
 export function DriverBrandHeaderRow({
   topInset,
   variant = 'default',
@@ -162,14 +163,7 @@ export function DriverBrandHeaderRow({
             </TouchableOpacity>
           ) : null}
           <View style={[lightStyles.left, onMenuPress && { marginLeft: 4 }]}>
-            <LinearGradient
-              colors={['#2563EB', '#1E40AF']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={lightStyles.logo}
-            >
-              <Text style={lightStyles.logoTxt}>NX</Text>
-            </LinearGradient>
+            <NexrydeMark size={34} />
             <Text style={lightStyles.brand}>NEXRYDE</Text>
           </View>
           <DriverHeaderAvatar
@@ -200,14 +194,7 @@ export function DriverBrandHeaderRow({
       />
       <View style={[styles.wrap, { paddingTop: topInset + 6 }]}>
         <View style={styles.left}>
-          <LinearGradient
-            colors={['#2563EB', '#1E3A8A']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.logo}
-          >
-            <Text style={styles.logoTxt}>NX</Text>
-          </LinearGradient>
+          <NexrydeMark size={34} />
           <Text style={styles.brand}>NEXRYDE</Text>
         </View>
         <DriverHeaderAvatar

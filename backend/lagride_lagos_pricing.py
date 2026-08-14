@@ -58,9 +58,23 @@ Verification overlays (optional, on top of baseline)
 • **Peace Garden** pickup: Ikorodu / Ikeja dropoff corridors use calibrated ₦/km
   (see ``PEACE_GARDEN_TO_*`` constants). Special corridors are not overridden by the ₦540 long-haul card.
 
-SERVICE MULTIPLIERS — **removed** (always 1.0× for all tiers)
+SERVICE MULTIPLIERS (NEXRYDE Lagos — distance-banded)
 ----------------------------------------------------------------------------------------
-Standard / XL / Comfort / Premium use the same distance + time math.
+Applied to the distance × area line. Uplift is widest on very short trips and tapers
+with distance so premium tiers stay bookable on long runs.
+
+• **≤5 km** — Standard **1.0×** · XL **1.20×** · Comfort **1.30×** · Premium **1.45×**
+
+• **5–15 km** — Standard **1.0×** · XL **1.08×** · Comfort **1.15×** · Premium **1.28×**
+
+• **15+ km** — Standard **1.0×** · XL **1.02×** · Comfort **1.04×** · Premium **1.10×**
+
+• **EV** → **1.0×** (economy-class energy tier)
+
+• **Omni / budget** — not NEXRYDE vehicles; normalized to **economy** (1.0×)
+
+Unknown keys fall back to **economy** (1.0×). The Sangotedo ↔ Ikorodu corridor keeps its
+own near-flat ladder because its Standard price is already a promo ceiling.
 
 SURGE — morning & evening only (does not exist at other times)
 ---------------------------------------------------------------------------------
@@ -145,10 +159,11 @@ _LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN = 39_547.0
 LAGOS_SANGOTEDO_IKORODU_CORRIDOR_PER_KM = _LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN / (
     _LAGRIDE_SANGOTEDO_IKORODU_SAMPLE_KM * LAGOS_MARKET_WIDE_FARE_MULTIPLIER
 )
-# Service multipliers removed — all tiers 1.0×.
-_LAGRIDE_SANGOTEDO_XL_M = 1.0
-_LAGRIDE_SANGOTEDO_COMFORT_M = 1.0
-_LAGRIDE_SANGOTEDO_PREMIUM_M = 1.0
+# Corridor tiers stay nearly flat: the ₦39,547 Standard ceiling is already a promo
+# price, so tier uplift here is a token amount rather than the city ladder.
+_LAGRIDE_SANGOTEDO_XL_M = 1.005
+_LAGRIDE_SANGOTEDO_COMFORT_M = 1.01
+_LAGRIDE_SANGOTEDO_PREMIUM_M = 1.02
 LAGOS_SANGOTEDO_IKORODU_SERVICE_MULTIPLIERS: dict[str, float] = {
     "economy": 1.0,
     "standard": 1.0,
@@ -170,25 +185,47 @@ LAGOS_SANGOTEDO_IKORODU_TIER_CEILINGS: dict[str, float] = {
     "executive": round(_LAGRIDE_SANGOTEDO_IKORODU_STD_PROMO_NGN * _LAGRIDE_SANGOTEDO_PREMIUM_M),
 }
 
-# SERVICE MULTIPLIERS — removed (flat 1.0 for every tier / distance band).
-LAGRIDE_SERVICE_PRO = 1.0
+# SERVICE MULTIPLIERS — distance-banded. Uplift is largest on very short trips,
+# where a bigger/nicer vehicle costs the driver about the same to run but the fare
+# base is small, and tapers on long trips so a Premium airport run stays bookable.
+LAGRIDE_SERVICE_PRO = 1.1
 LAGRIDE_SERVICE_STANDARD = 1.0
 LAGRIDE_SERVICE_EV = 1.0
 LAGRIDE_VERY_SHORT_MAX_KM = 5.0
 LAGRIDE_LONG_TRIP_SERVICE_KM = 15.0
-_FLAT_SERVICE = {
+# ≤5 km
+LAGRIDE_VERY_SHORT_SERVICE_MULTIPLIERS: dict[str, float] = {
     "economy": 1.0,
     "standard": 1.0,
     "ev": 1.0,
-    "xl": 1.0,
-    "comfort": 1.0,
-    "premium": 1.0,
-    "pro": 1.0,
-    "executive": 1.0,
+    "xl": 1.20,
+    "comfort": 1.30,
+    "premium": 1.45,
+    "pro": 1.45,
+    "executive": 1.45,
 }
-LAGRIDE_VERY_SHORT_SERVICE_MULTIPLIERS: dict[str, float] = dict(_FLAT_SERVICE)
-LAGRIDE_SHORT_TRIP_SERVICE_MULTIPLIERS: dict[str, float] = dict(_FLAT_SERVICE)
-LAGRIDE_LONG_TRIP_SERVICE_MULTIPLIERS: dict[str, float] = dict(_FLAT_SERVICE)
+# 5–15 km
+LAGRIDE_SHORT_TRIP_SERVICE_MULTIPLIERS: dict[str, float] = {
+    "economy": 1.0,
+    "standard": 1.0,
+    "ev": 1.0,
+    "xl": 1.08,
+    "comfort": 1.15,
+    "premium": 1.28,
+    "pro": 1.28,
+    "executive": 1.28,
+}
+# 15+ km
+LAGRIDE_LONG_TRIP_SERVICE_MULTIPLIERS: dict[str, float] = {
+    "economy": 1.0,
+    "standard": 1.0,
+    "ev": 1.0,
+    "xl": 1.02,
+    "comfort": 1.04,
+    "premium": 1.10,
+    "pro": 1.10,
+    "executive": 1.10,
+}
 
 # SURGE — smart morning/evening only (see surge_pricing.SMART_SURGE_MULTIPLIER).
 NORMAL_SURGE_LAGride = 1.0

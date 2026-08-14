@@ -70,6 +70,7 @@ import {
   type TripDraftLocation,
 } from '@/src/utils/bookingTripDraft';
 import { tripLocationRecord } from '@/src/utils/tripCoords';
+import { fareEstimateDelayMs } from '@/src/utils/fareEstimateScheduling';
 import { TrafficIntelligence, type TrafficRoute } from '@/src/services/trafficAI';
 import MapComponent from '@/src/components/MapComponent';
 import { RiderBookingMapNative } from '@/src/components/map/RiderBookingMapNative';
@@ -96,11 +97,17 @@ import {
 import { AnimatedPickupLabel } from '@/src/components/rider/AnimatedPickupLabel';
 import { useWalletEnabled } from '@/src/services/clientConfig';
 import { useFlowLayout } from '@/src/constants/flowLayout';
-import { useThemeColors } from '@/src/constants/theme';
 import { FIRST_RIDE_DISCOUNT_PCT } from '@/src/constants/commercialOffers';
 import { RIDER_PRIMARY_CTA_GRADIENT } from '@/src/constants/riderRideChrome';
 import { BookingBidInput } from '@/src/components/rider/BookingBidInput';
 import { BRAND, SURFACE } from '@/src/constants/designSystem';
+import {
+  alpha as TRIP_ALPHA,
+  colors as TRIP,
+  radius as TRIP_RADIUS,
+  shadow as TRIP_SHADOW,
+  type as TRIP_TYPE,
+} from '@/src/theme/tokens';
 
 /** Set `EXPO_PUBLIC_BOOKING_PROMO=false` to hide the booking promo strip entirely. */
 const BOOKING_PROMO_ENABLED = String(process.env.EXPO_PUBLIC_BOOKING_PROMO ?? 'true').toLowerCase() !== 'false';
@@ -201,22 +208,31 @@ function normalizeFareEstimatePayload(data: unknown): FareEstimateResponse {
   return { ...o, estimate_id, price_valid_until } as FareEstimateResponse;
 }
 
+/**
+ * Booking screen palette — light Bolt theme from `src/theme/tokens`.
+ *
+ * The keys keep their historic names so every style below reads the same, but they
+ * now resolve to the light surfaces: white sheets, navy text, lime primary. `white`
+ * is the primary *text* colour on this screen, which is navy in a light theme —
+ * renaming it across ~400 call sites would be churn for no visual gain.
+ */
 const COLORS = {
-  bg: BRAND.bgDeep,
-  card: BRAND.bgCard,
-  cardLight: BRAND.bgElevated,
-  green: BRAND.primary,
-  blue: BRAND.info,
-  accentBlue: BRAND.info,
-  /** Inner route highlight on map (NEXRYDE mint, not generic sky-blue). */
-  routeHighlight: BRAND.primaryMint,
-  lime: BRAND.primaryLight,
-  white: BRAND.white,
-  muted: BRAND.textSecondary,
-  dim: BRAND.textMuted,
-  yellow: BRAND.warning,
-  red: BRAND.danger,
-  purple: BRAND.accentPurple,
+  bg: TRIP.bg,
+  card: TRIP.bgMuted,
+  cardLight: TRIP.bg,
+  green: TRIP.greenDark,
+  blue: TRIP.blue,
+  accentBlue: TRIP.blue,
+  /** Inner route highlight on map — brand lime reads over pale Bolt roads. */
+  routeHighlight: TRIP.green,
+  lime: TRIP.green,
+  white: TRIP.textPrimary,
+  muted: TRIP.textSecondary,
+  dim: TRIP.textTertiary,
+  yellow: TRIP.amber,
+  red: TRIP.red,
+  purple: TRIP.blue,
+  border: TRIP.border,
 };
 
 type BookingVehicle = {
@@ -268,22 +284,26 @@ function BookInDriveStyle() {
   const requestedDriverName = params.driverName || null;
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
-  const { colors, isDark } = useThemeColors();
+  /**
+   * Booking is locked to the light trip theme. A dark sheet over the pale Bolt
+   * map mixed lime-on-navy cards with a white unselected card — that is the
+   * screenshot that looked like two themes at once. Lime stays the accent
+   * (selected ring, Live fares, Continue). Type and fares stay navy.
+   */
   const bookingTheme = useMemo(
     () => ({
-      bg: colors.background,
-      sheet: colors.background,
-      // Booking map always uses Bolt light basemap (#EEF3E8 landscape).
+      bg: TRIP.bg,
+      sheet: TRIP.bg,
       mapBg: '#EEF3E8',
-      statusBar: colors.statusBar,
-      text: colors.text,
-      muted: colors.textMuted,
-      card: isDark ? COLORS.card : colors.card,
-      cardLight: isDark ? COLORS.cardLight : colors.surfaceAlt,
-      border: isDark ? 'rgba(148,163,184,0.2)' : colors.border,
-      mapStyle: getNexrydeMapStyle(isDark),
+      statusBar: 'dark-content' as const,
+      text: TRIP.textPrimary,
+      muted: TRIP.textSecondary,
+      card: TRIP.bg,
+      cardLight: TRIP.bgMuted,
+      border: TRIP.border,
+      mapStyle: getNexrydeMapStyle(false),
     }),
-    [colors, isDark],
+    [],
   );
 
   const [pickup, setPickup] = useState('');
@@ -351,6 +371,12 @@ function BookInDriveStyle() {
   /** Bumps whenever pickup, destination, or stop changes — stale fare/route responses are ignored. */
   const pricingEpochRef = useRef(0);
   const fareDetailsEpochRef = useRef(0);
+  /** Last route we priced — lets a genuinely new destination skip the settle delay. */
+  const lastPricedRouteRef = useRef<{
+    pickup: { lat: number; lng: number } | null;
+    destination: { lat: number; lng: number } | null;
+    priced: boolean;
+  }>({ pickup: null, destination: null, priced: false });
   const ROUTE_DRIFT_KM = 1.0;
 
   const [fareExplainModal, setFareExplainModal] = useState<
@@ -637,7 +663,7 @@ function BookInDriveStyle() {
           ? { lat: sel.lat, lng: sel.lng }
           : null;
 
-      // Prefer coords already on the suggestion (local landmarks / saved / recent).
+      // Prefer coords already on the suggestion (local landmarks / saved / recent / geocode fallback).
       // Place Details only when we lack coordinates — keeps Maps budget ≤3/trip.
       if (!coords && sel.placeId && !sel.placeId.startsWith('prediction-')) {
         const details = await fetchPlaceDetails(sel.placeId, sel.sessionToken);
@@ -646,8 +672,8 @@ function BookInDriveStyle() {
           if (details.description) desc = details.description;
         }
       }
-      // Last resort only for free-text / recent rows without place_id or coords.
-      if (!coords && !sel.placeId && desc.length >= 3) {
+      // Fall through to address geocode when details fail (synthetic ids, 404, quota).
+      if (!coords && desc.length >= 3) {
         const resolved = await resolveAddressToCoords(desc);
         if (resolved) {
           coords = { lat: resolved.lat, lng: resolved.lng };
@@ -1231,9 +1257,10 @@ function BookInDriveStyle() {
         sessionToken && sessionToken.trim().length > 0
           ? `?sessiontoken=${encodeURIComponent(sessionToken.trim())}`
           : '';
+      // Place details require auth — without a bearer the pick never resolves coords.
       const res = await authedFetch(
         `${BACKEND_URL}/api/places/details/${encodeURIComponent(id)}${sessionQ}`,
-        { method: 'GET', preserveSessionOn401: true },
+        { method: 'GET', preserveSessionOn401: true, timeoutMs: 12_000 },
       );
       const data = await res.json().catch(() => ({}));
       const lat = Number(data?.latitude);
@@ -1862,7 +1889,23 @@ function BookInDriveStyle() {
         /* fare matrix best-effort */
       }
     };
-    const timer = setTimeout(run, 400);
+    // A committed destination goes straight out — the rider is staring at the
+    // screen waiting for a price. The delay is only for coordinate churn.
+    const delay = fareEstimateDelayMs({
+      previousPickup: lastPricedRouteRef.current.pickup,
+      previousDestination: lastPricedRouteRef.current.destination,
+      nextPickup: pickupCoords,
+      nextDestination: destinationCoords,
+      isFirstEstimate: !lastPricedRouteRef.current.priced,
+    });
+    lastPricedRouteRef.current = {
+      pickup: pickupCoords ? { lat: pickupCoords.lat, lng: pickupCoords.lng } : null,
+      destination: destinationCoords
+        ? { lat: destinationCoords.lat, lng: destinationCoords.lng }
+        : null,
+      priced: true,
+    };
+    const timer = setTimeout(run, delay);
     return () => {
       clearTimeout(timer);
     };
@@ -2481,13 +2524,9 @@ function BookInDriveStyle() {
   return (
     <SafeAreaView style={[s.container, { backgroundColor: bookingTheme.bg }]} edges={['top']}>
       <StatusBar barStyle={bookingTheme.statusBar} backgroundColor={bookingTheme.bg} />
-      {/* MAP SECTION */}
-      <View
-        style={[
-          s.mapArea,
-          { backgroundColor: bookingTheme.mapBg, height: routeReady ? '58%' : '46%' },
-        ]}
-      >
+      {/* MAP — full bleed. It runs to the bottom edge with the sheet floating
+          over it, rather than being cropped into a box above the sheet. */}
+      <View style={[s.mapArea, { backgroundColor: bookingTheme.mapBg }]}>
         {pickupCoords ? (
           !useNativeBookingMap ? (
             <MapComponent
@@ -2660,11 +2699,13 @@ function BookInDriveStyle() {
 
       </View>
 
-      {/* BOTTOM SHEET */}
+      {/* BOTTOM SHEET — floats over the map; height is capped so the map stays
+          visible above it instead of the sheet claiming the rest of the screen. */}
       <Animated.View
         style={[
           s.sheet,
           { backgroundColor: bookingTheme.sheet },
+          { maxHeight: routeReady ? '62%' : '52%' },
           { transform: [{ translateY: sheetSlide }] },
         ]}
       >
@@ -2991,7 +3032,7 @@ function BookInDriveStyle() {
                       <ActivityIndicator size="small" color={v.color} />
                     ) : price > 0 ? (
                       <>
-                        <Text style={[s.inlineCatPrice, isSelected && { color: v.color }]}>
+                        <Text style={s.inlineCatPrice}>
                           ₦{price.toLocaleString()}
                         </Text>
                         {listOrig != null && listOrig > price ? (
@@ -3011,8 +3052,8 @@ function BookInDriveStyle() {
                       <Text style={s.firstRideBadgeText}>-{FIRST_RIDE_DISCOUNT_PCT}%</Text>
                     </View>
                   ) : isSelected ? (
-                    <View style={[s.inlineCatCheck, { backgroundColor: v.color }]}>
-                      <Ionicons name="checkmark" size={12} color="#FFF" />
+                    <View style={[s.inlineCatCheck, { backgroundColor: TRIP.green }]}>
+                      <Ionicons name="checkmark" size={12} color={TRIP.textOnGreen} />
                     </View>
                   ) : null}
                 </TouchableOpacity>
@@ -3332,19 +3373,33 @@ function BookInDriveStyle() {
                   accessibilityLabel="Get fare estimate"
                   accessibilityRole="button"
                 >
-                  <LinearGradient
-                    colors={selectedVehicle ? [...RIDER_PRIMARY_CTA_GRADIENT] : ['#334155', '#475569']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={[s.calcBtnGrad, { paddingVertical: 16 }]}
+                  {/* Lime with navy text. White on this green is ~2.1:1 and fails. */}
+                  <View
+                    style={[
+                      s.calcBtnGrad,
+                      {
+                        paddingVertical: 16,
+                        backgroundColor: selectedVehicle ? TRIP.green : TRIP.bgMuted,
+                      },
+                    ]}
                   >
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Ionicons name={selectedVehicle ? 'pricetag' : 'car-outline'} size={20} color="#0D1420" />
-                      <Text style={[s.calcBtnText, { color: '#0D1420', fontSize: 16, fontWeight: '900' }]}>
+                      <Ionicons
+                        name={selectedVehicle ? 'pricetag' : 'car-outline'}
+                        size={20}
+                        color={selectedVehicle ? TRIP.textOnGreen : TRIP.textTertiary}
+                      />
+                      <Text
+                        style={[
+                          s.calcBtnText,
+                          TRIP_TYPE.bodyBold,
+                          { color: selectedVehicle ? TRIP.textOnGreen : TRIP.textTertiary },
+                        ]}
+                      >
                         {selectedVehicle ? 'Get fare estimate' : 'Select a ride above'}
                       </Text>
                     </View>
-                  </LinearGradient>
+                  </View>
                 </TouchableOpacity>
               )}
             </View>
@@ -3399,21 +3454,29 @@ function BookInDriveStyle() {
               accessibilityLabel={`Continue with ${veh?.name || 'ride'} for ₦${currentFare.toLocaleString()}`}
               accessibilityRole="button"
             >
-              <LinearGradient
-                colors={isLoading ? ['#64748b', '#475569'] : [...RIDER_PRIMARY_CTA_GRADIENT]}
-                style={[s.btnGrad, { paddingVertical: 17 }]}
+              {/* Primary action: lime with navy text, per the contrast rule. */}
+              <View
+                style={[
+                  s.btnGrad,
+                  {
+                    paddingVertical: 17,
+                    backgroundColor: isLoading ? TRIP.bgMuted : TRIP.green,
+                  },
+                ]}
               >
                 {isLoading ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <ActivityIndicator color="#fff" size="small" />
-                    <Text style={[s.findBtnText, { color: '#fff', fontSize: 16 }]}>Matching drivers…</Text>
+                    <ActivityIndicator color={TRIP.textSecondary} size="small" />
+                    <Text style={[s.findBtnText, TRIP_TYPE.bodyBold, { color: TRIP.textSecondary }]}>
+                      Matching drivers…
+                    </Text>
                   </View>
                 ) : (
-                  <Text style={[s.findBtnText, { color: '#0D1420', fontSize: 17, fontWeight: '900' }]}>
+                  <Text style={[s.findBtnText, TRIP_TYPE.bodyBold, { color: TRIP.textOnGreen }]}>
                     Continue
                   </Text>
                 )}
-              </LinearGradient>
+              </View>
             </TouchableOpacity>
           </View>
         ) : null}
@@ -3755,7 +3818,8 @@ function BookInDriveStyle() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  mapArea: { height: '46%', position: 'relative', backgroundColor: BRAND.bgDeep, overflow: 'hidden' },
+  // Full-bleed: the map is the background of the screen, not a panel in it.
+  mapArea: { ...StyleSheet.absoluteFillObject, backgroundColor: TRIP.bgMuted, overflow: 'hidden' },
   confirmHeader: { marginBottom: 2 },
   confirmHeaderTitle: {
     fontSize: 20,
@@ -3795,7 +3859,7 @@ const s = StyleSheet.create({
     marginBottom: 4,
   },
   fareBandChip: {
-    backgroundColor: SURFACE.cardElevated,
+    backgroundColor: TRIP.bgMuted,
     borderRadius: 20,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -3803,9 +3867,9 @@ const s = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     borderWidth: 1,
-    borderColor: SURFACE.hairline,
+    borderColor: TRIP.border,
   },
-  fareBandChipText: { color: BRAND.textPrimary, fontSize: 12, fontWeight: '700' },
+  fareBandChipText: { color: TRIP.textPrimary, fontSize: 12, fontWeight: '700' },
   fareSurgeChip: {
     backgroundColor: 'rgba(245,158,11,0.14)',
     borderRadius: 20,
@@ -3817,9 +3881,9 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(245,158,11,0.4)',
   },
-  fareSurgeChipText: { color: '#fbbf24', fontSize: 11, fontWeight: '800' },
+  fareSurgeChipText: { color: TRIP.textPrimary, fontSize: 11, fontWeight: '800' },
   fareGiftChip: {
-    backgroundColor: BRAND.primaryMuted,
+    backgroundColor: TRIP_ALPHA.greenSoft,
     borderRadius: 20,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -3827,9 +3891,9 @@ const s = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     borderWidth: 1,
-    borderColor: SURFACE.glassBorder,
+    borderColor: TRIP.border,
   },
-  fareGiftChipText: { color: BRAND.primary, fontSize: 11, fontWeight: '800' },
+  fareGiftChipText: { color: TRIP.greenDark, fontSize: 11, fontWeight: '800' },
   fareRefreshChip: {
     width: 32,
     height: 32,
@@ -3874,9 +3938,9 @@ const s = StyleSheet.create({
     right: 0,
     bottom: 0,
     paddingTop: 10,
-    backgroundColor: 'rgba(13,20,32,0.96)',
+    backgroundColor: TRIP.bg,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: SURFACE.hairline,
+    borderTopColor: TRIP.border,
   },
   mapBidRouteCard: {
     position: 'absolute',
@@ -4032,13 +4096,13 @@ const s = StyleSheet.create({
     letterSpacing: -0.2,
   },
   recommendedTag: {
-    backgroundColor: 'rgba(34,225,128,0.16)',
+    backgroundColor: TRIP_ALPHA.greenSoft,
     borderRadius: 6,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
   recommendedTagText: {
-    color: '#22E180',
+    color: TRIP.greenDark,
     fontSize: 9,
     fontWeight: '900',
     letterSpacing: 0.6,
@@ -4052,12 +4116,12 @@ const s = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: 'rgba(30,41,59,0.95)',
+    backgroundColor: TRIP.bgMuted,
     borderWidth: 1,
-    borderColor: 'rgba(34,225,128,0.28)',
+    borderColor: TRIP.border,
   },
   stickyPaySelectorText: {
-    color: '#F1F5F9',
+    color: TRIP.textPrimary,
     fontSize: 14,
     fontWeight: '800',
   },
@@ -4339,14 +4403,16 @@ const s = StyleSheet.create({
   preferredText: { fontSize: 13, fontWeight: '800', color: '#FCA5A5' },
   preferredSub: { marginTop: 3, fontSize: 11, fontWeight: '600', color: 'rgba(252,211,231,0.85)', lineHeight: 15 },
   sheet: {
-    flex: 1,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: COLORS.bg,
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
-    marginTop: -24,
+    borderTopLeftRadius: TRIP_RADIUS.sheet,
+    borderTopRightRadius: TRIP_RADIUS.sheet,
     paddingTop: 10,
     overflow: 'hidden',
-    position: 'relative',
+    ...TRIP_SHADOW,
   },
   sheetHidden: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 0, overflow: 'hidden', opacity: 0, marginTop: 0, paddingTop: 0 },
   sheetContent: { flexGrow: 1 },
@@ -4407,23 +4473,24 @@ const s = StyleSheet.create({
   inlineCatRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.card,
+    backgroundColor: TRIP.bg,
     borderRadius: 18,
     paddingVertical: 14,
     paddingHorizontal: 14,
     marginBottom: 10,
     gap: 12,
     borderWidth: 1.5,
-    borderColor: 'rgba(148,163,184,0.14)',
+    borderColor: TRIP.border,
     position: 'relative',
   },
   inlineCatRowActive: {
-    backgroundColor: 'rgba(34,225,128,0.08)',
-    shadowColor: BRAND.primary,
-    shadowOpacity: 0.22,
-    shadowRadius: 12,
+    backgroundColor: TRIP_ALPHA.greenSoft,
+    borderColor: TRIP.green,
+    shadowColor: TRIP.green,
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+    elevation: 3,
   },
   inlineCatIcon: {
     width: 50,
@@ -4486,9 +4553,9 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: BRAND.primaryMuted,
+    backgroundColor: TRIP_ALPHA.greenSoft,
     borderWidth: 1,
-    borderColor: SURFACE.glassBorder,
+    borderColor: TRIP.border,
     borderRadius: 14,
     padding: 12,
     marginBottom: 12,
@@ -4497,19 +4564,19 @@ const s = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 12,
-    backgroundColor: 'rgba(34,225,128,0.18)',
+    backgroundColor: TRIP_ALPHA.greenRing,
     alignItems: 'center',
     justifyContent: 'center',
   },
   firstRideBannerTitle: {
     fontSize: 13,
     fontWeight: '800',
-    color: BRAND.primary,
+    color: TRIP.greenDark,
     marginBottom: 2,
   },
   firstRideBannerSub: {
     fontSize: 11,
-    color: '#A7F3D0',
+    color: TRIP.textSecondary,
     fontWeight: '500',
     lineHeight: 16,
   },
@@ -4517,7 +4584,7 @@ const s = StyleSheet.create({
     position: 'absolute',
     top: 8,
     right: 8,
-    backgroundColor: BRAND.primary,
+    backgroundColor: TRIP.green,
     borderRadius: 8,
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -4525,10 +4592,10 @@ const s = StyleSheet.create({
   firstRideBadgeText: {
     fontSize: 10,
     fontWeight: '900',
-    color: BRAND.bgDeep,
+    color: TRIP.textOnGreen,
   },
   routeSafetyCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: TRIP.bgMuted,
     borderRadius: 16,
     padding: 14,
     marginBottom: 16,

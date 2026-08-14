@@ -13,6 +13,7 @@ import {
   URGENT_PUSH_TYPES,
 } from '@/src/constants/pushNotificationRouting';
 import { normalizeExpoPushData } from '@/src/utils/expoPushData';
+import { applySafetyPushToTrip } from '@/src/utils/tripSafetyPrompts';
 
 const DISMISS_ACTION_IDENTIFIER = 'expo.modules.notifications.actions.DISMISS';
 
@@ -112,6 +113,16 @@ export function useNotifications() {
       if (target) router.push(target as any);
     });
 
+    const receivedSub = Notifications.addNotificationReceivedListener((notification) => {
+      const raw = normalizeExpoPushData(
+        notification.request.content.data as Record<string, unknown> | undefined,
+      );
+      if (!raw) return;
+      const store = useAppStore.getState();
+      const next = applySafetyPushToTrip(store.currentTrip, raw);
+      if (next && next !== store.currentTrip) store.setCurrentTrip(next);
+    });
+
     responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
       const raw = normalizeExpoPushData(
         response.notification.request.content.data as Record<string, unknown> | undefined
@@ -144,6 +155,7 @@ export function useNotifications() {
       if (responseListener.current) {
         responseListener.current.remove();
       }
+      receivedSub.remove();
     };
   }, [userId, canCallAuthedApi, user?.role, router]);
 }

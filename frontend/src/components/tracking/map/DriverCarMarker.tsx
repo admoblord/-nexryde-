@@ -2,7 +2,7 @@
  * Live tracking / arriving / driver-self marker — shared Nexryde car asset,
  * glides between GPS pings and rotates smoothly (no snap).
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, Platform, Easing, Image } from 'react-native';
 import { MarkerAnimated, AnimatedRegion } from 'react-native-maps';
 import { bearingDeg, isValidMapCoord } from '@/src/components/tracking/map/mapUtils';
@@ -49,7 +49,9 @@ export function DriverCarMarker({
   moving = true,
   tracksViewChanges = !ANDROID,
   moveDurationMs = DEFAULT_MOVE_MS,
-  size = 36,
+  // Bolt-scale vehicle. At 36 the car read as an anonymous blue smudge on the
+  // route and riders reported not seeing a car at all.
+  size = 46,
   status = 'on_trip',
 }: Props) {
   const lastCoord = useRef<{ lat: number; lng: number } | null>(null);
@@ -81,6 +83,18 @@ export function DriverCarMarker({
     const t = setTimeout(() => setSelfCapture(false), 3000);
     return () => clearTimeout(t);
   }, [moving, size, status]);
+
+  /**
+   * Android snapshots a custom marker view once and caches the bitmap. If that
+   * snapshot happens before the car PNG has decoded, the marker is stuck as an
+   * empty box for the rest of the trip — which is why the car could be missing
+   * while the route drew fine. Force one more capture after the image loads.
+   */
+  const onCarLoaded = useCallback(() => {
+    if (!ANDROID) return;
+    setSelfCapture(true);
+    setTimeout(() => setSelfCapture(false), 600);
+  }, []);
 
   useEffect(() => {
     if (!isValidMapCoord(lat, lng)) return;
@@ -163,12 +177,15 @@ export function DriverCarMarker({
 
   const carW = size;
   const carH = Math.round(size * 1.85);
-  const halo =
+  const accent =
     status === 'available'
       ? MAP_VEHICLE.accentAvailable
       : status === 'offline'
         ? MAP_VEHICLE.accentOffline
         : MAP_VEHICLE.accentOnTrip;
+  // Padding leaves room for the shadow and status ring without clipping.
+  const wrapW = carW + 26;
+  const wrapH = carH + 26;
 
   return (
     <MarkerAnimated
@@ -179,12 +196,38 @@ export function DriverCarMarker({
       flat
       rotation={displayHeading}
     >
-      <View style={[styles.wrap, { width: carW + 16, height: carH + 16 }]} pointerEvents="none">
-        {moving ? <View style={[styles.softHalo, { backgroundColor: halo }]} /> : null}
+      <View style={[styles.wrap, { width: wrapW, height: wrapH }]} pointerEvents="none">
+        {/* Ground shadow — lifts the car off the basemap so it never reads flat. */}
+        <View
+          style={[
+            styles.groundShadow,
+            {
+              width: carW * 0.94,
+              height: carH * 0.82,
+              borderRadius: carW * 0.5,
+            },
+          ]}
+        />
+        {/* Status ring, sized to the car instead of a fixed 28px puck that the
+            car completely covered. */}
+        {moving ? (
+          <View
+            style={[
+              styles.statusRing,
+              {
+                width: carW + 14,
+                height: carH + 10,
+                borderRadius: (carW + 14) / 2,
+                borderColor: accent,
+              },
+            ]}
+          />
+        ) : null}
         <Image
           source={mapVehicleImageSource(status)}
           style={{ width: carW, height: carH }}
           resizeMode="contain"
+          onLoadEnd={onCarLoaded}
           accessibilityLabel={`Nexryde vehicle ${status}`}
         />
       </View>
@@ -197,12 +240,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  softHalo: {
+  groundShadow: {
     position: 'absolute',
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    backgroundColor: '#0B1220',
     opacity: 0.22,
+    transform: [{ translateY: 2 }],
+  },
+  statusRing: {
+    position: 'absolute',
+    borderWidth: 2.5,
+    opacity: 0.5,
+    backgroundColor: 'transparent',
   },
 });
 

@@ -1,33 +1,48 @@
 /**
- * Destination / target ETA puck — Uber-style floating minute badge on the map.
+ * Floating map badge over a trip point.
+ *
+ * Label sits above the value: `Pickup` / `12 min`, `Dropoff` / `12:48 AM`.
+ * The dropoff badge shows the clock time the rider arrives, because "12 min"
+ * next to a destination reads as travel time from wherever you happen to be
+ * looking — an arrival time answers the question the rider is actually asking.
  */
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Marker } from 'react-native-maps';
-import { BRAND } from '@/src/constants/designSystem';
+
+import { alpha, colors as T, radius, shadow, space, type as TYPE } from '@/src/theme/tokens';
+import { arrivalClockTime } from '@/src/components/trip/MapBadge';
 
 type Props = {
   lat: number;
   lng: number;
   etaMin: number | null;
   label?: string;
-  tone?: 'green' | 'red' | 'blue' | 'amber';
+  /** `amber` is the act-now state (driver is here). */
+  tone?: 'navy' | 'amber' | 'green' | 'red' | 'blue';
+  /** Dropoff badges show an arrival clock time; everything else shows a duration. */
+  valueMode?: 'duration' | 'arrivalClock';
 };
 
 const TONES = {
-  green: { bg: '#22E5A0', text: '#041016' },
-  red: { bg: '#EF4444', text: '#fff' },
-  blue: { bg: '#3B82F6', text: '#fff' },
-  amber: { bg: '#F59E0B', text: '#0F172A' },
+  navy: { bg: T.navy, text: alpha.white },
+  amber: { bg: T.amber, text: T.navy },
+  // Legacy tones map onto the brand palette so no screen paints its own colour.
+  green: { bg: T.navy, text: alpha.white },
+  red: { bg: T.navy, text: alpha.white },
+  blue: { bg: T.blue, text: alpha.white },
 } as const;
 
-export function EtaRoutePuck({ lat, lng, etaMin, label, tone = 'green' }: Props) {
+export function EtaRoutePuck({ lat, lng, etaMin, label, tone = 'navy', valueMode = 'duration' }: Props) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  const colors = TONES[tone];
-  const etaTxt =
-    etaMin != null && Number.isFinite(etaMin) && etaMin >= 0
-      ? `${Math.max(1, Math.round(etaMin))} min`
-      : null;
+  const palette = TONES[tone] ?? TONES.navy;
+
+  const hasEta = etaMin != null && Number.isFinite(etaMin) && etaMin >= 0;
+  const valueTxt = hasEta
+    ? valueMode === 'arrivalClock'
+      ? arrivalClockTime(etaMin as number)
+      : `${Math.max(1, Math.round(etaMin as number))} min`
+    : null;
 
   return (
     <Marker
@@ -37,16 +52,20 @@ export function EtaRoutePuck({ lat, lng, etaMin, label, tone = 'green' }: Props)
       zIndex={40}
     >
       <View style={styles.wrap} collapsable={false}>
-        <View style={[styles.badge, { backgroundColor: colors.bg }]}>
-          {etaTxt ? <Text style={[styles.eta, { color: colors.text }]}>{etaTxt}</Text> : null}
+        <View style={[styles.badge, { backgroundColor: palette.bg }]}>
           {label ? (
-            <Text style={[styles.label, { color: colors.text }]} numberOfLines={1}>
+            <Text style={[styles.label, { color: palette.text }]} numberOfLines={1}>
               {label}
             </Text>
           ) : null}
+          {valueTxt ? (
+            <Text style={[styles.value, { color: palette.text }]} numberOfLines={1}>
+              {valueTxt}
+            </Text>
+          ) : null}
         </View>
-        <View style={[styles.stem, { backgroundColor: colors.bg }]} />
-        <View style={[styles.dot, { borderColor: colors.bg }]} />
+        <View style={[styles.stem, { backgroundColor: palette.bg }]} />
+        <View style={[styles.dot, { borderColor: palette.bg }]} />
       </View>
     </Marker>
   );
@@ -55,28 +74,21 @@ export function EtaRoutePuck({ lat, lng, etaMin, label, tone = 'green' }: Props)
 const styles = StyleSheet.create({
   wrap: { alignItems: 'center' },
   badge: {
-    minWidth: 52,
-    paddingHorizontal: 10,
+    borderRadius: radius.button,
+    paddingHorizontal: space.md,
     paddingVertical: 6,
-    borderRadius: 12,
+    minWidth: 78,
     alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.55)',
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 8,
+    ...shadow,
   },
-  eta: { fontSize: 13, fontWeight: '900', letterSpacing: 0.2 },
-  label: { fontSize: 9, fontWeight: '800', marginTop: 1, opacity: 0.9 },
-  stem: { width: 3, height: 10, marginTop: -1 },
+  label: { ...TYPE.label, opacity: 0.8 },
+  value: { ...TYPE.bodyBold, marginTop: 1 },
+  stem: { width: 2, height: 10 },
   dot: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: BRAND.bgDeep,
-    borderWidth: 2.5,
-    marginTop: -2,
+    borderWidth: 3,
+    backgroundColor: alpha.white,
   },
 });

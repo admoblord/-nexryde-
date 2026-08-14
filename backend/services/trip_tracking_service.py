@@ -20,6 +20,15 @@ MAX_ETA_SECONDS = 7200
 ARRIVED_DISTANCE_KM = 0.05
 ARRIVING_ETA_SECONDS = 60
 
+#: Straight line under-states how far a car must actually drive. Lagos road
+#: geometry (lagoons, few crossings, one-ways) runs ~1.4x the chord, so an ETA
+#: built from raw haversine always read optimistic and the driver showed up late.
+#: Only used when there is no stored route polyline to measure against.
+ROAD_WINDING_FACTOR = 1.4
+#: A driver's instantaneous speed is a poor predictor on its own — stopped at a
+#: light does not mean an infinite ETA. Blend it with the corridor average.
+LIVE_SPEED_WEIGHT = 0.6
+
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     from math import asin, cos, radians, sin, sqrt
@@ -55,6 +64,24 @@ def trip_tracking_target(trip: dict) -> Optional[Tuple[float, float]]:
     return None
 
 
+def resolve_tracking_speed_kmh(speed_kmh: Optional[float] = None) -> float:
+    """
+    Speed to plan the ETA with.
+
+    A live reading is blended with the corridor average rather than trusted
+    outright, so a driver stopped at a light does not blow the ETA up and a
+    short burst on an expressway does not promise an arrival they cannot make.
+    """
+    try:
+        live = float(speed_kmh) if speed_kmh is not None else 0.0
+    except (TypeError, ValueError):
+        live = 0.0
+    if live <= 0:
+        return DEFAULT_SPEED_KMH
+    blended = (live * LIVE_SPEED_WEIGHT) + (DEFAULT_SPEED_KMH * (1 - LIVE_SPEED_WEIGHT))
+    return max(MIN_SPEED_KMH, min(MAX_SPEED_KMH, blended))
+
+
 def compute_live_tracking(
     *,
     driver_lat: float,
@@ -63,23 +90,39 @@ def compute_live_tracking(
     target_lng: float,
     speed_kmh: Optional[float] = None,
     trip_status: str = "accepted",
+    traffic_factor: float = 1.0,
 ) -> dict:
-    distance_km = haversine_km(driver_lat, driver_lng, target_lat, target_lng)
-    avg_speed = float(speed_kmh) if speed_kmh is not None and float(speed_kmh) > 0 else DEFAULT_SPEED_KMH
-    avg_speed = max(MIN_SPEED_KMH, min(MAX_SPEED_KMH, avg_speed))
-    if distance_km <= ARRIVED_DISTANCE_KM or str(trip_status).lower() == "arrived":
+    """
+    Fallback ETA when no route polyline is stored for this leg.
+
+    Reports the estimated ROAD distance, not the chord — that is the number a
+    rider reads as "km away" and the number the ETA is built from.
+    """
+    straight_km = haversine_km(driver_lat, driver_lng, target_lat, target_lng)
+    road_km = straight_km * ROAD_WINDING_FACTOR
+    avg_speed = resolve_tracking_speed_kmh(speed_kmh)
+    try:
+        factor = float(traffic_factor)
+    except (TypeError, ValueError):
+        factor = 1.0
+    factor = max(1.0, min(3.0, factor))
+    # Arrival is physical proximity — judge it on the real gap, not the estimate.
+    if straight_km <= ARRIVED_DISTANCE_KM or str(trip_status).lower() == "arrived":
         eta_seconds = 0
         tracking_status = "arrived"
     else:
-        eta_seconds = int((distance_km / avg_speed) * 3600)
+        eta_seconds = int((road_km / avg_speed) * 3600 * factor)
         eta_seconds = min(MAX_ETA_SECONDS, max(1, eta_seconds))
         tracking_status = "arriving" if eta_seconds < ARRIVING_ETA_SECONDS else "en_route"
     return {
         "eta_seconds": eta_seconds,
-        "distance_km": round(distance_km, 3),
-        "distance_remaining_km": round(distance_km, 3),
+        "distance_km": round(road_km, 3),
+        "distance_remaining_km": round(road_km, 3),
+        "straight_line_km": round(straight_km, 3),
         "average_speed_kmh": round(avg_speed, 1),
+        "traffic_factor": round(factor, 2),
         "status": tracking_status,
+        "source": "haversine_estimate",
         "updated_at": datetime.utcnow().isoformat(),
     }
 
@@ -118,6 +161,17 @@ async def enrich_driver_location_payload(
         pass
     target = trip_tracking_target(trip)
     if target:
+        # Same zone traffic the polyline path uses, so both estimates agree.
+        factor = 1.0
+        try:
+            from traffic_factor import get_zone_traffic_factor
+
+            pickup = trip.get("pickup_location") or {}
+            factor = float(
+                await get_zone_traffic_factor(pickup.get("lat"), pickup.get("lng")) or 1.0
+            )
+        except Exception:
+            factor = 1.0
         tracking = compute_live_tracking(
             driver_lat=d_lat,
             driver_lng=d_lng,
@@ -125,6 +179,7 @@ async def enrich_driver_location_payload(
             target_lng=target[1],
             speed_kmh=speed_kmh or trip.get("current_speed_kmh"),
             trip_status=str(trip.get("status") or ""),
+            traffic_factor=factor,
         )
         out.update(tracking)
     return out

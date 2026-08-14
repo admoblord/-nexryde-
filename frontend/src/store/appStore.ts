@@ -11,6 +11,8 @@ export interface User {
   role: 'rider' | 'driver' | 'admin';
   is_verified: boolean;
   profile_image: string | null;
+  /** True when avatar exists on server but was omitted from GET /users. */
+  has_profile_image?: boolean;
   rating: number;
   /** How many trips include a driver→rider rating; used for trust / achievements. */
   rider_reputation_trip_count?: number;
@@ -102,6 +104,24 @@ export interface Trip {
   speed_spike_alert?: Record<string, unknown> | null;
   gps_spoofing_alert?: Record<string, unknown> | null;
   invisible_shield_mode?: Record<string, unknown> | null;
+  guardian_alert?: {
+    active?: boolean;
+    type?: string;
+    message?: string;
+    reason?: string;
+    driver_reason?: string;
+    check_id?: string;
+    stop_duration_seconds?: number;
+    escalated?: boolean;
+    rider_response?: string;
+    triggered_at?: string;
+    stop_reason_submitted_at?: string;
+  } | null;
+  driver_stop_reason?: {
+    reason?: string;
+    submitted_at?: string;
+    driver_id?: string;
+  } | null;
   safe_arrival_check?: Record<string, unknown> | null;
   rider_face_verified_at_pickup?: boolean;
   face_verified_at_start?: boolean;

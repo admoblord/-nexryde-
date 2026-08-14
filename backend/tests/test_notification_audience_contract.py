@@ -103,3 +103,5 @@ def test_audience_report_contains_template_rows():
     assert by_type["monthly_verification_reminder"]["audience"] == "driver"
     assert by_type["rider_morning_commute"]["audience"] == "rider"
     assert by_type["password_changed"]["audience"] == "both"
+    assert by_type["safety_check"]["audience"] == "rider"
+    assert by_type["stop_reason_requested"]["audience"] == "driver"

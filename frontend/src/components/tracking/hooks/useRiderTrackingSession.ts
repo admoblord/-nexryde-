@@ -36,6 +36,7 @@ import {
   normalizeDriverInfo,
   mergeTripFromStatusPayload,
 } from '@/src/utils/tripCoords';
+import { resolveLegEta } from '@/src/utils/localEta';
 import { pickDriverPhotoRaw } from '@/src/utils/tripProfilePhotos';
 import { driverPingMovedEnough, parseTrackingPing } from '@/src/utils/riderTripLiveSync';
 import { logLocationUpdated } from '@/src/utils/trackingLiveLogger';
@@ -287,7 +288,45 @@ export function useRiderTrackingSession() {
     Boolean(driverPhone) &&
     (['accepted', 'arrived', 'ongoing', 'pending_payment'].includes(tripStatus) || isFavoriteDriver);
 
-  const liveEta = useETACountdown(serverEtaSeconds, trackingStatus);
+  /**
+   * Keep the ETA moving between server updates.
+   *
+   * The server refreshes on its own cadence and sends nothing at all on some
+   * legs, which left the rider staring at a number that never changed. Measure
+   * the polyline we already hold and feed that to the countdown when the server
+   * has not spoken — no Directions call, so the Maps budget is untouched.
+   */
+  const localEta = useMemo(() => {
+    const driverPt =
+      driverLocation &&
+      Number.isFinite(Number(driverLocation.lat)) &&
+      Number.isFinite(Number(driverLocation.lng))
+        ? { latitude: Number(driverLocation.lat), longitude: Number(driverLocation.lng) }
+        : null;
+    if (!driverPt) return { etaSeconds: null, distanceMeters: null, source: 'none' as const };
+
+    const pickupPt = parseTripCoords(currentTrip?.pickup_location);
+    const dropoffPt = parseTripCoords(currentTrip?.dropoff_location);
+    const heading = tripStatus === 'ongoing' ? dropoffPt : pickupPt;
+
+    return resolveLegEta({
+      serverEtaSeconds,
+      // Only the in-trip leg has a stored polyline; the approach leg is direct.
+      route: tripStatus === 'ongoing' ? snappedPolyline : null,
+      driver: driverPt,
+      target: heading ? { latitude: heading.lat, longitude: heading.lng } : null,
+      speedKmh: Number(driverLocation?.speed_kmh) || null,
+    });
+  }, [
+    driverLocation,
+    currentTrip?.pickup_location,
+    currentTrip?.dropoff_location,
+    tripStatus,
+    snappedPolyline,
+    serverEtaSeconds,
+  ]);
+
+  const liveEta = useETACountdown(localEta.etaSeconds ?? serverEtaSeconds, trackingStatus);
 
   const arrivedAtIso = useMemo(() => {
     const trip = currentTrip as { arrived_at?: string } | null;

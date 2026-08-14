@@ -125,21 +125,18 @@ async def guarantee_deliver(
                     "guaranteed": True,
                     "reassign": reassigned,
                 }
-            await finalize_outcome(
-                offer_id,
-                outcome="expired",
-                trip_id=trip_id,
-                driver_id=driver_id,
-                reason="reassign_failed",
-                delivery_status="expired",
-                meta={"event_id": result.get("event_id")},
-            )
-            incr("delivery_guarantee.expired")
+            # Nobody else to hand this to. Expiring the offer here left the trip
+            # with zero open offers, so accept returned 403 for a driver who was
+            # online and willing — a missed ACK (backgrounded app, weak network) was
+            # enough to strand the rider. Keep the offer live until its own
+            # expires_at and let the driver take it when the app comes back.
+            incr("delivery_guarantee.held_no_alternative")
             return {
                 **result,
                 "acked": False,
-                "outcome": "expired",
+                "outcome": "awaiting_ack",
                 "guaranteed": True,
+                "held_reason": "no_alternative_driver",
             }
 
         # In-flight: FCM sent, waiting for driver ACK / accept — guardian will close.
@@ -315,6 +312,14 @@ async def sweep_unknown_offers(*, older_than_sec: int = 90, limit: int = 40) -> 
         try:
             result = await reassign_offer(offer, reason="unknown_sweep")
             if not result.get("ok"):
+                # No one else can take it. Closing the offer here removed the trip's
+                # only acceptable offer 45s in, so a driver still holding a live
+                # request (their app shows the 5 minute window) got 403 on accept.
+                # Wait for the driver-facing window to actually lapse.
+                expires_at = str(offer.get("expires_at") or "")
+                if expires_at and expires_at > datetime.now(timezone.utc).isoformat():
+                    incr("delivery_guarantee.sweep_held_window_open")
+                    continue
                 await finalize_outcome(
                     oid,
                     outcome="expired",

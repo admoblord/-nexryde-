@@ -10,6 +10,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { NexrydeLogo } from '@/src/components/brand/NexrydeLogo';
+import { NexrydeMark } from '@/src/components/brand/NexrydeMark';
 import {
   NEX_LOADING,
   NEX_LOADING_STEPS,
@@ -26,21 +27,14 @@ function NexrydeLogoMark({ pulse }: { pulse: Animated.Value }) {
           styles.logoGlow,
           {
             transform: [
-              {
-                scale: pulse.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [1, 1.18],
-                }),
-              },
+              { scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.18] }) },
             ],
-            opacity: pulse.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0.35, 0.55],
-            }),
+            opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.6] }),
           },
         ]}
       />
-      <NexrydeLogo size={88} />
+      {/* The shipped icon, not a redrawn approximation of it. */}
+      <NexrydeMark size={104} />
     </View>
   );
 }

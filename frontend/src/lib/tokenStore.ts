@@ -9,7 +9,22 @@ const ACCESS_KEY = 'auth_token';
 const REFRESH_KEY = 'refresh_token';
 
 let accessToken: string | null = null;
-let refreshPromise: Promise<string | null> | null = null;
+let refreshPromise: Promise<RefreshResult> | null = null;
+
+/**
+ * Why a refresh did not produce a token.
+ *
+ * `rejected` — the server actively refused the refresh token (401/403). The session
+ * is genuinely dead and the user must sign in again.
+ * `unavailable` — we never got an answer (offline, timeout, DNS, 5xx). The session
+ * may be perfectly valid. Callers must NOT log the user out on this.
+ */
+export type RefreshOutcome = 'ok' | 'rejected' | 'unavailable';
+
+export type RefreshResult = {
+  token: string | null;
+  outcome: RefreshOutcome;
+};
 
 function jwtExpSec(token: string): number | null {
   try {
@@ -114,7 +129,7 @@ export async function getValidToken(): Promise<string | null> {
   }
   if (accessToken && !isExpired(accessToken)) return accessToken;
 
-  const refreshed = await forceRefresh();
+  const { token: refreshed } = await forceRefreshDetailed();
   if (refreshed) return refreshed;
 
   // Refresh can fail (no refresh token, offline) while the access JWT is still valid
@@ -127,16 +142,34 @@ export async function getValidToken(): Promise<string | null> {
   return null;
 }
 
-export async function forceRefresh(): Promise<string | null> {
+/**
+ * Refresh the access token and report WHY it failed.
+ *
+ * Drivers on weak Lagos data were being signed out mid-shift: a timed-out refresh
+ * looked exactly like a revoked refresh token, so the 401 handlers wiped the
+ * session. Only `rejected` may end a session.
+ */
+export async function forceRefreshDetailed(): Promise<RefreshResult> {
   if (refreshPromise) return refreshPromise;
 
-  refreshPromise = (async () => {
+  refreshPromise = (async (): Promise<RefreshResult> => {
     console.log('[TOKEN_REFRESH_START]');
     try {
-      const refresh = await SecureStore.getItemAsync(REFRESH_KEY);
+      let refresh: string | null = null;
+      try {
+        refresh = await SecureStore.getItemAsync(REFRESH_KEY);
+      } catch (e) {
+        // Keystore hiccup is not proof the session is gone.
+        console.log('[TOKEN_REFRESH_END]', {
+          ok: false,
+          reason: 'refresh_read_failed',
+          error: e instanceof Error ? e.message : String(e),
+        });
+        return { token: null, outcome: 'unavailable' };
+      }
       if (!refresh) {
         console.log('[TOKEN_REFRESH_END]', { ok: false, reason: 'no_refresh_token' });
-        return null;
+        return { token: null, outcome: 'rejected' };
       }
 
       try {
@@ -144,11 +177,16 @@ export async function forceRefresh(): Promise<string | null> {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ refresh_token: refresh }),
-          timeoutMs: 8000,
-        }, 1);
+          timeoutMs: 15000,
+        }, 2);
         if (!res.ok) {
-          console.log('[TOKEN_REFRESH_END]', { ok: false, status: res.status });
-          return null;
+          const rejected = res.status === 401 || res.status === 403;
+          console.log('[TOKEN_REFRESH_END]', {
+            ok: false,
+            status: res.status,
+            outcome: rejected ? 'rejected' : 'unavailable',
+          });
+          return { token: null, outcome: rejected ? 'rejected' : 'unavailable' };
         }
         const data = (await res.json()) as {
           access_token?: string;
@@ -158,31 +196,38 @@ export async function forceRefresh(): Promise<string | null> {
         const nextAccess = data.access_token || data.token;
         if (!nextAccess) {
           console.log('[TOKEN_REFRESH_END]', { ok: false, reason: 'empty_access' });
-          return null;
+          return { token: null, outcome: 'unavailable' };
         }
         await setTokens(nextAccess, data.refresh_token ?? refresh);
         console.log('[TOKEN_REFRESH_END]', {
           ok: true,
           ageSec: tokenAgeSec(nextAccess),
         });
-        return nextAccess;
+        return { token: nextAccess, outcome: 'ok' };
       } catch (e) {
         console.log('[TOKEN_REFRESH_END]', {
           ok: false,
+          outcome: 'unavailable',
           error: e instanceof Error ? e.message : String(e),
         });
-        return null;
+        return { token: null, outcome: 'unavailable' };
       }
     } catch (e) {
       console.log('[TOKEN_REFRESH_END]', {
         ok: false,
+        outcome: 'unavailable',
         error: e instanceof Error ? e.message : String(e),
       });
-      return null;
+      return { token: null, outcome: 'unavailable' };
     } finally {
       refreshPromise = null;
     }
   })();
 
   return refreshPromise;
+}
+
+export async function forceRefresh(): Promise<string | null> {
+  const { token } = await forceRefreshDetailed();
+  return token;
 }

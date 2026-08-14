@@ -9,8 +9,9 @@
 import React, { memo, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LIVE } from '@/src/components/tracking/live/liveTrackingTheme';
 import { LIVE_LAYOUT } from '@/src/components/tracking/live/liveTrackingLayout';
+import { arrivalClockTime } from '@/src/components/trip/MapBadge';
+import { colors, alpha } from '@/src/theme/tokens';
 
 export type EtaPhase = 'accepted' | 'arrived' | 'ongoing';
 
@@ -77,37 +78,37 @@ function LiveEtaTopCardInner({ topInset, title, etaMinutes, distanceKm, arrived,
   // Phase-specific design tokens
   const phaseTokens = {
     accepted: {
-      cardBg: LIVE.glass,
-      border:  LIVE.glassBorder,
-      badgeBg: LIVE.green,
-      glowColor: LIVE.green,
+      cardBg: colors.bg,
+      border:  colors.border,
+      badgeBg: colors.green,
+      glowColor: colors.green,
       icon:    'car-sport' as const,
-      iconColor: LIVE.greenInk,
-      labelColor: LIVE.green,
-      etaColor: LIVE.text,
-      subColor: LIVE.sub,
+      iconColor: colors.textOnGreen,
+      labelColor: colors.greenDark,
+      etaColor: colors.textPrimary,
+      subColor: colors.textSecondary,
     },
     arrived: {
-      cardBg: 'rgba(20,12,4,0.95)',
-      border:  'rgba(255,180,50,0.5)',
-      badgeBg: '#F59E0B',
-      glowColor: '#F59E0B',
+      cardBg: colors.bg,
+      border:  colors.amber,
+      badgeBg: colors.amber,
+      glowColor: colors.amber,
       icon:    'location' as const,
-      iconColor: '#FFF',
-      labelColor: '#FFC93C',
-      etaColor: '#FFF',
-      subColor: '#CBD5E1',
+      iconColor: colors.navy,
+      labelColor: colors.amber,
+      etaColor: colors.textPrimary,
+      subColor: colors.textSecondary,
     },
     ongoing: {
-      cardBg: 'rgba(4,14,28,0.95)',
-      border:  'rgba(56,189,248,0.38)',
-      badgeBg: '#0EA5E9',
-      glowColor: '#38BDF8',
+      cardBg: colors.bg,
+      border:  colors.border,
+      badgeBg: colors.blue,
+      glowColor: colors.blue,
       icon:    'navigate' as const,
-      iconColor: '#FFF',
-      labelColor: LIVE.blue,
-      etaColor: LIVE.text,
-      subColor: LIVE.sub,
+      iconColor: alpha.white,
+      labelColor: colors.blue,
+      etaColor: colors.textPrimary,
+      subColor: colors.textSecondary,
     },
   }[effectivePhase];
 
@@ -115,7 +116,7 @@ function LiveEtaTopCardInner({ topInset, title, etaMinutes, distanceKm, arrived,
     if (connecting) return 'Connecting to your driver…';
     if (effectivePhase === 'arrived') return 'Driver is here';
     if (effectivePhase === 'ongoing') {
-      if (destEtaMinutes != null && destEtaMinutes > 0) return `${destEtaMinutes} min`;
+      if (destEtaMinutes != null && destEtaMinutes > 0) return arrivalClockTime(destEtaMinutes);
       return 'On the way';
     }
     return fmtEta(etaMinutes);
@@ -205,11 +206,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     width: '86%',
     maxWidth: 360,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 14,
+    shadowColor: colors.navy,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 6,
     minHeight: LIVE_LAYOUT.topEtaCardH,
   },
   badgeWrap: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },

@@ -4,11 +4,23 @@
  * Extends the existing driverSessionStore + PUT /api/drivers/{id}/online —
  * does NOT introduce a second DriverStatusContext or /api/v1 surface.
  */
-export const GO_ONLINE_MAX_ATTEMPTS = 2;
-export const GO_ONLINE_BASE_BACKOFF_MS = 400;
-export const GO_ONLINE_MAX_BACKOFF_MS = 1_200;
-/** Per-attempt HTTP timeout — keep wall-clock under GO_ONLINE_TIMEOUT_MS (10s). */
-export const GO_ONLINE_ATTEMPT_TIMEOUT_MS = 4_000;
+/**
+ * Lagos 3G + a cold Cloud Run instance regularly needs more than the old
+ * 2 × 4s budget, so a healthy driver got "ERR_NETWORK" and was dumped offline.
+ * Going online is a shift-critical action: spend real time on it.
+ */
+export const GO_ONLINE_MAX_ATTEMPTS = 4;
+export const GO_ONLINE_BASE_BACKOFF_MS = 600;
+export const GO_ONLINE_MAX_BACKOFF_MS = 4_000;
+/** Per-attempt HTTP timeout. */
+export const GO_ONLINE_ATTEMPT_TIMEOUT_MS = 12_000;
+
+/**
+ * After the attempt budget is spent on pure connectivity failures we keep the
+ * shift and retry quietly instead of signing the driver off.
+ */
+export const GO_ONLINE_RECONNECT_INTERVAL_MS = 6_000;
+export const GO_ONLINE_RECONNECT_MAX_MS = 10 * 60 * 1000;
 
 /** Idempotency key for a single user-initiated status change. */
 export function createStatusRequestId(intent: 'online' | 'offline'): string {
@@ -29,6 +41,14 @@ export function statusBackoffMs(attemptIndex: number): number {
 export function isRetryableOnlineStatus(status: number | null): boolean {
   if (status == null) return true; // network / abort
   return status === 408 || status === 429 || status >= 500;
+}
+
+/**
+ * True when the toggle never got an answer from the server (offline, timeout, DNS,
+ * captive portal). The driver's account is fine, so the shift must survive.
+ */
+export function isConnectivityOnlineFailure(status: number | null): boolean {
+  return status == null;
 }
 
 export type OnlineToggleQuery = {

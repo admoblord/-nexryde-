@@ -115,17 +115,28 @@ def test_ikeja_tier2_flat():
 
 
 def test_service_multipliers_lagride_spec():
-    assert LAGRIDE_SERVICE_PRO == 1.0
+    """Tier uplift is distance-banded: widest ≤5 km, tapering past 15 km."""
+    assert LAGRIDE_SERVICE_PRO == 1.1
     assert LAGRIDE_SERVICE_STANDARD == 1.0
     assert LAGRIDE_SERVICE_EV == 1.0
-    # All tiers flat at 1.0 while multipliers are disabled for base-price review
-    for km in (3.5, 3.9, 5.0, 8.0, 15.0, 18.0, 22.0):
-        assert lagride_lagos_service_multiplier("xl", distance_km=km) == 1.0
-        assert lagride_lagos_service_multiplier("comfort", distance_km=km) == 1.0
-        assert lagride_lagos_service_multiplier("premium", distance_km=km) == 1.0
-        assert lagride_lagos_service_multiplier("pro", distance_km=km) == 1.0
+
+    # (distance_km, xl, comfort, premium)
+    bands = [
+        (3.5, 1.20, 1.30, 1.45),
+        (5.0, 1.20, 1.30, 1.45),
+        (8.0, 1.08, 1.15, 1.28),
+        (15.0, 1.02, 1.04, 1.10),
+        (22.0, 1.02, 1.04, 1.10),
+    ]
+    for km, xl, comfort, premium in bands:
+        assert lagride_lagos_service_multiplier("xl", distance_km=km) == xl
+        assert lagride_lagos_service_multiplier("comfort", distance_km=km) == comfort
+        assert lagride_lagos_service_multiplier("premium", distance_km=km) == premium
+        assert lagride_lagos_service_multiplier("pro", distance_km=km) == premium
+        # Standard is always the baseline every other tier is priced against.
         assert lagride_lagos_service_multiplier("economy", distance_km=km) == 1.0
         assert lagride_lagos_service_multiplier("standard", distance_km=km) == 1.0
+
     assert lagride_lagos_service_multiplier("ev") == LAGRIDE_SERVICE_EV
     assert lagride_lagos_service_multiplier("omni") == 1.0
     assert lagride_lagos_service_multiplier("budget") == 1.0
@@ -182,8 +193,9 @@ def test_short_hops_differ_by_km_and_time():
         min_fare=0,
         short_trip_threshold_km=5.0,
     )
-    assert comfort["service_multiplier"] == 1.0
-    assert comfort["total_fare"] == _lagos_expected_total(3.49, TIER1_RATE_3_15_KM, 8, svc_m=1.0)
+    # 3.49 km sits in the ≤5 km band, where Comfort carries the widest uplift.
+    assert comfort["service_multiplier"] == 1.30
+    assert comfort["total_fare"] == _lagos_expected_total(3.49, TIER1_RATE_3_15_KM, 8, svc_m=1.30)
 
 
 def test_surge_constants_lagride_spec():
@@ -316,9 +328,9 @@ def test_verification_totals_lekki_ikoyi_yaba_festac():
 
 
 def test_example_5_generic_tier2_premium_18km():
-    """Tier 2 @ 18 km uses 15+ band (₦540/km); Premium multiplier disabled (1.0×)."""
+    """Tier 2 @ 18 km uses the 15+ band (₦540/km) with the tapered Premium 1.10×."""
     m = lagride_lagos_service_multiplier("premium", distance_km=18.0)
-    assert m == 1.0
+    assert m == 1.10
     f2 = build_lagos_lagride_fare_breakdown(
         distance_km=18.0,
         duration_min=30,
@@ -335,14 +347,14 @@ def test_example_5_generic_tier2_premium_18km():
     )
     assert f2["location_zone"] == "lagride_t2_ikeja"
     assert f2["fare_bucket"] == "lagride_t2_15_plus_km"
-    assert f2["service_multiplier"] == 1.0
+    assert f2["service_multiplier"] == 1.10
     assert f2["total_fare"] == _lagos_expected_total(18.0, 540.0, 30, svc_m=m)
 
 
 def test_example_5_peace_garden_to_ikorodu_premium_18km():
-    """Ex 5 variant: PG → Ikorodu + Premium; service multiplier disabled (1.0×)."""
+    """Ex 5 variant: PG → Ikorodu + Premium at the tapered long-trip 1.10×."""
     m = lagride_lagos_service_multiplier("premium", distance_km=18.0)
-    assert m == 1.0
+    assert m == 1.10
     f = build_lagos_lagride_fare_breakdown(
         distance_km=18.0,
         duration_min=30,
@@ -359,7 +371,7 @@ def test_example_5_peace_garden_to_ikorodu_premium_18km():
         dropoff_lat=6.65,
         dropoff_lng=3.52,
     )
-    assert f["service_multiplier"] == 1.0
+    assert f["service_multiplier"] == 1.10
     assert f["total_fare"] == _lagos_expected_total(18.0, PEACE_GARDEN_TO_IKORODU_PER_KM, 30, svc_m=m)
 
 
@@ -580,7 +592,7 @@ def test_sangotedo_ikorodu_corridor_old_standard():
 
 
 def test_sangotedo_ikorodu_corridor_tier_multipliers():
-    """Old Standard ₦39,547; tier ladder disabled — all tiers cap at Standard."""
+    """Standard holds the ₦39,547 promo ceiling; corridor tiers add only a token uplift."""
     base_kw = dict(
         distance_km=63.64,
         duration_min=68,
@@ -602,19 +614,20 @@ def test_sangotedo_ikorodu_corridor_tier_multipliers():
     premium = build_lagos_lagride_fare_breakdown(**base_kw, service_key="premium")
 
     assert econ["total_fare"] == 39_547
-    assert xl["total_fare"] == 39_547
-    assert comfort["total_fare"] == 39_547
-    assert premium["total_fare"] == 39_547
-    assert xl["service_multiplier"] == 1.0
-    assert comfort["service_multiplier"] == 1.0
-    assert premium["service_multiplier"] == 1.0
+    assert xl["total_fare"] == 39_745
+    assert comfort["total_fare"] == 39_942
+    assert premium["total_fare"] == 40_338
+    assert xl["service_multiplier"] == 1.005
+    assert comfort["service_multiplier"] == 1.01
+    assert premium["service_multiplier"] == 1.02
 
     long_kw = {**base_kw, "distance_km": 76.0}
     long_econ = build_lagos_lagride_fare_breakdown(**long_kw, service_key="economy")
     long_xl = build_lagos_lagride_fare_breakdown(**long_kw, service_key="xl")
     long_comfort = build_lagos_lagride_fare_breakdown(**long_kw, service_key="comfort")
     long_premium = build_lagos_lagride_fare_breakdown(**long_kw, service_key="premium")
+    # Past the sample distance every tier still holds its own ceiling.
     assert long_econ["total_fare"] == 39_547
-    assert long_xl["total_fare"] == 39_547
-    assert long_comfort["total_fare"] == 39_547
-    assert long_premium["total_fare"] == 39_547
+    assert long_xl["total_fare"] == 39_745
+    assert long_comfort["total_fare"] == 39_942
+    assert long_premium["total_fare"] == 40_338

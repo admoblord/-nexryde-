@@ -109,15 +109,42 @@ class RideAlertManager(
 
   fun goOnline() {
     online = true
+    // Prepare the ringtone now so the first offer rings instantly instead of
+    // spending decode time while the countdown is already running.
+    audioManager.prewarm()
     showOnline()
   }
 
   fun goOffline() {
     online = false
     hide()
+    audioManager.release()
   }
 
   fun isOnline(): Boolean = online
+
+  /**
+   * Draw the shift bubble without disturbing an offer card that already owns the
+   * surface. Used when JS asserts the bubble as the app is minimised.
+   */
+  fun ensureVisible(status: String) {
+    online = true
+    if (stateManager.state.isExpanded) return
+    renderState(status)
+  }
+
+  /**
+   * The user just left the app (Home / recents). Draw the bubble straight away
+   * instead of waiting for JS AppState to round-trip over the bridge, which is
+   * what made the bubble appear a beat late after minimising.
+   */
+  fun onAppMinimized() {
+    if (!online) return
+    // An offer card already owns the surface — never replace it with the bubble.
+    if (stateManager.state.isExpanded) return
+    if (currentOffer != null) return
+    render(if (stateManager.state.phase == OverlayPhase.ON_TRIP) stateManager.onTrip() else stateManager.online())
+  }
 
   fun showOnline() {
     if (!online) return
@@ -493,7 +520,8 @@ class RideAlertManager(
 
   companion object {
     private const val TAG = "NexrydeFullScreen"
-    private const val OFFER_COUNTDOWN_SECONDS = 20
+    /** Keep in sync with DRIVER_OFFER_COUNTDOWN_SECONDS; must stay under RT_OFFER_TTL_SEC (45s). */
+    private const val OFFER_COUNTDOWN_SECONDS = 30
     private const val SESSION_PREFS = "nexryde_driver_native_session"
     private const val PREF_DRIVER_ID = "driver_id"
     private const val PREF_TOKEN = "token"

@@ -23,11 +23,14 @@ import {
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BRAND } from '@/src/constants/designSystem';
-import { NEXRYDE_MAP_STYLE } from '@/src/constants/nexrydeMapBehavior';
+import { colors, alpha, type as TYPE, space, radius, shadow } from '@/src/theme/tokens';
+import {
+  getBoltRiderCustomMapStyle,
+  getBoltRiderGoogleMapId,
+} from '@/src/constants/boltMapStyle';
+import { tripMapViewProps } from '@/src/components/trip/mapTreatment';
+import { RecentreFab } from '@/src/components/trip/RecentreFab';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 import { resolvePublicMediaUri } from '@/src/utils/resolvePublicMediaUri';
@@ -200,8 +203,8 @@ export function DriverUberStyleOfflineHome({
       {
         latitude: pin.lat,
         longitude: pin.lng,
-        latitudeDelta: 0.04,
-        longitudeDelta: 0.04,
+        latitudeDelta: 0.012,
+        longitudeDelta: 0.012,
       },
       420,
     );
@@ -280,16 +283,28 @@ export function DriverUberStyleOfflineHome({
     onRefreshPermissions,
   ]);
 
+  const googleMapId = getBoltRiderGoogleMapId();
+  const customMapStyle = getBoltRiderCustomMapStyle();
+
+  const recenter = useCallback(() => {
+    if (!mapRef.current || !pin) return;
+    mapRef.current.animateToRegion(
+      {
+        latitude: pin.lat,
+        longitude: pin.lng,
+        latitudeDelta: 0.012,
+        longitudeDelta: 0.012,
+      },
+      380,
+    );
+  }, [pin]);
+
   return (
     <View style={styles.root}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
 
-      {/* Layer 1 — Map hero */}
+      {/* Layer 1 — Map is the background, full bleed */}
       <View style={styles.mapStage}>
-        <LinearGradient
-          colors={['#070B14', '#101A2A', '#070B14']}
-          style={StyleSheet.absoluteFillObject}
-        />
         {nativeMapEnabled ? (
           <TripMapErrorBoundary
             key={`uber-home-map-${mapEpoch}`}
@@ -304,19 +319,14 @@ export function DriverUberStyleOfflineHome({
               ref={mapRef}
               style={StyleSheet.absoluteFillObject}
               provider={PROVIDER_GOOGLE}
-              customMapStyle={NEXRYDE_MAP_STYLE}
+              googleMapId={googleMapId || undefined}
+              customMapStyle={customMapStyle}
               initialRegion={LAGOS}
               scrollEnabled
               zoomEnabled
-              pitchEnabled={false}
-              rotateEnabled={false}
+              {...tripMapViewProps}
               showsUserLocation={false}
               showsMyLocationButton={false}
-              showsCompass={false}
-              showsPointsOfInterest={false}
-              showsBuildings={false}
-              showsTraffic={false}
-              toolbarEnabled={false}
               liteMode={false}
               moveOnMarkerPress={false}
             >
@@ -335,22 +345,16 @@ export function DriverUberStyleOfflineHome({
             </MapView>
           </TripMapErrorBoundary>
         ) : null}
-        <LinearGradient
-          colors={['rgba(7,11,20,0.72)', 'transparent', 'rgba(7,11,20,0.55)', 'rgba(7,11,20,0.96)']}
-          locations={[0, 0.22, 0.55, 1]}
-          style={StyleSheet.absoluteFillObject}
-          pointerEvents="none"
-        />
       </View>
 
       {/* Layer 2 — Floating top chrome */}
       <View style={[styles.topChrome, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
         <TouchableOpacity style={styles.glassBtn} onPress={onFeatureHub} activeOpacity={0.85}>
-          <Ionicons name="menu" size={22} color="#F1F5F9" />
+          <Ionicons name="menu" size={22} color={colors.navy} />
         </TouchableOpacity>
 
         <View style={styles.statusIsland}>
-          <View style={[styles.statusDot, { backgroundColor: '#94A3B8' }]} />
+          <View style={[styles.statusDot, { backgroundColor: colors.grey }]} />
           <Text style={styles.statusText}>You're offline</Text>
           <Switch
             value={false}
@@ -358,39 +362,35 @@ export function DriverUberStyleOfflineHome({
               if (on) handleGo();
             }}
             disabled={!canGo && !needsSubscription}
-            trackColor={{ false: 'rgba(148,163,184,0.35)', true: BRAND.primary }}
-            thumbColor="#F8FAFC"
-            ios_backgroundColor="rgba(148,163,184,0.35)"
+            trackColor={{ false: colors.border, true: colors.green }}
+            thumbColor={alpha.white}
+            ios_backgroundColor={colors.border}
           />
         </View>
 
         <View style={styles.topRight}>
           <TouchableOpacity style={styles.glassBtn} onPress={onShield} activeOpacity={0.85}>
-            <Ionicons name="shield-checkmark" size={20} color="#38BDF8" />
+            <Ionicons name="shield-checkmark" size={20} color={colors.blue} />
           </TouchableOpacity>
           <TouchableOpacity onPress={onProfile} activeOpacity={0.85}>
             <TripProfileAvatar
               size={42}
               uri={resolvePublicMediaUri(profileImageUri)}
-              borderColor="#FFFFFF"
+              borderColor={alpha.white}
               borderWidth={2}
               showOnlineDot
-              onlineDotColor={driverApproved && trialReady ? BRAND.primary : '#64748B'}
+              onlineDotColor={driverApproved && trialReady ? colors.green : colors.grey}
               accessibilityLabel="Driver profile"
             />
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Layer 3 — Bottom sheet */}
+      <RecentreFab onPress={recenter} bottom={Math.max(300, tabPad + 268)} />
+
+      {/* Layer 3 — Floating white sheet */}
       <View style={[styles.sheetWrap, { paddingBottom: tabPad }]} pointerEvents="box-none">
         <View style={styles.sheet}>
-          {Platform.OS === 'ios' ? (
-            <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFillObject} />
-          ) : (
-            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(12,18,30,0.94)' }]} />
-          )}
-
           <View style={styles.sheetHandle} />
 
           <View style={styles.earningsRow}>
@@ -399,7 +399,7 @@ export function DriverUberStyleOfflineHome({
               <Text style={styles.earningsValue}>{formatNaira(todayEarnings)}</Text>
             </View>
             <TouchableOpacity style={styles.demandChip} onPress={onHeatmap} activeOpacity={0.85}>
-              <Ionicons name="flame" size={14} color={BRAND.primary} />
+              <Ionicons name="flame" size={14} color={colors.greenDark} />
               <Text style={styles.demandChipText}>Demand</Text>
             </TouchableOpacity>
           </View>
@@ -417,7 +417,7 @@ export function DriverUberStyleOfflineHome({
                 {trialParts.separator}
                 {trialParts.secondaryPart}
               </Text>
-              <Ionicons name="chevron-forward" size={14} color="#64748B" />
+              <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
             </TouchableOpacity>
           ) : null}
 
@@ -432,7 +432,7 @@ export function DriverUberStyleOfflineHome({
               <Ionicons
                 name={docsNotSubmitted ? 'document-text-outline' : 'time-outline'}
                 size={18}
-                color="#FBBF24"
+                color={colors.amber}
               />
               <Text style={styles.warnText}>
                 {docsNotSubmitted
@@ -451,7 +451,7 @@ export function DriverUberStyleOfflineHome({
               <Ionicons
                 name={trialEnded ? 'card-outline' : 'flash-outline'}
                 size={18}
-                color="#FBBF24"
+                color={colors.amber}
               />
               <Text style={styles.warnText}>
                 {trialEnded
@@ -509,22 +509,22 @@ export function DriverUberStyleOfflineHome({
                 accessibilityRole="button"
                 accessibilityLabel={toggling ? 'Going online' : 'Go online'}
               >
-                <LinearGradient
-                  colors={
-                    pendingExplicit
-                      ? ['#334155', '#1E293B']
-                      : needsSubscription
-                        ? ['#F59E0B', '#D97706']
-                        : canGo
-                          ? ['#4ADE80', BRAND.primary, '#059669']
-                          : ['#334155', '#1E293B']
-                  }
-                  start={{ x: 0.15, y: 0 }}
-                  end={{ x: 0.9, y: 1 }}
-                  style={styles.goGrad}
+                <View
+                  style={[
+                    styles.goGrad,
+                    {
+                      backgroundColor: pendingExplicit
+                        ? colors.grey
+                        : needsSubscription
+                          ? colors.amber
+                          : canGo
+                            ? colors.green
+                            : colors.grey,
+                    },
+                  ]}
                 >
                   {toggling ? (
-                    <ActivityIndicator size="large" color="#022C22" />
+                    <ActivityIndicator size="large" color={colors.textOnGreen} />
                   ) : (
                     <>
                       <Text style={styles.goWord}>
@@ -557,7 +557,7 @@ export function DriverUberStyleOfflineHome({
                       </Text>
                     </>
                   )}
-                </LinearGradient>
+                </View>
               </TouchableOpacity>
             </Animated.View>
           </View>
@@ -571,7 +571,7 @@ export function DriverUberStyleOfflineHome({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#070B14' },
+  root: { flex: 1, backgroundColor: colors.bgMuted },
   mapStage: { ...StyleSheet.absoluteFillObject },
   youBeacon: {
     width: 28,
@@ -583,16 +583,16 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     borderRadius: 14,
     borderWidth: 2,
-    borderColor: 'rgba(34,225,128,0.45)',
-    backgroundColor: 'rgba(34,225,128,0.12)',
+    borderColor: alpha.greenRing,
+    backgroundColor: alpha.greenSoft,
   },
   youBeaconCore: {
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: BRAND.primary,
+    backgroundColor: colors.green,
     borderWidth: 2,
-    borderColor: '#FFF',
+    borderColor: alpha.white,
   },
   topChrome: {
     position: 'absolute',
@@ -600,7 +600,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 5,
-    paddingHorizontal: 14,
+    paddingHorizontal: space.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -610,120 +610,116 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(15,23,42,0.72)',
+    backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
+    ...shadow,
   },
   statusIsland: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingLeft: 12,
+    gap: space.sm,
+    paddingLeft: space.md,
     paddingRight: 6,
     paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: 'rgba(15,23,42,0.78)',
+    borderRadius: radius.pill,
+    backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.22)',
+    borderColor: colors.border,
+    ...shadow,
   },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   statusText: {
-    fontSize: 13,
+    ...TYPE.caption,
     fontWeight: '800',
-    color: '#E2E8F0',
-    letterSpacing: 0.1,
+    color: colors.textPrimary,
   },
-  topRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  topRight: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   sheetWrap: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
     zIndex: 6,
-    paddingHorizontal: 12,
   },
   sheet: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 14,
+    backgroundColor: colors.bg,
+    borderTopLeftRadius: radius.sheet,
+    borderTopRightRadius: radius.sheet,
+    paddingHorizontal: space.xl,
+    paddingTop: space.md,
+    paddingBottom: space.md,
     minHeight: 280,
+    ...shadow,
   },
   sheetHandle: {
     alignSelf: 'center',
-    width: 42,
+    width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: 'rgba(148,163,184,0.35)',
-    marginBottom: 14,
+    backgroundColor: colors.border,
+    marginBottom: space.md,
   },
   earningsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: space.md,
   },
   earningsLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#94A3B8',
-    letterSpacing: 0.4,
+    ...TYPE.label,
+    color: colors.textSecondary,
     textTransform: 'uppercase',
   },
   earningsValue: {
     marginTop: 2,
-    fontSize: 28,
-    fontWeight: '900',
-    color: '#F8FAFC',
+    ...TYPE.display,
+    color: colors.textPrimary,
     letterSpacing: -0.5,
   },
   demandChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 12,
+    paddingHorizontal: space.md,
     paddingVertical: 9,
-    borderRadius: 999,
-    backgroundColor: 'rgba(34,225,128,0.1)',
+    borderRadius: radius.pill,
+    backgroundColor: alpha.greenSoft,
     borderWidth: 1,
-    borderColor: 'rgba(34,225,128,0.28)',
+    borderColor: alpha.greenRing,
   },
-  demandChipText: { fontSize: 12, fontWeight: '800', color: '#D1FAE5' },
+  demandChipText: { ...TYPE.label, color: colors.greenDark },
   trialRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: space.sm,
     marginBottom: 6,
   },
   trialDot: {
     width: 7,
     height: 7,
     borderRadius: 4,
-    backgroundColor: BRAND.primary,
+    backgroundColor: colors.green,
   },
-  trialText: { flex: 1, fontSize: 13, fontWeight: '700', color: '#CBD5E1' },
-  trialHint: { fontSize: 11, fontWeight: '600', color: '#86EFAC', marginBottom: 8 },
+  trialText: { flex: 1, ...TYPE.caption, fontWeight: '700', color: colors.textSecondary },
+  trialHint: { ...TYPE.label, color: colors.greenDark, marginBottom: space.sm },
   warnBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: 'rgba(245,158,11,0.12)',
+    padding: space.md,
+    borderRadius: radius.button,
+    backgroundColor: alpha.amberSoft,
     borderWidth: 1,
-    borderColor: 'rgba(245,158,11,0.3)',
-    marginBottom: 10,
+    borderColor: colors.amber,
+    marginBottom: space.md,
   },
-  warnText: { flex: 1, fontSize: 13, fontWeight: '600', color: '#FDE68A', lineHeight: 18 },
+  warnText: { flex: 1, ...TYPE.caption, color: colors.textPrimary, lineHeight: 18 },
   goStage: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 8,
+    marginTop: space.sm,
     marginBottom: 4,
     minHeight: 148,
   },
@@ -733,25 +729,23 @@ const styles = StyleSheet.create({
     height: 148,
     borderRadius: 74,
     borderWidth: 3,
-    borderColor: BRAND.primary,
+    borderColor: colors.green,
   },
   goBtn: {
     width: 132,
     height: 132,
     borderRadius: 66,
     overflow: 'hidden',
-    shadowColor: BRAND.primary,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.45,
-    shadowRadius: 20,
-    elevation: 12,
+    ...shadow,
+    shadowColor: colors.green,
+    shadowOpacity: 0.28,
   },
   goBtnMuted: {
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     elevation: 2,
   },
   goBtnWarn: {
-    shadowColor: '#F59E0B',
+    shadowColor: colors.amber,
   },
   goGrad: {
     flex: 1,
@@ -762,15 +756,16 @@ const styles = StyleSheet.create({
   goWord: {
     fontSize: 34,
     fontWeight: '900',
-    color: '#022C22',
+    color: colors.textOnGreen,
     letterSpacing: 1.5,
   },
   goSub: {
     marginTop: 2,
     fontSize: 11,
     fontWeight: '700',
-    color: 'rgba(2,44,34,0.72)',
+    color: colors.textOnGreen,
     textAlign: 'center',
+    opacity: 0.72,
   },
 });
 

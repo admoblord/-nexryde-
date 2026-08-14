@@ -35,9 +35,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderRadius: 18,
-    backgroundColor: 'rgba(10,16,24,0.88)',
+    backgroundColor: LIVE.glass,
     borderWidth: 1,
-    borderColor: LIVE.glassBorder,
+    borderColor: LIVE.hairline,
   },
   title: {
     color: LIVE.text,

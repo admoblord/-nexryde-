@@ -113,6 +113,7 @@ export default function FeatureNotificationsScreen({ role }: Props) {
   const [tab, setTab] = useState<NotifTab>('activity');
   const [loading, setLoading] = useState(() => !notifCached);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Feature announcements
   const [rows, setRows] = useState<FeatureAnnouncement[]>(() => notifCached?.rows ?? []);
@@ -143,13 +144,15 @@ export default function FeatureNotificationsScreen({ role }: Props) {
     }
     try {
       const res = await authedFetch(
-        `${BACKEND_URL}/api/users/${userId}/notifications?limit=40`,
+        `${BACKEND_URL}/api/users/${userId}/notifications?limit=25`,
         { timeoutMs: 10_000, preserveSessionOn401: true },
       );
       if (res.ok) {
         const data = await res.json();
         const list = Array.isArray(data.notifications) ? data.notifications : [];
-        const unread = Number(data.unread_count || 0);
+        const unread = Number(
+          data.unread_count_excl_engagement ?? data.unread_count ?? 0,
+        );
         setBackendNotifs(list);
         setUnreadBackend(unread);
         return { backendNotifs: list, unreadBackend: unread };
@@ -161,9 +164,12 @@ export default function FeatureNotificationsScreen({ role }: Props) {
   }, [userId, canCallAuthedApi]);
 
   const load = useCallback(async () => {
-    const LOAD_TIMEOUT_MS = 12000;
+    // A skeleton that sits for 12s reads as broken. Give up on the network well
+    // before that and show cached rows or a retry line instead.
+    const LOAD_TIMEOUT_MS = 7000;
     // Instant return visits: keep prior rows while revalidating.
     if (!notifCached) setLoading(true);
+    setLoadError(null);
     try {
       const result = await Promise.race([
         Promise.all([loadFeatures(), loadBackendNotifs()]),
@@ -176,7 +182,13 @@ export default function FeatureNotificationsScreen({ role }: Props) {
           backendNotifs: b.backendNotifs,
           unreadBackend: b.unreadBackend,
         });
+      } else if (!result) {
+        // Timed out — leave any cached rows visible, stop skeleton.
+        setLoadError('Couldn’t refresh notifications. Pull to retry.');
       }
+    } catch (err) {
+      console.error('[FeatureNotificationsScreen] load failed', err);
+      setLoadError('Couldn’t load notifications. Pull to retry.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -190,7 +202,7 @@ export default function FeatureNotificationsScreen({ role }: Props) {
     }
     void load();
     // Absolute failsafe — never leave the tab spinning forever on weak networks.
-    const failsafe = setTimeout(() => setLoading(false), 15000);
+    const failsafe = setTimeout(() => setLoading(false), 8000);
     return () => clearTimeout(failsafe);
   }, [load, canCallAuthedApi]);
 
@@ -343,6 +355,9 @@ export default function FeatureNotificationsScreen({ role }: Props) {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           showsVerticalScrollIndicator={false}
         >
+          {loadError ? (
+            <Text style={{ color: colors.textMuted, marginBottom: SPACING.sm }}>{loadError}</Text>
+          ) : null}
           {/* ── Activity tab ─────────────────────────────────────── */}
           {tab === 'activity' && (
             <>

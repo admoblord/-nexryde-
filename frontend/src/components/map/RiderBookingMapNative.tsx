@@ -483,7 +483,9 @@ export const RiderBookingMapNative = React.memo(function RiderBookingMapNative(p
           loadingEnabled
           loadingBackgroundColor="#EEF3E8"
           loadingIndicatorColor={BOLT_ROUTE_GREEN}
-          showsBuildings={false}
+          // The booking camera is tilted, so buildings give it depth instead of a
+          // flat plan view that happens to be at an angle.
+          showsBuildings
           pitchEnabled
           showsPointsOfInterest={false}
           showsCompass={false}

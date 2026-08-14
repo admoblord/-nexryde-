@@ -18,6 +18,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { NexrydeMark } from '@/src/components/brand/NexrydeMark';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { DOCK_BLUR_INTENSITY } from '@/src/components/driver/driverDockTheme';
@@ -65,9 +66,7 @@ function CompletionBrandHeader() {
   return (
     <View style={styles.brandHeader}>
       <View style={styles.brandLeft}>
-        <LinearGradient colors={['#22C55E', '#16A34A']} style={styles.brandLogo}>
-          <Text style={styles.brandLogoTxt}>NX</Text>
-        </LinearGradient>
+        <NexrydeMark size={34} style={styles.brandLogo} />
         <View style={styles.brandWord}>
           <Text style={styles.brandNex}>NEX</Text>
           <Text style={styles.brandR}>R</Text>

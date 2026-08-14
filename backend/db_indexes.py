@@ -91,6 +91,8 @@ async def ensure_indexes(db):
         # broken unique+sparse shape or provisions fresh DBs. See helper for rationale.
         await _ensure_unique_if_present(db.users, "phone")
         await _ensure_unique_if_present(db.users, "email")
+        # Hot path: almost every authed request looks up users by public `id` (UUID).
+        await db.users.create_index("id", unique=True, name="users_id_unique")
         await db.users.create_index("role")
         await db.users.create_index("nin_hash", sparse=True)
         await db.users.create_index("nin_last4", sparse=True)

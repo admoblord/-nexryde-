@@ -57,6 +57,14 @@ _BALANCED_ANCHOR_MIN_FARE = 3200
 # ── Targeted time billing (pickup wait, traffic excess, route change) ─────────
 # Direct-trip estimates stay base+distance; these apply at pickup wait / completion / route change.
 PICKUP_FREE_WAIT_SECONDS = 180  # 3 minutes — matches rider app (pickupWaitPolicy.ts)
+# Mid-trip pause: the driver taps Pause trip to wait for a rider who has asked to
+# stop somewhere. Billing starts on the tap — there is no free window, because the
+# rider chose the wait and the driver is already on the clock. Priced above the
+# pickup rate (₦40) since the driver cannot take another trip during it.
+MID_TRIP_WAIT_PER_MIN_NGN = 80.0
+# Hard stop on a single trip's billable pause. Beyond this the meter freezes and
+# the driver is expected to end the trip instead of running an open-ended tab.
+MID_TRIP_WAIT_MAX_BILLABLE_MIN = 30
 TRAFFIC_EXCESS_BUFFER_MIN = 15
 TRAFFIC_EXCESS_MAX_SPEED_KMH = 12.0
 TRAFFIC_EXCESS_CAP_NGN = 2500

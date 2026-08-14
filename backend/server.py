@@ -1943,6 +1943,37 @@ async def ops_maintenance_tick(request: Request):
     return {"ok": True, "tick": result, "revision": os.environ.get("K_REVISION", "unknown")}
 
 
+@api_router.get("/ops/task-dump")
+async def ops_task_dump(request: Request):
+    """Stacks for every pending asyncio task on this instance.
+
+    A request that hangs without burning CPU is parked on an await, which the
+    loop watchdog cannot see. This shows which await. Gated by X-NEXRYDE-OPS-KEY
+    (wrong/missing key → 404).
+    """
+    expected = (os.environ.get("NEXRYDE_OPS_KEY") or "").strip()
+    got = (request.headers.get("x-nexryde-ops-key") or "").strip()
+    if not expected or got != expected:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    import io
+    import traceback as _tb
+
+    tasks = []
+    for task in asyncio.all_tasks():
+        buf = io.StringIO()
+        try:
+            task.print_stack(limit=25, file=buf)
+        except Exception as exc:  # pragma: no cover - diagnostic only
+            buf.write(f"<stack unavailable: {exc}>")
+        tasks.append({"name": task.get_name(), "done": task.done(), "stack": buf.getvalue()})
+    return {
+        "revision": os.environ.get("K_REVISION", "unknown"),
+        "task_count": len(tasks),
+        "tasks": tasks,
+    }
+
+
 @api_router.post("/ops/migrate-driver-document-binaries")
 async def ops_migrate_driver_document_binaries(request: Request, dry_run: bool = True):
     """One-shot, idempotent migration of driver_documents binaries → private GCS.
@@ -2507,6 +2538,12 @@ async def seed_promo_codes():
     set_payments_fare_estimate_store(fare_estimate_store)
     asyncio.create_task(_deferred_startup())
     asyncio.create_task(_mongo_keepalive_loop())
+    try:
+        from loop_watchdog import start_loop_watchdog
+
+        start_loop_watchdog()
+    except Exception:
+        logger.exception("loop watchdog start failed")
     # Optional native gRPC RidePush (set NEXRYDE_GRPC_PORT). HTTPS Connect-SSE is always on.
     try:
         from grpc_ride_push import start_grpc_ride_push_if_configured

@@ -144,7 +144,10 @@ class InboxSocketManager {
 
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data as string);
+        const raw = event.data as string;
+        if (raw === 'pong') return;
+        const data = JSON.parse(raw);
+        if (data?.type === 'pong') return;
         if (data?.type === 'notification_badge') {
           this.emitBadge({
             type: 'notification_badge',

@@ -279,14 +279,22 @@ async def _geocode_search_fallback_predictions(input_text: str, components: str)
         parts = [p.strip() for p in formatted.split(",") if p.strip()]
         main = parts[0] if parts else formatted
         secondary = ", ".join(parts[1:]) if len(parts) > 1 else ""
-        predictions.append(
-            {
-                "place_id": pid or f"geocode-result-{idx}",
-                "description": formatted,
-                "main_text": main,
-                "secondary_text": secondary,
-            }
-        )
+        loc = (r.get("geometry") or {}).get("location") or {}
+        lat = loc.get("lat")
+        lng = loc.get("lng")
+        row: dict = {
+            "place_id": pid or f"geocode-result-{idx}",
+            "description": formatted,
+            "main_text": main,
+            "secondary_text": secondary,
+            "source": "geocode_fallback",
+        }
+        # Attach coords so clients can pin without a Place Details round-trip
+        # (and so synthetic geocode-result-* ids still work).
+        if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+            row["lat"] = float(lat)
+            row["lng"] = float(lng)
+        predictions.append(row)
     if not predictions:
         return None
     return {"predictions": predictions, "status": "OK"}
@@ -320,10 +328,13 @@ def _local_landmark_predictions(input_text: str) -> list[dict]:
     q = (input_text or "").strip().lower()
     if len(q) < 3:
         return []
+    # Require the full phrase OR every significant token (len>=3). A single
+    # shared token like "island"/"mall" must not hijack unrelated landmarks.
+    tokens = [t for t in q.split() if len(t) >= 3]
     out = []
     for row in _LAGOS_LANDMARKS:
-        hay = f"{row['main_text']} {row['description']}".lower()
-        if q in hay or any(tok and tok in hay for tok in q.split()):
+        hay = f"{row['main_text']} {row['description']} {row.get('secondary_text') or ''}".lower()
+        if q in hay or (tokens and all(tok in hay for tok in tokens)):
             out.append(
                 {
                     "place_id": row["place_id"],
@@ -370,23 +381,23 @@ async def autocomplete_places(
     try:
         await _ensure_places_cache_indexes()
         session = (sessiontoken or "").strip()
-        use_cache = not session
-        if use_cache:
-            key = _cache_key("autocomplete", {
-                "input": input.strip().lower(),
-                "location_bias": location_bias,
-                "radius": radius,
-                "components": components,
-            })
-            cached = await _get_cache(key)
-            if cached:
-                try:
-                    from realtime_platform.observability import observe_ms, incr
-                    observe_ms("places.autocomplete_ms", (_time.perf_counter() - t0) * 1000, cache="hit")
-                    incr("places.autocomplete_cache_hit")
-                except Exception:
-                    pass
-                return cached["response"]
+        # Always cache by input — sessiontoken is for Google billing only and must
+        # not disable Redis/Mongo cache (app clients always send a session token).
+        key = _cache_key("autocomplete", {
+            "input": input.strip().lower(),
+            "location_bias": location_bias,
+            "radius": radius,
+            "components": components,
+        })
+        cached = await _get_cache(key)
+        if cached:
+            try:
+                from realtime_platform.observability import observe_ms, incr
+                observe_ms("places.autocomplete_ms", (_time.perf_counter() - t0) * 1000, cache="hit")
+                incr("places.autocomplete_cache_hit")
+            except Exception:
+                pass
+            return cached["response"]
 
         # Build location bias parameter
         location_params = f"&components={components}" if components else ""
@@ -419,8 +430,7 @@ async def autocomplete_places(
                 "predictions": predictions,
                 "status": "OK",
             }
-            if use_cache:
-                await _set_cache(key, response_payload, ttl_seconds=300)
+            await _set_cache(key, response_payload, ttl_seconds=300)
             try:
                 from realtime_platform.observability import observe_ms, incr
                 observe_ms("places.autocomplete_ms", (_time.perf_counter() - t0) * 1000, cache="miss")
@@ -431,25 +441,36 @@ async def autocomplete_places(
 
         fb = await _geocode_search_fallback_predictions(input, components or "country:ng")
         if fb:
-            if use_cache:
-                await _set_cache(key, fb, ttl_seconds=300)
+            await _set_cache(key, fb, ttl_seconds=300)
             return fb
 
         if data.get("status") == "OK":
             response_payload = {"predictions": [], "status": "OK"}
-            if use_cache:
-                await _set_cache(key, response_payload, ttl_seconds=120)
+            await _set_cache(key, response_payload, ttl_seconds=120)
             return response_payload
 
-        response_payload = {
-            "predictions": [],
-            "status": data.get("status", "ERROR"),
-            "error_message": data.get("error_message", "Unknown error"),
-        }
-        if use_cache:
-            await _set_cache(key, response_payload, ttl_seconds=60)
-        return response_payload
-    
+        g_status = str(data.get("status") or "ERROR")
+        g_err = str(data.get("error_message") or "Unknown error")
+        # Never look like ZERO_RESULTS when Google rejected the key/API/quota.
+        print(
+            f"[places.autocomplete] Google status={g_status} error_message={g_err} "
+            f"input={input[:64]!r}"
+        )
+        http_status = 503
+        if g_status == "INVALID_REQUEST":
+            http_status = 400
+        raise HTTPException(
+            status_code=http_status,
+            detail={
+                "predictions": [],
+                "status": g_status,
+                "error_message": g_err,
+                "user_message": "Search unavailable, try again",
+            },
+        )
+
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error in autocomplete: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching places: {str(e)}")
@@ -498,12 +519,11 @@ async def get_place_details(
     try:
         await _ensure_places_cache_indexes()
         session = (sessiontoken or "").strip()
-        use_cache = not session
-        if use_cache:
-            key = _cache_key("place_details", {"place_id": place_id})
-            cached = await _get_cache(key)
-            if cached:
-                return cached["response"]
+        # Cache by place_id regardless of sessiontoken (billing-only param).
+        key = _cache_key("place_details", {"place_id": place_id})
+        cached = await _get_cache(key)
+        if cached:
+            return cached["response"]
 
         session_param = f"&sessiontoken={quote(session)}" if session else ""
         url = (
@@ -523,8 +543,7 @@ async def get_place_details(
                 "address": result["formatted_address"],
                 "status": "OK"
             }
-            if use_cache:
-                await _set_cache(key, response_payload, ttl_seconds=86400 * 30)
+            await _set_cache(key, response_payload, ttl_seconds=86400 * 30)
             return response_payload
         else:
             raise HTTPException(

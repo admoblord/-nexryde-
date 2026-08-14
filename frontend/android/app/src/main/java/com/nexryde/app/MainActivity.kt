@@ -11,7 +11,19 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
 
 import expo.modules.ReactActivityDelegateWrapper
 
+import com.nexryde.app.driver.DriverOverlayBubbleController
+
 class MainActivity : ReactActivity() {
+  /**
+   * Fires the moment the driver presses Home or recents. Drawing the shift bubble
+   * here is instant; going through JS AppState left a visible gap where the driver
+   * had minimised the app but had no NEXRYDE surface on screen.
+   */
+  override fun onUserLeaveHint() {
+    super.onUserLeaveHint()
+    runCatching { DriverOverlayBubbleController.onAppMinimized() }
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     // Set the theme to AppTheme BEFORE onCreate to support
     // coloring the background, status bar, and navigation bar.

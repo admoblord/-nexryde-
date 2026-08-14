@@ -80,6 +80,7 @@ async def test_query_selects_only_overdue_unconfirmed_checks(guardian_env):
     assert q["safe_arrival_check.required"] is True
     # A rider who confirmed, or whose contacts were already texted, is done.
     assert q["safe_arrival_check.confirmed_at"] is None
+    assert q["safe_arrival_check.unsafe_reported_at"] is None
     assert q["safe_arrival_check.emergency_notified_at"] is None
     # Only trips whose deadline has actually passed.
     assert "$lte" in q["safe_arrival_check.confirm_deadline_at"]

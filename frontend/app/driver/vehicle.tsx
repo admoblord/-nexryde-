@@ -430,7 +430,7 @@ export default function VehicleScreen() {
                 <View style={s.plateBadgeRow}>
                   <View style={s.plateBadge}>
                     <Ionicons name="card-outline" size={12} color="rgba(255,255,255,0.5)" />
-                    <Text style={s.plateBadgeText}>{activeVehicle.plate || '—'}</Text>
+                    <Text style={s.plateBadgeText}>{activeVehicle.plate || 'Add plate number'}</Text>
                   </View>
                 </View>
 

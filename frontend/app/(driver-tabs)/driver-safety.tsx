@@ -77,7 +77,7 @@ const SECTIONS: { title: string; rows: SafeRow[] }[] = [
   {
     title: 'Account security',
     rows: [
-      { label: 'Bank & earnings vault', desc: 'Biometric withdrawals & locked savings', route: '/driver/bank', icon: 'finger-print', tone: 'safe' },
+      { label: 'Bank details', desc: 'Where your payouts land', route: '/driver/bank', icon: 'finger-print', tone: 'safe' },
       { label: 'Subscription & access', desc: 'Payment status for trip offers', route: '/driver/subscription', icon: 'card', tone: 'info' },
       { label: 'App settings', desc: 'Privacy, notifications & device', route: '/settings', icon: 'options', tone: 'info' },
     ],

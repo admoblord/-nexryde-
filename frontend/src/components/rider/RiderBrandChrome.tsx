@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 
 import { BRAND } from '@/src/constants/designSystem';
 import { useThemeColors } from '@/src/constants/theme';
+import { NexrydeMark } from '@/src/components/brand/NexrydeMark';
 
 /** Matches rider booking / search chrome — NX badge, NEXRYDE wordmark, RIDER pill. */
 export function RiderBrandHeaderRow({ topInset }: { topInset: number }) {
@@ -19,9 +20,7 @@ export function RiderBrandHeaderRow({ topInset }: { topInset: number }) {
       ]}
     >
       <View style={styles.left}>
-        <View style={styles.logo}>
-          <Text style={styles.logoTxt}>NX</Text>
-        </View>
+        <NexrydeMark size={34} />
         <Text style={[styles.brand, { color: colors.text }]}>NEXRYDE</Text>
       </View>
       <View style={styles.pill}>

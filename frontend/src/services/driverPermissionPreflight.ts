@@ -78,8 +78,11 @@ export async function evaluateDriverPermissionPreflight(): Promise<DriverPermiss
     Notifications.getPermissionsAsync(),
   ]);
 
+  // A failed bridge call is not a denial. Reading it as "denied" used to sign a
+  // working driver off mid-shift: the re-check runs on every reconnect, and a probe
+  // that rejects while the app is backgrounded tore down the foreground service.
   const overlayGranted =
-    Platform.OS !== 'android' ? true : await hasNativeOverlayPermission().catch(() => false);
+    Platform.OS !== 'android' ? true : await hasNativeOverlayPermission().catch(() => true);
   const batteryExempt =
     Platform.OS !== 'android' ? true : await hasNativeBatteryOptimizationExempt().catch(() => true);
 
