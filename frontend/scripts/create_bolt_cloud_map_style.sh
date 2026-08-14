@@ -36,7 +36,7 @@ create_map() {
     -H "X-Goog-User-Project: $PROJECT_NUM" \
     -H "Content-Type: application/json" \
     "https://mapmanagement.googleapis.com/v2beta/projects/${PROJECT_NUM}/mapConfigs" \
-    -d "{\"displayName\":\"Nexryde Bolt Rider ${plat}\",\"description\":\"Bolt desaturated rider booking map (${plat})\",\"mapType\":\"VECTOR\"}")"
+    -d "{\"displayName\":\"Nexryde Bolt Rider ${plat} Raster\",\"description\":\"Bolt desaturated rider booking map (${plat}, RASTER for Maps SDK)\",\"mapType\":\"RASTER\"}")"
   map_id="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["mapId"])' "$resp")"
   curl -sS -X POST \
     -H "Authorization: Bearer $TOKEN" \

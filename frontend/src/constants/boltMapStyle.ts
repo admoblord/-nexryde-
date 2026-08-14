@@ -1,6 +1,6 @@
 /**
  * Bolt-style desaturated rider map — pale landscape, white roads, muted labels.
- * Prefer Google Cloud Map IDs (googleMapId); JSON is the legacy fallback.
+ * Prefer the live raster Google Cloud Map IDs (googleMapId); JSON is the fallback.
  *
  * Keep in sync with mapStyles/boltRiderLight.json (Cloud Console reference).
  */

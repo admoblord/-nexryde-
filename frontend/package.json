@@ -26,6 +26,7 @@
     "postinstall": "node ./scripts/apply_appearance_native_patch.cjs --require-success",
     "verify:map-engines": "node ./scripts/verify_map_engines.mjs",
     "verify:rider-map": "node ./scripts/verify_rider_map_parity.mjs",
+    "verify:bolt-map-id": "node ./scripts/verify_bolt_raster_map_id.mjs",
     "verify:trip-uber": "node ./scripts/verify_trip_uber_upgrades.mjs",
     "verify:driver-trip": "node ./scripts/verify_driver_trip_uber.mjs",
     "verify:driver-nav": "node ./scripts/verify_driver_navigation_choice.mjs",

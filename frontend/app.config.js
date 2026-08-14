@@ -92,23 +92,28 @@ module.exports = ({ config }) => ({
     googleMapsDirectionsKey:
       process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_ANDROID_KEY,
     /**
-     * Google Cloud Console Map IDs (Map Management → Map styles → Light Bolt look).
-     * Prefer platform-specific IDs; shared EXPO_PUBLIC_GOOGLE_MAP_ID works for both.
-     * When empty, the app falls back to JSON customMapStyle (boltRiderLight).
+     * Google Cloud Map IDs — raster, mobile-safe (nexryde-app Map Management).
+     * Vector IDs blank Android/iOS. Defaults are the live raster IDs so a
+     * missing EAS secret still renders tiles + the Bolt cloud style.
      */
-    googleMapId: process.env.EXPO_PUBLIC_GOOGLE_MAP_ID || '',
+    EXPO_PUBLIC_GOOGLE_MAP_ID_ENABLED:
+      process.env.EXPO_PUBLIC_GOOGLE_MAP_ID_ENABLED ?? 'true',
+    googleMapId:
+      process.env.EXPO_PUBLIC_GOOGLE_MAP_ID || '8c2cb1bb7947cd4399ec19b0',
     googleMapIdAndroid:
       process.env.EXPO_PUBLIC_GOOGLE_MAP_ID_ANDROID ||
       process.env.EXPO_PUBLIC_GOOGLE_MAP_ID ||
-      '',
+      '8c2cb1bb7947cd4399ec19b0',
     googleMapIdIos:
       process.env.EXPO_PUBLIC_GOOGLE_MAP_ID_IOS ||
       process.env.EXPO_PUBLIC_GOOGLE_MAP_ID ||
-      '',
-    EXPO_PUBLIC_GOOGLE_MAP_ID: process.env.EXPO_PUBLIC_GOOGLE_MAP_ID || '',
+      '8c2cb1bb7947cd4382430923',
+    EXPO_PUBLIC_GOOGLE_MAP_ID:
+      process.env.EXPO_PUBLIC_GOOGLE_MAP_ID || '8c2cb1bb7947cd4399ec19b0',
     EXPO_PUBLIC_GOOGLE_MAP_ID_ANDROID:
-      process.env.EXPO_PUBLIC_GOOGLE_MAP_ID_ANDROID || '',
-    EXPO_PUBLIC_GOOGLE_MAP_ID_IOS: process.env.EXPO_PUBLIC_GOOGLE_MAP_ID_IOS || '',
+      process.env.EXPO_PUBLIC_GOOGLE_MAP_ID_ANDROID || '8c2cb1bb7947cd4399ec19b0',
+    EXPO_PUBLIC_GOOGLE_MAP_ID_IOS:
+      process.env.EXPO_PUBLIC_GOOGLE_MAP_ID_IOS || '8c2cb1bb7947cd4382430923',
     // Optional paid tile provider fallback only. Public OpenStreetMap tile servers
     // are intentionally not used by NEXRYDE production clients.
     mapTileUrlTemplate: MAP_TILE_URL_TEMPLATE,

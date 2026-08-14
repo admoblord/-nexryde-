@@ -41,7 +41,7 @@ export function isMapLibreEnabled(): boolean {
   return envFlag('EXPO_PUBLIC_MAPLIBRE_ENABLED', true);
 }
 
-/** Optional Mapbox/MapTiler/MapLibre Studio style JSON URL. */
+/** Optional Mapbox/MapTiler/MapLibre Studio style URL. */
 export function getMapLibreStyleUrl(): string {
   return (
     envString('EXPO_PUBLIC_MAPLIBRE_STYLE_URL') ||
@@ -56,14 +56,42 @@ export function getMapboxAccessToken(): string {
 }
 
 /**
- * Cloud Map IDs are opt-in. The Map IDs provisioned through the Map Management API
- * were created as `mapType: VECTOR`, which only the Maps JavaScript API can render —
- * the Android/iOS SDKs draw an empty canvas for them, so every native map went blank.
- * Until a raster, platform-correct Map ID is verified on a device, the app styles maps
- * with the Bolt JSON stylesheet instead.
+ * Live raster Map IDs in GCP project `nexryde-app` (Map Management API).
+ *
+ * These are the only IDs safe to hand to the Android / iOS Maps SDK. They
+ * render raster tiles with the "Nexryde Bolt Rider Light" cloud style
+ * (`e8c03fd7c78c554bdeb325a0`). Vector Map IDs blank the native map.
+ */
+export const BOLT_RIDER_MAP_ID_ANDROID = '8c2cb1bb7947cd4399ec19b0';
+export const BOLT_RIDER_MAP_ID_IOS = '8c2cb1bb7947cd4382430923';
+export const BOLT_RIDER_MAP_STYLE_ID = 'e8c03fd7c78c554bdeb325a0';
+
+/**
+ * WebGL-only Map IDs created 2026-08-12. The Maps JavaScript API can draw
+ * them; Maps SDK for Android / iOS cannot — the canvas stays empty.
+ */
+export const RETIRED_VECTOR_MAP_IDS = new Set([
+  '8c2cb1bb7947cd439e2af444',
+  '8c2cb1bb7947cd43c98f73a8',
+]);
+
+function rasterFallback(os: string): string {
+  return os === 'ios' ? BOLT_RIDER_MAP_ID_IOS : BOLT_RIDER_MAP_ID_ANDROID;
+}
+
+/** Drop retired vector IDs so a stale EAS secret cannot blank the map. */
+export function sanitizeGoogleMapId(id: string, os: string = Platform.OS): string {
+  const trimmed = (id || '').trim();
+  if (!trimmed || RETIRED_VECTOR_MAP_IDS.has(trimmed)) return rasterFallback(os);
+  return trimmed;
+}
+
+/**
+ * Cloud Map IDs are on by default now that raster (mobile-safe) IDs exist.
+ * Set EXPO_PUBLIC_GOOGLE_MAP_ID_ENABLED=false to force the JSON stylesheet.
  */
 export function isGoogleMapIdEnabled(): boolean {
-  return envFlag('EXPO_PUBLIC_GOOGLE_MAP_ID_ENABLED', false);
+  return envFlag('EXPO_PUBLIC_GOOGLE_MAP_ID_ENABLED', true);
 }
 
 /**
@@ -72,23 +100,23 @@ export function isGoogleMapIdEnabled(): boolean {
  */
 export function getGoogleMapIdForPlatform(os: string = Platform.OS): string {
   if (!isGoogleMapIdEnabled()) return '';
+  let raw = '';
   if (os === 'android') {
-    return (
+    raw =
       envString('EXPO_PUBLIC_GOOGLE_MAP_ID_ANDROID') ||
       envString('EXPO_PUBLIC_GOOGLE_MAP_ID') ||
       envString('googleMapIdAndroid') ||
-      envString('googleMapId')
-    );
-  }
-  if (os === 'ios') {
-    return (
+      envString('googleMapId');
+  } else if (os === 'ios') {
+    raw =
       envString('EXPO_PUBLIC_GOOGLE_MAP_ID_IOS') ||
       envString('EXPO_PUBLIC_GOOGLE_MAP_ID') ||
       envString('googleMapIdIos') ||
-      envString('googleMapId')
-    );
+      envString('googleMapId');
+  } else {
+    raw = envString('EXPO_PUBLIC_GOOGLE_MAP_ID') || envString('googleMapId');
   }
-  return envString('EXPO_PUBLIC_GOOGLE_MAP_ID') || envString('googleMapId');
+  return sanitizeGoogleMapId(raw, os);
 }
 
 export const MAP_ENGINE = {

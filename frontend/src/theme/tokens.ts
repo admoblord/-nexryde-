@@ -105,11 +105,15 @@ export const shadow = {
 
 // ── Map ─────────────────────────────────────────────────────────────────────
 export const map = {
-  /** Route line sits above a white casing so it stays the highest-contrast element. */
+  /**
+   * Route line = bright core over a DARK casing, the treatment Bolt and Uber use.
+   * The casing was white, which on a light basemap is the same value as the
+   * roads underneath, so the route read as a flat green ribbon with no edge.
+   */
   routeColor: colors.greenDark,
-  routeWidth: 9,
-  routeCasingColor: '#FFFFFF',
-  routeCasingWidth: 11,
+  routeWidth: 8,
+  routeCasingColor: '#0B1220',
+  routeCasingWidth: 13,
   /** Traffic layer is off everywhere: congestion colours fight the route line. */
   showsTraffic: false,
   /** Camera padding when fitting to the relevant pair of points. */
