@@ -158,10 +158,16 @@ import {
   createStatusRequestId,
   GO_ONLINE_ATTEMPT_TIMEOUT_MS,
   GO_ONLINE_MAX_ATTEMPTS,
+  GO_ONLINE_RECONNECT_INTERVAL_MS,
+  GO_ONLINE_RECONNECT_MAX_MS,
+  isConnectivityOnlineFailure,
   isRetryableOnlineStatus,
   statusBackoffMs,
 } from '@/src/services/driverOnlineStatusCoordinator';
-import { reportNetworkOpsSignal } from '@/src/services/platformConnectionManager';
+import {
+  reportNetworkOpsSignal,
+  subscribePlatformConnection,
+} from '@/src/services/platformConnectionManager';
 import {
   startDriverHeartbeat,
   setDriverHeartbeatForceOfflineHandler,
@@ -965,6 +971,22 @@ export default function ModernDriverHome() {
   const lastGoOnlineAtRef = useRef(0);
   const SHIFT_RESUME_MAX_AGE_MS = 15 * 60 * 1000;
   const PERMISSION_BOUNCE_GUARD_MS = 2 * 60 * 1000;
+  /** Quiet retry of the go-online PUT while the network is down. */
+  const goOnlineReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const goOnlineReconnectDeadlineRef = useRef(0);
+  const goOnlineReconnectNoticeShownRef = useRef(false);
+  /** Latest syncOnlineStatusBackground — lets the retry loop call it without a cycle. */
+  const syncOnlineStatusRef = useRef<((nextOnline: boolean) => Promise<void>) | null>(null);
+
+  /** Stop the quiet go-online retry loop (explicit Go Offline, success, hard failure). */
+  const clearGoOnlineReconnect = useCallback(() => {
+    if (goOnlineReconnectTimerRef.current) {
+      clearTimeout(goOnlineReconnectTimerRef.current);
+      goOnlineReconnectTimerRef.current = null;
+    }
+    goOnlineReconnectDeadlineRef.current = 0;
+    goOnlineReconnectNoticeShownRef.current = false;
+  }, []);
   const [earningsLoading, setEarningsLoading] = useState(true);
   const [earningsError, setEarningsError] = useState(false);
   const [walletBalance, setWalletBalance] = useState(0);
@@ -1262,55 +1284,72 @@ export default function ModernDriverHome() {
     setDriverCancelOpen(true);
   }, [currentTrip?.id, driverId]);
 
+  /**
+   * Cancel is applied to the UI on the tap, then synced.
+   *
+   * Awaiting the HTTP round trip first left the driver staring at a spinning
+   * sheet on weak data. The server call still runs (and queues offline when the
+   * network is down); only an explicit server refusal puts the trip back.
+   */
   const confirmDriverCancel = useCallback(
-    async (reason?: string) => {
-      if (!currentTrip?.id || !driverId) return;
-      setTripActionBusy('cancel');
+    (reason?: string) => {
+      const trip = currentTrip;
+      if (!trip?.id || !driverId) return;
+      const tripId = trip.id;
+
       setDriverCancelError(null);
-      try {
-        const { reliableCancel } = await import('@/src/realtime/criticalActions');
-        const result = await reliableCancel({
-          tripId: currentTrip.id,
-          actorId: driverId,
-          reason,
-          cancelFn: async () => {
-            await cancelTrip(currentTrip.id, driverId, { reason });
-          },
-        });
-        if (result.queued) {
-          setDriverCancelOpen(false);
-          setCurrentTrip(null);
-          toast.show('Cancel saved offline — will sync when you reconnect.', 'info');
-          return;
-        }
-        // Best-effort: reason is stored client-side for support if backend ignores it.
-        if (reason) {
-          try {
-            await fetchWithTimeout(`${BACKEND_URL}/api/trips/${currentTrip.id}/cancel-reason`, {
-              method: 'POST',
-              headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-              body: JSON.stringify({ reason, cancelled_by: 'driver' }),
-              timeoutMs: 4000,
-            });
-          } catch {
-            /* optional endpoint */
-          }
-        }
-        setDriverCancelOpen(false);
-        setCurrentTrip(null);
-        if (Platform.OS !== 'web') {
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        }
-        toast.show(reason === 'Rider no-show' ? 'Trip cancelled — rider no-show.' : 'Trip cancelled.', 'success');
-      } catch (e: unknown) {
-        const msg = messageFromAxiosError(e, 'Could not cancel trip. Try again in a moment.');
-        setDriverCancelError(msg);
-        toast.show(msg, 'error');
-      } finally {
-        setTripActionBusy(null);
+      setDriverCancelOpen(false);
+      setCurrentTrip(null);
+      setTripActionBusy(null);
+      setNativeActiveTripId(null);
+      if (Platform.OS !== 'web') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       }
+      toast.show(
+        reason === 'Rider no-show' ? 'Trip cancelled — rider no-show.' : 'Trip cancelled.',
+        'success',
+      );
+
+      void (async () => {
+        try {
+          const { reliableCancel } = await import('@/src/realtime/criticalActions');
+          const result = await reliableCancel({
+            tripId,
+            actorId: driverId,
+            reason,
+            cancelFn: async () => {
+              await cancelTrip(tripId, driverId, { reason });
+            },
+          });
+          if (result.queued) {
+            toast.show('Cancel saved offline — will sync when you reconnect.', 'info');
+            return;
+          }
+          // Best-effort: reason is stored client-side for support if backend ignores it.
+          if (reason) {
+            try {
+              await fetchWithTimeout(`${BACKEND_URL}/api/trips/${tripId}/cancel-reason`, {
+                method: 'POST',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason, cancelled_by: 'driver' }),
+                timeoutMs: 4000,
+              });
+            } catch {
+              /* optional endpoint */
+            }
+          }
+        } catch (e: unknown) {
+          // The server refused (already completed, too late, not yours). Put the
+          // trip back so the driver is not driving a trip the app forgot.
+          const msg = messageFromAxiosError(e, 'Could not cancel trip. Try again in a moment.');
+          setCurrentTrip(trip);
+          setDriverCancelError(msg);
+          setDriverCancelOpen(true);
+          toast.show(msg, 'error');
+        }
+      })();
     },
-    [currentTrip?.id, driverId, setCurrentTrip, toast],
+    [currentTrip, driverId, setCurrentTrip, toast],
   );
 
   const handleTripEmergency = useCallback(() => {
@@ -2012,6 +2051,7 @@ export default function ModernDriverHome() {
         status: meta?.status ?? null,
       });
       driverFlowLog('GO_OFFLINE', { reason: 'heartbeat_force_offline' });
+      clearGoOnlineReconnect();
       confirmOffline();
       setStoreIsOnline(false);
       driverOffersSocket.disconnect();
@@ -2647,6 +2687,9 @@ export default function ModernDriverHome() {
         nativeActionInFlightRef.current = false;
         clearIncomingOffer();
         setRideCountdown(DRIVER_OFFER_COUNTDOWN_SECONDS);
+      } else if (event.action === 'session_refresh_needed') {
+        // Native heartbeat hit 401 — push a fresh bearer instead of ending the shift.
+        void refreshNativeDriverSession().catch(() => {});
       } else if (event.action === 'heartbeat_force_offline') {
         invokeDriverHeartbeatForceOffline({
           source: typeof event.source === 'string' ? event.source : 'native_force_offline',
@@ -2712,6 +2755,7 @@ export default function ModernDriverHome() {
   const applyLocalOptimisticGoOffline = useCallback(() => {
     clearGoOnlineWatchdog();
     clearGoOfflineWatchdog();
+    clearGoOnlineReconnect();
     desiredOfflineUntilSyncedRef.current = true;
     driverFlowLog('GO_OFFLINE_TAP');
     const result = applyOptimisticGoOffline({
@@ -2758,7 +2802,7 @@ export default function ModernDriverHome() {
       uiBudgetPass: result.uiBudgetPass,
     });
     return result;
-  }, [clearIncomingOffer, confirmOffline, driverId, setStoreIsOnline]);
+  }, [clearIncomingOffer, clearGoOnlineReconnect, confirmOffline, driverId, setStoreIsOnline]);
 
   /** If go-online PUT succeeded after local abort, force server offline to match client. */
   const reconcileServerOfflineAfterAbort = useCallback(
@@ -2783,6 +2827,41 @@ export default function ModernDriverHome() {
     },
     [driverId],
   );
+
+  /**
+   * The PUT never reached the server. The driver's account is fine and he is
+   * sitting in his car waiting for trips, so hold the shift and keep trying
+   * rather than throwing ERR_NETWORK and signing him off.
+   */
+  const scheduleGoOnlineReconnect = useCallback(() => {
+    if (goOnlineReconnectTimerRef.current) return;
+    const phase = useDriverSessionStore.getState().connectionPhase;
+    if (phase === 'offline') return;
+    if (!goOnlineReconnectDeadlineRef.current) {
+      goOnlineReconnectDeadlineRef.current = Date.now() + GO_ONLINE_RECONNECT_MAX_MS;
+    }
+    if (Date.now() > goOnlineReconnectDeadlineRef.current) {
+      clearGoOnlineReconnect();
+      confirmOffline();
+      toast.show('Still no connection. Tap GO when you have data.', 'error');
+      driverFlowLog('GO_ONLINE_RESULT', { ok: false, code: 'ERR_NETWORK', gaveUp: true });
+      return;
+    }
+    markReconnecting();
+    if (!goOnlineReconnectNoticeShownRef.current) {
+      goOnlineReconnectNoticeShownRef.current = true;
+      toast.show('Weak network — keeping you online and retrying…', 'info');
+    }
+    goOnlineReconnectTimerRef.current = setTimeout(() => {
+      goOnlineReconnectTimerRef.current = null;
+      const nowPhase = useDriverSessionStore.getState().connectionPhase;
+      if (nowPhase === 'offline' || desiredOfflineUntilSyncedRef.current) {
+        clearGoOnlineReconnect();
+        return;
+      }
+      void syncOnlineStatusRef.current?.(true);
+    }, GO_ONLINE_RECONNECT_INTERVAL_MS);
+  }, [clearGoOnlineReconnect, confirmOffline, markReconnecting, toast]);
 
   /** Background-only online sync. Socket + GPS run independently — never cancelled by this.
    * Supports optimistic UI: caller may already be `confirmed`; PUT failure rolls back to offline.
@@ -2818,10 +2897,14 @@ export default function ModernDriverHome() {
           return;
         }
         try {
+          // Refresh the bearer per attempt: a stale cached token 401s here and the
+          // driver saw an auth error for what was only an expired access token.
+          const bearer = (await getValidToken().catch(() => null)) ?? getCachedToken();
           res = await fetchWithTimeout(url, {
             method: 'PUT',
             headers: {
               ...getAuthHeaders(),
+              ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
               'X-Request-Id': requestId,
             },
             timeoutMs: GO_ONLINE_ATTEMPT_TIMEOUT_MS,
@@ -2845,7 +2928,22 @@ export default function ModernDriverHome() {
         const detail =
           formatApiDetail(detailPayload) || parsed.message || 'Could not change online status.';
         if (nextOnline && stillWantsOnline()) {
+          // Connectivity failure: hold the shift and retry quietly. Only the server
+          // saying no (a real HTTP status) may end it.
+          if (isConnectivityOnlineFailure(res?.status ?? null)) {
+            driverFlowLog('GO_ONLINE_RESULT', {
+              ok: false,
+              status: null,
+              code: 'ERR_NETWORK',
+              requestId,
+              attempts: GO_ONLINE_MAX_ATTEMPTS,
+              retrying: true,
+            });
+            scheduleGoOnlineReconnect();
+            return;
+          }
           clearGoOnlineWatchdog();
+          clearGoOnlineReconnect();
           // Optimistic UI may already be confirmed — always roll back on hard PUT failure.
           if (isConnectingOnly()) abortConnecting();
           else confirmOffline();
@@ -2873,8 +2971,12 @@ export default function ModernDriverHome() {
           return;
         }
         clearGoOnlineWatchdog();
+        clearGoOnlineReconnect();
         // Idempotent if already confirmed (optimistic path).
         if (isConnectingOnly()) confirmOnline();
+        else if (useDriverSessionStore.getState().connectionPhase === 'reconnecting') {
+          confirmOnline();
+        }
         hydrateGenRef.current += 1;
         driverFlowLog('GO_ONLINE_RESULT', {
           ok: true,
@@ -2891,11 +2993,9 @@ export default function ModernDriverHome() {
       void updateDriverOnlineStatus(nextOnline, driverId);
     } catch {
       if (nextOnline && stillWantsOnline()) {
-        clearGoOnlineWatchdog();
-        if (isConnectingOnly()) abortConnecting();
-        else confirmOffline();
-        driverFlowLog('GO_ONLINE_RESULT', { ok: false, error: 'exception', requestId });
-        toast.show('Couldn’t go online. Tap GO to retry.', 'error');
+        // Same rule as above: an exception here is connectivity, not a refusal.
+        driverFlowLog('GO_ONLINE_RESULT', { ok: false, error: 'exception', requestId, retrying: true });
+        scheduleGoOnlineReconnect();
       }
     } finally {
       onlineToggleInFlightRef.current = false;
@@ -2905,13 +3005,30 @@ export default function ModernDriverHome() {
     driverId,
     driverCoords,
     abortConnecting,
+    clearGoOnlineReconnect,
     confirmOnline,
     confirmOffline,
     fetchIncomingRide,
     reconcileServerOfflineAfterAbort,
+    scheduleGoOnlineReconnect,
     showOnlineStatusAlert,
     toast,
   ]);
+
+  syncOnlineStatusRef.current = syncOnlineStatusBackground;
+
+  // Retry the moment data comes back instead of waiting out the backoff.
+  useEffect(() => {
+    return subscribePlatformConnection((snapshot) => {
+      if (snapshot.state === 'OFFLINE') return;
+      if (!goOnlineReconnectTimerRef.current) return;
+      clearTimeout(goOnlineReconnectTimerRef.current);
+      goOnlineReconnectTimerRef.current = null;
+      void syncOnlineStatusRef.current?.(true);
+    });
+  }, []);
+
+  useEffect(() => clearGoOnlineReconnect, [clearGoOnlineReconnect]);
 
   /**
    * Offline API after optimistic UI. Never restores ONLINE on failure —
@@ -3070,6 +3187,7 @@ export default function ModernDriverHome() {
     /** Release the tap lock and undo the optimistic CONNECTING paint. */
     const failGoOnline = () => {
       releaseGoOnlineLock();
+      clearGoOnlineReconnect();
       if (useDriverSessionStore.getState().connectionPhase === 'connecting') abortConnecting();
     };
 
@@ -3201,9 +3319,9 @@ export default function ModernDriverHome() {
         hydrateGenRef.current += 1;
         lastGoOnlineAtRef.current = Date.now();
         confirmOnline();
-        void import('@/src/realtime/criticalActions').then(({ recordOnline }) =>
-          recordOnline(driverId!),
-        );
+        void import('@/src/realtime/criticalActions')
+          .then(({ recordOnline }) => recordOnline(driverId!))
+          .catch(() => {});
         void updateDriverOnlineStatus(true, driverId);
         driverFlowLog('GO_ONLINE_OPTIMISTIC_UI');
         releaseGoOnlineLock();

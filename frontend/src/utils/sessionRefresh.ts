@@ -1,5 +1,10 @@
 import { BACKEND_URL } from '@/src/services/api';
-import { forceRefresh, getCachedToken, getValidToken } from '@/src/lib/tokenStore';
+import {
+  forceRefresh,
+  forceRefreshDetailed,
+  getCachedToken,
+  getValidToken,
+} from '@/src/lib/tokenStore';
 import { useAppStore } from '@/src/store/appStore';
 
 /** Default API cap — fail fast; warm Cloud Run should respond well under this. */
@@ -102,15 +107,20 @@ export async function authedFetch(
     if (res.status === 401 && retry) {
       const path = url.replace(BACKEND_URL, '');
       console.log('[API_401_RETRY]', { path });
-      const fresh = await forceRefresh();
+      const { token: fresh, outcome } = await forceRefreshDetailed();
       if (fresh) return authedFetch(url, options, false);
-      if (!preserveSessionOn401) {
+      // Only a server-rejected refresh token ends the session. A refresh that never
+      // reached the server (offline/timeout) must leave the driver signed in —
+      // that was signing drivers out mid-shift on weak data.
+      if (!preserveSessionOn401 && outcome === 'rejected') {
         try {
           await useAppStore.getState().logout();
         } catch {
           /* silent */
         }
         forceNavigateToLogin();
+      } else if (outcome === 'unavailable') {
+        console.log('[API_401_KEEP_SESSION]', { path, reason: 'refresh_unavailable' });
       }
     }
 

@@ -1,6 +1,6 @@
 import { acceptTerms, formatApiDetail } from '@/src/services/api';
 import {
-  forceRefresh,
+  forceRefreshDetailed,
   getCachedToken,
   getValidToken,
   isAccessTokenValid,
@@ -28,7 +28,9 @@ async function clearSessionForLogin(): Promise<void> {
   }
 }
 
-async function resolveAccessToken(): Promise<{ token: string } | { redirectLogin: true }> {
+async function resolveAccessToken(): Promise<
+  { token: string } | { redirectLogin: true } | { offline: true }
+> {
   await warmTokenCache();
   const cached = getCachedToken();
   if (isAccessTokenValid(cached)) {
@@ -37,13 +39,15 @@ async function resolveAccessToken(): Promise<{ token: string } | { redirectLogin
   }
 
   console.log('[TOKEN_REFRESH_START]');
-  const refreshed = await forceRefresh();
+  const { token: refreshed, outcome } = await forceRefreshDetailed();
   if (refreshed) {
     console.log('[TOKEN_REFRESH_SUCCESS]');
     return { token: refreshed };
   }
 
-  console.log('[TOKEN_REFRESH_FAILED]');
+  console.log('[TOKEN_REFRESH_FAILED]', { outcome });
+  // An unreachable refresh endpoint is a connectivity problem, not a dead session.
+  if (outcome === 'unavailable') return { offline: true };
   return { redirectLogin: true };
 }
 
@@ -121,6 +125,14 @@ export async function submitTermsAcceptanceUpdate(params: {
     }
 
     const auth = await resolveAccessToken();
+    if ('offline' in auth) {
+      console.log('[TERMS_ACCEPT_FAILED]', { reason: 'offline' });
+      return {
+        ok: false,
+        reason: 'api_error',
+        message: 'No connection. Check your data, then tap Accept again.',
+      };
+    }
     if ('redirectLogin' in auth) {
       await clearSessionForLogin();
       return { ok: false, reason: 'redirect_login' };

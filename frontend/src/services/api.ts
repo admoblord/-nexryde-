@@ -83,7 +83,7 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-let axiosRefreshInFlight: Promise<boolean> | null = null;
+let axiosRefreshInFlight: Promise<{ ok: boolean; outcome: string }> | null = null;
 
 api.interceptors.response.use(
   (response) => response,
@@ -101,15 +101,22 @@ api.interceptors.response.use(
 
       if (isTokenError) {
         originalRequest._retried = true;
+        let outcome = 'unavailable';
         try {
           if (!axiosRefreshInFlight) {
-            const { forceRefresh } = require('@/src/lib/tokenStore');
-            axiosRefreshInFlight = forceRefresh().then((t: string | null) => !!t).finally(() => {
-              axiosRefreshInFlight = null;
-            });
+            const { forceRefreshDetailed } = require('@/src/lib/tokenStore');
+            axiosRefreshInFlight = forceRefreshDetailed()
+              .then((r: { token: string | null; outcome: string }) => ({
+                ok: !!r.token,
+                outcome: r.outcome,
+              }))
+              .finally(() => {
+                axiosRefreshInFlight = null;
+              });
           }
-          const ok = await axiosRefreshInFlight;
-          if (ok) {
+          const result = (await axiosRefreshInFlight) ?? { ok: false, outcome: 'unavailable' };
+          outcome = result.outcome;
+          if (result.ok) {
             const { getCachedToken } = require('@/src/lib/tokenStore');
             const newToken = getCachedToken();
             if (newToken) {
@@ -121,15 +128,18 @@ api.interceptors.response.use(
             return api(originalRequest);
           }
         } catch {
-          /* refresh failed — fall through to logout */
+          outcome = 'unavailable';
         }
-        // Refresh failed: sign the user out
-        try {
-          const { useAppStore } = require('@/src/store/appStore');
-          if (useAppStore.getState().isAuthenticated) {
-            useAppStore.getState().logout();
-          }
-        } catch {}
+        // Sign out only when the server rejected the refresh token. A refresh that
+        // never reached the server (offline/timeout) must keep the driver signed in.
+        if (outcome === 'rejected') {
+          try {
+            const { useAppStore } = require('@/src/store/appStore');
+            if (useAppStore.getState().isAuthenticated) {
+              useAppStore.getState().logout();
+            }
+          } catch {}
+        }
       }
     }
     return Promise.reject(error);

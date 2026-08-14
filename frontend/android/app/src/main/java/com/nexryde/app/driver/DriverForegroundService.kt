@@ -60,6 +60,12 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
   private var audioFocusRequest: AudioFocusRequest? = null
   private var overlayActionInFlight = false
   private var rideStatus: String = "Listening for rides"
+  /** When this shift started. Used for the go-online commit grace window. */
+  @Volatile private var onlineStartedAtMs: Long = 0L
+  /** Set once a heartbeat has seen server_online=true for this shift. */
+  @Volatile private var serverOnlineConfirmedAtMs: Long = 0L
+  /** Consecutive heartbeat 401s — one stale token must not end a shift. */
+  @Volatile private var consecutiveAuthFailures: Int = 0
   private lateinit var driverNotificationManager: DriverNotificationManager
   private lateinit var driverAlertAudioManager: DriverAlertAudioManager
   private lateinit var rideAlertManager: RideAlertManager
@@ -204,6 +210,9 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
       return abortForegroundStart("start_promote_failed")
     }
     isDriverServiceOnline = true
+    onlineStartedAtMs = System.currentTimeMillis()
+    serverOnlineConfirmedAtMs = 0L
+    consecutiveAuthFailures = 0
     persistWasOnline(true)
     restoreActiveTripFromPrefs()
     rideAlertManager.goOnline()
@@ -532,6 +541,18 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
         val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
         conn.disconnect()
         if (status == 401) {
+          consecutiveAuthFailures += 1
+          // A single 401 is usually just an expired access token; JS pushes a fresh
+          // one every 60s. Ask for that refresh before ending the shift.
+          if (consecutiveAuthFailures < AUTH_FAILURES_BEFORE_OFFLINE) {
+            handler.post {
+              DriverExperienceEvents.emit(
+                "session_refresh_needed",
+                mapOf("status" to 401, "source" to "native_401_retry", "attempt" to consecutiveAuthFailures),
+              )
+            }
+            return@runCatching
+          }
           val refuse = refuseAutoOffline("native_401")
           handler.post {
             if (refuse) {
@@ -551,11 +572,28 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
           }
           return@runCatching
         }
+        consecutiveAuthFailures = 0
         if (status in 200..299 && raw.isNotBlank()) {
           val payload = JSONObject(raw)
           val action = payload.optString("action", "")
           val serverOnline = payload.optBoolean("server_online", true)
+          if (serverOnline) serverOnlineConfirmedAtMs = System.currentTimeMillis()
           if (action == "FORCE_OFFLINE" || !serverOnline) {
+            // The JS PUT /online may still be retrying on a weak network. Until this
+            // shift has been confirmed online once, treat server_online=false as
+            // "not committed yet" rather than "go offline" — otherwise the native
+            // heartbeat tore down a shift the driver had just started.
+            if (
+              serverOnlineConfirmedAtMs == 0L &&
+              System.currentTimeMillis() - onlineStartedAtMs < ONLINE_COMMIT_GRACE_MS
+            ) {
+              Log.i(TAG, "force_offline_ignored_commit_grace")
+              handler.post {
+                rideStatus = "Connecting…"
+                updatePersistentNotification()
+              }
+              return@runCatching
+            }
             val refuse = refuseAutoOffline("native_force_offline")
             handler.post {
               if (refuse) {
@@ -812,6 +850,13 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
   }
 
   private fun probeActiveTripBlocking(): Boolean {
+    // Never block the main looper on HTTP: Android throws NetworkOnMainThreadException
+    // (so the probe was useless from onTaskRemoved anyway) and a slow socket here
+    // delays startForeground past its 5s deadline, which kills the whole process.
+    if (Looper.myLooper() == Looper.getMainLooper()) {
+      Log.w(TAG, "probe_active_trip_skipped_main_thread")
+      return false
+    }
     val base = backendUrl?.trim()?.trimEnd('/') ?: return false
     val bearer = token?.takeIf { it.isNotBlank() } ?: return false
     val id = driverId?.takeIf { it.isNotBlank() } ?: return false
@@ -891,6 +936,10 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
     private const val PENDING_OFFER_KEY = "pending_native_offer"
     /** Aligned with RT_HEARTBEAT_INTERVAL_SEC (20s) for Redis presence TTL freshness. */
     private const val HEARTBEAT_INTERVAL_MS = 20_000L
+    /** Weak-network go-online PUT can take a while; do not tear the shift down inside this window. */
+    private const val ONLINE_COMMIT_GRACE_MS = 150_000L
+    /** Consecutive heartbeat 401s tolerated before ending a shift. */
+    private const val AUTH_FAILURES_BEFORE_OFFLINE = 3
     /** Matches Expo BG task + JS idle push — rider pins must not wait on 60s heartbeat. */
     private const val LOCATION_UPLOAD_INTERVAL_MS = 10_000L
     private const val LOCATION_INTERVAL_MS = 10_000L
