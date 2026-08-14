@@ -74,8 +74,10 @@ check(
     /if status not in SEARCHING_TRIP_STATUSES:/.test(trips),
 );
 check(
-  'a trip that already has a driver is rejected',
-  /if trip\.get\("driver_id"\):[\s\S]{0,140}?A driver is already on the way/.test(trips),
+  'a trip a driver is already running is rejected',
+  /if status in \{"accepted", "arrived", "ongoing"\}:[\s\S]{0,140}?A driver is already on the way/.test(
+    trips,
+  ),
 );
 check('the offer can never be lowered', /Your new offer must be at least/.test(trips));
 check('the offer is capped', trips.includes('MAX_RETRY_FARE_MULTIPLIER') && /That offer is too high/.test(trips));

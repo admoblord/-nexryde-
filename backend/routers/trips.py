@@ -5340,7 +5340,9 @@ async def retry_trip_dispatch(
 
     status = str(trip.get("status") or "").lower()
     if status not in SEARCHING_TRIP_STATUSES:
-        if trip.get("driver_id"):
+        # A finished trip also carries a driver_id, so check the status itself
+        # rather than assuming any assigned trip is still running.
+        if status in {"accepted", "arrived", "ongoing"}:
             raise HTTPException(status_code=409, detail="A driver is already on the way.")
         raise HTTPException(
             status_code=409,
