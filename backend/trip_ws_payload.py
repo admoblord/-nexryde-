@@ -13,6 +13,20 @@ def _iso(val: Any) -> Optional[str]:
     return str(val)
 
 
+def _cancelled_by_role(trip: dict) -> Optional[str]:
+    """'driver' | 'rider' | 'system' — derived from the stored actor id."""
+    actor = str(trip.get("cancelled_by") or "").strip()
+    if not actor:
+        return None
+    if actor.startswith("system"):
+        return "system"
+    if actor == str(trip.get("driver_id") or ""):
+        return "driver"
+    if actor == str(trip.get("rider_id") or ""):
+        return "rider"
+    return None
+
+
 def rider_trip_payload_from_doc(trip: Optional[dict]) -> dict[str, Any]:
     """JSON-serializable trip subset for rider WebSocket clients (no Mongo _id).
 
@@ -61,6 +75,11 @@ def rider_trip_payload_from_doc(trip: Optional[dict]) -> dict[str, Any]:
         "vehicle_color": trip.get("vehicle_color"),
         "payment_status": trip.get("payment_status"),
         "payment_method": trip.get("payment_method"),
+        # Cancellation context. The rider app shows "your driver cancelled" from
+        # these; without them a driver cancel silently bounced the rider home.
+        "cancelled_by": trip.get("cancelled_by"),
+        "cancelled_by_role": _cancelled_by_role(trip),
+        "cancellation_reason": trip.get("cancellation_reason") or trip.get("cancel_reason"),
         # Lifecycle timestamps — required by frontend timers
         "accepted_at": _iso(trip.get("accepted_at") or trip.get("assignment_accepted_at")),
         "arrived_at": arrived_at,

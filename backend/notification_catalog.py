@@ -64,6 +64,11 @@ NOTIFICATION_KIND_META: dict[str, dict[str, Any]] = {
     "trip_started": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.RIDES, channel_id="rides"),
     "trip_completed": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.RIDES, channel_id="rides"),
     "route_updated": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.RIDES, channel_id="rides"),
+    # Stuck-trip recovery. Unregistered kinds are dropped before delivery, so both
+    # sides used to be silently left holding a trip the watchdog had already closed.
+    "trip_auto_closed": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.RIDES, channel_id="rides", urgent=True),
+    "trip_auto_completed": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.RIDES, channel_id="rides", urgent=True),
+    "trip_force_completed": _meta(audience=NotificationAudience.BOTH, category=NotificationCategory.RIDES, channel_id="rides", urgent=True),
     "rider_route_updated": _meta(audience=NotificationAudience.RIDER, category=NotificationCategory.RIDES, channel_id="rides"),
     # Stable aliases for ride lifecycle (same audiences; keep primary types above for backward compat)
     "searching_for_driver": _meta(audience=NotificationAudience.RIDER, category=NotificationCategory.RIDES, channel_id="rides"),

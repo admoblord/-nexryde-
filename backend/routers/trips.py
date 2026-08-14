@@ -589,6 +589,20 @@ def _trip_biometric_ready(trip: dict) -> bool:
     return rider_ok and driver_ok
 
 
+def _cancelled_by_role(trip: dict) -> Optional[str]:
+    """'driver' | 'rider' | 'system' — derived from the stored actor id."""
+    actor = str(trip.get("cancelled_by") or "").strip()
+    if not actor:
+        return None
+    if actor in ("system", "system:stuck_trip_recovery") or actor.startswith("system"):
+        return "system"
+    if actor == str(trip.get("driver_id") or ""):
+        return "driver"
+    if actor == str(trip.get("rider_id") or ""):
+        return "rider"
+    return None
+
+
 def _distance_from_route_km(route_points: list[dict], lat: float, lng: float) -> float:
     if not route_points:
         return 0.0
@@ -5440,6 +5454,12 @@ async def get_trip_status(trip_id: str, request: Request):
         "updated_at": _iso(trip.get("updated_at") or trip.get("state_updated_at") or trip.get("created_at")),
         "payment_status": trip.get("payment_status"),
         "payment_method": trip.get("payment_method"),
+        # Who ended the trip and why. The rider app wants to say "your driver
+        # cancelled" but had no field to read, so a driver cancel just bounced the
+        # rider home with no explanation.
+        "cancelled_by": trip.get("cancelled_by"),
+        "cancelled_by_role": _cancelled_by_role(trip),
+        "cancellation_reason": trip.get("cancellation_reason") or trip.get("cancel_reason"),
         # Lifecycle timestamps — required by rider/driver timers
         "accepted_at": _iso(trip.get("accepted_at") or trip.get("assignment_accepted_at")),
         "arrived_at": _iso(trip.get("arrived_at")),
