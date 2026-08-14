@@ -30,6 +30,7 @@ import {
   ScrollView,
   Platform,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -101,6 +102,10 @@ type Props = {
   onCancel: () => void;
   onUpdateBid?: () => void;
   onTryAgain?: () => void;
+  /** Raise the offer and re-broadcast without cancelling the trip. */
+  onRaiseOffer?: () => void;
+  /** A retry / raise is in flight — keep the rider from double-sending. */
+  retryBusy?: boolean;
 };
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -122,6 +127,8 @@ export default function FindingDriverScreenV2({
   onCancel,
   onUpdateBid,
   onTryAgain,
+  onRaiseOffer,
+  retryBusy = false,
 }: Props) {
   const insets = useSafeAreaInsets();
   const isError = phase === 'error';
@@ -445,7 +452,9 @@ export default function FindingDriverScreenV2({
               {onTryAgain ? (
                 <TouchableOpacity
                   style={styles.tryAgainBtn}
+                  disabled={retryBusy}
                   onPress={() => {
+                    if (retryBusy) return;
                     if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     onTryAgain();
                   }}
@@ -458,9 +467,33 @@ export default function FindingDriverScreenV2({
                     end={{ x: 1, y: 0 }}
                     style={styles.tryAgainGrad}
                   >
-                    <Ionicons name="refresh" size={16} color={FV2.greenInk} />
-                    <Text style={styles.tryAgainTxt}>Try Again</Text>
+                    {retryBusy ? (
+                      <ActivityIndicator size="small" color={FV2.greenInk} />
+                    ) : (
+                      <>
+                        <Ionicons name="refresh" size={16} color={FV2.greenInk} />
+                        <Text style={styles.tryAgainTxt}>Try Again</Text>
+                      </>
+                    )}
                   </LinearGradient>
+                </TouchableOpacity>
+              ) : null}
+              {/* The copy tells the rider they can raise their offer, so give them
+                  the button here rather than only on the searching screen. */}
+              {onRaiseOffer ? (
+                <TouchableOpacity
+                  style={styles.raiseOfferBtn}
+                  disabled={retryBusy}
+                  onPress={() => {
+                    if (retryBusy) return;
+                    if (Platform.OS !== 'web') void Haptics.selectionAsync();
+                    onRaiseOffer();
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Raise your offer to attract drivers"
+                >
+                  <Ionicons name="trending-up" size={16} color={FV2.greenBright} />
+                  <Text style={styles.raiseOfferTxt}>Raise offer</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
@@ -1047,6 +1080,24 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
     paddingHorizontal: 16,
+  },
+  raiseOfferBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 10,
+    paddingVertical: 13,
+    paddingHorizontal: 22,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: 'rgba(0,208,132,0.45)',
+    backgroundColor: 'rgba(0,208,132,0.10)',
+  },
+  raiseOfferTxt: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: FV2.greenBright,
   },
   tryAgainBtn: {
     borderRadius: 999,

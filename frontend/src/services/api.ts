@@ -749,6 +749,21 @@ export const cancelTrip = (
       : {}),
   });
 
+/**
+ * Search again for the same trip, optionally at a higher offer.
+ * Keeps the trip alive — raising a bid used to require cancelling and rebooking,
+ * which also counted against the rider's cancellation limit.
+ */
+export const retryTripDispatch = (tripId: string, offeredFare?: number) =>
+  api.post<{
+    success: boolean;
+    trip_id: string;
+    drivers_notified: number;
+    fare_raised: boolean;
+    offered_fare: number;
+    message: string;
+  }>(`/trips/${tripId}/retry-dispatch`, offeredFare != null ? { offered_fare: offeredFare } : {});
+
 export const rateTrip = (tripId: string, raterId: string, rating: number, comment?: string) =>
   api.put(`/trips/${tripId}/rate?rater_id=${raterId}`, {
     overall_rating: rating,

@@ -2161,6 +2161,11 @@ class SafeArrivalConfirmRequest(BaseModel):
     safe: bool = True
 
 
+class RetryDispatchRequest(BaseModel):
+    """Search again, optionally at a higher offer."""
+    offered_fare: Optional[float] = Field(default=None, ge=0)
+
+
 class FakeDriverAlertRequest(BaseModel):
     observed_face_image: str
     location_lat: Optional[float] = None
@@ -5305,6 +5310,139 @@ async def generate_trip_share_link(trip_id: str, request: Request):
         "share_link": f"{SHARE_TRACK_BASE}/{token}",
         "trip_id": trip_id,
         "status": trip.get("status"),
+    }
+
+
+SEARCHING_TRIP_STATUSES = {"pending", "pending_driver_offers"}
+#: Riders can raise a stalled offer, but not to an arbitrary number.
+MAX_RETRY_FARE_MULTIPLIER = 3.0
+
+
+@trips_router.post("/trips/{trip_id}/retry-dispatch")
+async def retry_trip_dispatch(
+    trip_id: str, payload: RetryDispatchRequest, request: Request
+):
+    """
+    Search again for the same trip, optionally at a higher offer.
+
+    "No driver available right now" used to offer a Try Again button that only
+    reset a local countdown — the server was never asked to look again — and the
+    only way to raise the bid was to cancel the trip and rebook, which also
+    counted against the rider's cancellation limit. This keeps the trip and
+    re-runs dispatch.
+    """
+    rider_id = require_authenticated(request)
+    trip = await db.trips.find_one({"id": trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if str(trip.get("rider_id") or "") != str(rider_id):
+        raise HTTPException(status_code=403, detail="Not your trip")
+
+    status = str(trip.get("status") or "").lower()
+    if status not in SEARCHING_TRIP_STATUSES:
+        if trip.get("driver_id"):
+            raise HTTPException(status_code=409, detail="A driver is already on the way.")
+        raise HTTPException(
+            status_code=409,
+            detail="This request is no longer searching. Book a new ride.",
+        )
+
+    # Cheap abuse guard — this fans out to every nearby driver.
+    from security_advanced import general_limiter
+
+    await general_limiter.check_rate_limit(request, f"retry_dispatch:{trip_id}")
+
+    current_fare = float(trip.get("fare") or trip.get("offered_fare") or 0)
+    new_fare = payload.offered_fare
+    fare_raised = False
+    if new_fare is not None:
+        new_fare = round(float(new_fare), 2)
+        if current_fare > 0 and new_fare < current_fare:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Your new offer must be at least ₦{current_fare:,.0f}.",
+            )
+        ceiling = current_fare * MAX_RETRY_FARE_MULTIPLIER if current_fare > 0 else None
+        if ceiling and new_fare > ceiling:
+            raise HTTPException(
+                status_code=400,
+                detail=f"That offer is too high. Maximum is ₦{ceiling:,.0f}.",
+            )
+        if new_fare > current_fare:
+            fare_raised = True
+            await db.trips.update_one(
+                {"id": trip_id, "status": {"$in": list(SEARCHING_TRIP_STATUSES)}},
+                {
+                    "$set": {
+                        "fare": new_fare,
+                        "offered_fare": new_fare,
+                        "fare_raised_by_rider": True,
+                        "fare_raised_at": datetime.now(timezone.utc).isoformat(),
+                        "previous_offered_fare": current_fare,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                },
+            )
+            trip = await db.trips.find_one({"id": trip_id}) or trip
+
+    # Give every nearby driver a fresh look, including ones who let the last
+    # offer lapse — a higher fare is a new decision for them.
+    await db.trip_offers.update_many(
+        {"trip_id": trip_id, "status": {"$in": ["offered", "seen", "expired"]}},
+        {
+            "$set": {
+                "status": "superseded",
+                "superseded_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+    )
+
+    rider = await db.users.find_one({"id": rider_id}, {"_id": 0, "blocked_drivers": 1}) or {}
+    blocked_drivers = rider.get("blocked_drivers", []) or []
+    # Drivers who explicitly declined keep their decision unless the fare went up.
+    if not fare_raised:
+        declined = await db.trip_offers.find(
+            {"trip_id": trip_id, "status": "declined"}, {"_id": 0, "driver_id": 1}
+        ).to_list(50)
+        blocked_drivers = list(
+            {*blocked_drivers, *[str(d.get("driver_id")) for d in declined if d.get("driver_id")]}
+        )
+
+    offers = await _create_trip_offers(trip, blocked_drivers)
+
+    await db.trips.update_one(
+        {"id": trip_id},
+        {
+            "$set": {
+                "status": "pending_driver_offers" if offers else trip.get("status"),
+                "last_redispatch_at": datetime.now(timezone.utc).isoformat(),
+            },
+            "$inc": {"redispatch_count": 1},
+        },
+    )
+    await _log_trip_event(
+        trip_id,
+        "trip_redispatch_requested",
+        rider_id,
+        {
+            "eligible_drivers": len(offers),
+            "fare_raised": fare_raised,
+            "offered_fare": float(trip.get("fare") or current_fare),
+            "previous_fare": current_fare,
+        },
+    )
+
+    return {
+        "success": True,
+        "trip_id": trip_id,
+        "drivers_notified": len(offers),
+        "fare_raised": fare_raised,
+        "offered_fare": float(trip.get("fare") or current_fare),
+        "message": (
+            f"Sent to {len(offers)} nearby driver{'s' if len(offers) != 1 else ''}."
+            if offers
+            else "No drivers nearby yet — we will keep looking."
+        ),
     }
 
 

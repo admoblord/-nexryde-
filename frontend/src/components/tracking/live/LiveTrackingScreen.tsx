@@ -49,7 +49,13 @@ import { useThrottledValue } from '@/src/hooks/useThrottledValue';
 import { RIDER_TRACKING_DISPLAY_THROTTLE_MS } from '@/src/constants/tripRealtimeRhythm';
 import { useDevDriverMovementSim } from '@/src/components/tracking/hooks/useDevDriverMovementSim';
 import { DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
-import { getAvailableDrivers, respondToTripSafetyCheck } from '@/src/services/api';
+import {
+  getAvailableDrivers,
+  messageFromAxiosError,
+  respondToTripSafetyCheck,
+  retryTripDispatch,
+} from '@/src/services/api';
+import { useErrorToast } from '@/src/components/shared/ErrorToast';
 import { useAppStore } from '@/src/store/appStore';
 import { setForegroundInterval } from '@/src/utils/foregroundInterval';
 import { trackVerifyPing } from '@/src/components/tracking/map/trackVerifyLog';
@@ -480,6 +486,9 @@ export default function LiveTrackingScreen() {
   // ── Finding phase elapsed timer ───────────────────────────────────────────
   const findingStartRef = useRef<number | null>(null);
   const [searchElapsedSec, setSearchElapsedSec] = useState(0);
+  /** True while a re-broadcast (Try Again / raise offer) is in flight. */
+  const [retryBusy, setRetryBusy] = useState(false);
+  const toast = useErrorToast();
   /** Brief Uber-style "matched" beat between finding → live tracking. */
   const [matchedBeat, setMatchedBeat] = useState<{ name: string } | null>(null);
   const wasFindingRef = useRef(false);
@@ -490,8 +499,11 @@ export default function LiveTrackingScreen() {
       return;
     }
     if (findingStartRef.current == null) findingStartRef.current = Date.now();
-    const anchor = findingStartRef.current;
+    // Read the anchor each tick: a successful re-broadcast resets it, and a
+    // captured value would keep counting from the original search.
     const id = setInterval(() => {
+      const anchor = findingStartRef.current;
+      if (anchor == null) return;
       setSearchElapsedSec(Math.floor((Date.now() - anchor) / 1000));
     }, 1000);
     return () => clearInterval(id);
@@ -647,24 +659,75 @@ export default function LiveTrackingScreen() {
     setTrafficOn((v) => !v);
   }, []);
 
+  /**
+   * Search again for this same trip.
+   *
+   * Try Again used to only reset a local countdown, so a rider staring at
+   * "No driver available" was never actually re-broadcast to anyone.
+   */
+  const runRetryDispatch = useCallback(
+    async (offeredFare?: number) => {
+      if (!effectiveTripId || retryBusy) return;
+      setRetryBusy(true);
+      try {
+        const res = await retryTripDispatch(effectiveTripId, offeredFare);
+        const data = res?.data;
+        // Restart the on-screen search clock only after the server has looked again.
+        findingStartRef.current = Date.now();
+        setSearchElapsedSec(0);
+        const notified = Number(data?.drivers_notified ?? 0);
+        if (notified > 0) {
+          toast.show(
+            data?.fare_raised
+              ? `New offer sent to ${notified} driver${notified === 1 ? '' : 's'}.`
+              : `Searching again — ${notified} driver${notified === 1 ? '' : 's'} nearby.`,
+            'success',
+          );
+        } else {
+          toast.show('No drivers nearby yet — we will keep looking.', 'info');
+        }
+        void actions.retrySync();
+      } catch (e: unknown) {
+        toast.show(
+          messageFromAxiosError(e, 'Could not search again. Check your connection.'),
+          'error',
+        );
+      } finally {
+        setRetryBusy(false);
+      }
+    },
+    [actions, effectiveTripId, retryBusy, toast],
+  );
+
+  /**
+   * Raise the offer without losing the trip. This used to cancel the request and
+   * send the rider back to booking, which also counted against their
+   * cancellation limit.
+   */
   const handleUpdateBid = useCallback(() => {
+    const raw = currentTrip as { fare?: number; offered_fare?: number } | null;
+    const current = Math.round(Number(raw?.fare ?? raw?.offered_fare ?? 0));
+    if (!current || current <= 0) {
+      toast.show('Fare is still loading — try again in a moment.', 'info');
+      return;
+    }
+    const bump = (amount: number) => Math.round(current + amount);
     Alert.alert(
-      'Update your bid',
-      'To change your bid we need to cancel this request and take you back to booking. Continue?',
+      'Raise your offer',
+      `Drivers are scarce right now. A higher offer reaches them again immediately.\n\nCurrent offer: ₦${current.toLocaleString()}`,
       [
-        { text: 'Keep searching', style: 'cancel' },
+        { text: 'Not now', style: 'cancel' },
         {
-          text: 'Update bid',
-          onPress: () => {
-            void (async () => {
-              await actions.onCancelRide('Updating my bid');
-              router.push('/rider/book' as never);
-            })();
-          },
+          text: `+₦500 (₦${bump(500).toLocaleString()})`,
+          onPress: () => void runRetryDispatch(bump(500)),
+        },
+        {
+          text: `+₦1,000 (₦${bump(1000).toLocaleString()})`,
+          onPress: () => void runRetryDispatch(bump(1000)),
         },
       ],
     );
-  }, [actions, router]);
+  }, [currentTrip, runRetryDispatch, toast]);
 
   const cancelSheet = (
     <CancellationReasonModal
@@ -730,11 +793,7 @@ export default function LiveTrackingScreen() {
       : connLost
       ? actions.retrySync
       : noDriversTimedOut
-      ? () => {
-          // Reset the search clock and keep looking.
-          findingStartRef.current = Date.now();
-          setSearchElapsedSec(0);
-        }
+      ? () => void runRetryDispatch()
       : undefined;
     return (
       <View style={styles.root}>
@@ -756,6 +815,8 @@ export default function LiveTrackingScreen() {
           onCancel={matchedBeat ? () => undefined : actions.promptCancelRide}
           onTryAgain={onFindingTryAgain}
           onUpdateBid={matchedBeat ? undefined : handleUpdateBid}
+          onRaiseOffer={matchedBeat || connLost ? undefined : handleUpdateBid}
+          retryBusy={retryBusy}
           nearbyDrivers={nearbyDrivers}
         />
         {matchedBeat ? null : cancelSheet}
