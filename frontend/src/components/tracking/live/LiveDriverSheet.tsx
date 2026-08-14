@@ -228,6 +228,7 @@ function LiveDriverSheetInner({
       ? 'rgba(56,189,248,0.25)'
       : LIVE.glassBorder;
 
+
   return (
     <Animated.View
       style={[
@@ -247,7 +248,11 @@ function LiveDriverSheetInner({
         <View style={styles.grabber} />
       </View>
 
-      {/* Collapsed peek row */}
+      {/*
+        Peek row — the ONLY place the driver's photo, name and plate appear.
+        The expanded card below used to repeat all three, so an open sheet showed
+        the same driver twice.
+      */}
       <TouchableOpacity
         style={styles.collapsed}
         activeOpacity={0.92}
@@ -294,34 +299,19 @@ function LiveDriverSheetInner({
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        {/* Driver profile */}
+        {/*
+          Credentials + status only. The photo, name and plate stay in the peek
+          row above so the driver is never shown twice.
+        */}
         <View style={styles.profileRow}>
-          <TripProfileAvatar
-            size={LIVE_LAYOUT.expandedPhoto}
-            uri={photoUri}
-            borderColor="#FFFFFF"
-            borderWidth={3}
-            showOnlineDot={tripPhase !== 'ongoing'}
-            accessibilityLabel={`Photo of ${displayName}`}
-          />
           <View style={styles.profileMeta}>
-            <View style={styles.nameRow}>
-              <Text style={styles.expandedName} numberOfLines={1}>{displayName}</Text>
-              <TouchableOpacity onPress={onToggleFavorite} hitSlop={8} accessibilityLabel="Toggle favorite driver">
-                <Ionicons
-                  name={isFavorite ? 'heart' : 'heart-outline'}
-                  size={20}
-                  color={isFavorite ? LIVE.red : LIVE.faint}
-                />
-              </TouchableOpacity>
-            </View>
             <View style={styles.ratingRow}>
               <Ionicons name="star" size={14} color={LIVE.gold} />
               <Text style={styles.ratingTxt}>
                 {rating != null && rating > 0 ? rating.toFixed(1) : '—'}
               </Text>
               <Text style={styles.tripsTxt}>
-                {totalTrips != null && totalTrips > 0 ? ` · ${totalTrips} trips` : ' · — trips'}
+                {totalTrips != null && totalTrips > 0 ? `${totalTrips} trips` : '— trips'}
               </Text>
               {verified ? (
                 <View style={styles.verifiedBadge}>
@@ -329,6 +319,19 @@ function LiveDriverSheetInner({
                   <Text style={styles.verifiedTxt}>Verified</Text>
                 </View>
               ) : null}
+              <View style={styles.profileSpacer} />
+              <TouchableOpacity
+                onPress={onToggleFavorite}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={isFavorite ? 'Remove favourite driver' : 'Save as favourite driver'}
+              >
+                <Ionicons
+                  name={isFavorite ? 'heart' : 'heart-outline'}
+                  size={20}
+                  color={isFavorite ? LIVE.red : LIVE.faint}
+                />
+              </TouchableOpacity>
             </View>
             {/* Phase status line */}
             <Text style={[styles.phaseLine, tripPhase === 'arrived' && { color: colors.amber }, tripPhase === 'ongoing' && { color: colors.blue }]} numberOfLines={1}>
@@ -518,11 +521,10 @@ const styles = StyleSheet.create({
   collapsedEtaSub: { fontSize: 10, fontWeight: '700', color: LIVE.faint, marginTop: 2 },
   expandedScroll: { flex: 1 },
   expandedContent: { paddingHorizontal: LIVE.pad, paddingBottom: LIVE.gap + 8, gap: LIVE.gap },
-  profileRow: { flexDirection: 'row', gap: 14, alignItems: 'flex-start', paddingTop: 4 },
+  profileRow: { flexDirection: 'row', gap: 14, alignItems: 'flex-start' },
   profileMeta: { flex: 1, minWidth: 0, justifyContent: 'flex-start', gap: 4 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  expandedName: { fontSize: 18, fontWeight: '900', color: LIVE.text, flex: 1 },
-  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
+  profileSpacer: { flex: 1 },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   ratingTxt: { fontSize: 13, fontWeight: '800', color: LIVE.text },
   tripsTxt: { fontSize: 12, fontWeight: '600', color: LIVE.sub },
   verifiedBadge: {

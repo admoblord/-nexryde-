@@ -70,6 +70,7 @@ import {
   type TripDraftLocation,
 } from '@/src/utils/bookingTripDraft';
 import { tripLocationRecord } from '@/src/utils/tripCoords';
+import { fareEstimateDelayMs } from '@/src/utils/fareEstimateScheduling';
 import { TrafficIntelligence, type TrafficRoute } from '@/src/services/trafficAI';
 import MapComponent from '@/src/components/MapComponent';
 import { RiderBookingMapNative } from '@/src/components/map/RiderBookingMapNative';
@@ -367,6 +368,12 @@ function BookInDriveStyle() {
   /** Bumps whenever pickup, destination, or stop changes — stale fare/route responses are ignored. */
   const pricingEpochRef = useRef(0);
   const fareDetailsEpochRef = useRef(0);
+  /** Last route we priced — lets a genuinely new destination skip the settle delay. */
+  const lastPricedRouteRef = useRef<{
+    pickup: { lat: number; lng: number } | null;
+    destination: { lat: number; lng: number } | null;
+    priced: boolean;
+  }>({ pickup: null, destination: null, priced: false });
   const ROUTE_DRIFT_KM = 1.0;
 
   const [fareExplainModal, setFareExplainModal] = useState<
@@ -1879,7 +1886,23 @@ function BookInDriveStyle() {
         /* fare matrix best-effort */
       }
     };
-    const timer = setTimeout(run, 400);
+    // A committed destination goes straight out — the rider is staring at the
+    // screen waiting for a price. The delay is only for coordinate churn.
+    const delay = fareEstimateDelayMs({
+      previousPickup: lastPricedRouteRef.current.pickup,
+      previousDestination: lastPricedRouteRef.current.destination,
+      nextPickup: pickupCoords,
+      nextDestination: destinationCoords,
+      isFirstEstimate: !lastPricedRouteRef.current.priced,
+    });
+    lastPricedRouteRef.current = {
+      pickup: pickupCoords ? { lat: pickupCoords.lat, lng: pickupCoords.lng } : null,
+      destination: destinationCoords
+        ? { lat: destinationCoords.lat, lng: destinationCoords.lng }
+        : null,
+      priced: true,
+    };
+    const timer = setTimeout(run, delay);
     return () => {
       clearTimeout(timer);
     };
