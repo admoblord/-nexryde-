@@ -386,6 +386,7 @@ async def ensure_indexes(db):
 
         # Driver active_trip_id — index for lock queries
         await db.driver_profiles.create_index("active_trip_id", sparse=True)
+        await db.driver_profiles.create_index("queued_next_trip_id", sparse=True)
 
         # Realtime platform — saga retry loop + outbox drain scan by status.
         try:

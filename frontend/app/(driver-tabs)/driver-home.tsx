@@ -398,6 +398,9 @@ function mapWsRideOfferToTrip(data: Record<string, unknown>) {
     area_summary_line: data.area_summary_line ?? data.area_label ?? null,
     surge_multiplier: data.surge_multiplier ?? 1,
     payment_method: data.payment_method ?? 'cash',
+    finishing_trip: Boolean(data.finishing_trip),
+    finishing_eta_sec: data.finishing_eta_sec,
+    prior_trip_id: data.prior_trip_id,
   };
 }
 
@@ -1314,7 +1317,11 @@ export default function ModernDriverHome() {
       } as Trip & Record<string, unknown>;
       setCompleteTripConfirmOpen(false);
       setTripCompletion(tripToCompletionPayload(merged));
-      if (statusAfter === 'pending_payment') {
+      const nextTrip = (tripAfter as { next_trip?: Trip }).next_trip;
+      if (nextTrip && nextTrip.id) {
+        setCurrentTrip(nextTrip as Trip);
+        toast.show('Next rider is waiting — heading there after this drop-off.', 'success');
+      } else if (statusAfter === 'pending_payment') {
         setCurrentTrip(merged as Trip);
       } else {
         setCurrentTrip(null);
@@ -2257,8 +2264,20 @@ export default function ModernDriverHome() {
         if (Platform.OS !== 'web') {
           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         }
-        setCurrentTrip(optimisticTrip);
-        clearIncomingOffer();
+        const liveStatuses = new Set(['accepted', 'arrived', 'ongoing']);
+        const keepCurrentTrip = Boolean(
+          currentTrip?.id &&
+            liveStatuses.has(String(currentTrip.status || '')) &&
+            currentTrip.id !== tripId &&
+            (ride as { finishing_trip?: boolean }).finishing_trip,
+        );
+        if (keepCurrentTrip) {
+          clearIncomingOffer();
+          toast.show('Next ride booked — after you drop off.', 'success');
+        } else {
+          setCurrentTrip(optimisticTrip);
+          clearIncomingOffer();
+        }
 
         const outcome = await acceptDriverTripOffer({
           tripId,
@@ -2291,9 +2310,22 @@ export default function ModernDriverHome() {
           if (outcome.status === 'reconciled') {
             toast.show('Ride accepted — synced after a slow connection.', 'success');
           }
-          setCurrentTrip(mergedTrip);
+          const queuedNext = Boolean(
+            (data as { queued_behind_active_trip?: boolean; driver_finishing_prior_trip?: boolean })
+              .queued_behind_active_trip ||
+              (data as { driver_finishing_prior_trip?: boolean }).driver_finishing_prior_trip,
+          );
+          if (keepCurrentTrip || queuedNext) {
+            if (!keepCurrentTrip) {
+              toast.show('Next ride booked — after you drop off.', 'success');
+            }
+          } else {
+            setCurrentTrip(mergedTrip);
+          }
         } else if (outcome.status === 'session_expired') {
-          setCurrentTrip(null);
+          if (!keepCurrentTrip) {
+            setCurrentTrip(null);
+          }
           toast.show(outcome.message, 'error');
           Alert.alert('Session expired', outcome.message, [
             { text: 'Later', style: 'cancel' },
@@ -2310,15 +2342,32 @@ export default function ModernDriverHome() {
           toast.show('Bid saved — will send when connection is stable. Tap Send bid to retry.', 'warning');
         } else {
           // Roll back optimistic accept when the server rejects.
-          setCurrentTrip(null);
+          if (!keepCurrentTrip) {
+            setCurrentTrip(null);
+          }
           toast.show(outcome.message || 'Could not accept — try the next offer.', 'warning');
         }
       } catch (e) {
         const verified = await verifyDriverTripAssignment(driverId, ride.id);
         if (verified.assigned && verified.trip) {
-          setCurrentTrip(verified.trip as unknown as Trip);
+          const liveStatuses = new Set(['accepted', 'arrived', 'ongoing']);
+          const keepCurrent = Boolean(
+            currentTrip?.id &&
+              liveStatuses.has(String(currentTrip.status || '')) &&
+              currentTrip.id !== ride.id &&
+              ((ride as { finishing_trip?: boolean }).finishing_trip ||
+                (verified.trip as { driver_finishing_prior_trip?: boolean }).driver_finishing_prior_trip),
+          );
+          if (!keepCurrent) {
+            setCurrentTrip(verified.trip as unknown as Trip);
+          }
           clearIncomingOffer();
-          toast.show('Ride accepted — confirmed after connection issue.', 'success');
+          toast.show(
+            keepCurrent
+              ? 'Next ride booked — after you drop off.'
+              : 'Ride accepted — confirmed after connection issue.',
+            'success',
+          );
           return;
         }
         await queueDriverRideAcceptance(ride.id, {
@@ -2333,7 +2382,7 @@ export default function ModernDriverHome() {
         setAcceptingRide(false);
       }
     },
-    [incomingRide, driverId, clearIncomingOffer]
+    [incomingRide, driverId, clearIncomingOffer, currentTrip, setCurrentTrip, toast]
   );
 
   const handleAcceptIncomingAtRiderOffer = useCallback(() => {
@@ -2411,7 +2460,18 @@ export default function ModernDriverHome() {
           } catch {}
         }
         if (acceptedTrip) {
-          setCurrentTrip(acceptedTrip as unknown as Trip);
+          const liveStatuses = new Set(['accepted', 'arrived', 'ongoing']);
+          const keepCurrent = Boolean(
+            currentTrip?.id &&
+              liveStatuses.has(String(currentTrip.status || '')) &&
+              currentTrip.id !== String(acceptedTrip.id || event.tripId || '') &&
+              (acceptedTrip.driver_finishing_prior_trip || acceptedTrip.queued_behind_active_trip),
+          );
+          if (!keepCurrent) {
+            setCurrentTrip(acceptedTrip as unknown as Trip);
+          } else {
+            toast.show('Next ride booked — after you drop off.', 'success');
+          }
         } else if (event.tripId && driverId) {
           const acceptedTripId = event.tripId;
           // Accept succeeded server-side but no inline trip JSON — retry the assignment
@@ -2422,7 +2482,17 @@ export default function ModernDriverHome() {
               try {
                 const verified = await verifyDriverTripAssignment(driverId, acceptedTripId);
                 if (verified.assigned && verified.trip) {
-                  setCurrentTrip(verified.trip as unknown as Trip);
+                  const liveStatuses = new Set(['accepted', 'arrived', 'ongoing']);
+                  const keepCurrent = Boolean(
+                    currentTrip?.id &&
+                      liveStatuses.has(String(currentTrip.status || '')) &&
+                      currentTrip.id !== acceptedTripId &&
+                      (verified.trip as { driver_finishing_prior_trip?: boolean })
+                        .driver_finishing_prior_trip,
+                  );
+                  if (!keepCurrent) {
+                    setCurrentTrip(verified.trip as unknown as Trip);
+                  }
                   return;
                 }
               } catch {
@@ -2445,7 +2515,7 @@ export default function ModernDriverHome() {
         });
       }
     });
-  }, [clearIncomingOffer, driverId, setCurrentTrip]);
+  }, [clearIncomingOffer, currentTrip, driverId, setCurrentTrip, toast]);
 
   const showOnlineStatusAlert = useCallback((detail: unknown, httpStatus?: number | null) => {
     const parsed = parseDriverOnlineError(detail, httpStatus);

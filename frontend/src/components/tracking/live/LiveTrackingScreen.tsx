@@ -172,10 +172,11 @@ const ratingStyles = StyleSheet.create({
 
 // ─── TripAcceptBanner ────────────────────────────────────────────────────────
 // Auto-dismiss banner on driver acceptance.
-function TripAcceptBanner({ visible, driverName, etaMin }: {
+function TripAcceptBanner({ visible, driverName, etaMin, finishing }: {
   visible: boolean;
   driverName: string;
   etaMin: number | null;
+  finishing?: boolean;
 }) {
   const slideY  = useRef(new Animated.Value(-20)).current;
   const opacity = useRef(new Animated.Value(0)).current;
@@ -208,9 +209,15 @@ function TripAcceptBanner({ visible, driverName, etaMin }: {
         <Ionicons name="checkmark-circle" size={20} color={LIVE.greenBright} />
         <View style={{ flex: 1 }}>
           <Text style={acceptStyles.title}>
-            {driverName && driverName !== 'Driver' ? `${driverName} is on the way` : 'Driver confirmed'}
+            {finishing
+              ? (driverName && driverName !== 'Driver'
+                ? `${driverName} is finishing a trip nearby`
+                : 'Your driver is finishing a trip nearby')
+              : (driverName && driverName !== 'Driver' ? `${driverName} is on the way` : 'Driver confirmed')}
           </Text>
-          {etaMin != null && etaMin > 0 ? (
+          {finishing ? (
+            <Text style={acceptStyles.sub}>They'll join you shortly.</Text>
+          ) : etaMin != null && etaMin > 0 ? (
             <Text style={acceptStyles.sub}>Arriving in about {etaMin} min</Text>
           ) : null}
         </View>
@@ -426,7 +433,7 @@ export default function LiveTrackingScreen() {
   const findingStartRef = useRef<number | null>(null);
   const [searchElapsedSec, setSearchElapsedSec] = useState(0);
   /** Brief Uber-style "matched" beat between finding → live tracking. */
-  const [matchedBeat, setMatchedBeat] = useState<{ name: string } | null>(null);
+  const [matchedBeat, setMatchedBeat] = useState<{ name: string; finishing?: boolean } | null>(null);
   const wasFindingRef = useRef(false);
   useEffect(() => {
     if (!isFindingPhase) {
@@ -514,6 +521,9 @@ export default function LiveTrackingScreen() {
 
   // Driver info derivations
   const driverName = String(driverInfo?.name || 'Driver');
+  const driverFinishingPriorTrip = Boolean(
+    (currentTrip as { driver_finishing_prior_trip?: boolean } | null)?.driver_finishing_prior_trip,
+  );
 
   // Matched beat: hold finding UI ~1.5s with celebration before live map.
   useEffect(() => {
@@ -524,13 +534,13 @@ export default function LiveTrackingScreen() {
     if (!wasFindingRef.current || !isDriverAssigned) return;
     wasFindingRef.current = false;
     const name = driverName && driverName !== 'Driver' ? driverName : 'Your driver';
-    setMatchedBeat({ name });
+    setMatchedBeat({ name, finishing: driverFinishingPriorTrip });
     if (Platform.OS !== 'web') {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
     const t = setTimeout(() => setMatchedBeat(null), 700);
     return () => clearTimeout(t);
-  }, [isFindingPhase, isDriverAssigned, driverName]);
+  }, [isFindingPhase, isDriverAssigned, driverName, driverFinishingPriorTrip]);
 
   // Resolve across profile / face / face URL on both driverInfo and trip payload (Uber-visible).
   const driverPhoto = resolveDriverPhotoUri({
@@ -575,7 +585,9 @@ export default function LiveTrackingScreen() {
       ? 'Driver is here'
       : tripStatus === 'ongoing'
         ? 'On trip'
-        : 'Driver arriving';
+        : driverFinishingPriorTrip
+          ? 'Finishing nearby'
+          : 'Driver arriving';
 
   // Trip timer — anchored on server started_at for accuracy across re-renders
   const tripTimer = useTripTimer(tripStatus === 'ongoing', startedAtIso ?? null);
@@ -696,6 +708,7 @@ export default function LiveTrackingScreen() {
           routeMinLabel={raw?.duration_mins != null ? `~${Math.round(Number(raw.duration_mins))} min` : null}
           phase={findingPhase}
           matchedDriverName={matchedBeat?.name ?? null}
+          driverFinishingPriorTrip={Boolean(matchedBeat?.finishing || driverFinishingPriorTrip)}
           errorMessage={findingErrMsg}
           timeElapsedSec={searchElapsedSec}
           onCancel={matchedBeat ? () => undefined : actions.promptCancelRide}
@@ -861,6 +874,7 @@ export default function LiveTrackingScreen() {
           visible={acceptedBanner && tripStatus !== 'arrived' && tripStatus !== 'ongoing'}
           driverName={driverName}
           etaMin={showConnecting ? null : displayEtaMinutes}
+          finishing={driverFinishingPriorTrip}
         />
       </View>
 
@@ -924,6 +938,7 @@ export default function LiveTrackingScreen() {
         onSos={actions.onEmergency}
         destEtaMinutes={showConnecting ? null : tripStatus === 'ongoing' ? displayEtaMinutes : null}
         destAddress={tripStatus === 'ongoing' ? destinationLabel : null}
+        driverFinishingPriorTrip={driverFinishingPriorTrip}
         canCancel={canCancelLive}
         onCancel={actions.promptCancelRide}
         cancelFeeNote={cancelFeeNote}

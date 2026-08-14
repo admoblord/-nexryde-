@@ -323,10 +323,9 @@ async def run_cancel_saga(
         async def step_lock() -> None:
             did = trip.get("driver_id")
             if did:
-                await db.driver_profiles.update_one(
-                    {"user_id": did},
-                    {"$unset": {"active_trip_id": ""}},
-                )
+                from routers.trips import _promote_or_release_driver_lock
+
+                await _promote_or_release_driver_lock(str(did), trip_id)
 
         async def step_withdraw() -> None:
             from realtime_platform.lifecycle import withdraw_trip_offers

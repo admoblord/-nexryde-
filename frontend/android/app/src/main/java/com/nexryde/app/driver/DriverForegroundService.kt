@@ -221,8 +221,8 @@ class DriverForegroundService : Service(), LocationListener, DriverOverlayBubble
     runCatching {
       val json = JSONObject(raw)
       val ts = json.optLong("__ts", 0L)
-      // Ride offers are ~20s TTL — never replay a stale one on a later shift.
-      if (ts <= 0L || System.currentTimeMillis() - ts > 18_000L) return@runCatching
+      // Ride offers ring for 40s — never replay a stale one on a later shift.
+      if (ts <= 0L || System.currentTimeMillis() - ts > 30_000L) return@runCatching
       val replay = Intent(this, DriverForegroundService::class.java).apply {
         action = ACTION_SHOW_OFFER
         val keys = json.keys()

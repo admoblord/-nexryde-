@@ -18,7 +18,7 @@ from realtime_platform.observability import incr, observe_ms, trace
 logger = logging.getLogger("realtime_platform.dispatch_guardian")
 
 OFFER_ACK_GRACE_SEC = 8
-OFFER_ESCALATE_SEC = 45
+OFFER_ESCALATE_SEC = 60
 PENDING_WITHOUT_OFFERS_SEC = 12
 
 

@@ -197,6 +197,9 @@ async def create_offers_for_trip(
                 "preferred": trip.get("preferred_driver_id") == driver["driver_id"],
                 "platform": "realtime_v1",
                 "delivery_status": "pending",
+                "finishing_trip": bool(driver.get("finishing_trip")),
+                "finishing_eta_sec": driver.get("finishing_eta_sec"),
+                "prior_trip_id": driver.get("prior_trip_id"),
             }
             offers.append(offer)
         if offers:

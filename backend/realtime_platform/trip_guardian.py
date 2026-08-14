@@ -22,7 +22,7 @@ async def _clear_orphan_driver_locks(limit: int = 50) -> int:
 
     profiles = await db.driver_profiles.find(
         {"active_trip_id": {"$exists": True, "$nin": [None, ""]}},
-        {"_id": 0, "user_id": 1, "active_trip_id": 1},
+        {"_id": 0, "user_id": 1, "active_trip_id": 1, "queued_next_trip_id": 1},
     ).limit(limit).to_list(limit)
 
     cleared = 0
@@ -34,10 +34,15 @@ async def _clear_orphan_driver_locks(limit: int = 50) -> int:
             continue
         trip = await db.trips.find_one({"id": tid}, {"_id": 0, "status": 1, "driver_id": 1})
         if trip is None or str(trip.get("status") or "") in terminal:
-            await db.driver_profiles.update_one(
-                {"user_id": did, "active_trip_id": tid},
-                {"$unset": {"active_trip_id": ""}},
-            )
+            try:
+                from routers.trips import _promote_or_release_driver_lock
+
+                await _promote_or_release_driver_lock(did, tid)
+            except Exception:
+                await db.driver_profiles.update_one(
+                    {"user_id": did, "active_trip_id": tid},
+                    {"$unset": {"active_trip_id": ""}},
+                )
             cleared += 1
             incr("guardian.trip.orphan_lock_cleared")
         elif str(trip.get("driver_id") or "") not in ("", did):

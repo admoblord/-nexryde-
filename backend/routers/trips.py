@@ -36,6 +36,20 @@ from favorite_driver_notifications import maybe_send_rider_favorite_engagement_p
 from push_notifications import send_push_notification
 from routers.realtime_dispatch import push_driver_new_offer, push_rider_trip_update
 from trip_ws_payload import rider_trip_payload_from_doc
+from finishing_trip_dispatch import (
+    DISPATCH_CANDIDATE_CAP,
+    DISPATCH_OFFER_CAP,
+    DISPATCH_RADIUS_M_FAR,
+    DISPATCH_RADIUS_M_NEAR,
+    MAX_CHAINED_PICKUP_KM,
+    accept_lock_decision,
+    cancel_lock_decision,
+    chained_distance_km,
+    eligibility_rank_key,
+    finishing_offer_state,
+    merge_driver_profiles,
+    rider_finishing_push,
+)
 from trip_fare_adjustments import (
     compute_completion_fare_adjustments,
     compute_mid_trip_route_fare,
@@ -1297,6 +1311,171 @@ async def _driver_is_busy(driver_id: str) -> bool:
     return active is not None
 
 
+def _driver_lat_lng(profile: Optional[dict]) -> tuple[Optional[float], Optional[float]]:
+    if not profile:
+        return None, None
+    loc = profile.get("current_location") or {}
+    raw_lat = profile.get("current_lat")
+    raw_lng = profile.get("current_lng")
+    if raw_lat is None and isinstance(loc, dict):
+        raw_lat = loc.get("lat", loc.get("latitude"))
+    if raw_lng is None and isinstance(loc, dict):
+        raw_lng = loc.get("lng", loc.get("longitude"))
+    try:
+        return float(raw_lat), float(raw_lng)
+    except (TypeError, ValueError):
+        return None, None
+
+
+async def _lock_driver_for_accept(driver_id: str, trip_id: str) -> dict:
+    """Idle drivers take active_trip_id; finishing drivers queue the next ride."""
+    profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
+    d_lat, d_lng = _driver_lat_lng(profile)
+    active_id = str(profile.get("active_trip_id") or "").strip()
+    queued_id = str(profile.get("queued_next_trip_id") or "").strip()
+    busy_trip = None
+    if active_id and active_id != trip_id:
+        busy_trip = await db.trips.find_one({"id": active_id})
+    decision = accept_lock_decision(
+        new_trip_id=trip_id,
+        active_trip_id=active_id,
+        queued_next_trip_id=queued_id,
+        busy_trip=busy_trip,
+        driver_lat=d_lat,
+        driver_lng=d_lng,
+    )
+    if decision["mode"] == "reject":
+        if decision.get("reason") == "already_queued":
+            raise HTTPException(
+                status_code=409,
+                detail="You already have a next ride queued. Finish your current trip first.",
+            )
+        raise HTTPException(
+            status_code=409,
+            detail="You already have an active trip. Complete it before accepting another.",
+        )
+    if decision["mode"] == "queued":
+        dp_lock = await db.driver_profiles.find_one_and_update(
+            {
+                "user_id": driver_id,
+                "active_trip_id": active_id,
+                "$or": [
+                    {"queued_next_trip_id": {"$exists": False}},
+                    {"queued_next_trip_id": None},
+                    {"queued_next_trip_id": ""},
+                    {"queued_next_trip_id": trip_id},
+                ],
+            },
+            {"$set": {"queued_next_trip_id": trip_id}},
+            return_document=True,
+        )
+        if not dp_lock:
+            raise HTTPException(
+                status_code=409,
+                detail="You already have an active trip. Complete it before accepting another.",
+            )
+        return {**decision, "lock": dp_lock, "busy_trip": busy_trip}
+    dp_lock = await db.driver_profiles.find_one_and_update(
+        {
+            "user_id": driver_id,
+            "$or": [
+                {"active_trip_id": {"$exists": False}},
+                {"active_trip_id": None},
+                {"active_trip_id": ""},
+                {"active_trip_id": trip_id},
+            ],
+        },
+        {"$set": {"active_trip_id": trip_id}},
+        return_document=True,
+    )
+    if not dp_lock:
+        raise HTTPException(
+            status_code=409,
+            detail="You already have an active trip. Complete it before accepting another.",
+        )
+    return {**decision, "lock": dp_lock, "busy_trip": None}
+
+
+async def _unlock_driver_accept_lock(driver_id: str, trip_id: str, mode: str) -> None:
+    if mode == "queued":
+        await db.driver_profiles.update_one(
+            {"user_id": driver_id, "queued_next_trip_id": trip_id},
+            {"$unset": {"queued_next_trip_id": ""}},
+        )
+        return
+    await db.driver_profiles.update_one(
+        {"user_id": driver_id, "active_trip_id": trip_id},
+        {"$unset": {"active_trip_id": ""}},
+    )
+
+
+async def _promote_or_release_driver_lock(driver_id: str, releasing_trip_id: str) -> Optional[dict]:
+    """After complete/cancel, promote a queued next ride or free the driver lock."""
+    if not driver_id:
+        return None
+    profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
+    action = cancel_lock_decision(
+        cancelled_trip_id=releasing_trip_id,
+        active_trip_id=profile.get("active_trip_id"),
+        queued_next_trip_id=profile.get("queued_next_trip_id"),
+    )
+    if action == "noop":
+        return None
+    if action == "clear_queued":
+        await db.driver_profiles.update_one(
+            {"user_id": driver_id, "queued_next_trip_id": releasing_trip_id},
+            {"$unset": {"queued_next_trip_id": ""}},
+        )
+        return None
+
+    queued_id = str(profile.get("queued_next_trip_id") or "").strip()
+    next_trip = None
+    if queued_id and queued_id != releasing_trip_id:
+        next_trip = await db.trips.find_one({"id": queued_id})
+        if next_trip and str(next_trip.get("status") or "") in {"accepted", "arrived"}:
+            await db.driver_profiles.update_one(
+                {"user_id": driver_id},
+                {
+                    "$set": {"active_trip_id": queued_id},
+                    "$unset": {"queued_next_trip_id": ""},
+                },
+            )
+            now = datetime.now(timezone.utc).isoformat()
+            await db.trips.update_one(
+                {"id": queued_id},
+                {
+                    "$set": {
+                        "driver_finishing_prior_trip": False,
+                        "finishing_cleared_at": now,
+                    },
+                    "$unset": {"finishing_eta_sec": ""},
+                },
+            )
+            next_trip = await db.trips.find_one({"id": queued_id}) or next_trip
+            if next_trip.get("_id"):
+                next_trip["_id"] = str(next_trip["_id"])
+            try:
+                driver_user = await db.users.find_one({"id": driver_id}, {"name": 1})
+                name = (driver_user or {}).get("name") or "Your driver"
+                if next_trip.get("rider_id"):
+                    await send_push_notification(
+                        next_trip["rider_id"],
+                        "Your driver is on the way",
+                        f"{name} just finished nearby and is heading to you now.",
+                        {"type": "trip_driver_en_route", "trip_id": queued_id},
+                    )
+                await _emit_rider_trip_realtime(queued_id)
+            except Exception:
+                logger.warning("queued next-trip promote notify failed", exc_info=True)
+            return next_trip
+
+    unset_fields = {"active_trip_id": ""}
+    if queued_id:
+        unset_fields["queued_next_trip_id"] = ""
+    await db.driver_profiles.update_one({"user_id": driver_id}, {"$unset": unset_fields})
+    return None
+
+
 async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str]) -> list[dict]:
     pickup = trip.get("pickup_location") or {}
     if not isinstance(pickup, dict) or pickup.get("lat") is None or pickup.get("lng") is None:
@@ -1317,9 +1496,6 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
     )
     from driver_presence import nearby_available_drivers, nearby_h3_drivers
 
-    DISPATCH_RADIUS_M_NEAR = 8_000   # 8 km — first pass (cheap)
-    DISPATCH_RADIUS_M_FAR  = 15_000  # 15 km — fallback if too few nearby
-    DISPATCH_CANDIDATE_CAP = 30      # max profiles to evaluate in loop
     fresh_hb = heartbeat_freshness_mongo_clause()
 
     def _geo_pipeline(radius_m: int, limit: int) -> list:
@@ -1375,7 +1551,7 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
                 **fresh_hb,
             },
             {"_id": 0},
-        ).to_list(DISPATCH_CANDIDATE_CAP)
+        ).to_list(max(DISPATCH_CANDIDATE_CAP, len(ids)))
         rows.sort(key=lambda p: order.get(str(p.get("user_id") or ""), 10_000))
         return rows
 
@@ -1397,29 +1573,25 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
         )
         return await _hydrate_profiles_from_hits(hits)
 
-    # Uber pattern: H3 k-ring → Redis GEO → Mongo $geoNear
-    profiles = await _profiles_via_h3(2)
-    dispatch_source = "h3" if profiles else "redis_geo"
+    # Full coverage: union near + far rings so finishing / slightly-farther
+    # online drivers are not dropped just because 5 idle cars were already found.
+    h3_near, h3_far, geo_near, geo_far = await asyncio.gather(
+        _profiles_via_h3(2),
+        _profiles_via_h3(4),
+        _profiles_via_redis_geo(DISPATCH_RADIUS_M_NEAR),
+        _profiles_via_redis_geo(DISPATCH_RADIUS_M_FAR),
+    )
+    profiles = merge_driver_profiles(h3_near, h3_far, geo_near, geo_far)
+    dispatch_source = "union"
     if len(profiles) < 5:
-        wider_h3 = await _profiles_via_h3(4)
-        if len(wider_h3) > len(profiles):
-            profiles = wider_h3
-            dispatch_source = "h3"
-    if len(profiles) < 5:
-        geo_near = await _profiles_via_redis_geo(DISPATCH_RADIUS_M_NEAR)
-        if len(geo_near) > len(profiles):
-            profiles = geo_near
-            dispatch_source = "redis_geo"
-    if len(profiles) < 5:
-        wider_geo = await _profiles_via_redis_geo(DISPATCH_RADIUS_M_FAR)
-        if len(wider_geo) > len(profiles):
-            profiles = wider_geo
-            dispatch_source = "redis_geo"
-    if len(profiles) < 5:
-        profiles = await _profiles_via_mongo_geo(DISPATCH_RADIUS_M_NEAR)
+        mongo_near, mongo_far = await asyncio.gather(
+            _profiles_via_mongo_geo(DISPATCH_RADIUS_M_NEAR),
+            _profiles_via_mongo_geo(DISPATCH_RADIUS_M_FAR),
+        )
+        profiles = merge_driver_profiles(profiles, mongo_near, mongo_far)
         dispatch_source = "mongo_geo"
-        if len(profiles) < 5:
-            profiles = await _profiles_via_mongo_geo(DISPATCH_RADIUS_M_FAR)
+    if len(profiles) > DISPATCH_CANDIDATE_CAP:
+        profiles = profiles[:DISPATCH_CANDIDATE_CAP]
     logger.info(
         "dispatch_candidates source=%s count=%s pickup=(%.5f,%.5f)",
         dispatch_source,
@@ -1440,7 +1612,7 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
                 "driver_id": {"$in": candidate_driver_ids},
                 "status": {"$in": ["accepted", "arrived", "ongoing"]},
             },
-            {"_id": 0, "driver_id": 1},
+            {"_id": 0, "id": 1, "driver_id": 1, "status": 1, "dropoff_location": 1},
         ).to_list(1000),
         db.subscriptions.find(
             {
@@ -1450,7 +1622,14 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
             {"_id": 0},
         ).to_list(1000),
     )
-    busy_driver_ids = {str(r.get("driver_id")) for r in active_busy_rows if r.get("driver_id")}
+    busy_by_driver: dict[str, dict] = {}
+    for row in active_busy_rows:
+        did = str(row.get("driver_id") or "")
+        if not did:
+            continue
+        prev = busy_by_driver.get(did)
+        if not prev or str(row.get("status") or "") == "ongoing":
+            busy_by_driver[did] = row
 
     from driver_trial_policy import evaluate_driver_trial
 
@@ -1493,15 +1672,25 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
         if not driver_heartbeat_is_fresh(profile):
             continue
 
-        if str(driver_id) in busy_driver_ids:
-            continue
-
         if str(driver_id) not in subscribed_driver_ids:
             continue
 
         loc = profile.get("current_location") or {}
         if not isinstance(loc, dict) or loc.get("lat") is None or loc.get("lng") is None:
             continue
+        if profile.get("queued_next_trip_id"):
+            continue
+
+        finishing = None
+        busy_trip = busy_by_driver.get(str(driver_id))
+        if busy_trip:
+            finishing = finishing_offer_state(
+                busy_trip,
+                float(loc["lat"]),
+                float(loc["lng"]),
+            )
+            if not finishing:
+                continue
 
         if service_type:
             # Prefer active_categories; fall back to single vehicle_type for older profiles.
@@ -1518,13 +1707,22 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
                     if driver_id != preferred_driver_id:
                         continue
 
-        distance = calculate_distance_haversine(
-            pickup_lat,
-            pickup_lng,
-            float(loc["lat"]),
-            float(loc["lng"]),
-        )
-        if distance > 15 and driver_id != preferred_driver_id:
+        if finishing:
+            distance = chained_distance_km(
+                driver_lat=float(loc["lat"]),
+                driver_lng=float(loc["lng"]),
+                current_dropoff=(busy_trip or {}).get("dropoff_location") or {},
+                new_pickup_lat=pickup_lat,
+                new_pickup_lng=pickup_lng,
+            )
+        else:
+            distance = calculate_distance_haversine(
+                pickup_lat,
+                pickup_lng,
+                float(loc["lat"]),
+                float(loc["lng"]),
+            )
+        if distance > MAX_CHAINED_PICKUP_KM and driver_id != preferred_driver_id:
             continue
 
         # ── Work Zone filter (both pickup AND dropoff inside zone) ───────────
@@ -1544,14 +1742,17 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
         # Use stored visibility_score only — no per-candidate month trip scan on dispatch hot path.
         visibility_score = float(profile.get("visibility_score", 50.0))
 
-        eligible.append(
-            {
-                "driver_id": driver_id,
-                "distance_to_pickup": round(distance, 2),
-                "visibility_score": round(visibility_score, 2),
-                "vehicle_type": profile.get("vehicle_type"),
-            }
-        )
+        row = {
+            "driver_id": driver_id,
+            "distance_to_pickup": round(distance, 2),
+            "visibility_score": round(visibility_score, 2),
+            "vehicle_type": profile.get("vehicle_type"),
+        }
+        if finishing:
+            row["finishing_trip"] = True
+            row["finishing_eta_sec"] = finishing.get("finishing_eta_sec")
+            row["prior_trip_id"] = finishing.get("prior_trip_id")
+        eligible.append(row)
 
     eligible = await _filter_drivers_who_blocked_rider(eligible, trip.get("rider_id") or "")
 
@@ -1563,14 +1764,8 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
     except Exception:
         logger.debug("device_health filter skipped in eligibility", exc_info=True)
 
-    eligible.sort(
-        key=lambda d: (
-            0 if d["driver_id"] == preferred_driver_id else 1,
-            d["distance_to_pickup"],
-            -d["visibility_score"],
-        )
-    )
-    return eligible[:20]
+    eligible.sort(key=lambda d: eligibility_rank_key(d, preferred_driver_id))
+    return eligible[:DISPATCH_OFFER_CAP]
 
 
 async def _create_trip_offers(trip: dict, blocked_drivers: list[str]) -> list[dict]:
@@ -1629,6 +1824,9 @@ async def _create_trip_offers(trip: dict, blocked_drivers: list[str]) -> list[di
             "created_at": now.isoformat(),
             "expires_at": expires_at,
             "preferred": trip.get("preferred_driver_id") == driver["driver_id"],
+            "finishing_trip": bool(driver.get("finishing_trip")),
+            "finishing_eta_sec": driver.get("finishing_eta_sec"),
+            "prior_trip_id": driver.get("prior_trip_id"),
         }
         offers.append(offer)
 
@@ -1708,11 +1906,14 @@ async def _create_trip_offers(trip: dict, blocked_drivers: list[str]) -> list[di
         notif_body = f"{rider_name}: {route_hint}"
         if mood_hint:
             notif_body += f" • {mood_hint}"
+        finishing_offer = bool(offer.get("finishing_trip"))
+        notif_title = "Next ride · after you drop off" if finishing_offer else "New Ride Request"
         logger.info(
-            "dispatch_offer_sent trip_id=%s driver_id=%s preferred=%s",
+            "dispatch_offer_sent trip_id=%s driver_id=%s preferred=%s finishing=%s",
             trip["id"],
             offer["driver_id"],
             offer["preferred"],
+            finishing_offer,
         )
         rider_offer = trip.get("offered_fare")
         if rider_offer is None:
@@ -1740,13 +1941,16 @@ async def _create_trip_offers(trip: dict, blocked_drivers: list[str]) -> list[di
             "rider_name": rider_name,
             "rider_photo": rider_photo,
             "status": "searching",
+            "finishing_trip": finishing_offer,
+            "finishing_eta_sec": offer.get("finishing_eta_sec"),
+            "prior_trip_id": offer.get("prior_trip_id"),
         }
         # Delivery Guarantee Engine: unique ID → ACK → retry → FCM → reassign if FCM fails.
         await guarantee_deliver(
             offer,
             trip,
             socket_payload=socket_payload,
-            notif_title="New Ride Request",
+            notif_title=notif_title,
             notif_body=notif_body,
             fcm_immediate=True,
             reassign_on_fail=False,
@@ -3056,50 +3260,40 @@ async def _accept_trip_commit(
             raise HTTPException(status_code=403, detail="You cannot accept this ride")
 
     # Lock the driver only after all validation passes. If the trip update loses
-    # the race below, this lock is released immediately.
-    dp_lock = await db.driver_profiles.find_one_and_update(
-        {
-            "user_id": driver_id,
-            "$or": [
-                {"active_trip_id": {"$exists": False}},
-                {"active_trip_id": None},
-                {"active_trip_id": ""},
-                {"active_trip_id": trip_id},
-            ],
-        },
-        {"$set": {"active_trip_id": trip_id}},
-        return_document=True,
-    )
-    if not dp_lock:
-        raise HTTPException(status_code=409, detail="You already have an active trip. Complete it before accepting another.")
-    
+    # the race below, this lock is released immediately. Finishing drivers keep
+    # their current trip and queue this one as the next ride.
+    lock_info = await _lock_driver_for_accept(driver_id, trip_id)
+    finishing_accept = lock_info.get("mode") == "queued"
+    finishing_meta = lock_info.get("finishing") or {}
+    accept_set = {
+        "driver_id": driver_id,
+        **ride_state_set_fields(
+            old_status=trip.get("status"),
+            new_status="accepted",
+            actor_id=driver_id,
+            reason="driver_accept",
+        ),
+        "accepted_at": datetime.now(timezone.utc).isoformat(),
+        "accepted_offer_id": active_offer["id"],
+        "fare": round(proposed_fare, 2),
+        "agreed_fare": round(proposed_fare, 2),
+        "driver_counter_fare": driver_counter_val,
+        "driver_finishing_prior_trip": bool(finishing_accept),
+        "prior_trip_id": finishing_meta.get("prior_trip_id") or lock_info.get("prior_trip_id"),
+        "finishing_eta_sec": finishing_meta.get("finishing_eta_sec"),
+    }
+
     result = await db.trips.update_one(
         {"id": trip_id, "status": {"$in": ["pending", "pending_driver_offers"]}},
         {
-            "$set": {
-                "driver_id": driver_id,
-                **ride_state_set_fields(
-                    old_status=trip.get("status"),
-                    new_status="accepted",
-                    actor_id=driver_id,
-                    reason="driver_accept",
-                ),
-                "accepted_at": datetime.now(timezone.utc).isoformat(),
-                "accepted_offer_id": active_offer["id"],
-                "fare": round(proposed_fare, 2),
-                "agreed_fare": round(proposed_fare, 2),
-                "driver_counter_fare": driver_counter_val,
-            },
+            "$set": accept_set,
             "$inc": ride_state_inc_fields(),
         }
     )
     
     if result.modified_count == 0:
         # Trip was grabbed by another driver — release our driver lock immediately
-        await db.driver_profiles.update_one(
-            {"user_id": driver_id, "active_trip_id": trip_id},
-            {"$unset": {"active_trip_id": ""}},
-        )
+        await _unlock_driver_accept_lock(driver_id, trip_id, str(lock_info.get("mode") or "active"))
         raise HTTPException(status_code=400, detail="Trip not available")
 
     trip = await db.trips.find_one({"id": trip_id})
@@ -3174,13 +3368,16 @@ async def _accept_trip_commit(
         from route_leg_service import store_active_leg_route
 
         pickup = (trip or {}).get("pickup_location") or {}
+        prior_drop = ((lock_info.get("busy_trip") or {}).get("dropoff_location") or {}) if finishing_accept else {}
         d_lat = float(
-            (driver_profile or {}).get("current_lat")
+            prior_drop.get("lat")
+            or (driver_profile or {}).get("current_lat")
             or ((driver_profile or {}).get("current_location") or {}).get("lat")
             or pickup.get("lat")
         )
         d_lng = float(
-            (driver_profile or {}).get("current_lng")
+            prior_drop.get("lng")
+            or (driver_profile or {}).get("current_lng")
             or ((driver_profile or {}).get("current_location") or {}).get("lng")
             or pickup.get("lng")
         )
@@ -3213,10 +3410,17 @@ async def _accept_trip_commit(
     if trip and trip.get("rider_id"):
         driver_user = await db.users.find_one({"id": driver_id}, {"name": 1})
         driver_name = (driver_user or {}).get("name", "Your driver")
+        if finishing_accept:
+            push_title, push_body = rider_finishing_push(driver_name)
+        else:
+            push_title, push_body = (
+                "Driver Found!",
+                f"{driver_name} has accepted your ride. They're on their way!",
+            )
         await send_push_notification(
             trip["rider_id"],
-            "Driver Found!",
-            f"{driver_name} has accepted your ride. They're on their way!",
+            push_title,
+            push_body,
             {"type": "trip_accepted", "trip_id": trip_id},
         )
         trip.pop("_id", None)
@@ -3255,7 +3459,11 @@ async def _accept_trip_commit(
         )
     except Exception:
         pass
-    return enrich_ride_payload(trip or {})
+    payload = enrich_ride_payload(trip or {})
+    if finishing_accept:
+        payload["queued_behind_active_trip"] = True
+        payload["driver_finishing_prior_trip"] = True
+    return payload
 
 
 @trips_router.post("/trips/{trip_id}/verify-pickup-code")
@@ -5064,6 +5272,9 @@ async def get_trip_status(trip_id: str, request: Request):
         "mismatch_reported": bool(trip.get("mismatch_reported_at")),
         "route_preview_coordinates": trip.get("route_preview_coordinates"),
         "polyline": trip.get("polyline"),
+        "driver_finishing_prior_trip": bool(trip.get("driver_finishing_prior_trip")),
+        "prior_trip_id": trip.get("prior_trip_id"),
+        "finishing_eta_sec": trip.get("finishing_eta_sec"),
     }
 
 @trips_router.get("/trips/{trip_id}/driver-face-image")
@@ -5312,13 +5523,11 @@ async def complete_trip(trip_id: str, request: Request):
             return enrich_ride_payload(existing)
         raise HTTPException(status_code=400, detail="Cannot complete trip")
 
-    # Release the driver lock so they can accept new trips
+    # Promote a queued next ride, or free the lock if none.
+    next_trip = None
     driver_id_for_lock = trip_before.get("driver_id")
     if driver_id_for_lock:
-        await db.driver_profiles.update_one(
-            {"user_id": driver_id_for_lock},
-            {"$unset": {"active_trip_id": ""}},
-        )
+        next_trip = await _promote_or_release_driver_lock(driver_id_for_lock, trip_id)
 
     trip = await db.trips.find_one({"id": trip_id})
     trip["_id"] = str(trip["_id"])
@@ -5427,7 +5636,10 @@ async def complete_trip(trip_id: str, request: Request):
         schedule_trip_receipt_emails_after_payment(trip_id)
 
     trip = await db.trips.find_one({"id": trip_id}, {"_id": 0}) or trip
-    return enrich_ride_payload(trip)
+    payload = enrich_ride_payload(trip)
+    if next_trip:
+        payload["next_trip"] = enrich_ride_payload(next_trip)
+    return payload
 
 
 @trips_router.put("/trips/{trip_id}/confirm-payment")
@@ -5679,10 +5891,7 @@ async def _cancel_trip_commit(
         except Exception as _we:
             logger.warning(f"Wallet hold release failed on cancel trip={trip_id}: {_we}")
         if trip.get("driver_id"):
-            await db.driver_profiles.update_one(
-                {"user_id": trip["driver_id"]},
-                {"$unset": {"active_trip_id": ""}},
-            )
+            await _promote_or_release_driver_lock(trip["driver_id"], trip_id)
         await _emit_rider_trip_realtime(trip_id)
         enforcement_result = await record_violation(
             cancelled_by,
