@@ -2257,11 +2257,37 @@ export default function ModernDriverHome() {
       });
     });
 
+    // The server withdrew the offer (another driver took it, rider cancelled, it
+    // expired). Stop ringing now instead of running the alert to its own timeout
+    // and letting the driver tap Accept on a trip that is already gone.
+    const unsubWithdraw = driverOffersSocket.subscribeWithdrawals((withdrawal) => {
+      setIncomingRide((prev: any) => {
+        if (!prev) return prev;
+        if (withdrawal.offerId && String(prev.offer_id || '') !== withdrawal.offerId) return prev;
+        if (withdrawal.tripId && String(prev.id || '') !== withdrawal.tripId) return prev;
+        return null;
+      });
+      clearIncomingOffer();
+      setRideCountdown(DRIVER_OFFER_COUNTDOWN_SECONDS);
+      if (withdrawal.reason === 'trip_taken') {
+        toast.show('That ride was taken by another driver.', 'info');
+      }
+    });
+
     return () => {
       unsubConn();
       unsubOffer();
+      unsubWithdraw();
     };
-  }, [connectionPhase, confirmOnline, driverId, markReconnecting, setDriverOffersWsConnected]);
+  }, [
+    clearIncomingOffer,
+    connectionPhase,
+    confirmOnline,
+    driverId,
+    markReconnecting,
+    setDriverOffersWsConnected,
+    toast,
+  ]);
 
   // Fallback polling when no active modal; slow interval while WebSocket is healthy.
   useEffect(() => {

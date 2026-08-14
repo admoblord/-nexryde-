@@ -3279,9 +3279,19 @@ async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWit
     from security_advanced import general_limiter
     await general_limiter.check_rate_limit(http_request, f"withdraw:{driver_id}")
     verify_owner_strict(http_request, driver_id)
-    user = await db.users.find_one({"id": driver_id}, {"_id": 0, "role": 1, "wallet_balance": 1, "profile_image": 1}) or {}
+    user = await db.users.find_one(
+        {"id": driver_id},
+        {"_id": 0, "role": 1, "wallet_balance": 1, "profile_image": 1, "earnings_frozen": 1},
+    ) or {}
     if user.get("role") != "driver":
         raise HTTPException(status_code=403, detail="Driver account required")
+    # The freeze (SIM swap / fraud review) was enforced only in the app, so a direct
+    # API call could still drain a frozen wallet.
+    if bool(user.get("earnings_frozen")):
+        raise HTTPException(
+            status_code=403,
+            detail="Earnings are on hold while we verify your account. Contact support.",
+        )
 
     profile = await db.driver_profiles.find_one(
         {"user_id": driver_id},
@@ -3353,8 +3363,30 @@ async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWit
             },
         }
     )
-    # Debit balance AFTER ledger is committed
-    await db.users.update_one({"id": driver_id}, {"$inc": {"wallet_balance": -amount}})
+    # Debit AFTER the ledger is committed, and only if the balance still covers it.
+    # The earlier read-then-write let two concurrent withdrawals both pass the
+    # balance check and overdraw the wallet.
+    debit = await db.users.update_one(
+        {"id": driver_id, "wallet_balance": {"$gte": amount}},
+        {"$inc": {"wallet_balance": -amount}},
+    )
+    if debit.modified_count != 1:
+        await db.transactions.update_one(
+            {"reference": withdraw_reference},
+            {
+                "$set": {
+                    "status": "failed",
+                    "failure_reason": "insufficient_balance_at_debit",
+                    "failed_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+        fresh = await find_user_by_id(driver_id, {"_id": 0, "wallet_balance": 1}) or {}
+        available = float(fresh.get("wallet_balance", 0.0) or 0.0)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient wallet balance. Available: ₦{available:,.2f}",
+        )
     await db.face_verifications.insert_one(
         {
             "driver_id": driver_id,

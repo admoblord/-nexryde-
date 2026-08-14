@@ -672,7 +672,11 @@ export default function SubscriptionScreen() {
                       <Ionicons name="time" size={16} color="#FBBF24" />
                       <Text style={styles.pendingTierButtonText}>Processing payment…</Text>
                     </View>
-                  ) : (subscription?.tier === 'none' || !subscription) ? (
+                  ) : (
+                    /* Anything else — including an ended trial (`pending_payment`)
+                       on this same tier — must be able to pay. Gating this on
+                       `tier === 'none'` left drivers whose trial expired with no
+                       Subscribe button at all, so they could not get back online. */
                     <TouchableOpacity
                       style={[styles.selectButton, submitting ? styles.selectButtonDisabled : null]}
                       onPress={() => payWithSquadCheckout('city_rider')}
@@ -685,12 +689,14 @@ export default function SubscriptionScreen() {
                         ) : (
                           <>
                             <Ionicons name="card" size={18} color="#FFF" />
-                            <Text style={styles.selectButtonText}>Subscribe — City Rider</Text>
+                            <Text style={styles.selectButtonText}>
+                              {subscriptionNeedsPayment ? 'Pay now — City Rider' : 'Subscribe — City Rider'}
+                            </Text>
                           </>
                         )}
                       </LinearGradient>
                     </TouchableOpacity>
-                  ) : null}
+                  )}
                 </View>
               </LinearGradient>
             </Animated.View>
@@ -797,7 +803,8 @@ export default function SubscriptionScreen() {
                       <Ionicons name="lock-closed" size={16} color="#64748B" />
                       <Text style={styles.lockedButtonText}>Unlocks after 4.5★ rating + 50 trips</Text>
                     </View>
-                  ) : (subscription?.tier === 'none' || !subscription) ? (
+                  ) : (
+                    /* Same rule as City Rider: an ended trial must still be payable. */
                     <TouchableOpacity
                       style={[styles.selectButton, submitting ? styles.selectButtonDisabled : null]}
                       onPress={() => payWithSquadCheckout('road_warrior')}
@@ -810,12 +817,14 @@ export default function SubscriptionScreen() {
                         ) : (
                           <>
                             <Ionicons name="card" size={18} color="#000" />
-                            <Text style={[styles.selectButtonText, { color: '#000' }]}>Subscribe — Road Warrior</Text>
+                            <Text style={[styles.selectButtonText, { color: '#000' }]}>
+                              {subscriptionNeedsPayment ? 'Pay now — Road Warrior' : 'Subscribe — Road Warrior'}
+                            </Text>
                           </>
                         )}
                       </LinearGradient>
                     </TouchableOpacity>
-                  ) : null}
+                  )}
                 </View>
               </LinearGradient>
             </Animated.View>

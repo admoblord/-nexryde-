@@ -3038,10 +3038,15 @@ async def accept_trip(trip_id: str, request: dict, http_request: Request):
     if not gate.get("ok"):
         raise HTTPException(status_code=409, detail=gate.get("reason") or "Trip locked by another accept")
 
-    from realtime_platform.trip_engine import complete_accept_ack, release_trip_lock
+    from realtime_platform.trip_engine import (
+        complete_accept_ack,
+        release_accept_claim,
+        release_trip_lock,
+    )
     accept_event_id = str((gate.get("event") or {}).get("event_id") or "")
+    committed = False
     try:
-        return await _accept_trip_commit(
+        result = await _accept_trip_commit(
             trip_id=trip_id,
             driver_id=driver_id,
             request=request or {},
@@ -3049,11 +3054,24 @@ async def accept_trip(trip_id: str, request: dict, http_request: Request):
             active_offer=active_offer,
             accept_event_id=accept_event_id,
         )
+        committed = True
+        return result
     finally:
         try:
             await release_trip_lock(trip_id)
         except Exception:
             pass
+        if not committed:
+            # The accept did not assign this driver. Hand the key back so the next
+            # tap is a real attempt instead of "Duplicate accept in progress".
+            try:
+                await release_accept_claim(
+                    trip_id=trip_id,
+                    driver_id=driver_id,
+                    client_event_id=client_event_id,
+                )
+            except Exception:
+                pass
 
 
 async def _accept_trip_commit(
@@ -3246,6 +3264,23 @@ async def _accept_trip_commit(
             "driver_account_name": driver_profile.get("account_name"),
             "payment_status": "pending",
         })
+    # Who else was still ringing for this trip? Read before closing the offers.
+    losing_driver_ids: list[str] = []
+    try:
+        losing_offers = await db.trip_offers.find(
+            {
+                "trip_id": trip_id,
+                "driver_id": {"$ne": driver_id},
+                "status": {"$in": ["offered", "seen"]},
+            },
+            {"_id": 0, "driver_id": 1},
+        ).to_list(50)
+        losing_driver_ids = [
+            str(o.get("driver_id")) for o in losing_offers if o.get("driver_id")
+        ]
+    except Exception:
+        logger.debug("accept: could not read losing offers", exc_info=True)
+
     await db.trip_offers.update_many(
         {"trip_id": trip_id, "status": {"$in": ["offered", "seen", "declined", "expired"]}},
         {
@@ -3257,6 +3292,18 @@ async def _accept_trip_commit(
             }
         },
     )
+    # Tell the drivers who lost the race to stop ringing. Without this their alert
+    # ran to its own timeout and Accept just failed on a trip that was gone.
+    if losing_driver_ids:
+        try:
+            from routers.realtime_dispatch import push_driver_offers_withdrawn
+
+            for losing_id in dict.fromkeys(losing_driver_ids):
+                await push_driver_offers_withdrawn(
+                    losing_id, reason="trip_taken", count=1
+                )
+        except Exception:
+            logger.debug("accept: offer withdrawal push failed", exc_info=True)
     # ONE Essentials Compute Routes call: driver → pickup (never per-ping).
     try:
         from route_leg_service import store_active_leg_route

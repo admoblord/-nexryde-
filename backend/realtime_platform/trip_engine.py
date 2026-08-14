@@ -27,6 +27,27 @@ async def release_trip_lock(trip_id: str) -> None:
     await release(_lock_key(trip_id))
 
 
+def accept_idempotency_key(*, trip_id: str, driver_id: str, client_event_id: str = "") -> str:
+    return client_event_id or f"accept:{trip_id}:{driver_id}"
+
+
+async def release_accept_claim(
+    *, trip_id: str, driver_id: str, client_event_id: str = ""
+) -> None:
+    """
+    Give the accept key back when the accept did NOT assign the driver.
+
+    The key is claimed for 300s before subscription/fare/assignment checks run, so
+    a driver whose first tap failed (lost race, plan hiccup, transient 5xx) was told
+    "Duplicate accept in progress" for five minutes and could not retry.
+    """
+    await release(
+        accept_idempotency_key(
+            trip_id=trip_id, driver_id=driver_id, client_event_id=client_event_id
+        )
+    )
+
+
 async def accept_offer_once(
     *,
     trip_id: str,
@@ -39,7 +60,9 @@ async def accept_offer_once(
     Returns {ok, duplicate, locked, event}. Caller still runs business accept.
     """
     cfg = get_realtime_config()
-    idem = client_event_id or f"accept:{trip_id}:{driver_id}"
+    idem = accept_idempotency_key(
+        trip_id=trip_id, driver_id=driver_id, client_event_id=client_event_id
+    )
     with trace("trip.accept_once", trip_id=trip_id, driver_id=driver_id):
         t0 = time.perf_counter()
         if not await claim(idem, ttl_sec=300):
@@ -52,6 +75,9 @@ async def accept_offer_once(
             }
         if not await acquire_trip_lock(trip_id, driver_id):
             incr("trip.accept_lock_failed")
+            # Another driver holds the trip. This driver never got a chance, so the
+            # key must not stay claimed for 300s blocking their retry.
+            await release(idem)
             return {
                 "ok": False,
                 "duplicate": False,

@@ -128,21 +128,66 @@ async def test_release_hold_refunds_balance():
 
 @pytest.mark.asyncio
 async def test_driver_credit_idempotent():
-    """apply_driver_wallet_ride_credit should not double-credit on duplicate call."""
+    """A duplicate ledger row that was already settled must not credit again."""
     from wallet_ops import apply_driver_wallet_ride_credit
 
     db = MagicMock()
-    # Simulate DuplicateKeyError on second insert
     import pymongo.errors
     db.transactions.insert_one = AsyncMock(
         side_effect=pymongo.errors.DuplicateKeyError("", 11000, None)
     )
+    # balance_applied is already True → nothing to claim.
+    db.transactions.find_one_and_update = AsyncMock(return_value=None)
+    db.transactions.update_one = AsyncMock()
     db.users.update_one = AsyncMock()
     db.users.find_one = AsyncMock(return_value={"earnings_frozen": False})
 
-    # Should not raise, should short-circuit
     await apply_driver_wallet_ride_credit(db, "d1", "t1", 300.0)
-    db.users.update_one.assert_not_called()  # balance should NOT be updated
+    db.users.update_one.assert_not_called()  # balance must NOT be updated twice
+
+
+@pytest.mark.asyncio
+async def test_driver_credit_recovers_orphan_ledger_row():
+    """
+    Crash between the ledger insert and the balance $inc must be recoverable.
+
+    The retry sees a duplicate ledger row, but the row is not marked settled, so
+    the driver is still owed the money and it must be credited.
+    """
+    from wallet_ops import apply_driver_wallet_ride_credit
+
+    db = MagicMock()
+    import pymongo.errors
+    db.transactions.insert_one = AsyncMock(
+        side_effect=pymongo.errors.DuplicateKeyError("", 11000, None)
+    )
+    # Unsettled row → this caller claims it.
+    db.transactions.find_one_and_update = AsyncMock(
+        return_value={"reference": "trip_t1_driver"}
+    )
+    db.transactions.update_one = AsyncMock()
+    db.users.update_one = AsyncMock()
+
+    await apply_driver_wallet_ride_credit(db, "d1", "t1", 300.0)
+    db.users.update_one.assert_called_once()
+    inc_arg = str(db.users.update_one.call_args)
+    assert "wallet_balance" in inc_arg and "300" in inc_arg
+
+
+@pytest.mark.asyncio
+async def test_driver_credit_marks_ledger_settled():
+    """First successful credit marks the ledger row so retries can tell the difference."""
+    from wallet_ops import apply_driver_wallet_ride_credit
+
+    db = MagicMock()
+    db.transactions.insert_one = AsyncMock()
+    db.transactions.update_one = AsyncMock()
+    db.users.update_one = AsyncMock()
+
+    await apply_driver_wallet_ride_credit(db, "d1", "t1", 250.0)
+    db.users.update_one.assert_called_once()
+    db.transactions.update_one.assert_called_once()
+    assert "balance_applied" in str(db.transactions.update_one.call_args)
 
 
 # ─── Auth registration unit tests ─────────────────────────────────────────────
