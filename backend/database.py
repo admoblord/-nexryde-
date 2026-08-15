@@ -15,6 +15,7 @@ mongo_url = os.environ.get('MONGODB_URI') or os.environ.get('MONGO_URL')
 # waiting for a connection slot.  Override via MONGO_MAX_POOL_SIZE env var.
 _max_pool = int(os.environ.get('MONGO_MAX_POOL_SIZE', '80'))
 from pymongo import ReadPreference
+from mongo_slow_monitor import slow_command_listener
 
 client = AsyncIOMotorClient(
     mongo_url,
@@ -29,6 +30,7 @@ client = AsyncIOMotorClient(
     retryReads=False,
     waitQueueTimeoutMS=5000,
     compressors=["zlib"],
+    event_listeners=[slow_command_listener],
 )
 db = client[os.environ.get('DB_NAME', 'nexryde_db')]
 

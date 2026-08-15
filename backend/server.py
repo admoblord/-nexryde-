@@ -1976,6 +1976,38 @@ async def ops_migrate_trip_face_binaries(request: Request, dry_run: bool = True)
     return summary
 
 
+@api_router.get("/ops/mongo-performance")
+async def ops_mongo_performance(request: Request):
+    """Ops runbook for the slow-mongo alert — in-process command stats.
+
+    Gated by X-NEXRYDE-OPS-KEY (wrong/missing key → 404).
+    """
+    expected = (os.environ.get("NEXRYDE_OPS_KEY") or "").strip()
+    got = (request.headers.get("x-nexryde-ops-key") or "").strip()
+    if not expected or got != expected:
+        raise HTTPException(status_code=404, detail="Not found")
+    from realtime_platform.gateway import _mongo_performance_payload
+
+    return {"ok": True, **_mongo_performance_payload(), "revision": os.environ.get("K_REVISION", "unknown")}
+
+
+@api_router.post("/ops/ensure-indexes")
+async def ops_ensure_indexes(request: Request):
+    """Re-run Mongo index ensure without a full restart.
+
+    Safe to call after a unique-index failure skipped later collections.
+    Gated by X-NEXRYDE-OPS-KEY (wrong/missing key → 404).
+    """
+    expected = (os.environ.get("NEXRYDE_OPS_KEY") or "").strip()
+    got = (request.headers.get("x-nexryde-ops-key") or "").strip()
+    if not expected or got != expected:
+        raise HTTPException(status_code=404, detail="Not found")
+    from db_indexes import ensure_indexes
+
+    await ensure_indexes(db)
+    return {"ok": True, "revision": os.environ.get("K_REVISION", "unknown")}
+
+
 @api_router.get("/route-cache/stats")
 async def route_cache_stats():
     """Monitor route cache savings — each DB hit = 1 saved Google API call (~$0.007)."""
