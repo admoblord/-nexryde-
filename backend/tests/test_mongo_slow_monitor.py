@@ -59,13 +59,22 @@ def test_records_slow_and_failed(monkeypatch):
     listener = SlowMongoListener(slow_ms=200)
     listener.succeeded(_ok("update", 250))
     listener.failed(_ok("find", 40))
+    listener.failed(_ok("update", 400))
     snap = listener.snapshot()
-    assert snap["commands_total"] == 2
+    assert snap["commands_total"] == 3
     assert snap["commands_slow"] == 2
-    assert snap["commands_failed"] == 1
+    assert snap["commands_failed"] == 2
     assert [m for m, _, _ in seen] == [SLOW_METRIC, SLOW_METRIC]
     assert seen[0][2]["command"] == "update"
     assert seen[1][2]["failed"] == "1"
+    assert seen[1][1] == 400
+
+
+def test_skips_index_admin_commands():
+    listener = SlowMongoListener(slow_ms=200)
+    listener.succeeded(_ok("createIndexes", 12))
+    listener.failed(_ok("dropIndexes", 8))
+    assert listener.snapshot()["commands_total"] == 0
 
 
 def test_performance_payload_includes_mongo():
