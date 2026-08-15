@@ -42,6 +42,13 @@ _SKIP_COMMANDS = frozenset(
         "getLog",
         "atlashello",
         "atlasHello",
+        "createIndexes",
+        "dropIndexes",
+        "listIndexes",
+        "collStats",
+        "dbStats",
+        "explain",
+        "reIndex",
     }
 )
 
@@ -88,14 +95,14 @@ class SlowMongoListener(CommandListener):
             self.total += 1
             if failed:
                 self.failed_count += 1
-            if ms >= self.slow_ms or failed:
+            if ms >= self.slow_ms:
                 self.slow += 1
             bucket = self._samples_ms
             bucket.append(ms)
             if len(bucket) > SAMPLE_CAP:
                 del bucket[: SAMPLE_CAP // 2]
 
-        if ms < self.slow_ms and not failed:
+        if ms < self.slow_ms:
             return
         try:
             from realtime_platform.observability import observe_ms
