@@ -14,6 +14,27 @@ def _ok(name: str, ms: float, db: str = "nexryde_db"):
     )
 
 
+def test_started_is_noop():
+    listener = SlowMongoListener(slow_ms=200)
+    listener.started(SimpleNamespace(command_name="find"))
+    assert listener.snapshot()["commands_total"] == 0
+
+
+def test_event_without_database_name(monkeypatch):
+    seen: list[tuple] = []
+
+    def _observe(metric, ms, **tags):
+        seen.append((metric, ms, tags))
+
+    import realtime_platform.observability as obs
+
+    monkeypatch.setattr(obs, "observe_ms", _observe)
+    listener = SlowMongoListener(slow_ms=200)
+    listener.succeeded(SimpleNamespace(command_name="update", duration_micros=250_000))
+    assert listener.snapshot()["commands_slow"] == 1
+    assert seen[0][2]["ns"] == ""
+
+
 def test_skips_heartbeats_and_fast_finds():
     listener = SlowMongoListener(slow_ms=200)
     listener.succeeded(_ok("hello", 5))
