@@ -62,6 +62,27 @@ class SlowMongoListener(CommandListener):
             self.failed_count = 0
             self._samples_ms.clear()
 
+    def started(self, event) -> None:  # noqa: ARG002 — required by CommandListener
+        return
+
+    @staticmethod
+    def _event_ms(event: Any) -> float:
+        micros = getattr(event, "duration_micros", None)
+        if micros is not None:
+            return float(micros) / 1000.0
+        duration = getattr(event, "duration", None)
+        return float(duration or 0.0)
+
+    @staticmethod
+    def _event_ns(event: Any) -> str:
+        dbn = getattr(event, "database_name", None) or getattr(event, "database", None)
+        if dbn:
+            return str(dbn)
+        cmd = getattr(event, "command", None) or {}
+        if isinstance(cmd, dict):
+            return str(cmd.get("$db") or "")
+        return ""
+
     def _record(self, command: str, ns: str, ms: float, *, failed: bool) -> None:
         with self._lock:
             self.total += 1
@@ -97,24 +118,30 @@ class SlowMongoListener(CommandListener):
             )
 
     def succeeded(self, event: CommandSucceededEvent) -> None:
-        if event.command_name in _SKIP_COMMANDS:
-            return
-        self._record(
-            event.command_name,
-            f"{event.database_name}",
-            event.duration_micros / 1000.0,
-            failed=False,
-        )
+        try:
+            if event.command_name in _SKIP_COMMANDS:
+                return
+            self._record(
+                event.command_name,
+                self._event_ns(event),
+                self._event_ms(event),
+                failed=False,
+            )
+        except Exception:
+            logger.debug("slow-mongo succeeded hook failed", exc_info=True)
 
     def failed(self, event: CommandFailedEvent) -> None:
-        if event.command_name in _SKIP_COMMANDS:
-            return
-        self._record(
-            event.command_name,
-            f"{event.database_name}",
-            event.duration_micros / 1000.0,
-            failed=True,
-        )
+        try:
+            if event.command_name in _SKIP_COMMANDS:
+                return
+            self._record(
+                event.command_name,
+                self._event_ns(event),
+                self._event_ms(event),
+                failed=True,
+            )
+        except Exception:
+            logger.debug("slow-mongo failed hook failed", exc_info=True)
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:

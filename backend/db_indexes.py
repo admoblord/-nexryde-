@@ -102,6 +102,9 @@ async def _safe_create_index(coll, keys, **kwargs):
         if not kwargs.get("unique"):
             return "fail"
         fallback = {k: v for k, v in kwargs.items() if k != "unique"}
+        # Mongo rejects sparse + partialFilterExpression on the same index.
+        if fallback.get("partialFilterExpression"):
+            fallback.pop("sparse", None)
         name = fallback.get("name")
         if isinstance(name, str):
             fallback["name"] = (
@@ -307,6 +310,12 @@ async def ensure_indexes(db):
         await _safe_create_index(db.engagement_notification_log, [("user_id", 1), ("opened_at", 1)], sparse=True)
         await _safe_create_index(db.engagement_notification_log, [("dismissed_at", -1)], sparse=True)
         await _safe_create_index(db.engagement_notification_log, [("learning_attributed_at", 1), ("delivery_status", 1), ("sent_at", -1)])
+        # Learning attribution sweep: {delivery_status, learning_attributed_at:{$exists:false}}
+        await _safe_create_index(
+            db.engagement_notification_log,
+            [("delivery_status", 1), ("learning_attributed_at", 1), ("sent_at", -1)],
+            name="engagement_delivery_learning_sent",
+        )
         await _safe_create_index(db.engagement_area_metric_snapshots, [("area_key", 1), ("created_at", -1)])
         await _safe_create_index(db.engagement_area_metric_snapshots, "expires_at", expireAfterSeconds=0, sparse=True)
         await _safe_create_index(db.engagement_notification_config, "id", unique=True)
