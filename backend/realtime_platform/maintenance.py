@@ -20,6 +20,7 @@ rest of the tick.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -28,6 +29,10 @@ from realtime_platform.observability import incr, observe_ms
 
 logger = logging.getLogger("realtime_platform.maintenance")
 
+# One hung Mongo/Redis call must not pin the event loop for the whole tick.
+# 7 steps × 6s keeps the scheduler path under the 45s HTTP-task ceiling.
+MAINTENANCE_STEP_TIMEOUT_S = 6.0
+
 
 async def run_maintenance_tick(*, outbox_limit: int = 80, saga_limit: int = 40) -> dict[str, Any]:
     t0 = time.perf_counter()
@@ -35,7 +40,11 @@ async def run_maintenance_tick(*, outbox_limit: int = 80, saga_limit: int = 40) 
 
     async def _step(name: str, coro_fn) -> None:
         try:
-            result[name] = await coro_fn()
+            result[name] = await asyncio.wait_for(coro_fn(), timeout=MAINTENANCE_STEP_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            result[name] = {"error": True, "timeout": True}
+            incr("maintenance.step_failed", step=name)
+            logger.error("maintenance step timeout step=%s timeout_s=%s", name, MAINTENANCE_STEP_TIMEOUT_S)
         except Exception:
             result[name] = {"error": True}
             incr("maintenance.step_failed", step=name)

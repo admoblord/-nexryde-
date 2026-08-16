@@ -1920,6 +1920,10 @@ async def debug_test_crash(request: Request):
     )
 
 
+_MAINTENANCE_TICK_LOCK = asyncio.Lock()
+_MAINTENANCE_TICK_TIMEOUT_S = 45.0
+
+
 @api_router.post("/ops/maintenance-tick")
 async def ops_maintenance_tick(request: Request):
     """Accept one maintenance tick — for Cloud Scheduler when nothing stays warm.
@@ -1930,8 +1934,9 @@ async def ops_maintenance_tick(request: Request):
     worker loop runs.
 
     The HTTP response returns immediately (accepted) and the tick runs in the
-    background. Running it inline made every scheduler hit take 7–16s and skewed
-    Cloud Run / log-based p95 latency alerts under sparse traffic.
+    background. Running it inline blocked the event loop for 90–110s every 2
+    minutes, which killed the Cloud Run connection and stormed 503 / uptime /
+    latency alerts. Overlapping ticks are skipped; a hung tick is cut at 45s.
 
     Gated by X-NEXRYDE-OPS-KEY (wrong/missing key -> 404) — Cloud Scheduler sends
     it as a header.
@@ -1943,11 +1948,31 @@ async def ops_maintenance_tick(request: Request):
 
     from realtime_platform.maintenance import run_maintenance_tick
 
+    if _MAINTENANCE_TICK_LOCK.locked():
+        return {
+            "ok": True,
+            "accepted": True,
+            "skipped": "in_flight",
+            "revision": os.environ.get("K_REVISION", "unknown"),
+        }
+
     async def _run_tick() -> None:
-        try:
-            await run_maintenance_tick()
-        except Exception:
-            logger.exception("ops_maintenance_tick_background_failed")
+        if _MAINTENANCE_TICK_LOCK.locked():
+            logger.info("ops_maintenance_tick_skipped in_flight")
+            return
+        async with _MAINTENANCE_TICK_LOCK:
+            try:
+                await asyncio.wait_for(
+                    run_maintenance_tick(),
+                    timeout=_MAINTENANCE_TICK_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "ops_maintenance_tick_timeout timeout_s=%s",
+                    _MAINTENANCE_TICK_TIMEOUT_S,
+                )
+            except Exception:
+                logger.exception("ops_maintenance_tick_background_failed")
 
     asyncio.create_task(_run_tick())
     return {

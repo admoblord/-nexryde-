@@ -97,11 +97,32 @@ def test_ops_endpoint_accepts_tick_in_background():
 
     src = pathlib.Path(__file__).resolve().parent.parent / "server.py"
     text = src.read_text()
-    start = text.index("/ops/maintenance-tick")
-    body = text[start:start + 1800]
+    start = text.index("_MAINTENANCE_TICK_LOCK")
+    body = text[start:start + 2800]
     assert "asyncio.create_task" in body
     assert '"accepted": True' in body or "'accepted': True" in body
     # Tick may be awaited only inside the background task, never as the
     # endpoint's return path (`return {..., "tick": result}`).
     assert '"tick": result' not in body and "'tick': result" not in body
     assert "create_task(_run_tick())" in body
+    assert "_MAINTENANCE_TICK_LOCK" in body
+    assert "in_flight" in body
+    assert "wait_for" in body
+
+
+@pytest.mark.asyncio
+async def test_one_hung_subsystem_times_out_and_tick_continues(monkeypatch, stub_steps):
+    """A hung outbox drain must not block guardians / the rest of the tick."""
+    import asyncio
+    import realtime_platform.outbox_worker as ow
+
+    async def hang(limit=0):
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(ow, "_drain_outbox", hang, raising=False)
+    monkeypatch.setattr(maintenance, "MAINTENANCE_STEP_TIMEOUT_S", 0.05)
+
+    result = await maintenance.run_maintenance_tick()
+
+    assert result["outbox_drained"] == {"error": True, "timeout": True}
+    assert "guardians" in result and result["guardians"] != {"error": True}

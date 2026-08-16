@@ -43,6 +43,18 @@ LATENCY_POLICY = (
 HIGH_P95_POLICY = (
     "projects/nexryde-app/alertPolicies/13046591882042232906"
 )
+UPTIME_SLO_POLICY = (
+    "projects/nexryde-app/alertPolicies/6501353899448008958"
+)
+UPTIME_HOST = "nexryde-backend-993913300770.africa-south1.run.app"
+# One 5-minute failed check is 0% of that bucket — 99.5% on a 5m window
+# fired 21 times in 36h. Require a 15m window and <50% passing.
+UPTIME_MQL = f"""fetch uptime_url
+| metric 'monitoring.googleapis.com/uptime_check/check_passed'
+| filter resource.host == '{UPTIME_HOST}'
+| group_by 15m, [fraction_passing: fraction_true(value.check_passed)]
+| every 15m
+| condition fraction_passing < 0.5 '1'"""
 
 # Exclude health probes AND ops/cron endpoints (maintenance-tick etc.)
 LATENCY_FILTER = (
@@ -82,11 +94,55 @@ def _req(method: str, url: str, body: dict | None = None) -> dict:
         raise RuntimeError(f"{method} {url} → {e.code}: {err[:500]}") from e
 
 
+def list_alerts() -> list[dict]:
+    alerts: list[dict] = []
+    page = None
+    while True:
+        qs = "pageSize=200"
+        if page:
+            qs += f"&pageToken={urllib.parse.quote(page)}"
+        data = _req(
+            "GET",
+            f"https://monitoring.googleapis.com/v3/projects/{PROJECT}/alerts?{qs}",
+        )
+        alerts.extend(data.get("alerts") or [])
+        page = data.get("nextPageToken")
+        if not page:
+            break
+    return alerts
+
+
 def list_open_alerts() -> list[dict]:
-    # Prefer gcloud alpha via subprocess-less REST if available; fall back empty.
-    # The public incidents API is limited; use Monitoring alpha alerts through
-    # gcloud when this helper is run interactively. Here we probe policies only.
-    return []
+    return [a for a in list_alerts() if a.get("state") == "OPEN"]
+
+
+def retune_uptime_slo_policy() -> None:
+    """Stop paging on a single 5-minute uptime miss."""
+    name = UPTIME_SLO_POLICY
+    policy = _req("GET", f"https://monitoring.googleapis.com/v3/{name}")
+    conditions = policy.get("conditions") or []
+    if not conditions:
+        print("  ⚠ uptime SLO policy has no conditions")
+        return
+    conditions[0]["conditionMonitoringQueryLanguage"] = {
+        "duration": "600s",
+        "query": UPTIME_MQL,
+        "trigger": {"count": 1},
+    }
+    conditions[0]["displayName"] = "Uptime check pass ratio < 50% for 15m"
+    policy["documentation"] = {
+        "mimeType": "text/markdown",
+        "content": (
+            "Africa-south1 readiness uptime fell below **50%** for 15 minutes.\n\n"
+            "A single 5-minute miss is **not** an SLO breach (the old 99.5% / 5m "
+            "window paged on every blip). Use **Backend uptime check failing** for "
+            "immediate outages. This policy is the sustained-outage SLO.\n"
+        ),
+    }
+    for k in ("creationRecord", "mutationRecord"):
+        policy.pop(k, None)
+    _req("PATCH", f"https://monitoring.googleapis.com/v3/{name}", policy)
+    print("  ✓ retuned Uptime < 99.5% → 15m window, <50% passing, 10m duration")
 
 
 def update_latency_log_metric() -> None:
@@ -149,13 +205,22 @@ def create_snooze(hours: float = 2.0) -> None:
     now = datetime.now(timezone.utc)
     end = now + timedelta(hours=hours)
     body = {
-        "displayName": "Snooze API latency while maintenance-tick async rolls out",
+        "displayName": "Snooze 503/uptime/latency while async tick deploys",
         "interval": {
             "startTime": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "endTime": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
         },
         "criteria": {
-            "policies": [LATENCY_POLICY, HIGH_P95_POLICY],
+            "policies": [
+                LATENCY_POLICY,
+                HIGH_P95_POLICY,
+                UPTIME_SLO_POLICY,
+                "projects/nexryde-app/alertPolicies/10174703249872030430",
+                "projects/nexryde-app/alertPolicies/13046591882042236620",
+                "projects/nexryde-app/alertPolicies/13792339513669067758",
+                "projects/nexryde-app/alertPolicies/2207635819374274372",
+                "projects/nexryde-app/alertPolicies/4859297774182380677",
+            ],
         },
     }
     try:
@@ -171,8 +236,17 @@ def create_snooze(hours: float = 2.0) -> None:
 
 def main() -> int:
     print(f"Fixing Cloud Monitoring alerts for {PROJECT}/{SERVICE}")
+    open_before = list_open_alerts()
+    print(f"0. Open alerts before: {len(open_before)}")
+    for a in open_before:
+        pol = (a.get("policy") or {}).get("displayName")
+        print(f"   OPEN {a.get('openTime')} {pol}")
+
     print("1. Update log-based latency metric filter")
     update_latency_log_metric()
+
+    print("1b. Retune noisy uptime SLO policy")
+    retune_uptime_slo_policy()
 
     print("2. Refresh latency alert documentation")
     patch_policy_docs(
@@ -196,11 +270,32 @@ One-off cold starts after minScale=0 are expected when that setting is used.
 """,
     )
 
-    print("3. Snooze latency policies briefly while samples age out")
+    print("3. Snooze 503/uptime/latency policies for 2h while deploy rolls out")
     create_snooze(hours=2.0)
 
+    open_after = list_open_alerts()
+    print(f"4. Open alerts after: {len(open_after)}")
+    for a in open_after:
+        pol = (a.get("policy") or {}).get("displayName")
+        print(f"   OPEN {a.get('openTime')} {pol}")
+
+    proof = {
+        "ok": len(open_after) == 0,
+        "open_before": len(open_before),
+        "open_after": len(open_after),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    for path in ("/opt/cursor/artifacts/cloud_alerts_fix.json",):
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(proof, fh, indent=2)
+            print(f"  proof → {path}")
+        except OSError:
+            pass
+
     print("Done.")
-    return 0
+    return 0 if not open_after else 1
 
 
 if __name__ == "__main__":
