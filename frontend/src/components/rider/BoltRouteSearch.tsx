@@ -15,8 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { BACKEND_URL } from '@/src/services/api';
-import { authedFetch } from '@/src/utils/sessionRefresh';
+import { searchPlacesAutocomplete } from '@/src/services/placesSearch';
 import {
   loadIdleRouteSuggestions,
   mapPlacesPredictions,
@@ -132,27 +131,15 @@ export function BoltRouteSearch({
       setLoading(true);
       try {
         const session = ensureSession();
-        let url = `${BACKEND_URL}/api/places/autocomplete?input=${encodeURIComponent(
-          input,
-        )}&components=country:ng&sessiontoken=${encodeURIComponent(session)}`;
-        if (origin && Number.isFinite(origin.lat) && Number.isFinite(origin.lng)) {
-          url += `&location_bias=${encodeURIComponent(`${origin.lat},${origin.lng}`)}&radius=45000`;
-        }
-        const res = await authedFetch(url, { method: 'GET', preserveSessionOn401: true });
-        const data = await res.json().catch(() => ({}));
+        const data = await searchPlacesAutocomplete(input, {
+          origin,
+          sessionToken: session,
+          countryCode: 'ng',
+        });
         if (reqId !== reqIdRef.current) return;
-        if (res.ok && data?.status === 'OK') {
-          setPlaces(
-            mapPlacesPredictions(
-              data.predictions || [],
-              input,
-              origin,
-              session,
-            ),
-          );
-        } else {
-          setPlaces([]);
-        }
+        setPlaces(
+          mapPlacesPredictions(data.predictions || [], input, origin, session),
+        );
       } catch {
         if (reqId === reqIdRef.current) setPlaces([]);
       } finally {

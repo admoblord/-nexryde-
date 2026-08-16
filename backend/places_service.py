@@ -317,25 +317,49 @@ _LAGOS_LANDMARKS: list[dict] = [
 
 
 def _local_landmark_predictions(input_text: str) -> list[dict]:
+    """Match the landmark name, not a generic token like 'Lagos' or 'Island'."""
     q = (input_text or "").strip().lower()
     if len(q) < 3:
         return []
+    tokens = [t for t in q.split() if len(t) >= 3]
     out = []
     for row in _LAGOS_LANDMARKS:
+        main = str(row["main_text"]).lower()
         hay = f"{row['main_text']} {row['description']}".lower()
-        if q in hay or any(tok and tok in hay for tok in q.split()):
-            out.append(
-                {
-                    "place_id": row["place_id"],
-                    "description": row["description"],
-                    "main_text": row["main_text"],
-                    "secondary_text": row["secondary_text"],
-                    "lat": row["lat"],
-                    "lng": row["lng"],
-                    "source": "local_landmark",
-                }
-            )
+        name_hit = q == main or main.startswith(q) or q in main
+        multi_hit = len(tokens) >= 2 and all(t in hay for t in tokens)
+        if not (name_hit or multi_hit):
+            continue
+        out.append(
+            {
+                "place_id": row["place_id"],
+                "description": row["description"],
+                "main_text": row["main_text"],
+                "secondary_text": row["secondary_text"],
+                "lat": row["lat"],
+                "lng": row["lng"],
+                "source": "local_landmark",
+            }
+        )
     return out[:5]
+
+
+def _merge_place_predictions(*groups: list[dict]) -> list[dict]:
+    """Dedup by place_id / description. First group wins (Google rank first)."""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for group in groups:
+        for row in group or []:
+            pid = str(row.get("place_id") or "").strip().lower()
+            desc = str(row.get("description") or row.get("main_text") or "").strip().lower()
+            key = pid or desc
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            if desc:
+                seen.add(desc)
+            out.append(row)
+    return out[:12]
 
 
 @places_router.get("/autocomplete")
@@ -360,9 +384,9 @@ async def autocomplete_places(
     if len(input) < 3:
         return {"predictions": [], "status": "OK"}
 
+    # Landmarks are a boost only — never replace Google. Token-OR matching used
+    # to return "Landmark Beach" for any query containing "Island" / "Lagos".
     local_hits = _local_landmark_predictions(input)
-    if local_hits:
-        return {"predictions": local_hits, "status": "OK", "cache": "local_landmark"}
 
     import time as _time
     t0 = _time.perf_counter()
@@ -372,7 +396,7 @@ async def autocomplete_places(
         session = (sessiontoken or "").strip()
         use_cache = not session
         if use_cache:
-            key = _cache_key("autocomplete", {
+            key = _cache_key("autocomplete_v2", {
                 "input": input.strip().lower(),
                 "location_bias": location_bias,
                 "radius": radius,
@@ -415,8 +439,9 @@ async def autocomplete_places(
                     "secondary_text": formatting.get("secondary_text", ""),
                 })
 
+            merged = _merge_place_predictions(predictions, local_hits)
             response_payload = {
-                "predictions": predictions,
+                "predictions": merged,
                 "status": "OK",
             }
             if use_cache:
@@ -431,14 +456,19 @@ async def autocomplete_places(
 
         fb = await _geocode_search_fallback_predictions(input, components or "country:ng")
         if fb:
+            fb_preds = _merge_place_predictions(fb.get("predictions") or [], local_hits)
+            fb = {**fb, "predictions": fb_preds, "status": "OK"}
             if use_cache:
                 await _set_cache(key, fb, ttl_seconds=300)
             return fb
 
+        if local_hits:
+            return {"predictions": local_hits, "status": "OK", "cache": "local_landmark"}
+
         if data.get("status") == "OK":
             response_payload = {"predictions": [], "status": "OK"}
             if use_cache:
-                await _set_cache(key, response_payload, ttl_seconds=120)
+                await _set_cache(key, response_payload, ttl_seconds=60)
             return response_payload
 
         response_payload = {
@@ -447,7 +477,7 @@ async def autocomplete_places(
             "error_message": data.get("error_message", "Unknown error"),
         }
         if use_cache:
-            await _set_cache(key, response_payload, ttl_seconds=60)
+            await _set_cache(key, response_payload, ttl_seconds=30)
         return response_payload
     
     except Exception as e:

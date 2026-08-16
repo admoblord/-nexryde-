@@ -10,7 +10,7 @@ import {
   Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BACKEND_URL } from '@/src/services/api';
+import { searchPlacesAutocomplete } from '@/src/services/placesSearch';
 
 interface Prediction {
   place_id: string;
@@ -163,50 +163,26 @@ export default function LocationAutocomplete({
       setIsLoading(true);
       try {
         const session = ensureSessionToken();
-        let url = `${BACKEND_URL}/api/places/autocomplete?input=${encodeURIComponent(
-          input,
-        )}&components=country:${countryCode}&sessiontoken=${encodeURIComponent(session)}`;
-        if (
+        const origin =
           typeof biasLat === 'number' &&
           typeof biasLng === 'number' &&
           Number.isFinite(biasLat) &&
           Number.isFinite(biasLng)
-        ) {
-          const r = Math.min(Math.max(5000, Math.round(biasRadiusM ?? 45000)), 50000);
-          url += `&location_bias=${encodeURIComponent(`${biasLat},${biasLng}`)}&radius=${r}`;
-        }
-
-        const response = await fetch(url);
-        let data: any = {};
-        try {
-          data = await response.json();
-        } catch {
-          data = {};
-        }
+            ? { lat: biasLat, lng: biasLng }
+            : null;
+        const data = await searchPlacesAutocomplete(input, {
+          origin,
+          sessionToken: session,
+          countryCode,
+        });
         if (!mountedRef.current || requestId !== activeRequestIdRef.current) return;
 
-        if (!response.ok) {
-          setPredictions([]);
-          setShowSuggestions(false);
-          return;
-        }
-
-        if (data.status === 'OK') {
-          const normalized = (data.predictions || []).map((p: any, index: number) =>
-            normalizePrediction(p, index),
-          );
-          storeCachedPredictions(input, normalized);
-          setPredictions(normalized);
-          setShowSuggestions(normalized.length > 0);
-        } else if (data.status === 'ZERO_RESULTS') {
-          storeCachedPredictions(input, []);
-          setPredictions([]);
-          setShowSuggestions(false);
-        } else {
-          console.error('Google Places API error:', data.status, data.error_message);
-          setPredictions([]);
-          setShowSuggestions(false);
-        }
+        const normalized = (data.predictions || []).map((p, index) =>
+          normalizePrediction(p, index),
+        );
+        storeCachedPredictions(input, normalized);
+        setPredictions(normalized);
+        setShowSuggestions(normalized.length > 0);
       } catch (error) {
         console.error('Error fetching predictions:', error);
         if (!mountedRef.current || requestId !== activeRequestIdRef.current) return;
@@ -221,7 +197,6 @@ export default function LocationAutocomplete({
     [
       biasLat,
       biasLng,
-      biasRadiusM,
       countryCode,
       ensureSessionToken,
       storeCachedPredictions,

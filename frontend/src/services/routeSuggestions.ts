@@ -197,7 +197,8 @@ export function mapPlacesPredictions(
       _q: query,
     };
   });
-  rows.sort((a, b) => (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9));
+  // Keep Google rank. Sorting by missing GPS distance buried real addresses
+  // under "near you" landmarks that happened to include lat/lng.
   return rows.map(({ _q: _omit, ...rest }) => rest);
 }
 
@@ -218,5 +219,6 @@ export function mergeRouteSuggestions(
   const recent = filterIdle.filter((s) => s.kind === 'recent');
   const seen = new Set([...saved, ...recent].map((s) => s.subtitle.toLowerCase()));
   const placesDedup = places.filter((s) => !seen.has(s.subtitle.toLowerCase()));
-  return [...saved, ...recent, ...placesDedup];
+  // Typed query → real Places first, then matching saved/recent.
+  return [...placesDedup, ...saved, ...recent];
 }
