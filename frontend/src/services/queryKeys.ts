@@ -10,7 +10,11 @@ export const qk = {
     ['driver', 'earnings', uid, period] as const,
   driverTrips: (uid: string) => ['driver', 'trips', uid] as const,
   driverSubscription: (uid: string) => ['driver', 'subscription', uid] as const,
+  driverSubStatus: (uid: string) => ['driver', 'sub-status', uid] as const,
   driverWorkZone: (uid: string) => ['driver', 'work-zone', uid] as const,
   driverProfile: (uid: string) => ['driver', 'profile', uid] as const,
+  driverTrust: (uid: string) => ['driver', 'trust', uid] as const,
+  driverVehicles: (uid: string) => ['driver', 'vehicles', uid] as const,
+  driverUser: (uid: string) => ['driver', 'user', uid] as const,
   driverNotifs: (uid: string) => ['driver', 'notifs', uid] as const,
 };

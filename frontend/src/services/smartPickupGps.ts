@@ -2,14 +2,21 @@
  * Smart pickup GPS — last-known first, Balanced refresh, hard timeout.
  *
  * Spec:
- * 1. getLastKnownPositionAsync({ maxAge: 300000 }) → pin + reverse-geocode immediately
- * 2. getCurrentPositionAsync(Balanced) in background; update only if >50m
- * 3. Hard 8s timeout on current position — never leave UI stuck
- * 4. Never use Highest / BestForNavigation for pickup (driver trip tracking only)
+ * 1. hydrateLocationPersist / in-memory last-known → pin immediately
+ * 2. getLastKnownPositionAsync → pin + reverse-geocode if disk was empty
+ * 3. getCurrentPositionAsync(Balanced) in background; update only if >50m
+ * 4. Hard 8s timeout on current position — never leave UI stuck
+ * 5. Never use Highest / BestForNavigation for pickup (driver trip tracking only)
  */
 import { Platform } from 'react-native';
 import * as Location from 'expo-location';
-import { getWarmedLocation, setWarmedLocation } from '@/src/services/locationWarm';
+import {
+  getWarmedLocation,
+  hydrateLocationPersist,
+  isPersistFresh,
+  LOCATION_PERSIST_MAX_AGE_MS,
+  setWarmedLocation,
+} from '@/src/services/locationWarm';
 
 export type SmartPickupFix = {
   lat: number;
@@ -113,9 +120,11 @@ export function startSmartPickupGps(options: SmartPickupOptions): () => void {
         return;
       }
 
-      // 0) In-memory warm from home launch — paint before OS last-known round-trip.
+      // 0) Memory + disk last-known — paint before OS last-known / GPS.
+      await hydrateLocationPersist();
+      if (cancelled) return;
       const warm = getWarmedLocation();
-      if (warm && Date.now() - warm.at < 5 * 60 * 1000) {
+      if (warm && isPersistFresh(warm.at)) {
         emit({
           lat: warm.lat,
           lng: warm.lng,
@@ -127,7 +136,9 @@ export function startSmartPickupGps(options: SmartPickupOptions): () => void {
 
       // 1) OS last-known — under 1s path for address resolve.
       try {
-        const loc = await Location.getLastKnownPositionAsync({ maxAge: 5 * 60 * 1000 });
+        const loc = await Location.getLastKnownPositionAsync({
+          maxAge: LOCATION_PERSIST_MAX_AGE_MS,
+        });
         if (!cancelled && loc?.coords) {
           const lat = Number(loc.coords.latitude);
           const lng = Number(loc.coords.longitude);

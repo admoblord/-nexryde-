@@ -28,6 +28,12 @@ type SessionPayload = {
   refresh_token?: string | null;
   is_verified?: boolean;
   face_verified?: boolean;
+  profile_image?: string | null;
+  rating?: number;
+  total_trips?: number;
+  trips_completed?: number;
+  created_at?: string;
+  rider_reputation_trip_count?: number;
   terms_accepted?: boolean;
   terms_version?: string | null;
   terms_accepted_at?: string | null;
@@ -93,28 +99,37 @@ export function useAppBootstrap(router: Pick<Router, 'replace' | 'push'>) {
     const [, secure] = await Promise.all([awaitPersistHydration(), getUserSession()]);
     const store = useAppStore.getState();
     if (store.isAuthenticated && store.user?.id) {
+      const u = store.user;
       return {
-        id: store.user.id,
-        phone: store.user.phone,
-        name: store.user.name,
-        email: store.user.email,
-        role: store.user.role,
+        ...u,
+        id: u.id,
+        phone: u.phone,
+        name: u.name,
+        email: u.email,
+        role: u.role,
         token: secure?.token ?? null,
         refresh_token: (secure as { refresh_token?: string })?.refresh_token ?? null,
-        is_verified: store.user.is_verified,
-        face_verified: (store.user as { face_verified?: boolean }).face_verified,
-        terms_accepted: store.user.terms_accepted,
-        terms_version: store.user.terms_version,
-        terms_accepted_at: store.user.terms_accepted_at,
-        privacy_accepted: store.user.privacy_accepted,
-        privacy_version: store.user.privacy_version,
-        privacy_accepted_at: store.user.privacy_accepted_at,
-        rider_verification_completed: store.user.rider_verification_completed,
-        onboarding_complete: store.user.onboarding_complete,
+        is_verified: u.is_verified,
+        face_verified: (u as { face_verified?: boolean }).face_verified,
+        profile_image: u.profile_image ?? null,
+        rating: u.rating,
+        total_trips: u.total_trips,
+        trips_completed: u.trips_completed,
+        created_at: u.created_at,
+        rider_reputation_trip_count: u.rider_reputation_trip_count,
+        terms_accepted: u.terms_accepted,
+        terms_version: u.terms_version,
+        terms_accepted_at: u.terms_accepted_at,
+        privacy_accepted: u.privacy_accepted,
+        privacy_version: u.privacy_version,
+        privacy_accepted_at: u.privacy_accepted_at,
+        rider_verification_completed: u.rider_verification_completed,
+        onboarding_complete: u.onboarding_complete,
       };
     }
     if (!secure?.id) return null;
     return {
+      ...secure,
       id: secure.id,
       phone: secure.phone,
       name: secure.name ?? null,
@@ -124,6 +139,12 @@ export function useAppBootstrap(router: Pick<Router, 'replace' | 'push'>) {
       refresh_token: (secure as { refresh_token?: string }).refresh_token || null,
       is_verified: secure.is_verified,
       face_verified: secure.face_verified,
+      profile_image: secure.profile_image ?? null,
+      rating: secure.rating,
+      total_trips: secure.total_trips,
+      trips_completed: secure.trips_completed,
+      created_at: secure.created_at,
+      rider_reputation_trip_count: secure.rider_reputation_trip_count,
       terms_accepted: secure.terms_accepted,
       terms_version: secure.terms_version,
       terms_accepted_at: secure.terms_accepted_at,

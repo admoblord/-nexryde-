@@ -27,6 +27,16 @@ import {
   toggleWomenOnlyMode,
 } from '@/src/services/api';
 import { DriverOfferSoundPreferences } from '@/src/components/profile/DriverOfferSoundPreferences';
+import { tabCacheGet, tabCacheSet } from '@/src/services/tabDataCache';
+
+type PrefCache = {
+  pushEnabled?: boolean;
+  emailEnabled?: boolean;
+  engagementEnabled?: boolean;
+  promotionsEnabled?: boolean;
+  pickupCodeEnabled?: boolean;
+  womenOnly?: boolean;
+};
 
 type Variant = 'rider' | 'driver';
 
@@ -36,17 +46,18 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
   const { colors } = useThemeColors();
   const { language, setLanguage } = useLanguage();
 
-  const [loading, setLoading] = useState(true);
+  const prefCacheKey = userId ? `user-prefs:${variant}:${userId}` : '';
+  const prefCached = userId ? tabCacheGet<PrefCache>(`user-prefs:${variant}:${userId}`) : null;
   const [showLanguages, setShowLanguages] = useState(false);
-  const [pushEnabled, setPushEnabled] = useState(true);
-  const [emailEnabled, setEmailEnabled] = useState(true);
-  const [engagementEnabled, setEngagementEnabled] = useState(true);
-  const [promotionsEnabled, setPromotionsEnabled] = useState(true);
+  const [pushEnabled, setPushEnabled] = useState(() => prefCached?.pushEnabled ?? true);
+  const [emailEnabled, setEmailEnabled] = useState(() => prefCached?.emailEnabled ?? true);
+  const [engagementEnabled, setEngagementEnabled] = useState(() => prefCached?.engagementEnabled ?? true);
+  const [promotionsEnabled, setPromotionsEnabled] = useState(() => prefCached?.promotionsEnabled ?? true);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricSupported, setBiometricSupported] = useState(false);
-  const [womenOnly, setWomenOnly] = useState(false);
+  const [womenOnly, setWomenOnly] = useState(() => prefCached?.womenOnly ?? false);
   const [womenOnlyLoading, setWomenOnlyLoading] = useState(false);
-  const [pickupCodeEnabled, setPickupCodeEnabled] = useState(false);
+  const [pickupCodeEnabled, setPickupCodeEnabled] = useState(() => prefCached?.pickupCodeEnabled ?? false);
   const [pickupCodeSaving, setPickupCodeSaving] = useState(false);
 
   const showFemaleDriverRow =
@@ -178,13 +189,11 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
 
   useEffect(() => {
     if (!userId || !canCallAuthedApi) {
-      setLoading(false);
       return;
     }
 
     let cancelled = false;
     (async () => {
-      setLoading(true);
       try {
         const [prefRes, userRes] = await Promise.all([
           getUserPreferences(userId),
@@ -221,10 +230,26 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
         if (typeof pref.pickup_code_enabled === 'boolean') {
           setPickupCodeEnabled(pref.pickup_code_enabled);
         }
+        if (prefCacheKey) {
+          tabCacheSet(prefCacheKey, {
+            pushEnabled: typeof pref.notifications_enabled === 'boolean' ? pref.notifications_enabled : true,
+            emailEnabled: typeof (pref.notification_channels || {}).email === 'boolean'
+              ? (pref.notification_channels || {}).email
+              : true,
+            engagementEnabled: typeof (pref.notification_types || {}).engagement === 'boolean'
+              ? (pref.notification_types || {}).engagement
+              : true,
+            promotionsEnabled: typeof (pref.notification_types || {}).promotions === 'boolean'
+              ? (pref.notification_types || {}).promotions
+              : true,
+            pickupCodeEnabled: typeof pref.pickup_code_enabled === 'boolean' ? pref.pickup_code_enabled : false,
+            womenOnly: userRes?.data && typeof userRes.data.women_only_mode === 'boolean'
+              ? userRes.data.women_only_mode
+              : false,
+          } satisfies PrefCache);
+        }
       } catch {
         // keep defaults
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     })();
 
@@ -235,15 +260,6 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
 
   const currentLang =
     SUPPORTED_LANGUAGES.find((l) => l.code === language) || SUPPORTED_LANGUAGES[0];
-
-  if (loading) {
-    return (
-      <View style={styles.loadingRow}>
-        <ActivityIndicator color={COLORS.accentGreen} />
-        <Text style={[styles.loadingText, { color: colors.textMuted }]}>Loading preferences…</Text>
-      </View>
-    );
-  }
 
   return (
     <>

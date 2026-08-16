@@ -32,7 +32,8 @@ export const queryClient = new QueryClient({
       gcTime: 1000 * 60 * 60 * 24, // 24h
       retry: 3,
       retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
-      refetchOnMount: 'always',
+      // Respect staleTime — remounts paint from cache instead of refetching every tap.
+      refetchOnMount: true,
       refetchOnWindowFocus: false,
       refetchOnReconnect: true,
       networkMode: 'online',

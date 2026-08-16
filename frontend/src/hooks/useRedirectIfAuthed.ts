@@ -29,7 +29,8 @@ export function useRedirectIfAuthed(): boolean {
     });
   }, [storeReady, user?.id, user?.role, isAuthenticated, router, onAuthFlowScreen]);
 
-  if (!storeReady) return false;
+  // Show login chrome immediately — don't block the first frame on persist.
+  if (!storeReady) return true;
   if (onAuthFlowScreen) return true;
   if (user?.id && isAuthenticated) return false;
   return true;

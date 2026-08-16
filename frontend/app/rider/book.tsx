@@ -77,10 +77,20 @@ import { getNexrydeMapStyle } from '@/src/constants/nexrydeMapBehavior';
 import { ErrorBoundary } from '@/src/components/ErrorBoundary';
 import { getRecentLocations, cacheRecentLocation, createOfflineBooking, checkOnlineStatus } from '@/src/services/offlineMode';
 import { authedFetch } from '@/src/utils/sessionRefresh';
+import {
+  fareMatrixCacheKey,
+  getCachedFareMatrix,
+  setCachedFareMatrix,
+} from '@/src/services/fareMatrixCache';
 import * as Haptics from 'expo-haptics';
 import { geocodeAddressForRider } from '@/src/services/riderSavedPlaces';
 import { startSmartPickupGps } from '@/src/services/smartPickupGps';
-import { peekQuickLocation } from '@/src/services/locationWarm';
+import {
+  getWarmedLocation,
+  hydrateLocationPersist,
+  lastKnownLatLng,
+  peekQuickLocation,
+} from '@/src/services/locationWarm';
 import {
   DETECTING_PICKUP,
   SAFE_PICKUP_FALLBACK,
@@ -286,17 +296,22 @@ function BookInDriveStyle() {
     [colors, isDark],
   );
 
-  const [pickup, setPickup] = useState('');
+  const [pickup, setPickup] = useState(() => (getWarmedLocation() ? SAFE_PICKUP_FALLBACK : ''));
   const [destination, setDestination] = useState('');
   const [stop, setStop] = useState('');
-  const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | null>(lastKnownLatLng);
   const [destinationCoords, setDestinationCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [stopCoords, setStopCoords] = useState<{ lat: number; lng: number } | null>(null);
   /** Single source of truth for route geometry + metrics (pickup → stops[] → destination). */
   const [tripDraft, setTripDraft] = useState<TripDraft>(EMPTY_TRIP_DRAFT);
-  const [currentLocation, setCurrentLocation] = useState<any>(null);
-  const [gpsStatus, setGpsStatus] = useState<'detecting' | 'locked' | 'error'>('detecting');
-  const [pickupDetecting, setPickupDetecting] = useState(true);
+  const [currentLocation, setCurrentLocation] = useState<any>(() => {
+    const w = getWarmedLocation();
+    return w ? { lat: w.lat, lng: w.lng, address: SAFE_PICKUP_FALLBACK } : null;
+  });
+  const [gpsStatus, setGpsStatus] = useState<'detecting' | 'locked' | 'error'>(() =>
+    getWarmedLocation() ? 'locked' : 'detecting',
+  );
+  const [pickupDetecting, setPickupDetecting] = useState(() => !getWarmedLocation());
   /** Once the rider picks a pickup manually, background GPS must never overwrite it. */
   const manualPickupRef = useRef(false);
   /** Instant Pickup Detection Engine — continuous resolve + cache. */
@@ -1086,8 +1101,15 @@ function BookInDriveStyle() {
           }
         }
 
-        // Paint from warm / last-known BEFORE any Detecting… spinner.
-        const quick = await peekQuickLocation();
+        // Paint from sync last-known BEFORE any Detecting… spinner or GPS.
+        let quick = getWarmedLocation();
+        if (!quick) {
+          await hydrateLocationPersist();
+          quick = getWarmedLocation();
+        }
+        if (!quick) {
+          quick = await peekQuickLocation();
+        }
         if (quick && mounted) {
           setPickupCoords({ lat: quick.lat, lng: quick.lng });
           setCurrentLocation({
@@ -1591,6 +1613,13 @@ function BookInDriveStyle() {
         inferCity(pickup, destination) ||
         'default';
 
+      const cacheKey = fareMatrixCacheKey(pLat, pLng, dLat, dLng, city);
+      const cached = getCachedFareMatrix(cacheKey);
+      if (cached && Object.keys(cached.matrix).length) {
+        setFareMatrix(cached.matrix);
+        setFareMatrixOriginal(cached.original);
+      }
+
       const results = await Promise.all(
         availableVehicles.map(async (vehicle) => {
           try {
@@ -1631,6 +1660,7 @@ function BookInDriveStyle() {
       }
       setFareMatrix(nextMatrix);
       setFareMatrixOriginal(nextOrig);
+      setCachedFareMatrix(cacheKey, { matrix: nextMatrix, original: nextOrig });
 
       let veh = selectedVehicle;
       if (!veh && (nextMatrix['economy'] ?? 0) > 0) {
@@ -1855,6 +1885,24 @@ function BookInDriveStyle() {
       setOptimizedRoute(null);
       return;
     }
+    const city =
+      inferCityFromCoords(pickupCoords.lat, pickupCoords.lng) ||
+      inferCityFromCoords(destinationCoords.lat, destinationCoords.lng) ||
+      inferCity(pickup, destination) ||
+      'default';
+    const cached = getCachedFareMatrix(
+      fareMatrixCacheKey(
+        pickupCoords.lat,
+        pickupCoords.lng,
+        destinationCoords.lat,
+        destinationCoords.lng,
+        city,
+      ),
+    );
+    if (cached && Object.keys(cached.matrix).length) {
+      setFareMatrix(cached.matrix);
+      setFareMatrixOriginal(cached.original);
+    }
     const run = async () => {
       try {
         await calculateAllVehiclePrices();
@@ -1862,7 +1910,7 @@ function BookInDriveStyle() {
         /* fare matrix best-effort */
       }
     };
-    const timer = setTimeout(run, 400);
+    const timer = setTimeout(run, cached ? 0 : 400);
     return () => {
       clearTimeout(timer);
     };
