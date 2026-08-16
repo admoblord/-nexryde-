@@ -37,6 +37,9 @@ import {
   RIDER_SAVED_SLOTS_ORDER,
   type RiderSavedPlace,
 } from '@/src/services/riderSavedPlaces';
+import { queryClient } from '@/src/providers/QueryProvider';
+import { qk } from '@/src/services/queryKeys';
+import { tabCacheGet, tabCacheSet } from '@/src/services/tabDataCache';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { RiderFavoritesHomeStrip } from '@/src/components/rider/RiderFavoritesHomeStrip';
 import { RiderActiveTripHomePanel } from '@/src/components/rider/RiderActiveTripHomePanel';
@@ -67,7 +70,14 @@ export default function ModernRiderHome() {
   const { t } = useLanguage();
   const tabPad = useTabBottomPad(8);
   const flow = useFlowLayout();
-  const [savedPlaces, setSavedPlaces] = useState<RiderSavedPlace[]>([]);
+  const [savedPlaces, setSavedPlaces] = useState<RiderSavedPlace[]>(() => {
+    const uid = useAppStore.getState().user?.id;
+    if (!uid) return [];
+    const fromQuery = queryClient.getQueryData<RiderSavedPlace[]>(qk.riderSavedPlaces(uid));
+    if (Array.isArray(fromQuery) && fromQuery.length) return fromQuery;
+    const fromTab = tabCacheGet<RiderSavedPlace[]>(`rider-saved:${uid}`);
+    return Array.isArray(fromTab) ? fromTab : [];
+  });
   const hasActiveTrip = useRiderHasActiveTrip();
   const activeTripPhase = useRiderActiveTripPhase();
   const activeTripFade = useRef(new Animated.Value(hasActiveTrip ? 1 : 0)).current;
@@ -155,7 +165,12 @@ export default function ModernRiderHome() {
       const now = Date.now();
       if (now - lastHomeFocusSyncRef.current < 15000) return;
       lastHomeFocusSyncRef.current = now;
-      void loadRiderSavedPlaces(riderId).then(setSavedPlaces).catch(() => setSavedPlaces([]));
+      void loadRiderSavedPlaces(riderId)
+        .then((places) => {
+          setSavedPlaces(places);
+          tabCacheSet(`rider-saved:${riderId}`, places);
+        })
+        .catch(() => setSavedPlaces((prev) => prev));
       void pullAndApplyActiveTrip(riderId);
     }, [riderId, canCallAuthedApi]),
   );

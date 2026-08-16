@@ -9,6 +9,8 @@ import { getUserTrips, getWalletMe, getUser, getUserTrustSummary } from '@/src/s
 import { authedFetch } from '@/src/utils/sessionRefresh';
 import { loadRiderSavedPlaces } from '@/src/services/riderSavedPlaces';
 import { fetchFeatureAnnouncements } from '@/src/services/featureAnnouncements';
+import { tabCacheSet } from '@/src/services/tabDataCache';
+import { applyRiderProfileToStore } from '@/src/utils/hydrateRiderProfile';
 
 export async function prefetchRiderTabs(userId: string): Promise<void> {
   if (!userId) return;
@@ -17,17 +19,26 @@ export async function prefetchRiderTabs(userId: string): Promise<void> {
       queryKey: qk.riderTrips(userId),
       queryFn: async () => {
         const res = await getUserTrips(userId, 'rider');
-        return Array.isArray(res.data) ? res.data : [];
+        const trips = Array.isArray(res.data) ? res.data : [];
+        tabCacheSet(`rider-trips:${userId}`, trips);
+        return trips;
       },
     }),
     queryClient.prefetchQuery({
       queryKey: qk.riderSavedPlaces(userId),
-      queryFn: () => loadRiderSavedPlaces(userId),
+      queryFn: async () => {
+        const places = await loadRiderSavedPlaces(userId);
+        tabCacheSet(`rider-saved:${userId}`, places);
+        return places;
+      },
     }),
     queryClient.prefetchQuery({
       queryKey: qk.riderProfile(userId),
       queryFn: async () => {
         const res = await getUser(userId);
+        if (res.data && typeof res.data === 'object') {
+          void applyRiderProfileToStore(res.data as Record<string, unknown>);
+        }
         return res.data;
       },
     }),
@@ -42,10 +53,12 @@ export async function prefetchRiderTabs(userId: string): Promise<void> {
       queryKey: qk.riderWallet(userId),
       queryFn: async () => {
         const w = await getWalletMe(15);
-        return {
+        const next = {
           balance: Number(w.data?.balance ?? 0),
           txs: Array.isArray(w.data?.transactions) ? w.data.transactions : [],
         };
+        tabCacheSet(`rider-wallet:${userId}`, next);
+        return next;
       },
     }),
     queryClient.prefetchQuery({
@@ -65,7 +78,9 @@ export async function prefetchRiderTabs(userId: string): Promise<void> {
           backendNotifs = Array.isArray(data.notifications) ? data.notifications : [];
           unreadBackend = Number(data.unread_count || 0);
         }
-        return { rows, backendNotifs, unreadBackend };
+        const next = { rows, backendNotifs, unreadBackend };
+        tabCacheSet(`tab-notifs:rider:${userId}`, next);
+        return next;
       },
     }),
   ]);
@@ -131,7 +146,9 @@ export async function prefetchDriverTabs(userId: string): Promise<void> {
           backendNotifs = Array.isArray(data.notifications) ? data.notifications : [];
           unreadBackend = Number(data.unread_count || 0);
         }
-        return { rows, backendNotifs, unreadBackend };
+        const next = { rows, backendNotifs, unreadBackend };
+        tabCacheSet(`tab-notifs:driver:${userId}`, next);
+        return next;
       },
     }),
   ]);
