@@ -41,5 +41,29 @@ subprojects { sub ->
   }
 }
 
+// @generated begin nexryde-16kb-page-size
+// NDK r28+ defaults to 16 KB ELF alignment for from-source native builds.
+ext {
+    ndkVersion = "28.2.13676358"
+}
+
+// Only the native AAR is pinned. Rewriting the whole group breaks
+// datastore-guava (Navigation SDK), which has no 1.1.7 artifact.
+allprojects { project ->
+    project.configurations.configureEach { configuration ->
+        configuration.resolutionStrategy.eachDependency { details ->
+            if (details.requested.group == 'androidx.datastore'
+                    && details.requested.name == 'datastore-core-android') {
+                details.useVersion('1.1.7')
+                details.because('Play 16KB: pin datastore-core-android NDK r25c .so')
+            }
+        }
+        configuration.resolutionStrategy.force(
+            'androidx.datastore:datastore-core-android:1.1.7'
+        )
+    }
+}
+// @generated end nexryde-16kb-page-size
+
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
