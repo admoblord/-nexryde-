@@ -34,6 +34,12 @@ import { NEXRYDE_MAP_STYLE } from '@/src/constants/nexrydeMapBehavior';
 import { MapLibreDemandHeatmap } from '@/src/components/map/MapLibreDemandHeatmap';
 import { isMapLibreEnabled } from '@/src/constants/mapEngines';
 import { ensureLagosOfflinePack } from '@/src/services/mapLibreOffline';
+import {
+  getWarmedLocation,
+  lastKnownLatLng,
+  setWarmedLocation,
+  startBackgroundGpsFix,
+} from '@/src/services/locationWarm';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -255,8 +261,8 @@ export default function DriverHeatmapScreen() {
   const [lastUpdated, setLastUpdated] = useState('');
   const [fetchHint, setFetchHint] = useState<string | null>(null);
   const [errorReason, setErrorReason] = useState<string | null>(null);
-  const [driverCoords, setDriverCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const driverCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
+  const [driverCoords, setDriverCoords] = useState<{ lat: number; lng: number } | null>(lastKnownLatLng);
+  const driverCoordsRef = useRef<{ lat: number; lng: number } | null>(lastKnownLatLng());
   const [mapReady, setMapReady] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [selectedZone, setSelectedZone] = useState<number | null>(null);
@@ -284,6 +290,8 @@ export default function DriverHeatmapScreen() {
   }, []);
 
   const getFreshCoords = useCallback(async (): Promise<{ lat: number; lng: number } | null> => {
+    const warmed = getWarmedLocation();
+    if (warmed) return { lat: warmed.lat, lng: warmed.lng };
     try {
       const perm = await withTimeout(
         Location.getForegroundPermissionsAsync(),
@@ -293,6 +301,10 @@ export default function DriverHeatmapScreen() {
       if (perm.status !== 'granted') {
         logHeatmapFailure('location_permission_not_granted', { status: perm.status });
         return null;
+      }
+      const last = await Location.getLastKnownPositionAsync();
+      if (last?.coords) {
+        return { lat: last.coords.latitude, lng: last.coords.longitude };
       }
       const pos = await withTimeout(
         Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
@@ -423,8 +435,12 @@ export default function DriverHeatmapScreen() {
       return;
     }
     let cancelled = false;
+    const stopGps = startBackgroundGpsFix({ requestPermission: true });
     (async () => {
-      let coords: { lat: number; lng: number } | null = null;
+      let coords: { lat: number; lng: number } | null = lastKnownLatLng();
+      if (coords && !cancelled) updateDriverCoords(coords);
+      // Load heat from last-known immediately — do not wait on a cold GPS fix.
+      if (!cancelled) void loadHeatmap(coords);
       try {
         const perm = await withTimeout(
           Location.requestForegroundPermissionsAsync(),
@@ -432,13 +448,18 @@ export default function DriverHeatmapScreen() {
           'LOCATION_PERMISSION_REQUEST_TIMEOUT',
         );
         if (perm.status === 'granted') {
-          const pos = await withTimeout(
-            Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-            5000,
-            'LOCATION_INITIAL_FIX_TIMEOUT',
-          );
-          coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          if (!cancelled) updateDriverCoords(coords);
+          const last = await Location.getLastKnownPositionAsync();
+          if (last?.coords && !cancelled) {
+            coords = { lat: last.coords.latitude, lng: last.coords.longitude };
+            updateDriverCoords(coords);
+            setWarmedLocation({
+              lat: coords.lat,
+              lng: coords.lng,
+              accuracyM: last.coords.accuracy ?? null,
+              source: 'last_known',
+              at: Date.now(),
+            });
+          }
         } else {
           logHeatmapFailure('location_permission_denied_on_mount', { status: perm.status });
         }
@@ -447,12 +468,13 @@ export default function DriverHeatmapScreen() {
           message: err instanceof Error ? err.message : String(err),
         });
       }
-      if (!cancelled) await loadHeatmap(coords);
+      if (!cancelled && coords) await loadHeatmap(coords);
     })();
 
     const interval = setInterval(() => { void loadHeatmap(undefined, { background: true }); }, 45000);
     return () => {
       cancelled = true;
+      stopGps();
       clearInterval(interval);
     };
   }, [canCallAuthedApi, loadHeatmap, updateDriverCoords]);

@@ -32,6 +32,13 @@ import { useIsFocused } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
+import {
+  getWarmedLocation,
+  hydrateLocationPersist,
+  lastKnownLatLng,
+  setWarmedLocation,
+  shouldAcceptGpsUpdate,
+} from '@/src/services/locationWarm';
 import * as SecureStore from 'expo-secure-store';
 import { useAppStore, type Trip, type DriverProfile } from '@/src/store/appStore';
 import { useLanguage } from '@/src/i18n/LanguageContext';
@@ -916,7 +923,10 @@ export default function ModernDriverHome() {
     lng: number;
     heading?: number;
     speedKmh?: number;
-  } | null>(null);
+  } | null>(() => {
+    const w = lastKnownLatLng();
+    return w ? { lat: w.lat, lng: w.lng } : null;
+  });
   const lastLocationPushAtRef = useRef<number>(0);
   const lastLocationPushCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
   const onlineToggleInFlightRef = useRef(false);
@@ -1867,6 +1877,16 @@ export default function ModernDriverHome() {
       updateDriverHeartbeatCoords(c.lat, c.lng);
       setDriverCoords(c);
       setCurrentLocation({ latitude: c.lat, longitude: c.lng, address: '' });
+      const prevWarm = getWarmedLocation();
+      if (force || shouldAcceptGpsUpdate(prevWarm, c)) {
+        setWarmedLocation({
+          lat: c.lat,
+          lng: c.lng,
+          accuracyM: null,
+          source: force ? 'last_known' : 'gps',
+          at: Date.now(),
+        });
+      }
       if (!fixLogged) {
         fixLogged = true;
         driverFlowLog('LOCATION_FIX', { lat: c.lat, lng: c.lng, source: force ? 'bootstrap' : 'watch' });
@@ -1889,7 +1909,13 @@ export default function ModernDriverHome() {
           return;
         }
 
-        // Prefer last-known immediately so map / go-online never wait on a fresh High fix.
+        // Prefer persist / last-known immediately so the map never waits on a fresh fix.
+        await hydrateLocationPersist();
+        const warmed = getWarmedLocation();
+        if (!cancelled && warmed) {
+          pushLocation({ lat: warmed.lat, lng: warmed.lng, heading: 0 }, true);
+        }
+
         const lastKnown = await Location.getLastKnownPositionAsync();
         if (!cancelled && lastKnown) {
           const c = {

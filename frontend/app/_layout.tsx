@@ -146,6 +146,9 @@ function RootLayout() {
   useEffect(() => {
     if (Platform.OS !== 'web') {
       warmBackendConnection(true);
+      void import('@/src/services/locationWarm').then((m) => {
+        void m.hydrateLocationPersist();
+      });
       // Register background GPS task after React mounts (still before driver goes online).
       void import('@/src/tasks/backgroundLocationTask').catch((err) => {
         console.warn('[startup] backgroundLocationTask registration failed:', err);
