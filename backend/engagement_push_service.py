@@ -1296,9 +1296,12 @@ async def tick_engagement_pushes() -> int:
         "notification_channels": 1,
         "notification_types": 1,
     }
-    scan_limit = int(os.getenv("ENGAGEMENT_SCAN_LIMIT", "25000"))
-    users = await db.users.find(user_query, projection).to_list(scan_limit)
-    sem = asyncio.Semaphore(int(os.getenv("ENGAGEMENT_SEND_CONCURRENCY", "25")))
+    # Never load/gather the whole user table. A 25k-task gather froze the
+    # Cloud Run event loop (~90s), killed liveness, and pickup/destination
+    # search returned "No places found".
+    scan_limit = max(1, int(os.getenv("ENGAGEMENT_SCAN_LIMIT", "2000")))
+    batch_size = max(1, int(os.getenv("ENGAGEMENT_BATCH_SIZE", "50")))
+    sem = asyncio.Semaphore(max(1, int(os.getenv("ENGAGEMENT_SEND_CONCURRENCY", "8"))))
 
     async def handle_user(user: dict[str, Any]) -> int:
         role = str(user.get("role") or "")
@@ -1316,8 +1319,26 @@ async def tick_engagement_pushes() -> int:
                 break
         return count
 
-    results = await asyncio.gather(*(handle_user(u) for u in users), return_exceptions=True)
-    sent = sum(r for r in results if isinstance(r, int))
+    sent = 0
+    scanned = 0
+    batch: list[dict[str, Any]] = []
+
+    async def flush_batch() -> None:
+        nonlocal sent, batch
+        if not batch:
+            return
+        results = await asyncio.gather(*(handle_user(u) for u in batch), return_exceptions=True)
+        sent += sum(r for r in results if isinstance(r, int))
+        batch = []
+        await asyncio.sleep(0)
+
+    cursor = db.users.find(user_query, projection).limit(scan_limit)
+    async for user in cursor:
+        batch.append(user)
+        scanned += 1
+        if len(batch) >= batch_size:
+            await flush_batch()
+    await flush_batch()
     if sent:
-        logger.info("Engagement notification tick sent=%d users_scanned=%d", sent, len(users))
+        logger.info("Engagement notification tick sent=%d users_scanned=%d", sent, scanned)
     return sent
