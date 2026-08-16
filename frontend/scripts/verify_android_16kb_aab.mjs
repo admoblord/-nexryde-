@@ -60,7 +60,6 @@ async function main() {
     const versionFiles = [
       'base/root/META-INF/androidx.datastore_datastore-core.version',
       'base/root/META-INF/androidx.datastore_datastore-core-android.version',
-      'base/root/META-INF/androidx.datastore_datastore.version',
     ];
     let sawVersion = false;
     for (const rel of versionFiles) {
