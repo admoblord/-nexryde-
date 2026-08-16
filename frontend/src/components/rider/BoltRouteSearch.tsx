@@ -88,12 +88,15 @@ export function BoltRouteSearch({
   const [idle, setIdle] = useState<RouteSuggestion[]>([]);
   const [places, setPlaces] = useState<RouteSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState<'auth' | 'network' | null>(null);
   const sessionRef = useRef<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reqIdRef = useRef(0);
+  const originRef = useRef(origin);
   const pickupRef = useRef<TextInput>(null);
   const dropoffRef = useRef<TextInput>(null);
   const stopRef = useRef<TextInput>(null);
+  originRef.current = origin;
 
   const activeQuery = useMemo(() => {
     if (focused === 'pickup') return pickupLabel;
@@ -129,24 +132,33 @@ export function BoltRouteSearch({
     async (input: string) => {
       const reqId = ++reqIdRef.current;
       setLoading(true);
+      setSearchError(null);
       try {
         const session = ensureSession();
         const data = await searchPlacesAutocomplete(input, {
-          origin,
+          origin: originRef.current,
           sessionToken: session,
           countryCode: 'ng',
         });
         if (reqId !== reqIdRef.current) return;
+        if (data.httpStatus === 401) {
+          setSearchError('auth');
+          setPlaces([]);
+          return;
+        }
         setPlaces(
-          mapPlacesPredictions(data.predictions || [], input, origin, session),
+          mapPlacesPredictions(data.predictions || [], input, originRef.current, session),
         );
       } catch {
-        if (reqId === reqIdRef.current) setPlaces([]);
+        if (reqId === reqIdRef.current) {
+          setPlaces([]);
+          setSearchError('network');
+        }
       } finally {
         if (reqId === reqIdRef.current) setLoading(false);
       }
     },
-    [ensureSession, origin],
+    [ensureSession],
   );
 
   useEffect(() => {
@@ -341,9 +353,15 @@ export function BoltRouteSearch({
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <Text style={styles.empty}>
-            {activeQuery.trim().length >= MIN_CHARS
-              ? 'No places found'
-              : 'Saved places and recent searches appear here'}
+            {loading
+              ? 'Searching addresses…'
+              : searchError === 'auth'
+                ? 'Sign in again to search pickup and destination'
+                : searchError === 'network'
+                  ? 'Could not reach address search. Try again.'
+                  : activeQuery.trim().length >= MIN_CHARS
+                    ? 'No places found'
+                    : 'Saved places and recent searches appear here'}
           </Text>
         }
       />

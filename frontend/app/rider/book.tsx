@@ -340,8 +340,18 @@ function BookInDriveStyle() {
   const [showVehicleModal, setShowVehicleModal] = useState(false);
   /** Bolt Route screen — open until dropoff is confirmed by suggestion tap. */
   const [routeSearchOpen, setRouteSearchOpen] = useState(true);
+  const routeSearchOpenRef = useRef(true);
+  routeSearchOpenRef.current = routeSearchOpen;
   const [routeSearchFocus, setRouteSearchFocus] = useState<RouteField>('dropoff');
   const [showStopField, setShowStopField] = useState(false);
+
+  const routeSearchOrigin = useMemo(() => {
+    const lat = Number(pickupCoords?.lat ?? currentLocation?.lat);
+    const lng = Number(pickupCoords?.lng ?? currentLocation?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (Math.abs(lat) < 1e-5 && Math.abs(lng) < 1e-5) return null;
+    return { lat, lng };
+  }, [pickupCoords?.lat, pickupCoords?.lng, currentLocation?.lat, currentLocation?.lng]);
 
   /** Active trip lives on tracking — block overlapping book UI. */
   useFocusEffect(
@@ -661,8 +671,8 @@ function BookInDriveStyle() {
           if (details.description) desc = details.description;
         }
       }
-      // Last resort only for free-text / recent rows without place_id or coords.
-      if (!coords && !sel.placeId && desc.length >= 3) {
+      // Truncated Google session ids (Ei…) 404 Place Details — geocode the label.
+      if (!coords && desc.length >= 3) {
         const resolved = await resolveAddressToCoords(desc);
         if (resolved) {
           coords = { lat: resolved.lat, lng: resolved.lng };
@@ -1034,6 +1044,12 @@ function BookInDriveStyle() {
         if (!mounted || manualPickupRef.current) return;
         setPickupCoords({ lat: state.lat, lng: state.lng });
         setCurrentLocation({ lat: state.lat, lng: state.lng, address: state.label });
+        // Route search is the first screen — never overwrite the field the rider is typing.
+        if (routeSearchOpenRef.current) {
+          setPickupDetecting(false);
+          if (!state.detecting) setGpsStatus('locked');
+          return;
+        }
         // Engine never sets detecting=true once a last-known/GPS fix exists.
         setPickup(
           state.detecting
@@ -1117,12 +1133,28 @@ function BookInDriveStyle() {
             lng: quick.lng,
             address: SAFE_PICKUP_FALLBACK,
           });
-          setPickup(SAFE_PICKUP_FALLBACK);
+          setPickup((prev) => {
+            if (manualPickupRef.current) return prev;
+            if (
+              routeSearchOpenRef.current &&
+              prev.trim() &&
+              prev !== SAFE_PICKUP_FALLBACK &&
+              !isDetectingPickupLabel(prev)
+            ) {
+              return prev;
+            }
+            return SAFE_PICKUP_FALLBACK;
+          });
           setPickupDetecting(false);
           setGpsStatus('locked');
           engine.onGpsFix(quick.lat, quick.lng, { final: false });
         } else if (mounted) {
-          setPickup(DETECTING_PICKUP);
+          setPickup((prev) =>
+            manualPickupRef.current ||
+            (routeSearchOpenRef.current && prev.trim() && !isDetectingPickupLabel(prev))
+              ? prev
+              : DETECTING_PICKUP,
+          );
           setPickupDetecting(true);
         }
 
@@ -1201,7 +1233,15 @@ function BookInDriveStyle() {
           const resolved = await resolveInstantPickup(pickupCoords.lat, pickupCoords.lng, {
             forceNetwork: true,
           });
-          if (cancelled) return;
+          if (cancelled || manualPickupRef.current) return;
+          if (
+            routeSearchOpenRef.current &&
+            pickup.trim() &&
+            pickup !== SAFE_PICKUP_FALLBACK &&
+            !isDetectingPickupLabel(pickup)
+          ) {
+            return;
+          }
           setPickup(safePickupDisplay(resolved.label));
           setPickupDetecting(false);
           setCurrentLocation((prev: { lat: number; lng: number; address: string } | null) =>
@@ -2392,12 +2432,7 @@ function BookInDriveStyle() {
           dropoffLabel={destination}
           stopLabel={stop}
           showStop={showStopField || Boolean(stop?.trim())}
-          origin={
-            pickupCoords ||
-            (currentLocation && Number.isFinite(currentLocation.lat)
-              ? { lat: currentLocation.lat, lng: currentLocation.lng }
-              : null)
-          }
+          origin={routeSearchOrigin}
           initialFocus={routeSearchFocus}
           onClose={() => {
             if (destinationCoords && destination?.trim()) {
@@ -2422,9 +2457,16 @@ function BookInDriveStyle() {
             setRouteSearchFocus('stop');
           }}
           onPickupChangeText={(t) => {
-            setPickup(t);
-            // Typing over a selected pickup clears the pin until a new suggestion is chosen.
-            if (pickupCoords) setPickupCoords(null);
+            const next = String(t || '');
+            if (
+              next.trim() &&
+              next.trim() !== SAFE_PICKUP_FALLBACK &&
+              !isDetectingPickupLabel(next)
+            ) {
+              manualPickupRef.current = true;
+            }
+            setPickup(next);
+            // Keep last GPS pin for search bias; pin is replaced when a suggestion is chosen.
           }}
           onDropoffChangeText={(t) => {
             setDestination(t);

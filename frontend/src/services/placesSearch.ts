@@ -5,6 +5,9 @@
 import { BACKEND_URL } from '@/src/services/api';
 import { authedFetch } from '@/src/utils/sessionRefresh';
 
+/** Places can miss Redis and wait on Google; 10s was aborting live Lagos searches. */
+export const PLACES_SEARCH_TIMEOUT_MS = 20000;
+
 export type PlacesPrediction = {
   place_id: string;
   description: string;
@@ -52,8 +55,32 @@ function normalizePredictions(raw: unknown): PlacesPrediction[] {
     .filter((p) => p.description);
 }
 
+export function typedQueryTokens(input: string): string[] {
+  return String(input || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 3);
+}
+
+/** True when at least one prediction mentions a typed token (Peace / garden / Estate). */
+export function predictionsMatchTypedQuery(
+  predictions: PlacesPrediction[],
+  input: string,
+): boolean {
+  const tokens = typedQueryTokens(input);
+  if (!tokens.length) return predictions.length > 0;
+  return predictions.some((p) => {
+    const hay = `${p.description} ${p.main_text || ''} ${p.secondary_text || ''}`.toLowerCase();
+    return tokens.some((t) => hay.includes(t));
+  });
+}
+
 async function fetchAutocomplete(url: string): Promise<PlacesSearchResult> {
-  const res = await authedFetch(url, { method: 'GET', preserveSessionOn401: true });
+  const res = await authedFetch(url, {
+    method: 'GET',
+    preserveSessionOn401: true,
+    timeoutMs: PLACES_SEARCH_TIMEOUT_MS,
+  });
   const data = await res.json().catch(() => ({}));
   const predictions = normalizePredictions((data as { predictions?: unknown }).predictions);
   const status = String((data as { status?: string }).status || (res.ok ? 'OK' : 'ERROR'));
@@ -88,10 +115,18 @@ export async function searchPlacesAutocomplete(
     : base;
 
   let result = await fetchAutocomplete(biased);
-  // Bias must never hide a real Nigerian address (Sangotedo estate from a VI pin).
-  if (result.predictions.length === 0 && hasOrigin) {
+  // Bias / wrong GPS must never hide a real Nigerian address.
+  const needUnbiased =
+    hasOrigin &&
+    (result.predictions.length === 0 || !predictionsMatchTypedQuery(result.predictions, q));
+  if (needUnbiased) {
     const unbiased = await fetchAutocomplete(base);
-    if (unbiased.predictions.length) result = unbiased;
+    if (
+      unbiased.predictions.length &&
+      (result.predictions.length === 0 || predictionsMatchTypedQuery(unbiased.predictions, q))
+    ) {
+      result = unbiased;
+    }
   }
   return result;
 }

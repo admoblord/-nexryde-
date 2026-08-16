@@ -156,6 +156,9 @@ export default function LocationAutocomplete({
     };
   }, []);
 
+  const biasRef = useRef({ biasLat, biasLng });
+  biasRef.current = { biasLat, biasLng };
+
   const fetchPredictions = useCallback(
     async (input: string) => {
       const requestId = activeRequestIdRef.current + 1;
@@ -163,12 +166,13 @@ export default function LocationAutocomplete({
       setIsLoading(true);
       try {
         const session = ensureSessionToken();
+        const { biasLat: lat, biasLng: lng } = biasRef.current;
         const origin =
-          typeof biasLat === 'number' &&
-          typeof biasLng === 'number' &&
-          Number.isFinite(biasLat) &&
-          Number.isFinite(biasLng)
-            ? { lat: biasLat, lng: biasLng }
+          typeof lat === 'number' &&
+          typeof lng === 'number' &&
+          Number.isFinite(lat) &&
+          Number.isFinite(lng)
+            ? { lat, lng }
             : null;
         const data = await searchPlacesAutocomplete(input, {
           origin,
@@ -194,13 +198,7 @@ export default function LocationAutocomplete({
         }
       }
     },
-    [
-      biasLat,
-      biasLng,
-      countryCode,
-      ensureSessionToken,
-      storeCachedPredictions,
-    ],
+    [countryCode, ensureSessionToken],
   );
 
   useEffect(() => {
@@ -241,7 +239,7 @@ export default function LocationAutocomplete({
         clearTimeout(debounceTimeout.current);
       }
     };
-  }, [value, fetchPredictions, readCachedPredictions]);
+  }, [value, fetchPredictions]);
 
   const handleSelectPlace = (prediction: Prediction) => {
     try {

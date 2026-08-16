@@ -19,6 +19,7 @@ const files = {
   bolt: 'src/components/rider/BoltRouteSearch.tsx',
   ac: 'src/components/LocationAutocomplete.tsx',
   suggest: 'src/services/routeSuggestions.ts',
+  book: 'app/rider/book.tsx',
   backend: path.join(root, '..', 'backend', 'places_service.py'),
 };
 const src = {
@@ -26,6 +27,7 @@ const src = {
   bolt: fs.readFileSync(path.join(root, files.bolt), 'utf8'),
   ac: fs.readFileSync(path.join(root, files.ac), 'utf8'),
   suggest: fs.readFileSync(path.join(root, files.suggest), 'utf8'),
+  book: fs.readFileSync(path.join(root, files.book), 'utf8'),
   backend: fs.readFileSync(files.backend, 'utf8'),
 };
 
@@ -65,7 +67,7 @@ results.push(
     'empty biased search retries without location_bias',
     src.places.includes('location_bias') &&
       src.places.includes('unbiased') &&
-      src.places.includes('Bias must never hide'),
+      src.places.includes('must never hide a real Nigerian address'),
   ),
 );
 
@@ -94,6 +96,83 @@ results.push(
     'generic tokens Lagos/Island do not match every landmark',
     src.backend.includes('not a generic token') &&
       src.backend.includes('len(tokens) >= 2'),
+  ),
+);
+
+results.push(
+  printRow(
+    'no-empty-while-loading',
+    'Route does not show No places found while search is in flight',
+    src.bolt.includes("Searching addresses…") &&
+      src.bolt.includes("activeQuery.trim().length >= MIN_CHARS") &&
+      src.bolt.includes("searchError === 'auth'"),
+  ),
+);
+
+results.push(
+  printRow(
+    'gps-does-not-cancel-search',
+    'Route search debounce ignores GPS origin object identity',
+    src.bolt.includes('originRef.current = origin') &&
+      src.bolt.includes('[ensureSession]') &&
+      !src.bolt.includes('[ensureSession, origin]'),
+  ),
+);
+
+results.push(
+  printRow(
+    'retry-unbiased-mismatch',
+    'biased results that do not match the typed query retry without location_bias',
+    src.places.includes('predictionsMatchTypedQuery') &&
+      src.places.includes('needUnbiased'),
+  ),
+);
+
+results.push(
+  printRow(
+    'backend-cache-with-session',
+    'backend caches autocomplete even when the app sends sessiontoken',
+    src.backend.includes('Cache even when sessiontoken is present') &&
+      !src.backend.includes('use_cache = not session') &&
+      src.backend.includes('include_bias=False'),
+  ),
+);
+
+results.push(
+  printRow(
+    'details-fallback-geocode',
+    'failed Place Details still geocodes the tapped address',
+    src.book.includes('Truncated Google session ids') &&
+      src.book.includes('!coords && desc.length >= 3'),
+  ),
+);
+
+results.push(
+  printRow(
+    'match-peace-garden',
+    'typed-query matcher keeps Peace Garden and rejects unrelated landmarks',
+    (() => {
+      const tokens = (input) =>
+        String(input || '')
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter((t) => t.length >= 3);
+      const match = (predictions, input) => {
+        const tok = tokens(input);
+        if (!tok.length) return predictions.length > 0;
+        return predictions.some((p) => {
+          const hay = `${p.description} ${p.main_text || ''} ${p.secondary_text || ''}`.toLowerCase();
+          return tok.some((t) => hay.includes(t));
+        });
+      };
+      return (
+        match(
+          [{ description: 'Peace Garden Estate, Oladunni Street', main_text: 'Peace Garden Estate' }],
+          'Peace garden Estate',
+        ) &&
+        !match([{ description: 'Landmark Beach, Victoria Island', main_text: 'Landmark Beach' }], 'Peace garden Estate')
+      );
+    })(),
   ),
 );
 
