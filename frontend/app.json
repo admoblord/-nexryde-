@@ -136,6 +136,7 @@
     "plugins": [
       "./plugins/withSafeAppearanceTurboModule.js",
       "./plugins/withDriverExperiencePackage.js",
+      "./plugins/withAndroid16KbPageSize.js",
       [
         "expo-cronet",
         {
