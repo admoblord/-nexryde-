@@ -284,3 +284,68 @@ def test_scheduler_windows_use_preferred_minute():
     assert eng._in_slot_window(rule, datetime(2026, 7, 14, 8, 15))
     assert eng._in_slot_window(rule, datetime(2026, 7, 14, 8, 18))
     assert not eng._in_slot_window(rule, datetime(2026, 7, 14, 8, 40))
+
+
+class _AsyncUserCursor:
+    def __init__(self, users):
+        self._users = list(users)
+
+    def limit(self, _n):
+        return self
+
+    def __aiter__(self):
+        self._i = 0
+        return self
+
+    async def __anext__(self):
+        if self._i >= len(self._users):
+            raise StopAsyncIteration
+        row = self._users[self._i]
+        self._i += 1
+        return row
+
+
+@pytest.mark.asyncio
+async def test_engagement_tick_flushes_in_small_batches(monkeypatch):
+    """A full-table gather froze Cloud Run and made Route search empty."""
+    users = [{"id": f"u{i}", "role": "rider"} for i in range(120)]
+    gather_sizes: list[int] = []
+    real_gather = eng.asyncio.gather
+
+    async def spy_gather(*aws, **kwargs):
+        gather_sizes.append(len(aws))
+        return await real_gather(*aws, **kwargs)
+
+    monkeypatch.setenv("ENGAGEMENT_SCAN_LIMIT", "200")
+    monkeypatch.setenv("ENGAGEMENT_BATCH_SIZE", "40")
+    monkeypatch.setenv("ENGAGEMENT_SEND_CONCURRENCY", "4")
+    monkeypatch.setattr(eng.asyncio, "gather", spy_gather)
+    monkeypatch.setattr(
+        "notification_delivery_ledger.acquire_scheduler_lock",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(eng, "tick_engagement_learning_attribution", AsyncMock())
+    monkeypatch.setattr(eng, "_load_rules", AsyncMock(return_value=[{
+        "id": "rider_morning_commute",
+        "role": "rider",
+        "days": "weekday",
+        "start": "00:00",
+        "end": "23:59",
+        "preferred_minute": 0,
+    }]))
+    monkeypatch.setattr(eng, "_send_rule_to_user", AsyncMock(return_value=False))
+    monkeypatch.setattr(eng, "_in_slot_window", lambda *_a, **_k: True)
+    monkeypatch.setattr(eng, "_now_in_timezone", lambda *_a, **_k: datetime(2026, 7, 14, 8, 0))
+    monkeypatch.setattr(eng, "_user_timezone", lambda *_a, **_k: "Africa/Lagos")
+
+    class _Users:
+        def find(self, *_a, **_k):
+            return _AsyncUserCursor(users)
+
+    monkeypatch.setattr(eng.db, "users", _Users())
+
+    sent = await eng.tick_engagement_pushes()
+    assert sent == 0
+    assert gather_sizes
+    assert max(gather_sizes) <= 40
+    assert sum(gather_sizes) == 120

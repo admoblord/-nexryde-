@@ -625,6 +625,9 @@ _compliance_task: Optional[asyncio.Task] = None
 
 
 async def _compliance_loop():
+    # Do not scan every driver on the first second of a new Cloud Run instance.
+    # That stampede + engagement gather was freezing /api/health and places.
+    await asyncio.sleep(int(os.getenv("COMPLIANCE_LOOP_INITIAL_DELAY_S", "180")))
     while True:
         try:
             await run_expiry_check_all_drivers()
