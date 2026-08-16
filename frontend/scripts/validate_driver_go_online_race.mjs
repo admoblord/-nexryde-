@@ -24,6 +24,7 @@ function main() {
   const sock = read('src/services/driverOffersSocket.ts');
   const wd = read('src/services/driverGoOnlineWatchdog.ts');
   const logs = read('src/utils/driverOnlineFlowLog.ts');
+  const layout = read('app/_layout.tsx');
   const banner = read('src/components/shared/OfflineBanner.tsx');
   const offlineHome = home;
 
@@ -110,10 +111,11 @@ function main() {
   results.push(
     printRow(
       '8',
-      'Network Reconnecting banner suppressed during driver CONNECTING/session reconnect',
-      banner.includes("driverPhase === 'connecting'") &&
-        banner.includes("driverPhase === 'reconnecting'") &&
-        banner.includes("'hidden'"),
+      'Global connection strip removed (no Reconnecting chrome during go-online)',
+      banner.includes('permanently removed') &&
+        banner.includes('() => null') &&
+        !layout.includes('<OfflineBanner') &&
+        layout.includes('useConnectivityRecovery'),
       null,
     ),
   );
