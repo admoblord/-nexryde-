@@ -15,6 +15,7 @@ import { legalTermsRouteForRole } from '@/src/constants/legal';
 import { replaceLegalTermsIfNeeded } from '@/src/utils/navigationRouteGuard';
 import { logLegalGateCheck, syncUserLegalStatus } from '@/src/services/legalStatusSync';
 import { writeDriverVerificationFact } from '@/src/services/driverVerificationFact';
+import { userNeedsLegalAcceptance } from '@/src/constants/legal';
 
 /**
  * Verification learned during routing is persisted IMMEDIATELY (Uber model).
@@ -36,12 +37,28 @@ const driverOnboardedKey = (userId: string) => `@nexryde_driver_onboarded_${user
 async function resolveUserForLegalGate(
   loggedUser: AuthedUserForRouting,
 ): Promise<AuthedUserForRouting> {
-  if (!loggedUser?.id) return loggedUser;
-  const synced = await syncUserLegalStatus(loggedUser.id);
-  if (synced) {
-    return { ...loggedUser, ...synced } as AuthedUserForRouting;
-  }
+  // Local fields only — never block first navigation on legal-status RTT.
   return loggedUser;
+}
+
+function localLegalUnknown(user: AuthedUserForRouting): boolean {
+  return user.terms_accepted == null && (user.terms_version == null || user.terms_version === '');
+}
+
+function syncLegalInBackground(
+  router: Pick<Router, 'replace'>,
+  loggedUser: AuthedUserForRouting,
+): void {
+  const id = loggedUser?.id;
+  if (!id) return;
+  void (async () => {
+    const synced = await syncUserLegalStatus(id);
+    if (!synced) return;
+    const merged = { ...loggedUser, ...synced } as AuthedUserForRouting;
+    if (userNeedsLegalAcceptance(merged)) {
+      replaceLegalTermsIfNeeded(router, loggedUser.role);
+    }
+  })();
 }
 
 function needsLegalRedirect(user: AuthedUserForRouting, source: string): boolean {
@@ -123,9 +140,15 @@ export async function clearSessionRoutingCache(userId?: string | null): Promise<
 export function routeToHomeInstant(
   router: Pick<Router, 'replace'>,
   role?: string,
+  userId?: string,
 ): void {
   // Fire-and-forget the storage write — never block navigation on it
   void markAppOnboardingSeen();
+  if (userId) {
+    void import('@/src/services/prefetchTabData').then(({ warmSessionData }) => {
+      warmSessionData(role, userId);
+    });
+  }
   router.replace(homeRouteForRole(role) as any);
 }
 
@@ -217,7 +240,7 @@ export async function routeAuthedUserFirstLogin(
       if (st.ok) persistDriverVerificationFromRouting(id, status?.verification_status);
       if (st.ok && status?.completed) {
         await markDriverOnboardingCached(id);
-        router.replace(homeRouteForRole('driver') as any);
+        routeToHomeInstant(router, 'driver', id);
         return;
       }
       if (!st.ok || !status?.completed) {
@@ -243,7 +266,7 @@ export async function routeAuthedUserFirstLogin(
           } else {
             // Docs submitted — limited Home until approval (option 1).
             await markDriverOnboardingCached(id);
-            router.replace(homeRouteForRole('driver') as any);
+            routeToHomeInstant(router, 'driver', id);
           }
           return;
         }
@@ -263,7 +286,7 @@ export async function routeAuthedUserFirstLogin(
         } as any);
         return;
       }
-      router.replace(homeRouteForRole('driver') as any);
+      routeToHomeInstant(router, 'driver', id);
     } catch {
       // Network blip: never dump a locally-approved driver back into document upload.
       try {
@@ -273,7 +296,7 @@ export async function routeAuthedUserFirstLogin(
         const fact = await readDriverVerificationFact(id);
         if (fact?.verificationStatus === 'approved') {
           await markDriverOnboardingCached(id);
-          router.replace(homeRouteForRole('driver') as any);
+          routeToHomeInstant(router, 'driver', id);
           return;
         }
       } catch {
@@ -300,7 +323,7 @@ export async function routeAuthedUserFirstLogin(
     const riderStatus = await st.json();
     if (st.ok && riderStatus?.completed) {
       await markRiderVerificationCached(id);
-      router.replace(homeRouteForRole('rider') as any);
+      routeToHomeInstant(router, 'rider', id);
     } else {
       router.replace('/(auth)/rider-verification' as any);
     }
@@ -328,6 +351,8 @@ export async function routeAuthedUser(
   const role = loggedUser.role;
   const forceCheck = options?.forceStatusCheck === true;
   const legalUser = await resolveUserForLegalGate(loggedUser);
+  const blockOnLocalLegal =
+    !localLegalUnknown(legalUser) && needsLegalRedirect(legalUser, 'routeAuthedUser:local');
 
   if (!forceCheck) {
     if (role === 'rider') {
@@ -340,16 +365,17 @@ export async function routeAuthedUser(
         (loggedUser as { rider_verification_completed?: boolean }).rider_verification_completed === true ||
         (loggedUser as { onboarding_complete?: boolean }).onboarding_complete === true;
       if (cached) {
-        if (needsLegalRedirect(legalUser, 'routeAuthedUser:rider-cached')) {
+        if (blockOnLocalLegal) {
           replaceLegalTermsIfNeeded(router, role);
           return;
         }
-        routeToHomeInstant(router, role);
+        routeToHomeInstant(router, role, id);
+        syncLegalInBackground(router, loggedUser);
         syncAuthStatusInBackground(loggedUser, resolvedToken);
         return;
       }
     } else if (role === 'driver') {
-      if (needsLegalRedirect(legalUser, 'routeAuthedUser:driver')) {
+      if (blockOnLocalLegal) {
         replaceLegalTermsIfNeeded(router, 'driver');
         return;
       }
@@ -362,7 +388,8 @@ export async function routeAuthedUser(
           );
           const fact = await readDriverVerificationFact(id);
           if (fact?.verificationStatus === 'approved') {
-            routeToHomeInstant(router, role);
+            routeToHomeInstant(router, role, id);
+            syncLegalInBackground(router, loggedUser);
             syncAuthStatusInBackground(loggedUser, resolvedToken);
             return;
           }

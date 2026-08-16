@@ -32,6 +32,9 @@ import {
   geocodeAddressForRider,
   type RiderSavedSlot,
 } from '@/src/services/riderSavedPlaces';
+import { queryClient } from '@/src/providers/QueryProvider';
+import { qk } from '@/src/services/queryKeys';
+import { tabCacheGet, tabCacheSet } from '@/src/services/tabDataCache';
 
 export default function RiderSavedPlacesScreen() {
   const router = useRouter();
@@ -39,8 +42,17 @@ export default function RiderSavedPlacesScreen() {
   const tabPad = useTabBottomPad(16);
   const flow = useFlowLayout();
   const { colors, isDark } = useThemeColors();
-  const [places, setPlaces] = useState<Awaited<ReturnType<typeof loadRiderSavedPlaces>>>([]);
-  const [loading, setLoading] = useState(true);
+  const [places, setPlaces] = useState<Awaited<ReturnType<typeof loadRiderSavedPlaces>>>(() => {
+    const uid = riderId;
+    if (!uid) return [];
+    const fromQ = queryClient.getQueryData<Awaited<ReturnType<typeof loadRiderSavedPlaces>>>(
+      qk.riderSavedPlaces(uid),
+    );
+    if (Array.isArray(fromQ) && fromQ.length) return fromQ;
+    const fromTab = tabCacheGet<Awaited<ReturnType<typeof loadRiderSavedPlaces>>>(`rider-saved:${uid}`);
+    return Array.isArray(fromTab) ? fromTab : [];
+  });
+  const [loading, setLoading] = useState(() => places.length === 0);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingSlot, setEditingSlot] = useState<RiderSavedSlot | null>(null);
   const [searchDraft, setSearchDraft] = useState('');
@@ -52,9 +64,11 @@ export default function RiderSavedPlacesScreen() {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!places.length) setLoading(true);
     try {
-      setPlaces(await loadRiderSavedPlaces(riderId));
+      const next = await loadRiderSavedPlaces(riderId);
+      setPlaces(next);
+      tabCacheSet(`rider-saved:${riderId}`, next);
     } finally {
       setLoading(false);
     }

@@ -77,6 +77,11 @@ import { getNexrydeMapStyle } from '@/src/constants/nexrydeMapBehavior';
 import { ErrorBoundary } from '@/src/components/ErrorBoundary';
 import { getRecentLocations, cacheRecentLocation, createOfflineBooking, checkOnlineStatus } from '@/src/services/offlineMode';
 import { authedFetch } from '@/src/utils/sessionRefresh';
+import {
+  fareMatrixCacheKey,
+  getCachedFareMatrix,
+  setCachedFareMatrix,
+} from '@/src/services/fareMatrixCache';
 import * as Haptics from 'expo-haptics';
 import { geocodeAddressForRider } from '@/src/services/riderSavedPlaces';
 import { startSmartPickupGps } from '@/src/services/smartPickupGps';
@@ -1591,6 +1596,13 @@ function BookInDriveStyle() {
         inferCity(pickup, destination) ||
         'default';
 
+      const cacheKey = fareMatrixCacheKey(pLat, pLng, dLat, dLng, city);
+      const cached = getCachedFareMatrix(cacheKey);
+      if (cached && Object.keys(cached.matrix).length) {
+        setFareMatrix(cached.matrix);
+        setFareMatrixOriginal(cached.original);
+      }
+
       const results = await Promise.all(
         availableVehicles.map(async (vehicle) => {
           try {
@@ -1631,6 +1643,7 @@ function BookInDriveStyle() {
       }
       setFareMatrix(nextMatrix);
       setFareMatrixOriginal(nextOrig);
+      setCachedFareMatrix(cacheKey, { matrix: nextMatrix, original: nextOrig });
 
       let veh = selectedVehicle;
       if (!veh && (nextMatrix['economy'] ?? 0) > 0) {
@@ -1855,6 +1868,24 @@ function BookInDriveStyle() {
       setOptimizedRoute(null);
       return;
     }
+    const city =
+      inferCityFromCoords(pickupCoords.lat, pickupCoords.lng) ||
+      inferCityFromCoords(destinationCoords.lat, destinationCoords.lng) ||
+      inferCity(pickup, destination) ||
+      'default';
+    const cached = getCachedFareMatrix(
+      fareMatrixCacheKey(
+        pickupCoords.lat,
+        pickupCoords.lng,
+        destinationCoords.lat,
+        destinationCoords.lng,
+        city,
+      ),
+    );
+    if (cached && Object.keys(cached.matrix).length) {
+      setFareMatrix(cached.matrix);
+      setFareMatrixOriginal(cached.original);
+    }
     const run = async () => {
       try {
         await calculateAllVehiclePrices();
@@ -1862,7 +1893,7 @@ function BookInDriveStyle() {
         /* fare matrix best-effort */
       }
     };
-    const timer = setTimeout(run, 400);
+    const timer = setTimeout(run, cached ? 0 : 400);
     return () => {
       clearTimeout(timer);
     };

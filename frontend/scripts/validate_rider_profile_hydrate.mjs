@@ -112,6 +112,15 @@ const files = {
   home: 'app/(rider-tabs)/rider-home.tsx',
   wallet: 'app/(rider-tabs)/rider-wallet.tsx',
   notifs: 'src/components/FeatureNotificationsScreen.tsx',
+  query: 'src/providers/QueryProvider.tsx',
+  routing: 'src/utils/sessionRouting.ts',
+  login: 'app/(auth)/login.tsx',
+  splash: 'app/index.tsx',
+  fare: 'src/services/fareMatrixCache.ts',
+  book: 'app/rider/book.tsx',
+  saved: 'app/rider/saved-places.tsx',
+  prefs: 'src/components/profile/ProfileMergedPreferences.tsx',
+  redirect: 'src/hooks/useRedirectIfAuthed.ts',
 };
 const src = Object.fromEntries(
   Object.entries(files).map(([k, rel]) => [k, fs.readFileSync(path.join(root, rel), 'utf8')]),
@@ -193,6 +202,54 @@ results.push(
     'driver-helper',
     'driver display helper extracts name/city/vehicles',
     src.driverHelper.includes('export function driverProfileDisplay'),
+  ),
+);
+results.push(
+  printRow(
+    'instant-prefetch-at-login',
+    'session warms at login + splash + home, not only tab mount',
+    src.prefetch.includes('export function warmSessionData') &&
+      src.login.includes('warmSessionData') &&
+      src.splash.includes('warmSessionData') &&
+      src.routing.includes('warmSessionData'),
+  ),
+);
+results.push(
+  printRow(
+    'instant-no-legal-rtt',
+    'home routing does not await legal-status',
+    src.routing.includes('never block first navigation') &&
+      src.routing.includes('syncLegalInBackground'),
+  ),
+);
+results.push(
+  printRow(
+    'instant-query-stale',
+    'React Query respects staleTime on remount',
+    src.query.includes("refetchOnMount: true") && !src.query.includes("refetchOnMount: 'always'"),
+  ),
+);
+results.push(
+  printRow(
+    'instant-fare-cache',
+    'booking paints last-known fare matrix',
+    src.fare.includes('getCachedFareMatrix') && src.book.includes('getCachedFareMatrix'),
+  ),
+);
+results.push(
+  printRow(
+    'instant-saved-prefs',
+    'saved places + settings paint without a blocking loader',
+    src.saved.includes('tabCacheGet') &&
+      src.prefs.includes('tabCacheSet') &&
+      !src.prefs.includes('Loading preferences'),
+  ),
+);
+results.push(
+  printRow(
+    'instant-login-chrome',
+    'login chrome shows before persist hydrates',
+    src.redirect.includes('Show login chrome immediately'),
   ),
 );
 

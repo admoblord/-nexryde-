@@ -76,6 +76,27 @@ import { DriverGoOnlinePermissionGate } from '@/src/components/driver/DriverGoOn
 import { apiFetch } from '@/src/utils/sessionRefresh';
 import { verifyDriverTripAssignment } from '@/src/utils/verifyDriverTripAssignment';
 import { getValidToken, getCachedToken } from '@/src/lib/tokenStore';
+import { tabCacheGet } from '@/src/services/tabDataCache';
+import type { DriverEarningsScreenData } from '@/src/services/driverEarningsScreenData';
+
+function peekDriverHomeEarnings(driverId: string | undefined): {
+  today: number;
+  week: number;
+  trips: number;
+  tripHoursToday: number;
+} | null {
+  if (!driverId) return null;
+  const cached = tabCacheGet<DriverEarningsScreenData>(`driver-earnings:${driverId}:today`);
+  const summary = (cached?.dashboard as { summary?: Record<string, unknown> } | undefined)?.summary;
+  if (!summary) return null;
+  const tripMins = Number(summary.total_time_mins ?? 0);
+  return {
+    today: Number(summary.total_earnings ?? 0),
+    week: 0,
+    trips: Number(summary.total_trips ?? 0),
+    tripHoursToday: tripMins > 0 ? Math.round((tripMins / 60) * 10) / 10 : 0,
+  };
+}
 import {
   startupLog,
   startupStepStart,
@@ -630,12 +651,14 @@ export default function ModernDriverHome() {
     void loadWorkZoneOnce(driverId);
   }, [driverId]);
 
-  const [earnings, setEarnings] = useState({
-    today: 0,
-    week: 0,
-    trips: 0,
-    tripHoursToday: 0,
-  });
+  const [earnings, setEarnings] = useState(() =>
+    peekDriverHomeEarnings(driverId) ?? {
+      today: 0,
+      week: 0,
+      trips: 0,
+      tripHoursToday: 0,
+    },
+  );
   const [surgePricing, setSurgePricing] = useState<any>(null);
 
   // Load earnings for offline + online home (never leave EARNINGS/TRIPS blank forever).
@@ -646,7 +669,10 @@ export default function ModernDriverHome() {
     }
     let mounted = true;
     const fetchEarnings = async (isInitial = false) => {
-      if (isInitial) { setEarningsLoading(true); setEarningsError(false); }
+      if (isInitial && !peekDriverHomeEarnings(driverId)) {
+        setEarningsLoading(true);
+        setEarningsError(false);
+      }
       try {
         const [todayRes, weekRes] = await Promise.all([
           fetchWithTimeout(`${BACKEND_URL}/api/driver/earnings/${driverId}?period=today`, {
@@ -902,7 +928,7 @@ export default function ModernDriverHome() {
    *  first heartbeat's FORCE_OFFLINE while Mongo is_online is briefly still false —
    *  otherwise "tap GO → You were signed offline" flashes before the PUT lands. */
   const goOnlineCommitInFlightRef = useRef(false);
-  const [earningsLoading, setEarningsLoading] = useState(true);
+  const [earningsLoading, setEarningsLoading] = useState(() => !peekDriverHomeEarnings(driverId));
   const [earningsError, setEarningsError] = useState(false);
   const [walletBalance, setWalletBalance] = useState(0);
 
@@ -3185,11 +3211,20 @@ export default function ModernDriverHome() {
   // Option 1: never paint map/GO while documents are still outstanding.
   if (verificationStatus === 'not_submitted') {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F172A' }}>
-        <ActivityIndicator size="large" color="#4ADE80" />
-        <Text style={{ marginTop: 14, color: '#E2E8F0', fontSize: 15, fontWeight: '600' }}>
-          Continue document setup…
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F172A', paddingHorizontal: 28 }}>
+        <Ionicons name="document-text-outline" size={36} color="#4ADE80" />
+        <Text style={{ marginTop: 14, color: '#E2E8F0', fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
+          Finish document setup
         </Text>
+        <Text style={{ marginTop: 8, color: '#94A3B8', fontSize: 14, textAlign: 'center', lineHeight: 20 }}>
+          Upload your papers to go online. Nothing is loading — tap below to continue.
+        </Text>
+        <TouchableOpacity
+          onPress={() => router.push('/driver/documents' as Href)}
+          style={{ marginTop: 20, backgroundColor: '#22C55E', borderRadius: 14, paddingHorizontal: 22, paddingVertical: 12 }}
+        >
+          <Text style={{ color: '#052E16', fontWeight: '800', fontSize: 15 }}>Continue setup</Text>
+        </TouchableOpacity>
       </View>
     );
   }

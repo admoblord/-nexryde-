@@ -209,3 +209,10 @@ export function prefetchTabsForRole(role: string | undefined, userId: string | u
   if (role === 'rider') void prefetchRiderTabs(userId);
   else if (role === 'driver') void prefetchDriverTabs(userId);
 }
+
+/** Call as soon as a session exists — login, splash, and home — not only tab mount. */
+export function warmSessionData(role: string | undefined, userId: string | undefined): void {
+  if (!userId || !role) return;
+  void import('@/src/utils/warmBackend').then((m) => m.warmBackendConnection(true));
+  prefetchTabsForRole(role, userId);
+}
