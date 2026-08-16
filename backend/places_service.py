@@ -362,6 +362,58 @@ def _merge_place_predictions(*groups: list[dict]) -> list[dict]:
     return out[:12]
 
 
+def _autocomplete_google_has_rows(data: Optional[dict]) -> bool:
+    return bool(data and data.get("status") == "OK" and data.get("predictions"))
+
+
+def _typed_query_tokens(input_text: str) -> list[str]:
+    return [t for t in re.split(r"[^a-z0-9]+", (input_text or "").lower()) if len(t) >= 3]
+
+
+def _predictions_match_typed_query(predictions: list[dict], input_text: str) -> bool:
+    """True when at least one row mentions a typed token (Peace / garden / Estate)."""
+    tokens = _typed_query_tokens(input_text)
+    if not tokens:
+        return bool(predictions)
+    for row in predictions or []:
+        hay = f"{row.get('description', '')} {row.get('main_text', '')} {row.get('secondary_text', '')}".lower()
+        if any(t in hay for t in tokens):
+            return True
+    return False
+
+
+def _google_autocomplete_url(
+    input_text: str,
+    *,
+    components: Optional[str],
+    location_bias: Optional[str],
+    radius: Optional[int],
+    session: str,
+    include_bias: bool,
+) -> str:
+    location_params = f"&components={components}" if components else ""
+    if include_bias and location_bias and radius:
+        location_params += f"&location={location_bias}&radius={radius}"
+    session_param = f"&sessiontoken={quote(session)}" if session else ""
+    return (
+        f"https://maps.googleapis.com/maps/api/place/autocomplete/json"
+        f"?input={quote(input_text)}{location_params}{session_param}&key={GOOGLE_MAPS_API_KEY}"
+    )
+
+
+def _normalize_google_autocomplete_predictions(data: dict) -> list[dict]:
+    predictions = []
+    for pred in data.get("predictions") or []:
+        formatting = pred.get("structured_formatting") or {}
+        predictions.append({
+            "place_id": pred.get("place_id", ""),
+            "description": pred.get("description", ""),
+            "main_text": formatting.get("main_text", pred.get("description", "")),
+            "secondary_text": formatting.get("secondary_text", ""),
+        })
+    return predictions
+
+
 @places_router.get("/autocomplete")
 async def autocomplete_places(
     request: Request,
@@ -376,6 +428,7 @@ async def autocomplete_places(
     Searches for places and returns predictions.
 
     Pass ``sessiontoken`` from the client so autocomplete + place details bill as one session.
+    Session tokens must never disable Redis — the app sends one on every keystroke.
     """
     await _require_places_auth(request)
     if not GOOGLE_MAPS_API_KEY:
@@ -394,58 +447,62 @@ async def autocomplete_places(
     try:
         await _ensure_places_cache_indexes()
         session = (sessiontoken or "").strip()
-        use_cache = not session
-        if use_cache:
-            key = _cache_key("autocomplete_v2", {
-                "input": input.strip().lower(),
-                "location_bias": location_bias,
-                "radius": radius,
-                "components": components,
-            })
-            cached = await _get_cache(key)
-            if cached:
-                try:
-                    from realtime_platform.observability import observe_ms, incr
-                    observe_ms("places.autocomplete_ms", (_time.perf_counter() - t0) * 1000, cache="hit")
-                    incr("places.autocomplete_cache_hit")
-                except Exception:
-                    pass
-                return cached["response"]
-
-        # Build location bias parameter
-        location_params = f"&components={components}" if components else ""
-        if location_bias and radius:
-            location_params += f"&location={location_bias}&radius={radius}"
-
-        safe_in = quote(input)
-        session_param = f"&sessiontoken={quote(session)}" if session else ""
-        url = (
-            f"https://maps.googleapis.com/maps/api/place/autocomplete/json"
-            f"?input={safe_in}{location_params}{session_param}&key={GOOGLE_MAPS_API_KEY}"
-        )
+        # Cache even when sessiontoken is present. Skipping cache made every
+        # pickup/destination keystroke a cold Google call (timeout → empty list).
+        key = _cache_key("autocomplete_v2", {
+            "input": input.strip().lower(),
+            "location_bias": location_bias,
+            "radius": radius,
+            "components": components,
+        })
+        cached = await _get_cache(key)
+        if cached:
+            try:
+                from realtime_platform.observability import observe_ms, incr
+                observe_ms("places.autocomplete_ms", (_time.perf_counter() - t0) * 1000, cache="hit")
+                incr("places.autocomplete_cache_hit")
+            except Exception:
+                pass
+            return cached["response"]
 
         client = get_http_client()
-        response = await client.get(url, timeout=10.0)
+        response = await client.get(
+            _google_autocomplete_url(
+                input,
+                components=components,
+                location_bias=location_bias,
+                radius=radius,
+                session=session,
+                include_bias=True,
+            ),
+            timeout=10.0,
+        )
         data = response.json()
+        # Soft location bias can hide a Lagos estate from a far/wrong GPS pin.
+        if location_bias and not _autocomplete_google_has_rows(data):
+            unbiased = await client.get(
+                _google_autocomplete_url(
+                    input,
+                    components=components,
+                    location_bias=location_bias,
+                    radius=radius,
+                    session=session,
+                    include_bias=False,
+                ),
+                timeout=10.0,
+            )
+            data2 = unbiased.json()
+            if _autocomplete_google_has_rows(data2):
+                data = data2
 
-        if data.get("status") == "OK" and data.get("predictions"):
-            predictions = []
-            for pred in data.get("predictions", []):
-                formatting = pred.get("structured_formatting", {})
-                predictions.append({
-                    "place_id": pred.get("place_id", ""),
-                    "description": pred.get("description", ""),
-                    "main_text": formatting.get("main_text", pred.get("description", "")),
-                    "secondary_text": formatting.get("secondary_text", ""),
-                })
-
+        if _autocomplete_google_has_rows(data):
+            predictions = _normalize_google_autocomplete_predictions(data)
             merged = _merge_place_predictions(predictions, local_hits)
             response_payload = {
                 "predictions": merged,
                 "status": "OK",
             }
-            if use_cache:
-                await _set_cache(key, response_payload, ttl_seconds=300)
+            await _set_cache(key, response_payload, ttl_seconds=300)
             try:
                 from realtime_platform.observability import observe_ms, incr
                 observe_ms("places.autocomplete_ms", (_time.perf_counter() - t0) * 1000, cache="miss")
@@ -458,8 +515,7 @@ async def autocomplete_places(
         if fb:
             fb_preds = _merge_place_predictions(fb.get("predictions") or [], local_hits)
             fb = {**fb, "predictions": fb_preds, "status": "OK"}
-            if use_cache:
-                await _set_cache(key, fb, ttl_seconds=300)
+            await _set_cache(key, fb, ttl_seconds=300)
             return fb
 
         if local_hits:
@@ -467,8 +523,7 @@ async def autocomplete_places(
 
         if data.get("status") == "OK":
             response_payload = {"predictions": [], "status": "OK"}
-            if use_cache:
-                await _set_cache(key, response_payload, ttl_seconds=60)
+            await _set_cache(key, response_payload, ttl_seconds=60)
             return response_payload
 
         response_payload = {
@@ -476,8 +531,7 @@ async def autocomplete_places(
             "status": data.get("status", "ERROR"),
             "error_message": data.get("error_message", "Unknown error"),
         }
-        if use_cache:
-            await _set_cache(key, response_payload, ttl_seconds=30)
+        await _set_cache(key, response_payload, ttl_seconds=30)
         return response_payload
     
     except Exception as e:
@@ -528,12 +582,10 @@ async def get_place_details(
     try:
         await _ensure_places_cache_indexes()
         session = (sessiontoken or "").strip()
-        use_cache = not session
-        if use_cache:
-            key = _cache_key("place_details", {"place_id": place_id})
-            cached = await _get_cache(key)
-            if cached:
-                return cached["response"]
+        key = _cache_key("place_details", {"place_id": place_id})
+        cached = await _get_cache(key)
+        if cached:
+            return cached["response"]
 
         session_param = f"&sessiontoken={quote(session)}" if session else ""
         url = (
@@ -553,8 +605,7 @@ async def get_place_details(
                 "address": result["formatted_address"],
                 "status": "OK"
             }
-            if use_cache:
-                await _set_cache(key, response_payload, ttl_seconds=86400 * 30)
+            await _set_cache(key, response_payload, ttl_seconds=86400 * 30)
             return response_payload
         else:
             raise HTTPException(
