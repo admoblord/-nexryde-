@@ -33,7 +33,7 @@ const dsOk = ds === '1.1.1' || ds === '1.1.7';
 results.push(
   printRow(
     'datastore-1.1.7',
-    'plugin forces DataStore 1.1.7 (r25c .so), not 1.2.x r20',
+    'plugin forces datastore-core-android 1.1.7 (r25c .so), not the whole group',
     dsOk,
     `datastore=${ds}`,
   ),
@@ -53,10 +53,11 @@ const rootGradle = fs.readFileSync(path.join(root, 'android/build.gradle'), 'utf
 results.push(
   printRow(
     'root-gradle-force',
-    'android/build.gradle forces androidx.datastore 1.1.7',
+    'android/build.gradle forces only datastore-core-android 1.1.7',
     rootGradle.includes(plugin.BEGIN) &&
-      rootGradle.includes("useVersion('1.1.7')") &&
-      rootGradle.includes('androidx.datastore:datastore-core-android:1.1.7'),
+      rootGradle.includes("name == 'datastore-core-android'") &&
+      rootGradle.includes('androidx.datastore:datastore-core-android:1.1.7') &&
+      !rootGradle.includes('androidx.datastore:datastore-guava:1.1.7'),
   ),
 );
 
