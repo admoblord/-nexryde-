@@ -136,8 +136,17 @@ spec:
               value: "1"
             - name: WORK_ZONE_EARLY_ACCESS_EMAILS
               value: "loopy9ice@gmail.com,timothy_okunola@yahoo.com"
+            # Off until the send path is batched. The old 25k-user gather froze
+            # the event loop, Cloud Run killed the instance, and Route search
+            # showed "No places found". Re-enable after ENGAGEMENT_SCAN_LIMIT.
             - name: ENGAGEMENT_LOOP_ENABLED
-              value: "true"
+              value: "false"
+            - name: ENGAGEMENT_SCAN_LIMIT
+              value: "400"
+            - name: ENGAGEMENT_SEND_CONCURRENCY
+              value: "8"
+            - name: ENGAGEMENT_BATCH_SIZE
+              value: "50"
             - name: ENGAGEMENT_MAX_PER_DAY
               value: "2"
             - name: ENGAGEMENT_MIN_HOURS_BETWEEN
