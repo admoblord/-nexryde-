@@ -4,8 +4,9 @@
  * Exported historically as `platformConnectionManager` (keep those APIs).
  * Temporary latency must never equal OFFLINE: ride ops use `state !== 'OFFLINE'`.
  *
- * Driver-facing banners are intentionally quieter than the internal FSM:
- * internal transitions are always logged; banner exposure is gated separately.
+ * Driver-facing connection chrome (2px strip / status pill) was removed.
+ * Internal FSM transitions are still logged; bannerExposure remains an
+ * internal policy field for tests and logs only — nothing renders it.
  */
 import { useEffect, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -16,7 +17,7 @@ export type NetworkState = 'CONNECTED' | 'DEGRADED' | 'RECONNECTING' | 'OFFLINE'
 /** @deprecated Prefer NetworkState — same values. */
 export type PlatformConnectionState = NetworkState;
 
-/** What the OfflineBanner is allowed to show to the driver. */
+/** Internal policy slot. No UI reads this — the global strip/pill is gone. */
 export type BannerExposure = 'hidden' | 'degraded' | 'reconnecting' | 'offline' | 'connected';
 
 export type PlatformSignalSource = 'internet' | 'backend' | 'socket' | 'heartbeat';
@@ -30,9 +31,9 @@ export type NetworkOpsSignal =
 
 export type PlatformConnectionSnapshot = {
   state: NetworkState;
-  /** Debounced / policy-gated banner (legacy field — mirrors bannerExposure mapping). */
+  /** Debounced / policy-gated slot (legacy field — mirrors bannerExposure mapping). */
   uiState: NetworkState;
-  /** Driver-facing banner slot. Prefer this over uiState for UI. */
+  /** Internal exposure policy. Not rendered — global strip/pill was removed. */
   bannerExposure: BannerExposure;
   internetReachable: boolean | null;
   backendReachable: boolean | null;

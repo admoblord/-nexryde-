@@ -40,15 +40,20 @@ function expectNotIncludes(rel, needle, label) {
 
 function checkFrontendInvariants() {
   console.log('\n[1] Frontend connection + ride-state invariants');
+  expectNotIncludes(
+    'frontend/app/_layout.tsx',
+    '<OfflineBanner',
+    'Root layout does not mount connection strip/pill'
+  );
+  expectIncludes(
+    'frontend/src/components/shared/OfflineBanner.tsx',
+    'permanently removed',
+    'OfflineBanner visual chrome is removed at source'
+  );
   expectIncludes(
     'frontend/src/services/platformConnectionManager.ts',
     "FAILURES_TO_DEGRADED = 3",
     'Connection manager requires 3 all-signal failures'
-  );
-  expectIncludes(
-    'frontend/src/components/shared/OfflineBanner.tsx',
-    'Low Connection',
-    'Four-state connection indicator (dot + strip) exists'
   );
   expectIncludes(
     'frontend/src/services/driverHeartbeat.ts',
