@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Constants from 'expo-constants';
 import { useErrorToast } from '@/src/components/shared/ErrorToast';
 import { ProfileScreenSkeleton } from '@/src/components/shared/SkeletonLoader';
@@ -18,17 +18,24 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useQuery } from '@tanstack/react-query';
 import { useAppStore } from '@/src/store/appStore';
 import { useDriverDisplayStore } from '@/src/store/driverDisplayStore';
 import {
   deleteUserAccount,
   getDriverProfile,
   getDriverSubscriptionStatus,
+  getUser,
   getUserTrustSummary,
   updateUser,
   BACKEND_URL,
   getAuthHeaders,
 } from '@/src/services/api';
+import { queryClient } from '@/src/providers/QueryProvider';
+import { qk } from '@/src/services/queryKeys';
+import { tabCacheGet } from '@/src/services/tabDataCache';
+import { applyRiderProfileToStore } from '@/src/utils/hydrateRiderProfile';
+import { driverProfileDisplay } from '@/src/utils/hydrateDriverProfile';
 import { writeDriverVerificationFact } from '@/src/services/driverVerificationFact';
 import { writeDriverBootCache, readDriverBootCache } from '@/src/services/driverBootCache';
 import * as ImagePicker from 'expo-image-picker';
@@ -242,16 +249,44 @@ export default function DriverProfileScreen() {
   );
   const setDriverDisplay = useDriverDisplayStore((s) => s.setDriverDisplay);
 
+  const seededDriverProfile = driverId
+    ? ((queryClient.getQueryData(qk.driverProfile(driverId)) as Record<string, unknown> | undefined) ??
+      tabCacheGet<Record<string, unknown>>(`driver-profile:${driverId}`))
+    : null;
+  const seededDisplay = driverProfileDisplay(seededDriverProfile);
+  const seededTrust = driverId
+    ? (queryClient.getQueryData(qk.driverTrust(driverId)) ??
+      tabCacheGet(`driver-trust:${driverId}`))
+    : null;
+  const seededVehicles = driverId
+    ? tabCacheGet<DriverVehicle[]>(`driver-vehicles:${driverId}`)
+    : null;
+
   const [profileImage, setProfileImage] = useState<string | null>(user?.profile_image || null);
   const [showSwitchModal, setShowSwitchModal] = useState(false);
-  const [driverCity, setDriverCity] = useState('');
-  const [driverFullName, setDriverFullName] = useState('');
-  const [driverVehicles, setDriverVehicles] = useState<DriverVehicle[]>([]);
-  const [trustSummary, setTrustSummary] = useState<any>(null);
-  const [loadingTrust, setLoadingTrust] = useState(false);
+  const [driverCity, setDriverCity] = useState(seededDisplay.city);
+  const [driverFullName, setDriverFullName] = useState(seededDisplay.fullName);
+  const [driverVehicles, setDriverVehicles] = useState<DriverVehicle[]>(() =>
+    seededDisplay.vehicles.length
+      ? (seededDisplay.vehicles as DriverVehicle[])
+      : Array.isArray(seededVehicles)
+        ? seededVehicles
+        : [],
+  );
+  const [trustSummary, setTrustSummary] = useState<any>(seededTrust ?? null);
+  const [loadingTrust, setLoadingTrust] = useState(() => !seededTrust);
 
   const avatarScale = useRef(new Animated.Value(0.85)).current;
   const fadeIn = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!driverId || subscription) return;
+    const cached =
+      tabCacheGet<Record<string, unknown>>(`driver-sub-status:${driverId}`) ??
+      (queryClient.getQueryData(qk.driverSubStatus(driverId)) as Record<string, unknown> | undefined) ??
+      (queryClient.getQueryData(qk.driverSubscription(driverId)) as Record<string, unknown> | undefined);
+    if (cached) setSubscription(cached as any);
+  }, [driverId, setSubscription, subscription]);
 
   useEffect(() => {
     Animated.parallel([
@@ -260,82 +295,127 @@ export default function DriverProfileScreen() {
     ]).start();
   }, []);
 
-  const loadDriverProfile = useCallback(async () => {
-    if (!driverId || !canCallAuthedApi) return;
-    try {
-      const [profileRes, vehiclesRes, subRes] = await Promise.allSettled([
-        getDriverProfile(driverId),
-        fetch(`${BACKEND_URL}/api/drivers/${driverId}/vehicles`, {
-          headers: getAuthHeaders(),
-        }).then(r => r.json()).catch(() => ({ vehicles: [] })),
-        getDriverSubscriptionStatus(),
-      ]);
-      if (profileRes.status === 'fulfilled') {
-        const p = (profileRes.value as any).data as any;
-        setDriverCity(p?.city || '');
-        setDriverFullName(p?.full_name || '');
-        const vStatus = typeof p?.verification_status === 'string' ? p.verification_status : '';
-        if (vStatus) {
-          setDriverDisplay({ driverId, verificationStatus: vStatus, displayHydrated: true });
-          void writeDriverVerificationFact(driverId, vStatus);
-        }
-      }
-      if (vehiclesRes.status === 'fulfilled') {
-        setDriverVehicles(((vehiclesRes.value as any)?.vehicles || []) as DriverVehicle[]);
-      }
-      if (subRes.status === 'fulfilled' && subRes.value?.data) {
-        const sub = subRes.value.data as Record<string, unknown>;
-        setSubscription(sub as any);
-        const tripsCompleted = Number(sub.trial_trips_completed ?? 0);
-        const tripsTarget = Number(sub.trial_trips_target ?? 0) || 20;
-        const status = String(sub.status || 'none');
-        setDriverDisplay({
+  const driverProfileQuery = useQuery({
+    queryKey: driverId ? qk.driverProfile(driverId) : ['driver', 'profile', 'none'],
+    enabled: Boolean(driverId && canCallAuthedApi),
+    queryFn: async () => {
+      const res = await getDriverProfile(driverId!);
+      return res.data;
+    },
+  });
+
+  const driverUserQuery = useQuery({
+    queryKey: driverId ? qk.driverUser(driverId) : ['driver', 'user', 'none'],
+    enabled: Boolean(driverId && canCallAuthedApi),
+    queryFn: async () => {
+      const res = await getUser(driverId!);
+      return res.data;
+    },
+  });
+
+  const trustQuery = useQuery({
+    queryKey: driverId ? qk.driverTrust(driverId) : ['driver', 'trust', 'none'],
+    enabled: Boolean(driverId && canCallAuthedApi),
+    queryFn: async () => {
+      const res = await getUserTrustSummary(driverId!);
+      return res.data;
+    },
+  });
+
+  const subStatusQuery = useQuery({
+    queryKey: driverId ? qk.driverSubStatus(driverId) : ['driver', 'sub-status', 'none'],
+    enabled: Boolean(driverId && canCallAuthedApi),
+    queryFn: async () => {
+      const res = await getDriverSubscriptionStatus();
+      return res.data;
+    },
+  });
+
+  const vehiclesQuery = useQuery({
+    queryKey: driverId ? qk.driverVehicles(driverId) : ['driver', 'vehicles', 'none'],
+    enabled: Boolean(driverId && canCallAuthedApi),
+    queryFn: async () => {
+      const r = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/vehicles`, {
+        headers: getAuthHeaders(),
+      });
+      const json = await r.json().catch(() => ({ vehicles: [] }));
+      return (json?.vehicles || []) as DriverVehicle[];
+    },
+  });
+
+  useEffect(() => {
+    const p = driverProfileQuery.data as Record<string, unknown> | undefined;
+    if (!p) return;
+    const display = driverProfileDisplay(p);
+    setDriverCity(display.city);
+    if (display.fullName) setDriverFullName(display.fullName);
+    if (display.vehicles.length) setDriverVehicles(display.vehicles as DriverVehicle[]);
+    if (display.verificationStatus && driverId) {
+      setDriverDisplay({ driverId, verificationStatus: display.verificationStatus, displayHydrated: true });
+      void writeDriverVerificationFact(driverId, display.verificationStatus);
+    }
+  }, [driverProfileQuery.data, driverId, setDriverDisplay]);
+
+  useEffect(() => {
+    const d = driverUserQuery.data as Record<string, unknown> | undefined;
+    if (!d) return;
+    void applyRiderProfileToStore(d);
+  }, [driverUserQuery.data]);
+
+  useEffect(() => {
+    if (trustQuery.data) {
+      setTrustSummary(trustQuery.data);
+      setLoadingTrust(false);
+      return;
+    }
+    if (trustQuery.isLoading && !trustSummary) setLoadingTrust(true);
+    if (trustQuery.isFetched) setLoadingTrust(false);
+  }, [trustQuery.data, trustQuery.isLoading, trustQuery.isFetched, trustSummary]);
+
+  useEffect(() => {
+    const sub = subStatusQuery.data as Record<string, unknown> | undefined;
+    if (!sub || !driverId) return;
+    setSubscription(sub as any);
+    const tripsCompleted = Number(sub.trial_trips_completed ?? 0);
+    const tripsTarget = Number(sub.trial_trips_target ?? 0) || 20;
+    const status = String(sub.status || 'none');
+    setDriverDisplay({
+      driverId,
+      subscriptionStatus: status,
+      trialTripsCompleted: tripsCompleted,
+      trialTripsTarget: tripsTarget,
+      trialExtended: Boolean(sub.trial_extended),
+      displayHydrated: true,
+    });
+    void (async () => {
+      try {
+        const prev = await readDriverBootCache(driverId);
+        await writeDriverBootCache({
           driverId,
+          verificationStatus: prev?.verificationStatus || displayVerification || 'approved',
           subscriptionStatus: status,
           trialTripsCompleted: tripsCompleted,
           trialTripsTarget: tripsTarget,
           trialExtended: Boolean(sub.trial_extended),
-          displayHydrated: true,
+          onboardingCompleted: prev?.onboardingCompleted ?? true,
         });
-        void (async () => {
-          try {
-            const prev = await readDriverBootCache(driverId);
-            await writeDriverBootCache({
-              driverId,
-              verificationStatus: prev?.verificationStatus || displayVerification || 'approved',
-              subscriptionStatus: status,
-              trialTripsCompleted: tripsCompleted,
-              trialTripsTarget: tripsTarget,
-              trialExtended: Boolean(sub.trial_extended),
-              onboardingCompleted: prev?.onboardingCompleted ?? true,
-            });
-          } catch {
-            /* non-fatal */
-          }
-        })();
+      } catch {
+        /* non-fatal */
       }
-    } catch { /* non-critical */ }
-  }, [canCallAuthedApi, displayVerification, driverId, setDriverDisplay, setSubscription]);
+    })();
+  }, [subStatusQuery.data, driverId, displayVerification, setDriverDisplay, setSubscription]);
 
   useEffect(() => {
-    if (!canCallAuthedApi) return;
-    void loadDriverProfile();
-  }, [loadDriverProfile, canCallAuthedApi]);
+    const rows = vehiclesQuery.data;
+    if (Array.isArray(rows) && rows.length) setDriverVehicles(rows);
+  }, [vehiclesQuery.data]);
 
   useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      if (!driverId || !canCallAuthedApi) return;
-      setLoadingTrust(true);
-      try {
-        const res = await getUserTrustSummary(driverId);
-        if (mounted) setTrustSummary(res.data);
-      } catch { /* non-critical */ }
-      finally { if (mounted) setLoadingTrust(false); }
-    };
-    void load();
-    return () => { mounted = false; };
-  }, [canCallAuthedApi, driverId]);
+    const img = user?.profile_image;
+    if (typeof img === 'string' && img && img !== profileImage) {
+      setProfileImage(img);
+    }
+  }, [user?.profile_image, profileImage]);
 
   const saveProfileImage = async (uri: string) => {
     setProfileImage(uri);

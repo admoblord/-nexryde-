@@ -104,8 +104,10 @@ results.push(
 
 const files = {
   helper: 'src/utils/hydrateRiderProfile.ts',
+  driverHelper: 'src/utils/hydrateDriverProfile.ts',
   prefetch: 'src/services/prefetchTabData.ts',
   profile: 'app/(rider-tabs)/rider-profile.tsx',
+  driverProfile: 'app/(driver-tabs)/driver-profile.tsx',
   bootstrap: 'src/hooks/useAppBootstrap.ts',
   home: 'app/(rider-tabs)/rider-home.tsx',
   wallet: 'app/(rider-tabs)/rider-wallet.tsx',
@@ -163,6 +165,34 @@ results.push(
     'wallet-notifs-seed',
     'wallet + updates seed from queryClient prefetch',
     src.wallet.includes('qk.riderWallet') && src.notifs.includes('queryClient.getQueryData'),
+  ),
+);
+results.push(
+  printRow(
+    'driver-prefetch-tabcache',
+    'driver prefetch writes trips/earnings/profile/trust caches',
+    src.prefetch.includes('driver-trips:') &&
+      src.prefetch.includes('driver-earnings:') &&
+      src.prefetch.includes('driver-profile:') &&
+      src.prefetch.includes('qk.driverTrust') &&
+      src.prefetch.includes('applyRiderProfileToStore'),
+  ),
+);
+results.push(
+  printRow(
+    'driver-profile-consumes',
+    'driver profile uses prefetch keys and applies user + driver display',
+    src.driverProfile.includes('qk.driverProfile') &&
+      src.driverProfile.includes('qk.driverTrust') &&
+      src.driverProfile.includes('applyRiderProfileToStore') &&
+      src.driverProfile.includes('driverProfileDisplay'),
+  ),
+);
+results.push(
+  printRow(
+    'driver-helper',
+    'driver display helper extracts name/city/vehicles',
+    src.driverHelper.includes('export function driverProfileDisplay'),
   ),
 );
 

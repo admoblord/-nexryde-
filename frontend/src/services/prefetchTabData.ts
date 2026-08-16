@@ -5,10 +5,18 @@
 import { queryClient } from '@/src/providers/QueryProvider';
 import { qk } from '@/src/services/queryKeys';
 import { BACKEND_URL } from '@/src/services/api';
-import { getUserTrips, getWalletMe, getUser, getUserTrustSummary } from '@/src/services/api';
+import {
+  getUserTrips,
+  getWalletMe,
+  getUser,
+  getUserTrustSummary,
+  getDriverSubscriptionStatus,
+} from '@/src/services/api';
 import { authedFetch } from '@/src/utils/sessionRefresh';
 import { loadRiderSavedPlaces } from '@/src/services/riderSavedPlaces';
 import { fetchFeatureAnnouncements } from '@/src/services/featureAnnouncements';
+import { fetchDriverTripsScreenData } from '@/src/services/driverTripsScreenData';
+import { fetchDriverEarningsScreenData } from '@/src/services/driverEarningsScreenData';
 import { tabCacheSet } from '@/src/services/tabDataCache';
 import { applyRiderProfileToStore } from '@/src/utils/hydrateRiderProfile';
 
@@ -92,8 +100,17 @@ export async function prefetchDriverTabs(userId: string): Promise<void> {
     queryClient.prefetchQuery({
       queryKey: qk.driverTrips(userId),
       queryFn: async () => {
-        const res = await getUserTrips(userId, 'driver');
-        return Array.isArray(res.data) ? res.data : [];
+        const trips = await fetchDriverTripsScreenData(userId);
+        tabCacheSet(`driver-trips:${userId}`, trips);
+        return trips;
+      },
+    }),
+    queryClient.prefetchQuery({
+      queryKey: qk.driverEarnings(userId, 'today'),
+      queryFn: async () => {
+        const data = await fetchDriverEarningsScreenData(userId, 'today');
+        tabCacheSet(`driver-earnings:${userId}:today`, data);
+        return data;
       },
     }),
     queryClient.prefetchQuery({
@@ -104,7 +121,17 @@ export async function prefetchDriverTabs(userId: string): Promise<void> {
           preserveSessionOn401: true,
         });
         if (!res.ok) return null;
-        return res.json();
+        const json = await res.json();
+        tabCacheSet(`driver-sub:${userId}`, json);
+        return json;
+      },
+    }),
+    queryClient.prefetchQuery({
+      queryKey: qk.driverSubStatus(userId),
+      queryFn: async () => {
+        const res = await getDriverSubscriptionStatus();
+        tabCacheSet(`driver-sub-status:${userId}`, res.data);
+        return res.data;
       },
     }),
     queryClient.prefetchQuery({
@@ -126,7 +153,30 @@ export async function prefetchDriverTabs(userId: string): Promise<void> {
           preserveSessionOn401: true,
         });
         if (!res.ok) return null;
-        return res.json();
+        const json = await res.json();
+        tabCacheSet(`driver-profile:${userId}`, json);
+        if (json && typeof json === 'object' && Array.isArray((json as { vehicles?: unknown }).vehicles)) {
+          tabCacheSet(`driver-vehicles:${userId}`, (json as { vehicles: unknown[] }).vehicles);
+        }
+        return json;
+      },
+    }),
+    queryClient.prefetchQuery({
+      queryKey: qk.driverTrust(userId),
+      queryFn: async () => {
+        const res = await getUserTrustSummary(userId);
+        tabCacheSet(`driver-trust:${userId}`, res.data);
+        return res.data;
+      },
+    }),
+    queryClient.prefetchQuery({
+      queryKey: qk.driverUser(userId),
+      queryFn: async () => {
+        const res = await getUser(userId);
+        if (res.data && typeof res.data === 'object') {
+          void applyRiderProfileToStore(res.data as Record<string, unknown>);
+        }
+        return res.data;
       },
     }),
     queryClient.prefetchQuery({
