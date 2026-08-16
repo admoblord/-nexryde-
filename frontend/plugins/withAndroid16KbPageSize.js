@@ -5,10 +5,10 @@
  *   base/lib/arm64-v8a/libdatastore_shared_counter.so
  *
  * 1) Pin NDK r28+ so anything compiled from source gets 16 KB ELF defaults.
- * 2) Force AndroidX DataStore 1.1.7. The 1.2.0 / 1.2.1 native lib is stamped
- *    NDK r20 — Play's "compiled with an older Android NDK … can still crash
- *    on 16 KB devices" warning. 1.1.7 ships the same .so as 1.1.1 (NDK r25c)
- *    which Play accepts. Do not "upgrade" to 1.2.1 for this warning.
+ * 2) Force only datastore-core-android 1.1.7 (the AAR that ships
+ *    libdatastore_shared_counter.so). 1.2.0/1.2.1 stamp that .so as NDK r20.
+ *    Do not rewrite the whole androidx.datastore group — Navigation SDK needs
+ *    datastore-guava 1.2.x, which does not exist at 1.1.7.
  *
  * Survives `expo prebuild` (EAS production regenerates android/).
  */
@@ -30,24 +30,19 @@ ext {
     ndkVersion = "${NDK_VERSION}"
 }
 
-// 1.2.0/1.2.1 libdatastore_shared_counter.so is stamped NDK r20 (Play crash
-// warning). 1.1.7 is NDK r25c — same native binary Play already accepted.
+// Only the native AAR is pinned. Rewriting the whole group breaks
+// datastore-guava (Navigation SDK), which has no 1.1.7 artifact.
 allprojects { project ->
     project.configurations.configureEach { configuration ->
         configuration.resolutionStrategy.eachDependency { details ->
-            if (details.requested.group == 'androidx.datastore') {
+            if (details.requested.group == 'androidx.datastore'
+                    && details.requested.name == 'datastore-core-android') {
                 details.useVersion('${DATASTORE_VERSION}')
-                details.because('Play 16KB: avoid datastore 1.2.x NDK r20 native lib')
+                details.because('Play 16KB: pin datastore-core-android NDK r25c .so')
             }
         }
         configuration.resolutionStrategy.force(
-            'androidx.datastore:datastore:${DATASTORE_VERSION}',
-            'androidx.datastore:datastore-android:${DATASTORE_VERSION}',
-            'androidx.datastore:datastore-core:${DATASTORE_VERSION}',
-            'androidx.datastore:datastore-core-android:${DATASTORE_VERSION}',
-            'androidx.datastore:datastore-preferences:${DATASTORE_VERSION}',
-            'androidx.datastore:datastore-preferences-android:${DATASTORE_VERSION}',
-            'androidx.datastore:datastore-preferences-core:${DATASTORE_VERSION}'
+            'androidx.datastore:datastore-core-android:${DATASTORE_VERSION}'
         )
     }
 }
