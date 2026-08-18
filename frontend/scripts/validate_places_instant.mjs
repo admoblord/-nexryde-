@@ -235,6 +235,16 @@ results.push(
 
 results.push(
   printRow(
+    'no-country-sized-destination',
+    'a typo never offers the whole country as a pickup or dropoff',
+    src.backend.includes('_TOO_COARSE_GEOCODE_TYPES') &&
+      src.backend.includes('set(r.get("types") or []) & _TOO_COARSE_GEOCODE_TYPES') &&
+      src.backend.includes('_predictions_match_typed_query([row], raw)'),
+  ),
+);
+
+results.push(
+  printRow(
     'retries-dropped-request',
     'one dropped request is retried instead of ending the search',
     src.places.includes('fetchAutocompleteWithRetry') &&

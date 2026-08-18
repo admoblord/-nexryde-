@@ -286,6 +286,10 @@ class PlaceDetails(BaseModel):
     address: str
 
 
+# Too coarse to be anyone's pickup or dropoff.
+_TOO_COARSE_GEOCODE_TYPES = {"country", "continent", "administrative_area_level_1"}
+
+
 async def _geocode_search_fallback_predictions(input_text: str, components: str) -> Optional[dict]:
     """
     When Places Autocomplete is blocked (API key missing Places API), approximate suggestions
@@ -313,17 +317,24 @@ async def _geocode_search_fallback_predictions(input_text: str, components: str)
         formatted = str(r.get("formatted_address") or "").strip()
         if not formatted:
             continue
+        # Geocoding answers a typo with the country itself. "Nigeria" pins the
+        # trip at 9.08, 8.68 — the middle of the country, hundreds of km from
+        # the rider. Showing nothing is far safer than that.
+        if set(r.get("types") or []) & _TOO_COARSE_GEOCODE_TYPES:
+            continue
         parts = [p.strip() for p in formatted.split(",") if p.strip()]
         main = parts[0] if parts else formatted
         secondary = ", ".join(parts[1:]) if len(parts) > 1 else ""
-        predictions.append(
-            {
-                "place_id": pid or f"geocode-result-{idx}",
-                "description": formatted,
-                "main_text": main,
-                "secondary_text": secondary,
-            }
-        )
+        row = {
+            "place_id": pid or f"geocode-result-{idx}",
+            "description": formatted,
+            "main_text": main,
+            "secondary_text": secondary,
+        }
+        # A fallback suggestion that shares nothing with what was typed is noise.
+        if not _predictions_match_typed_query([row], raw):
+            continue
+        predictions.append(row)
     if not predictions:
         return None
     return {"predictions": predictions, "status": "OK"}

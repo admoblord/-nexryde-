@@ -236,6 +236,76 @@ def test_geocode_fallback_covers_autocomplete_outage(monkeypatch):
     assert "Peace Garden Estate" in out["predictions"][0]["description"]
 
 
+def test_typo_never_offers_the_whole_country(monkeypatch):
+    """
+    Geocoding answers a typo with "Nigeria". Tapping it pinned the trip at
+    9.08, 8.68 — the middle of the country, hundreds of km from the rider.
+    """
+    fake = _FakeGoogle(
+        autocomplete={"status": "ZERO_RESULTS", "predictions": []},
+        geocode={
+            "status": "OK",
+            "results": [
+                {
+                    "place_id": "ChIJDY2kfa8LThARyAvFaEH-qJk",
+                    "formatted_address": "Nigeria",
+                    "types": ["country", "political"],
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(places_service, "get_http_client", lambda: fake)
+
+    out = _autocomplete(input="zzqqxx nowhere at all 9999")
+
+    assert out["predictions"] == []
+    assert out["status"] == "OK"
+
+
+def test_geocode_fallback_drops_results_unrelated_to_the_query(monkeypatch):
+    fake = _FakeGoogle(
+        autocomplete={"status": "ZERO_RESULTS", "predictions": []},
+        geocode={
+            "status": "OK",
+            "results": [
+                {"place_id": "ChIJ-kano", "formatted_address": "Kano, Nigeria", "types": ["locality"]},
+                {
+                    "place_id": "ChIJ-peace",
+                    "formatted_address": "Peace Garden Estate, Sangotedo, Lagos",
+                    "types": ["premise"],
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(places_service, "get_http_client", lambda: fake)
+
+    out = _autocomplete(input="Peace garden Estate")
+
+    descriptions = [p["description"] for p in out["predictions"]]
+    assert descriptions == ["Peace Garden Estate, Sangotedo, Lagos"]
+
+
+def test_geocode_fallback_keeps_a_real_street_match(monkeypatch):
+    fake = _FakeGoogle(
+        autocomplete={"status": "ZERO_RESULTS", "predictions": []},
+        geocode={
+            "status": "OK",
+            "results": [
+                {
+                    "place_id": "ChIJ-ogunlana",
+                    "formatted_address": "23 Ogunlana Drive, Surulere, Lagos, Nigeria",
+                    "types": ["street_address"],
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(places_service, "get_http_client", lambda: fake)
+
+    out = _autocomplete(input="23 Ogunlana Drive Surulere")
+
+    assert out["predictions"][0]["main_text"] == "23 Ogunlana Drive"
+
+
 def test_bias_that_hides_the_typed_estate_is_retried_unbiased(monkeypatch):
     """A stale GPS pin must not bury the address the rider actually typed."""
     def scripted(url):
