@@ -1420,6 +1420,25 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
         dispatch_source = "mongo_geo"
         if len(profiles) < 5:
             profiles = await _profiles_via_mongo_geo(DISPATCH_RADIUS_M_FAR)
+
+    # Favorite / preferred driver must still be considered even when Redis GEO /
+    # H3 is cold or the 2dsphere index is missing — otherwise a rider who picks
+    # a nearby online driver gets zero offers.
+    if preferred_driver_id and preferred_driver_id not in blocked_drivers:
+        if not any(str(p.get("user_id") or "") == str(preferred_driver_id) for p in profiles):
+            pref_profile = await db.driver_profiles.find_one(
+                {
+                    "user_id": preferred_driver_id,
+                    "is_online": True,
+                    "verification_status": "approved",
+                    **fresh_hb,
+                },
+                {"_id": 0},
+            )
+            if pref_profile:
+                profiles.insert(0, pref_profile)
+                dispatch_source = f"{dispatch_source}+preferred"
+
     logger.info(
         "dispatch_candidates source=%s count=%s pickup=(%.5f,%.5f)",
         dispatch_source,
