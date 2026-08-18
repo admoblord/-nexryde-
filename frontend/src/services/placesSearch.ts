@@ -3,7 +3,8 @@
  * Always authenticated. Google rank first — never "nearby landmarks only".
  */
 import { BACKEND_URL } from '@/src/services/api';
-import { authedFetch } from '@/src/utils/sessionRefresh';
+import { ApiTimeoutError, authedFetch } from '@/src/utils/sessionRefresh';
+import { isHardOffline } from '@/src/services/platformConnectionManager';
 import {
   hydratePlacesCache,
   readPlacesCache,
@@ -34,6 +35,8 @@ export type PlacesSearchResult = {
   fromCache?: boolean;
   /** Backend confirmed Google genuinely has no match for this query. */
   emptyConfirmed?: boolean;
+  /** The request never reached the backend (dead Wi-Fi, no data, timeout). */
+  offline?: boolean;
 };
 
 function normalizePredictions(raw: unknown): PlacesPrediction[] {
@@ -110,6 +113,26 @@ async function fetchAutocomplete(url: string): Promise<RawAutocomplete> {
   };
 }
 
+const RETRY_DELAY_MS = 500;
+
+/**
+ * One quick retry for a dropped request.
+ *
+ * A single lost packet on a Lagos network used to end the search: the screen
+ * said "Could not reach address search" and nothing tried again until the rider
+ * typed another character. A timeout is not retried — 20s of waiting is already
+ * more than enough.
+ */
+async function fetchAutocompleteWithRetry(url: string): Promise<RawAutocomplete> {
+  try {
+    return await fetchAutocomplete(url);
+  } catch (err) {
+    if (err instanceof ApiTimeoutError || isHardOffline()) throw err;
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    return fetchAutocomplete(url);
+  }
+}
+
 export async function searchPlacesAutocomplete(
   input: string,
   opts?: {
@@ -137,8 +160,9 @@ export async function searchPlacesAutocomplete(
   void hydratePlacesCache();
 
   let result: RawAutocomplete | null = null;
+  let reachedBackend = true;
   try {
-    result = await fetchAutocomplete(biased);
+    result = await fetchAutocompleteWithRetry(biased);
     // Bias / wrong GPS must never hide a real Nigerian address. Newer backends
     // already retry unbiased and say so, which saves a round trip.
     const needUnbiased =
@@ -146,16 +170,24 @@ export async function searchPlacesAutocomplete(
       !result.biasRetried &&
       (result.predictions.length === 0 || !predictionsMatchTypedQuery(result.predictions, q));
     if (needUnbiased) {
-      const unbiased = await fetchAutocomplete(base);
-      if (
-        unbiased.predictions.length &&
-        (result.predictions.length === 0 || predictionsMatchTypedQuery(unbiased.predictions, q))
-      ) {
-        result = unbiased;
+      try {
+        const unbiased = await fetchAutocomplete(base);
+        if (
+          unbiased.predictions.length &&
+          (result.predictions.length === 0 || predictionsMatchTypedQuery(unbiased.predictions, q))
+        ) {
+          result = unbiased;
+        }
+      } catch {
+        // A failed second opinion must not throw away the first one.
       }
     }
   } catch (err) {
     result = null;
+    // The request never reached the backend. This is read-only with respect to
+    // the connectivity FSM on purpose — search must not be able to push the
+    // whole app into a degraded state.
+    reachedBackend = false;
     if (__DEV__) console.log('[places] search failed', err);
   }
 
@@ -176,6 +208,7 @@ export async function searchPlacesAutocomplete(
         httpStatus: result?.httpStatus ?? 0,
         error: result?.error,
         fromCache: true,
+        offline: !reachedBackend,
       };
     }
   }
@@ -186,6 +219,7 @@ export async function searchPlacesAutocomplete(
       status: 'UNAVAILABLE',
       httpStatus: 0,
       error: 'network',
+      offline: true,
     }
   );
 }

@@ -235,6 +235,44 @@ results.push(
 
 results.push(
   printRow(
+    'retries-dropped-request',
+    'one dropped request is retried instead of ending the search',
+    src.places.includes('fetchAutocompleteWithRetry') &&
+      src.places.includes('ApiTimeoutError') &&
+      src.places.includes('RETRY_DELAY_MS'),
+  ),
+);
+
+results.push(
+  printRow(
+    'offline-is-named-honestly',
+    'an unreachable backend says so instead of blaming the search',
+    src.places.includes('offline?: boolean') &&
+      src.bolt.includes("searchError === 'offline'") &&
+      src.bolt.includes('No internet connection'),
+  ),
+);
+
+results.push(
+  printRow(
+    'retry-is-tappable',
+    '"Try again" is a real control, not just text',
+    src.bolt.includes('styles.retryBtn') &&
+      src.bolt.includes('onPress={() => void fetchPlaces(activeQuery.trim())}'),
+  ),
+);
+
+results.push(
+  printRow(
+    'search-cannot-degrade-the-app',
+    'a failed search never pushes the connectivity FSM into a degraded state',
+    !src.places.includes('reportPlatformConnectionSignal') &&
+      src.places.includes('isHardOffline'),
+  ),
+);
+
+results.push(
+  printRow(
     'tapped-name-beats-plus-code',
     'selecting a suggestion never shows a Plus Code instead of the place name',
     src.engine.includes('export function preferReadableAddress') &&
