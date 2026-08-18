@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BACKEND_URL } from '@/src/services/api';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 
 export type RiderSavedSlot = 'home' | 'work' | 'gym' | 'favorite';
 
@@ -80,7 +81,13 @@ export const RIDER_SAVED_SLOT_META: Record<
 export async function geocodeAddressForRider(address: string): Promise<{ lat: number; lng: number; address: string } | null> {
   try {
     const query = encodeURIComponent(address.trim());
-    const res = await fetch(`${BACKEND_URL}/api/places/geocode-address?address=${query}`);
+    // /api/places/* is JWT-gated. A bare fetch here 401s every time, which is why
+    // saving Home/Work, preset pickups and mid-trip destination changes silently
+    // failed to resolve. preserveSessionOn401 keeps a token blip from logging out.
+    const res = await authedFetch(
+      `${BACKEND_URL}/api/places/geocode-address?address=${query}`,
+      { method: 'GET', preserveSessionOn401: true },
+    );
     const data = await res.json().catch(() => ({}));
     const lat = Number(data?.latitude);
     const lng = Number(data?.longitude);
