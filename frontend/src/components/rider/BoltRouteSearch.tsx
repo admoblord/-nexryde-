@@ -141,19 +141,33 @@ export function BoltRouteSearch({
           countryCode: 'ng',
         });
         if (reqId !== reqIdRef.current) return;
+        const rows = mapPlacesPredictions(
+          data.predictions || [],
+          input,
+          originRef.current,
+          session,
+        );
+        if (rows.length) {
+          setPlaces(rows);
+          setSearchError(null);
+          return;
+        }
         if (data.httpStatus === 401) {
           setSearchError('auth');
           setPlaces([]);
           return;
         }
-        setPlaces(
-          mapPlacesPredictions(data.predictions || [], input, originRef.current, session),
-        );
-      } catch {
-        if (reqId === reqIdRef.current) {
+        if (data.emptyConfirmed) {
+          // Backend reached Google and there is genuinely no such place.
           setPlaces([]);
-          setSearchError('network');
+          setSearchError(null);
+          return;
         }
+        // Degraded response: keep the suggestions already on screen rather than
+        // replacing real addresses with an empty state.
+        setSearchError('network');
+      } catch {
+        if (reqId === reqIdRef.current) setSearchError('network');
       } finally {
         if (reqId === reqIdRef.current) setLoading(false);
       }

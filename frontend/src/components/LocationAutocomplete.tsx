@@ -184,14 +184,20 @@ export default function LocationAutocomplete({
         const normalized = (data.predictions || []).map((p, index) =>
           normalizePrediction(p, index),
         );
-        storeCachedPredictions(input, normalized);
-        setPredictions(normalized);
-        setShowSuggestions(normalized.length > 0);
+        if (normalized.length) {
+          storeCachedPredictions(input, normalized);
+          setPredictions(normalized);
+          setShowSuggestions(true);
+          return;
+        }
+        if (data.emptyConfirmed) {
+          setPredictions([]);
+          setShowSuggestions(false);
+          return;
+        }
+        // Degraded response — leave the suggestions already on screen alone.
       } catch (error) {
         console.error('Error fetching predictions:', error);
-        if (!mountedRef.current || requestId !== activeRequestIdRef.current) return;
-        setPredictions([]);
-        setShowSuggestions(false);
       } finally {
         if (mountedRef.current && requestId === activeRequestIdRef.current) {
           setIsLoading(false);
