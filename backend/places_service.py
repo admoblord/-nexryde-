@@ -233,6 +233,43 @@ async def _set_cache(key: str, response: dict, ttl_seconds: int) -> None:
     except Exception:
         pass  # best-effort persistence — Redis hit is sufficient
 
+
+# A good answer stays usable long after it stops being fresh. Google outages,
+# Cloud Run cold starts and Lagos network blips used to turn a 300 s expiry into
+# "No places found"; the stale copy is what the rider sees instead.
+STALE_TTL_SECONDS = 86400 * 30
+
+# Background writes are held here so the event loop cannot garbage-collect a
+# task mid-flight (asyncio only keeps weak references to running tasks).
+_stale_writes: set = set()
+
+
+async def _set_stale_cache(key: str, response: dict) -> None:
+    """
+    Long-lived last-good copy, written alongside every successful lookup.
+
+    Fire-and-forget: the rider already has their suggestions, so this must not
+    add a Redis + Mongo round trip to the response they are waiting on.
+    """
+    if not (response or {}).get("predictions"):
+        return
+    import asyncio
+
+    task = asyncio.create_task(_set_cache(f"stale:{key}", response, ttl_seconds=STALE_TTL_SECONDS))
+    _stale_writes.add(task)
+    task.add_done_callback(_stale_writes.discard)
+
+
+async def _get_stale_cache(key: str) -> "dict | None":
+    """Last-good answer for this exact query, regardless of freshness."""
+    doc = await _get_cache(f"stale:{key}")
+    if not doc:
+        return None
+    response = doc.get("response") if isinstance(doc, dict) else None
+    if isinstance(response, dict) and response.get("predictions"):
+        return response
+    return None
+
 class PlacePrediction(BaseModel):
     place_id: str
     description: str
@@ -401,6 +438,61 @@ def _google_autocomplete_url(
     )
 
 
+def _autocomplete_google_reached(data: Optional[dict]) -> bool:
+    """False only when Google never answered (timeout, DNS, circuit breaker)."""
+    return data is not None
+
+
+async def _google_autocomplete_once(url: str) -> Optional[dict]:
+    """One Google call that reports failure instead of raising."""
+    try:
+        client = get_http_client()
+        response = await client.get(url, timeout=10.0)
+        return response.json()
+    except Exception as exc:
+        print(f"places.autocomplete google call failed: {exc}")
+        return None
+
+
+async def _google_autocomplete_data(
+    input_text: str,
+    *,
+    components: Optional[str],
+    location_bias: Optional[str],
+    radius: Optional[int],
+    session: str,
+) -> tuple[Optional[dict], bool]:
+    """
+    Biased Google Autocomplete, retried unbiased when the bias buries the answer.
+
+    A far or stale GPS pin used to hide a real Lagos estate behind "nearby only"
+    results, so a biased miss is never the final word. Returns the chosen payload
+    and whether the unbiased retry already ran, so the app does not repeat it.
+    """
+    def build(include_bias: bool) -> str:
+        return _google_autocomplete_url(
+            input_text,
+            components=components,
+            location_bias=location_bias,
+            radius=radius,
+            session=session,
+            include_bias=include_bias,
+        )
+
+    biased = await _google_autocomplete_once(build(True))
+    if not location_bias:
+        return biased, False
+
+    rows = _normalize_google_autocomplete_predictions(biased or {})
+    if _autocomplete_google_has_rows(biased) and _predictions_match_typed_query(rows, input_text):
+        return biased, False
+
+    unbiased = await _google_autocomplete_once(build(False))
+    if _autocomplete_google_has_rows(unbiased):
+        return unbiased, True
+    return (biased, True) if _autocomplete_google_reached(biased) else (unbiased, True)
+
+
 def _normalize_google_autocomplete_predictions(data: dict) -> list[dict]:
     predictions = []
     for pred in data.get("predictions") or []:
@@ -443,18 +535,19 @@ async def autocomplete_places(
 
     import time as _time
     t0 = _time.perf_counter()
-    
+
+    session = (sessiontoken or "").strip()
+    # Cache even when sessiontoken is present. Skipping cache made every
+    # pickup/destination keystroke a cold Google call (timeout → empty list).
+    key = _cache_key("autocomplete_v2", {
+        "input": input.strip().lower(),
+        "location_bias": location_bias,
+        "radius": radius,
+        "components": components,
+    })
+
     try:
         await _ensure_places_cache_indexes()
-        session = (sessiontoken or "").strip()
-        # Cache even when sessiontoken is present. Skipping cache made every
-        # pickup/destination keystroke a cold Google call (timeout → empty list).
-        key = _cache_key("autocomplete_v2", {
-            "input": input.strip().lower(),
-            "location_bias": location_bias,
-            "radius": radius,
-            "components": components,
-        })
         cached = await _get_cache(key)
         if cached:
             try:
@@ -465,35 +558,13 @@ async def autocomplete_places(
                 pass
             return cached["response"]
 
-        client = get_http_client()
-        response = await client.get(
-            _google_autocomplete_url(
-                input,
-                components=components,
-                location_bias=location_bias,
-                radius=radius,
-                session=session,
-                include_bias=True,
-            ),
-            timeout=10.0,
+        data, unbiased_retried = await _google_autocomplete_data(
+            input,
+            components=components,
+            location_bias=location_bias,
+            radius=radius,
+            session=session,
         )
-        data = response.json()
-        # Soft location bias can hide a Lagos estate from a far/wrong GPS pin.
-        if location_bias and not _autocomplete_google_has_rows(data):
-            unbiased = await client.get(
-                _google_autocomplete_url(
-                    input,
-                    components=components,
-                    location_bias=location_bias,
-                    radius=radius,
-                    session=session,
-                    include_bias=False,
-                ),
-                timeout=10.0,
-            )
-            data2 = unbiased.json()
-            if _autocomplete_google_has_rows(data2):
-                data = data2
 
         if _autocomplete_google_has_rows(data):
             predictions = _normalize_google_autocomplete_predictions(data)
@@ -501,8 +572,10 @@ async def autocomplete_places(
             response_payload = {
                 "predictions": merged,
                 "status": "OK",
+                "bias_retried": unbiased_retried,
             }
             await _set_cache(key, response_payload, ttl_seconds=300)
+            await _set_stale_cache(key, response_payload)
             try:
                 from realtime_platform.observability import observe_ms, incr
                 observe_ms("places.autocomplete_ms", (_time.perf_counter() - t0) * 1000, cache="miss")
@@ -514,29 +587,63 @@ async def autocomplete_places(
         fb = await _geocode_search_fallback_predictions(input, components or "country:ng")
         if fb:
             fb_preds = _merge_place_predictions(fb.get("predictions") or [], local_hits)
-            fb = {**fb, "predictions": fb_preds, "status": "OK"}
+            fb = {**fb, "predictions": fb_preds, "status": "OK", "bias_retried": unbiased_retried}
             await _set_cache(key, fb, ttl_seconds=300)
+            await _set_stale_cache(key, fb)
             return fb
 
-        if local_hits:
-            return {"predictions": local_hits, "status": "OK", "cache": "local_landmark"}
+        # Only Google itself saying "nothing matches" counts as an empty result.
+        # Timeouts, quota and key errors mean the rider gets the last good answer
+        # for this query instead of "No places found".
+        google_status = (data or {}).get("status") if _autocomplete_google_reached(data) else None
+        genuinely_empty = google_status in ("OK", "ZERO_RESULTS")
 
-        if data.get("status") == "OK":
-            response_payload = {"predictions": [], "status": "OK"}
+        if not genuinely_empty:
+            stale = await _get_stale_cache(key)
+            if stale:
+                return {**stale, "status": "OK", "cache": "stale", "bias_retried": unbiased_retried}
+
+        if local_hits:
+            return {
+                "predictions": local_hits,
+                "status": "OK",
+                "cache": "local_landmark",
+                "bias_retried": unbiased_retried,
+            }
+
+        if genuinely_empty:
+            response_payload = {
+                "predictions": [],
+                "status": "OK",
+                "bias_retried": unbiased_retried,
+            }
             await _set_cache(key, response_payload, ttl_seconds=60)
             return response_payload
 
-        response_payload = {
+        return {
             "predictions": [],
-            "status": data.get("status", "ERROR"),
-            "error_message": data.get("error_message", "Unknown error"),
+            "status": google_status or "UNAVAILABLE",
+            "error_message": (data or {}).get("error_message", "Address search temporarily unavailable"),
+            "bias_retried": unbiased_retried,
         }
-        await _set_cache(key, response_payload, ttl_seconds=30)
-        return response_payload
-    
+
     except Exception as e:
+        # Autocomplete must never 500 — a crash here is what painted
+        # "No places found" over a working Google account.
         print(f"Error in autocomplete: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error fetching places: {str(e)}")
+        try:
+            stale = await _get_stale_cache(key)
+            if stale:
+                return {**stale, "status": "OK", "cache": "stale"}
+        except Exception:
+            pass
+        if local_hits:
+            return {"predictions": local_hits, "status": "OK", "cache": "local_landmark"}
+        return {
+            "predictions": [],
+            "status": "UNAVAILABLE",
+            "error_message": "Address search temporarily unavailable",
+        }
 
 
 
