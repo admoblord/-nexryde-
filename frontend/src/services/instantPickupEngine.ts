@@ -99,6 +99,34 @@ export function safePickupDisplay(label: string | null | undefined, detecting = 
   return t;
 }
 
+/** Drop a leading Plus Code so "H97R+34P, Oladunni St, Lagos" reads as a street. */
+export function stripPlusCodeHead(address: string | null | undefined): string {
+  const t = String(address || '').trim();
+  if (!isPlusCodeLabel(t)) return t;
+  const rest = t.split(',').slice(1).join(',').trim();
+  return rest || t;
+}
+
+/**
+ * Keep the name the rider tapped when Place Details answers with a Plus Code.
+ *
+ * Google returns "H97R+34P, Oladunni St, Gbagada" as the formatted address for
+ * Peace Garden Estate. Overwriting the tapped suggestion with that turned the
+ * destination field into a code, and pickup into the generic fallback because
+ * safePickupDisplay rejects Plus Codes outright.
+ */
+export function preferReadableAddress(
+  tapped: string | null | undefined,
+  resolved: string | null | undefined,
+): string {
+  const tappedText = String(tapped || '').trim();
+  const resolvedText = String(resolved || '').trim();
+  if (!resolvedText) return tappedText;
+  if (!isPlusCodeLabel(resolvedText)) return resolvedText;
+  if (tappedText && !isBadPickupLabel(tappedText)) return tappedText;
+  return stripPlusCodeHead(resolvedText) || tappedText;
+}
+
 export function geoCellKey(lat: number, lng: number, meters = CELL_METERS): string {
   const dLat = meters / 111_320;
   const cos = Math.cos((lat * Math.PI) / 180);

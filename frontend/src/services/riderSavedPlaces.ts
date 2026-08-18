@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BACKEND_URL } from '@/src/services/api';
 import { authedFetch } from '@/src/utils/sessionRefresh';
+import { preferReadableAddress } from '@/src/services/instantPickupEngine';
 
 export type RiderSavedSlot = 'home' | 'work' | 'gym' | 'favorite';
 
@@ -95,7 +96,7 @@ export async function geocodeAddressForRider(address: string): Promise<{ lat: nu
       return {
         lat,
         lng,
-        address: String(data.address || address || '').trim() || address,
+        address: preferReadableAddress(address, String(data.address || '')) || address,
       };
     }
   } catch {

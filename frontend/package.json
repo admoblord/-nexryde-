@@ -19,6 +19,7 @@
     "verify:location-instant": "node ./scripts/validate_location_instant.mjs",
     "verify:places-instant": "node ./scripts/validate_places_instant.mjs",
     "verify:places-cache": "node --experimental-strip-types --no-warnings ./scripts/validate_places_cache_behavior.mjs",
+    "verify:place-labels": "node --experimental-strip-types --no-warnings ./scripts/validate_place_label_quality.mjs",
     "verify:go-online-race": "node ./scripts/validate_driver_go_online_race.mjs",
     "verify:driver-status-standard": "node ./scripts/validate_driver_status_uber_standard.mjs",
     "verify:app-store-ipad-audio": "node ./scripts/validate_app_store_ipad_audio.mjs",

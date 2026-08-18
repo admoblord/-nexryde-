@@ -21,6 +21,7 @@ const files = {
   ac: 'src/components/LocationAutocomplete.tsx',
   suggest: 'src/services/routeSuggestions.ts',
   saved: 'src/services/riderSavedPlaces.ts',
+  engine: 'src/services/instantPickupEngine.ts',
   book: 'app/rider/book.tsx',
   backend: path.join(root, '..', 'backend', 'places_service.py'),
 };
@@ -31,6 +32,7 @@ const src = {
   ac: fs.readFileSync(path.join(root, files.ac), 'utf8'),
   suggest: fs.readFileSync(path.join(root, files.suggest), 'utf8'),
   saved: fs.readFileSync(path.join(root, files.saved), 'utf8'),
+  engine: fs.readFileSync(path.join(root, files.engine), 'utf8'),
   book: fs.readFileSync(path.join(root, files.book), 'utf8'),
   backend: fs.readFileSync(files.backend, 'utf8'),
 };
@@ -228,6 +230,17 @@ results.push(
     'failed Place Details still geocodes the tapped address',
     src.book.includes('Truncated Google session ids') &&
       src.book.includes('!coords && desc.length >= 3'),
+  ),
+);
+
+results.push(
+  printRow(
+    'tapped-name-beats-plus-code',
+    'selecting a suggestion never shows a Plus Code instead of the place name',
+    src.engine.includes('export function preferReadableAddress') &&
+      !src.book.includes('if (details.description) desc = details.description;') &&
+      (src.book.match(/preferReadableAddress\(desc, /g) || []).length >= 3 &&
+      src.saved.includes('preferReadableAddress'),
   ),
 );
 
