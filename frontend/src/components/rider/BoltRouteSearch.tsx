@@ -88,7 +88,7 @@ export function BoltRouteSearch({
   const [idle, setIdle] = useState<RouteSuggestion[]>([]);
   const [places, setPlaces] = useState<RouteSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
-  const [searchError, setSearchError] = useState<'auth' | 'network' | null>(null);
+  const [searchError, setSearchError] = useState<'auth' | 'network' | 'offline' | null>(null);
   const sessionRef = useRef<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reqIdRef = useRef(0);
@@ -141,19 +141,33 @@ export function BoltRouteSearch({
           countryCode: 'ng',
         });
         if (reqId !== reqIdRef.current) return;
+        const rows = mapPlacesPredictions(
+          data.predictions || [],
+          input,
+          originRef.current,
+          session,
+        );
+        if (rows.length) {
+          setPlaces(rows);
+          setSearchError(null);
+          return;
+        }
         if (data.httpStatus === 401) {
           setSearchError('auth');
           setPlaces([]);
           return;
         }
-        setPlaces(
-          mapPlacesPredictions(data.predictions || [], input, originRef.current, session),
-        );
-      } catch {
-        if (reqId === reqIdRef.current) {
+        if (data.emptyConfirmed) {
+          // Backend reached Google and there is genuinely no such place.
           setPlaces([]);
-          setSearchError('network');
+          setSearchError(null);
+          return;
         }
+        // Degraded response: keep the suggestions already on screen rather than
+        // replacing real addresses with an empty state.
+        setSearchError(data.offline ? 'offline' : 'network');
+      } catch {
+        if (reqId === reqIdRef.current) setSearchError('offline');
       } finally {
         if (reqId === reqIdRef.current) setLoading(false);
       }
@@ -352,17 +366,31 @@ export function BoltRouteSearch({
         style={styles.list}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
-          <Text style={styles.empty}>
-            {loading
-              ? 'Searching addresses…'
-              : searchError === 'auth'
-                ? 'Sign in again to search pickup and destination'
-                : searchError === 'network'
-                  ? 'Could not reach address search. Try again.'
-                  : activeQuery.trim().length >= MIN_CHARS
-                    ? 'No places found'
-                    : 'Saved places and recent searches appear here'}
-          </Text>
+          <View style={styles.emptyWrap}>
+            <Text style={styles.empty}>
+              {loading
+                ? 'Searching addresses…'
+                : searchError === 'auth'
+                  ? 'Sign in again to search pickup and destination'
+                  : searchError === 'offline'
+                    ? 'No internet connection. Check your Wi-Fi or mobile data.'
+                    : searchError === 'network'
+                      ? 'Address search is busy right now.'
+                      : activeQuery.trim().length >= MIN_CHARS
+                        ? 'No places found'
+                        : 'Saved places and recent searches appear here'}
+            </Text>
+            {!loading && (searchError === 'offline' || searchError === 'network') ? (
+              <TouchableOpacity
+                style={styles.retryBtn}
+                onPress={() => void fetchPlaces(activeQuery.trim())}
+                accessibilityRole="button"
+              >
+                <Ionicons name="refresh" size={16} color={TEXT} />
+                <Text style={styles.retryText}>Try again</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         }
       />
     </SafeAreaView>
@@ -483,6 +511,20 @@ const styles = StyleSheet.create({
   sugSub: { fontSize: 13, color: MUTED, marginTop: 2 },
   sugDist: { fontSize: 13, color: MUTED, marginLeft: 8, fontWeight: '500' },
   empty: { textAlign: 'center', color: MUTED, marginTop: 32, paddingHorizontal: 24 },
+  emptyWrap: { alignItems: 'center' },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 22,
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  retryText: { fontSize: 15, fontWeight: '600', color: TEXT },
 });
 
 export default BoltRouteSearch;

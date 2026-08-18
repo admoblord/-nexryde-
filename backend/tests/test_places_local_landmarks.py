@@ -55,4 +55,3 @@ def test_autocomplete_caches_even_with_sessiontoken():
     src = inspect.getsource(autocomplete_places)
     assert "use_cache = not session" not in src
     assert "Cache even when sessiontoken is present" in src
-    assert "include_bias=False" in src

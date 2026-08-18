@@ -97,6 +97,7 @@ import {
   isDetectingPickupLabel,
   isPlusCodeLabel,
   isRawLatLngLabel,
+  preferReadableAddress,
   preloadPickupAt,
   resolveInstantPickup,
   safePickupDisplay,
@@ -668,7 +669,7 @@ function BookInDriveStyle() {
         const details = await fetchPlaceDetails(sel.placeId, sel.sessionToken);
         if (details && Number.isFinite(details.lat) && Number.isFinite(details.lng)) {
           coords = { lat: details.lat, lng: details.lng };
-          if (details.description) desc = details.description;
+          desc = preferReadableAddress(desc, details.description);
         }
       }
       // Truncated Google session ids (Ei…) 404 Place Details — geocode the label.
@@ -676,7 +677,7 @@ function BookInDriveStyle() {
         const resolved = await resolveAddressToCoords(desc);
         if (resolved) {
           coords = { lat: resolved.lat, lng: resolved.lng };
-          desc = String(resolved.address || desc).trim() || desc;
+          desc = preferReadableAddress(desc, resolved.address);
         }
       }
       if (!coords) {
@@ -3660,7 +3661,7 @@ function BookInDriveStyle() {
                     const details = await fetchPlaceDetails(placeId, loc.sessionToken);
                     if (details && Number.isFinite(details.lat) && Number.isFinite(details.lng)) {
                       coords = { lat: details.lat, lng: details.lng };
-                      if (details.description) desc = details.description;
+                      desc = preferReadableAddress(desc, details.description);
                     }
                   }
 
@@ -3668,7 +3669,7 @@ function BookInDriveStyle() {
                     const resolved = await resolveAddressToCoords(desc);
                     if (resolved && Number.isFinite(resolved.lat) && Number.isFinite(resolved.lng)) {
                       coords = { lat: resolved.lat, lng: resolved.lng };
-                      desc = String(resolved.address || desc).trim() || desc;
+                      desc = preferReadableAddress(desc, resolved.address);
                     }
                   }
 
