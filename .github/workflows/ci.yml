@@ -88,6 +88,7 @@ jobs:
             tests/test_driver_online_cache_invalidation.py \
             tests/test_places_local_landmarks.py \
             tests/test_places_resilience.py \
+            tests/test_squad_verify_reason_codes.py \
             -v --tb=short \
             --cov=. --cov-report=term-missing \
             2>&1 | tail -80
