@@ -85,6 +85,8 @@ jobs:
             tests/test_wallet_trip_helpers.py \
             tests/test_safe_arrival_guardian.py \
             tests/test_maintenance_tick.py \
+            tests/test_places_local_landmarks.py \
+            tests/test_places_resilience.py \
             -v --tb=short \
             --cov=. --cov-report=term-missing \
             2>&1 | tail -80
@@ -181,6 +183,13 @@ jobs:
       - name: TypeScript check
         working-directory: frontend
         run: npx tsc --noEmit --skipLibCheck
+
+      # Pickup/destination search is the first screen of every trip; these guard
+      # the auth, cache and fallback rules that kept regressing into
+      # "No places found".
+      - name: Pickup / destination search contract
+        working-directory: frontend
+        run: node ./scripts/validate_places_instant.mjs
 
       - name: ESLint
         working-directory: frontend

@@ -16,17 +16,21 @@ function printRow(id, label, pass, detail) {
 
 const files = {
   places: 'src/services/placesSearch.ts',
+  cache: 'src/services/placesCache.ts',
   bolt: 'src/components/rider/BoltRouteSearch.tsx',
   ac: 'src/components/LocationAutocomplete.tsx',
   suggest: 'src/services/routeSuggestions.ts',
+  saved: 'src/services/riderSavedPlaces.ts',
   book: 'app/rider/book.tsx',
   backend: path.join(root, '..', 'backend', 'places_service.py'),
 };
 const src = {
   places: fs.readFileSync(path.join(root, files.places), 'utf8'),
+  cache: fs.readFileSync(path.join(root, files.cache), 'utf8'),
   bolt: fs.readFileSync(path.join(root, files.bolt), 'utf8'),
   ac: fs.readFileSync(path.join(root, files.ac), 'utf8'),
   suggest: fs.readFileSync(path.join(root, files.suggest), 'utf8'),
+  saved: fs.readFileSync(path.join(root, files.saved), 'utf8'),
   book: fs.readFileSync(path.join(root, files.book), 'utf8'),
   backend: fs.readFileSync(files.backend, 'utf8'),
 };
@@ -134,7 +138,87 @@ results.push(
     'backend caches autocomplete even when the app sends sessiontoken',
     src.backend.includes('Cache even when sessiontoken is present') &&
       !src.backend.includes('use_cache = not session') &&
-      src.backend.includes('include_bias=False'),
+      src.backend.includes('build(False)'),
+  ),
+);
+
+results.push(
+  printRow(
+    'backend-serves-stale-on-outage',
+    'a Google outage serves the last good answer, not an empty list',
+    src.backend.includes('_get_stale_cache') &&
+      src.backend.includes('_set_stale_cache') &&
+      src.backend.includes('"cache": "stale"'),
+  ),
+);
+
+results.push(
+  printRow(
+    'backend-autocomplete-never-500',
+    'autocomplete degrades instead of raising a 500 the app reads as an outage',
+    !/except Exception as e:\n\s+print\(f"Error in autocomplete[\s\S]{0,120}raise HTTPException/.test(
+      src.backend,
+    ) && src.backend.includes('Autocomplete must never 500'),
+  ),
+);
+
+results.push(
+  printRow(
+    'backend-empty-only-when-google-says-so',
+    'only a real Google ZERO_RESULTS/OK counts as "no places"',
+    src.backend.includes('genuinely_empty') &&
+      src.backend.includes('("OK", "ZERO_RESULTS")'),
+  ),
+);
+
+results.push(
+  printRow(
+    'client-last-good-cache',
+    'client keeps a durable last-good answer per query',
+    src.places.includes('readPlacesCache') &&
+      src.places.includes('readPlacesCachePrefix') &&
+      src.places.includes('writePlacesCache') &&
+      src.cache.includes('AsyncStorage'),
+  ),
+);
+
+results.push(
+  printRow(
+    'client-no-blank-on-degraded',
+    'a degraded search keeps the addresses already on screen',
+    src.places.includes('emptyConfirmed') &&
+      src.bolt.includes('data.emptyConfirmed') &&
+      src.ac.includes('data.emptyConfirmed') &&
+      !src.bolt.includes('setPlaces([]);\n          setSearchError(\'network\');'),
+  ),
+);
+
+results.push(
+  printRow(
+    'client-401-only-blocks-when-empty',
+    'a cached answer still shows while a token refreshes',
+    (() => {
+      const authBranch = src.bolt.indexOf("setSearchError('auth')");
+      const rowsBranch = src.bolt.indexOf('if (rows.length)');
+      return rowsBranch > -1 && authBranch > rowsBranch;
+    })(),
+  ),
+);
+
+results.push(
+  printRow(
+    'saved-places-authed-geocode',
+    'saved places / preset pickup / route change geocode with a JWT',
+    src.saved.includes('authedFetch') &&
+      !src.saved.includes('await fetch(`${BACKEND_URL}/api/places/geocode-address'),
+  ),
+);
+
+results.push(
+  printRow(
+    'no-duplicate-unbiased-retry',
+    'app skips its own unbiased retry when the backend already did it',
+    src.places.includes('biasRetried') && src.backend.includes('bias_retried'),
   ),
 );
 
