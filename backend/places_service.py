@@ -489,7 +489,11 @@ async def _google_autocomplete_data(
 
     unbiased = await _google_autocomplete_once(build(False))
     if _autocomplete_google_has_rows(unbiased):
-        return unbiased, True
+        # Only trade nearby results away for something that actually matches
+        # what the rider typed.
+        unbiased_rows = _normalize_google_autocomplete_predictions(unbiased)
+        if not rows or _predictions_match_typed_query(unbiased_rows, input_text):
+            return unbiased, True
     return (biased, True) if _autocomplete_google_reached(biased) else (unbiased, True)
 
 

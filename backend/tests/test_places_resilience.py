@@ -253,6 +253,21 @@ def test_bias_that_hides_the_typed_estate_is_retried_unbiased(monkeypatch):
     assert out["bias_retried"] is True
 
 
+def test_unbiased_retry_does_not_trade_away_nearby_results_for_worse_ones(monkeypatch):
+    """Neither list matches the typed query, so the nearby one is kept."""
+    def scripted(url):
+        if "&location=" in url:
+            return _google_rows("Ajah Bus Stop, Lagos")
+        return _google_rows("Kano Line, Kano")
+
+    fake = _FakeGoogle(autocomplete=scripted)
+    monkeypatch.setattr(places_service, "get_http_client", lambda: fake)
+
+    out = _autocomplete(input="Peace garden Estate", location_bias="6.4531,3.3958", radius=45000)
+
+    assert out["predictions"][0]["main_text"] == "Ajah Bus Stop"
+
+
 def test_matching_biased_result_does_not_spend_a_second_google_call(monkeypatch):
     fake = _FakeGoogle(autocomplete=_google_rows("Peace Garden Estate, Oladunni Street, Lagos"))
     monkeypatch.setattr(places_service, "get_http_client", lambda: fake)
