@@ -27,10 +27,10 @@ class RealtimeConfig:
     h3_k_near: int = 2
     h3_k_far: int = 4
     dispatch_target_ms: int = 300
-    offer_ttl_sec: int = 45
+    offer_ttl_sec: int = 60
     offer_ack_timeout_ms: int = 2500
     offer_max_retries: int = 2
-    max_offers_per_trip: int = 20
+    max_offers_per_trip: int = 40
 
     # Delivery
     push_target_ms: int = 500
@@ -64,10 +64,10 @@ def get_realtime_config() -> RealtimeConfig:
         offline_ack_timeout_ms=_int("RT_OFFLINE_ACK_TIMEOUT_MS", 300),
         h3_k_near=_int("RT_H3_K_NEAR", 2),
         h3_k_far=_int("RT_H3_K_FAR", 4),
-        offer_ttl_sec=_int("RT_OFFER_TTL_SEC", 45),
+        offer_ttl_sec=_int("RT_OFFER_TTL_SEC", 60),
         offer_ack_timeout_ms=_int("RT_OFFER_ACK_TIMEOUT_MS", 2500),
         offer_max_retries=_int("RT_OFFER_MAX_RETRIES", 2),
-        max_offers_per_trip=_int("RT_MAX_OFFERS_PER_TRIP", 20),
+        max_offers_per_trip=_int("RT_MAX_OFFERS_PER_TRIP", 40),
         fcm_fallback_after_ms=_int("RT_FCM_FALLBACK_AFTER_MS", 1500),
         trip_lock_ttl_sec=_int("RT_TRIP_LOCK_TTL_SEC", 30),
         retry_base_ms=_int("RT_RETRY_BASE_MS", 200),

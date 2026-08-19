@@ -98,6 +98,7 @@ type Props = {
   timeElapsedSec?: number;
   errorMessage?: string | null;
   matchedDriverName?: string | null;
+  driverFinishingPriorTrip?: boolean;
   onCancel: () => void;
   onUpdateBid?: () => void;
   onTryAgain?: () => void;
@@ -119,6 +120,7 @@ export default function FindingDriverScreenV2({
   timeElapsedSec = 0,
   errorMessage,
   matchedDriverName,
+  driverFinishingPriorTrip = false,
   onCancel,
   onUpdateBid,
   onTryAgain,
@@ -288,7 +290,11 @@ export default function FindingDriverScreenV2({
   const phaseTitle = isError
     ? 'No drivers nearby'
     : isMatched
-      ? matchedDriverName ? `${matchedDriverName} is on the way` : 'Driver confirmed'
+      ? driverFinishingPriorTrip
+        ? matchedDriverName
+          ? `${matchedDriverName} is finishing a trip nearby`
+          : 'Your driver is finishing a trip nearby'
+        : matchedDriverName ? `${matchedDriverName} is on the way` : 'Driver confirmed'
       : timeElapsedSec >= 90
         ? 'Still looking for you'
         : timeElapsedSec >= 60
@@ -483,7 +489,9 @@ export default function FindingDriverScreenV2({
                 </Animated.View>
               </View>
               <Text style={styles.phaseTitleTxt}>{phaseTitle}</Text>
-              <Text style={styles.matchedSubTxt}>Opening your live trip…</Text>
+              <Text style={styles.matchedSubTxt}>
+                {driverFinishingPriorTrip ? "They'll join you shortly." : 'Opening your live trip…'}
+              </Text>
             </View>
           ) : (
             <View style={styles.searchInner}>

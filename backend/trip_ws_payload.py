@@ -81,4 +81,7 @@ def rider_trip_payload_from_doc(trip: Optional[dict]) -> dict[str, Any]:
             if trip.get("pickup_code_required", False)
             else None
         ),
+        "driver_finishing_prior_trip": bool(trip.get("driver_finishing_prior_trip")),
+        "prior_trip_id": trip.get("prior_trip_id"),
+        "finishing_eta_sec": trip.get("finishing_eta_sec"),
     }

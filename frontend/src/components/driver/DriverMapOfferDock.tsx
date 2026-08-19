@@ -214,6 +214,13 @@ function DriverMapOfferDock({
         <View style={s.handle} />
       </View>
 
+      {Boolean(trip?.finishing_trip) ? (
+        <View style={s.nextRideBanner} accessibilityRole="text">
+          <Ionicons name="flag-outline" size={14} color={G} />
+          <Text style={s.nextRideBannerTxt}>Next ride · after you drop off</Text>
+        </View>
+      ) : null}
+
       {/* ── Countdown progress bar ─────────────────────────────────── */}
       <View style={s.countdownTrack}>
         <Animated.View
@@ -392,6 +399,20 @@ function createOfferStyles(t: OfferTok) {
   },
   handleWrap: { alignSelf: 'center', marginBottom: 12 },
   handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)' },
+  nextRideBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,212,126,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,126,0.28)',
+  },
+  nextRideBannerTxt: { fontSize: 12, fontWeight: '800', color: G, letterSpacing: 0.1 },
 
   // Countdown
   countdownTrack: {

@@ -493,7 +493,7 @@ class RideAlertManager(
 
   companion object {
     private const val TAG = "NexrydeFullScreen"
-    private const val OFFER_COUNTDOWN_SECONDS = 20
+    private const val OFFER_COUNTDOWN_SECONDS = 40
     private const val SESSION_PREFS = "nexryde_driver_native_session"
     private const val PREF_DRIVER_ID = "driver_id"
     private const val PREF_TOKEN = "token"

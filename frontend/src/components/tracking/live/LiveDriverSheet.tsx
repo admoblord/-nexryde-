@@ -53,6 +53,7 @@ type Props = {
   onSos: () => void;
   destEtaMinutes?: number | null;
   destAddress?: string | null;
+  driverFinishingPriorTrip?: boolean;
   /** Uber: cancel always available until trip starts */
   canCancel?: boolean;
   onCancel?: () => void;
@@ -100,7 +101,7 @@ function fmtKm(km: number | null): string {
 }
 
 // Phase badge in collapsed row
-function PhaseBadge({ phase }: { phase: TripPhase }) {
+function PhaseBadge({ phase, finishing }: { phase: TripPhase; finishing?: boolean }) {
   if (phase === 'arrived') {
     return (
       <View style={badgeStyles.arrived}>
@@ -114,6 +115,14 @@ function PhaseBadge({ phase }: { phase: TripPhase }) {
       <View style={badgeStyles.ongoing}>
         <View style={badgeStyles.ongoingDot} />
         <Text style={badgeStyles.ongoingTxt}>On trip</Text>
+      </View>
+    );
+  }
+  if (finishing) {
+    return (
+      <View style={badgeStyles.accepted}>
+        <View style={badgeStyles.acceptedDot} />
+        <Text style={badgeStyles.acceptedTxt}>Joining shortly</Text>
       </View>
     );
   }
@@ -176,6 +185,7 @@ function LiveDriverSheetInner({
   onSos,
   destEtaMinutes,
   destAddress,
+  driverFinishingPriorTrip = false,
   canCancel = false,
   onCancel,
   cancelFeeNote,
@@ -287,7 +297,7 @@ function LiveDriverSheetInner({
         <View style={styles.collapsedLeft}>
           <Text style={styles.collapsedName} numberOfLines={1}>{displayName}</Text>
           <View style={styles.collapsedBadgeRow}>
-            <PhaseBadge phase={tripPhase} />
+            <PhaseBadge phase={tripPhase} finishing={driverFinishingPriorTrip && tripPhase === 'accepted'} />
             {displayPlate !== '—' ? (
               <View style={styles.collapsedPlateChip}>
                 <Text style={styles.collapsedPlateTxt} numberOfLines={1}>{displayPlate}</Text>
@@ -355,9 +365,11 @@ function LiveDriverSheetInner({
                 ? 'Meet them at your pickup point'
                 : tripPhase === 'ongoing'
                   ? destAddress ? `To ${destAddress}` : 'Heading to drop-off'
-                  : etaMinutes != null && etaMinutes > 0
-                    ? `${etaMinutes} min away · ${fmtKm(distanceKm)}`
-                    : 'On the way to you'}
+                  : driverFinishingPriorTrip
+                    ? "Finishing a trip nearby · they'll join you shortly"
+                    : etaMinutes != null && etaMinutes > 0
+                      ? `${etaMinutes} min away · ${fmtKm(distanceKm)}`
+                      : 'On the way to you'}
             </Text>
           </View>
         </View>

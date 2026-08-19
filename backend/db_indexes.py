@@ -432,6 +432,8 @@ async def ensure_indexes(db):
 
         # Driver active_trip_id — index for lock queries
         await _safe_create_index(db.driver_profiles, "active_trip_id", sparse=True)
+        # Stacked dispatch: find the driver holding a queued next ride.
+        await _safe_create_index(db.driver_profiles, "queued_next_trip_id", sparse=True)
 
         # Realtime platform — saga retry loop + outbox drain scan by status.
         try:

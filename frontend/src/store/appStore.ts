@@ -126,6 +126,10 @@ export interface Trip {
   vehicle_model?: string | null;
   vehicle_plate?: string | null;
   vehicle_color?: string | null;
+  /** Driver accepted while finishing a nearby drop-off. */
+  driver_finishing_prior_trip?: boolean;
+  prior_trip_id?: string | null;
+  finishing_eta_sec?: number | null;
 }
 
 export interface Location {

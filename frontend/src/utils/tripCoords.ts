@@ -204,6 +204,18 @@ export function mergeTripFromStatusPayload(
       (typeof data.vehicle_color === 'string' && data.vehicle_color.trim())
         ? data.vehicle_color
         : (prev as { vehicle_color?: string | null } | null)?.vehicle_color ?? null,
+    driver_finishing_prior_trip:
+      data.driver_finishing_prior_trip !== undefined
+        ? Boolean(data.driver_finishing_prior_trip)
+        : Boolean((prev as { driver_finishing_prior_trip?: boolean } | null)?.driver_finishing_prior_trip),
+    prior_trip_id:
+      (typeof data.prior_trip_id === 'string' && data.prior_trip_id.trim())
+        ? data.prior_trip_id
+        : (prev as { prior_trip_id?: string | null } | null)?.prior_trip_id ?? null,
+    finishing_eta_sec:
+      Number.isFinite(Number(data.finishing_eta_sec))
+        ? Number(data.finishing_eta_sec)
+        : (prev as { finishing_eta_sec?: number | null } | null)?.finishing_eta_sec ?? null,
   };
 }
 

@@ -86,6 +86,7 @@ jobs:
             tests/test_safe_arrival_guardian.py \
             tests/test_maintenance_tick.py \
             tests/test_driver_online_cache_invalidation.py \
+            tests/test_finishing_trip_dispatch.py \
             tests/test_places_local_landmarks.py \
             tests/test_places_resilience.py \
             tests/test_squad_verify_reason_codes.py \
@@ -192,6 +193,12 @@ jobs:
       - name: Pickup / destination search contract
         working-directory: frontend
         run: node ./scripts/validate_places_instant.mjs
+
+      # Stacked dispatch touches the offer ring timer on both JS and native;
+      # these keep the 40s countdown inside the 60s backend TTL.
+      - name: Finishing-trip offer contract
+        working-directory: frontend
+        run: node ./scripts/verify_finishing_trip_offers.mjs
 
       - name: ESLint
         working-directory: frontend
