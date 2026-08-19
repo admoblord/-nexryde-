@@ -10,6 +10,16 @@ import {
   type RiderSavedSlot,
 } from '@/src/services/riderSavedPlaces';
 import { getRecentLocations } from '@/src/services/offlineMode';
+import { queryClient } from '@/src/providers/QueryProvider';
+import { qk } from '@/src/services/queryKeys';
+import { tabCacheGet } from '@/src/services/tabDataCache';
+
+function peekSavedPlaces(userId: string): RiderSavedPlace[] {
+  const fromQ = queryClient.getQueryData<RiderSavedPlace[]>(qk.riderSavedPlaces(userId));
+  if (Array.isArray(fromQ) && fromQ.length) return fromQ;
+  const fromTab = tabCacheGet<RiderSavedPlace[]>(`rider-saved:${userId}`);
+  return Array.isArray(fromTab) ? fromTab : [];
+}
 
 export type RouteSuggestionKind = 'saved' | 'recent' | 'places';
 
@@ -88,8 +98,9 @@ export async function loadIdleRouteSuggestions(
   const out: RouteSuggestion[] = [];
 
   if (userId) {
-    const saved = await loadRiderSavedPlaces(userId);
-    const mapped = saved
+    const saved = peekSavedPlaces(userId);
+    const fresh = saved.length ? saved : await loadRiderSavedPlaces(userId);
+    const mapped = fresh
       .map((p: RiderSavedPlace) => {
         const meta = RIDER_SAVED_SLOT_META[p.slot];
         const d = distanceFromOrigin(origin, p.lat, p.lng);
@@ -186,7 +197,8 @@ export function mapPlacesPredictions(
       _q: query,
     };
   });
-  rows.sort((a, b) => (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9));
+  // Keep Google rank. Sorting by missing GPS distance buried real addresses
+  // under "near you" landmarks that happened to include lat/lng.
   return rows.map(({ _q: _omit, ...rest }) => rest);
 }
 
@@ -207,5 +219,6 @@ export function mergeRouteSuggestions(
   const recent = filterIdle.filter((s) => s.kind === 'recent');
   const seen = new Set([...saved, ...recent].map((s) => s.subtitle.toLowerCase()));
   const placesDedup = places.filter((s) => !seen.has(s.subtitle.toLowerCase()));
-  return [...saved, ...recent, ...placesDedup];
+  // Typed query → real Places first, then matching saved/recent.
+  return [...placesDedup, ...saved, ...recent];
 }

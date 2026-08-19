@@ -263,15 +263,51 @@ function main() {
   const locPub = read('src/hooks/useDriverTripLocationPublisher.ts');
   const tripSync = read('src/services/activeTripSync.ts');
 
-  // --- R1 Quiet banner ---
+  const layout = read('app/_layout.tsx');
+
+  function collectTsx(dir, acc = []) {
+    for (const name of fs.readdirSync(dir)) {
+      if (name === 'node_modules' || name === '.expo') continue;
+      const p = path.join(dir, name);
+      const st = fs.statSync(p);
+      if (st.isDirectory()) collectTsx(p, acc);
+      else if (/\.(tsx|ts)$/.test(name) && !name.endsWith('OfflineBanner.tsx')) acc.push(p);
+    }
+    return acc;
+  }
+  const chromeMounts = collectTsx(path.join(root, 'app'))
+    .concat(collectTsx(path.join(root, 'src')))
+    .filter((p) => {
+      const t = fs.readFileSync(p, 'utf8');
+      return t.includes('<OfflineBanner') || t.includes("from '@/src/components/OfflineBanner'");
+    })
+    .map((p) => path.relative(root, p));
+
+  results.push(
+    printRow(
+      'R0',
+      'Global connection strip/pill is removed at source (not screen-by-screen)',
+      banner.includes('permanently removed') &&
+        banner.includes('() => null') &&
+        !banner.includes('styles.strip') &&
+        !banner.includes('height: 2') &&
+        !layout.includes('<OfflineBanner') &&
+        !layout.includes("from '@/src/components/OfflineBanner'") &&
+        layout.includes('useConnectivityRecovery') &&
+        layout.includes('useOfflineQueueFlush') &&
+        chromeMounts.length === 0,
+      chromeMounts.length ? chromeMounts.join(', ') : null,
+    ),
+  );
+
+  // --- R1 Quiet banner (FSM policy; no visual chrome) ---
   results.push(
     printRow(
       'R1a',
-      'Quiet banner: no Connected on normal recovery (silent dismiss 2s)',
+      'Quiet policy: no Connected on normal recovery (silent dismiss 2s)',
       mgr.includes('SILENT_DISMISS_MS = 2_000') &&
         mgr.includes('CONNECTED_BANNER_AFTER_OFFLINE_MS = 30_000') &&
-        banner.includes("label: 'Low Connection'") &&
-        banner.includes('bannerExposure'),
+        mgr.includes('bannerExposure'),
       null,
     ),
   );
@@ -451,7 +487,7 @@ function main() {
       'Internal transitions logged; banner gated separately',
       mgr.includes("logNet('state_transition'") &&
         mgr.includes("logNet('banner_exposure'") &&
-        banner.includes('bannerExposure'),
+        mgr.includes('bannerExposure'),
       null,
     ),
   );
@@ -550,6 +586,7 @@ function main() {
   );
 
   const requirementMap = {
+    R0: ['R0'],
     R1: ['R1a', 'R1b', 'R1c'],
     R2: ['R2a', 'R2b', 'R2c'],
     R3: ['R3a', 'R3b', 'R3c'],
@@ -560,7 +597,7 @@ function main() {
 
   // Store per-check results by parsing labels - easier: keep parallel array of ids
   const ids = [
-    'R1a', 'R1b', 'R1c', 'R2a', 'R2b', 'R2c', 'R3a', 'R3b', 'R3c', 'R4', 'R4b', 'R5',
+    'R0', 'R1a', 'R1b', 'R1c', 'R2a', 'R2b', 'R2c', 'R3a', 'R3b', 'R3c', 'R4', 'R4b', 'R5',
     'R6a', 'R6b', 'R6c', 'R6d', 'R6e', 'LEG',
   ];
   const byId = Object.fromEntries(ids.map((id, i) => [id, results[i]]));

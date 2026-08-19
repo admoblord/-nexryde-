@@ -26,6 +26,8 @@ import { authedFetch } from '@/src/utils/sessionRefresh';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { tabCacheGet, tabCacheSet } from '@/src/services/tabDataCache';
+import { queryClient } from '@/src/providers/QueryProvider';
+import { qk } from '@/src/services/queryKeys';
 
 type Props = {
   role: 'rider' | 'driver';
@@ -108,7 +110,13 @@ export default function FeatureNotificationsScreen({ role }: Props) {
         rows: FeatureAnnouncement[];
         backendNotifs: BackendNotif[];
         unreadBackend: number;
-      }>(`tab-notifs:${role}:${userId}`)
+      }>(`tab-notifs:${role}:${userId}`) ??
+      queryClient.getQueryData<{
+        rows: FeatureAnnouncement[];
+        backendNotifs: BackendNotif[];
+        unreadBackend: number;
+      }>(role === 'driver' ? qk.driverNotifs(userId) : qk.riderNotifs(userId)) ??
+      null
     : null;
   const [tab, setTab] = useState<NotifTab>('activity');
   const [loading, setLoading] = useState(() => !notifCached);

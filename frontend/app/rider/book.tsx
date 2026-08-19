@@ -77,16 +77,27 @@ import { getNexrydeMapStyle } from '@/src/constants/nexrydeMapBehavior';
 import { ErrorBoundary } from '@/src/components/ErrorBoundary';
 import { getRecentLocations, cacheRecentLocation, createOfflineBooking, checkOnlineStatus } from '@/src/services/offlineMode';
 import { authedFetch } from '@/src/utils/sessionRefresh';
+import {
+  fareMatrixCacheKey,
+  getCachedFareMatrix,
+  setCachedFareMatrix,
+} from '@/src/services/fareMatrixCache';
 import * as Haptics from 'expo-haptics';
 import { geocodeAddressForRider } from '@/src/services/riderSavedPlaces';
 import { startSmartPickupGps } from '@/src/services/smartPickupGps';
-import { peekQuickLocation } from '@/src/services/locationWarm';
+import {
+  getWarmedLocation,
+  hydrateLocationPersist,
+  lastKnownLatLng,
+  peekQuickLocation,
+} from '@/src/services/locationWarm';
 import {
   DETECTING_PICKUP,
   SAFE_PICKUP_FALLBACK,
   isDetectingPickupLabel,
   isPlusCodeLabel,
   isRawLatLngLabel,
+  preferReadableAddress,
   preloadPickupAt,
   resolveInstantPickup,
   safePickupDisplay,
@@ -286,17 +297,22 @@ function BookInDriveStyle() {
     [colors, isDark],
   );
 
-  const [pickup, setPickup] = useState('');
+  const [pickup, setPickup] = useState(() => (getWarmedLocation() ? SAFE_PICKUP_FALLBACK : ''));
   const [destination, setDestination] = useState('');
   const [stop, setStop] = useState('');
-  const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | null>(lastKnownLatLng);
   const [destinationCoords, setDestinationCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [stopCoords, setStopCoords] = useState<{ lat: number; lng: number } | null>(null);
   /** Single source of truth for route geometry + metrics (pickup → stops[] → destination). */
   const [tripDraft, setTripDraft] = useState<TripDraft>(EMPTY_TRIP_DRAFT);
-  const [currentLocation, setCurrentLocation] = useState<any>(null);
-  const [gpsStatus, setGpsStatus] = useState<'detecting' | 'locked' | 'error'>('detecting');
-  const [pickupDetecting, setPickupDetecting] = useState(true);
+  const [currentLocation, setCurrentLocation] = useState<any>(() => {
+    const w = getWarmedLocation();
+    return w ? { lat: w.lat, lng: w.lng, address: SAFE_PICKUP_FALLBACK } : null;
+  });
+  const [gpsStatus, setGpsStatus] = useState<'detecting' | 'locked' | 'error'>(() =>
+    getWarmedLocation() ? 'locked' : 'detecting',
+  );
+  const [pickupDetecting, setPickupDetecting] = useState(() => !getWarmedLocation());
   /** Once the rider picks a pickup manually, background GPS must never overwrite it. */
   const manualPickupRef = useRef(false);
   /** Instant Pickup Detection Engine — continuous resolve + cache. */
@@ -325,8 +341,18 @@ function BookInDriveStyle() {
   const [showVehicleModal, setShowVehicleModal] = useState(false);
   /** Bolt Route screen — open until dropoff is confirmed by suggestion tap. */
   const [routeSearchOpen, setRouteSearchOpen] = useState(true);
+  const routeSearchOpenRef = useRef(true);
+  routeSearchOpenRef.current = routeSearchOpen;
   const [routeSearchFocus, setRouteSearchFocus] = useState<RouteField>('dropoff');
   const [showStopField, setShowStopField] = useState(false);
+
+  const routeSearchOrigin = useMemo(() => {
+    const lat = Number(pickupCoords?.lat ?? currentLocation?.lat);
+    const lng = Number(pickupCoords?.lng ?? currentLocation?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (Math.abs(lat) < 1e-5 && Math.abs(lng) < 1e-5) return null;
+    return { lat, lng };
+  }, [pickupCoords?.lat, pickupCoords?.lng, currentLocation?.lat, currentLocation?.lng]);
 
   /** Active trip lives on tracking — block overlapping book UI. */
   useFocusEffect(
@@ -643,15 +669,15 @@ function BookInDriveStyle() {
         const details = await fetchPlaceDetails(sel.placeId, sel.sessionToken);
         if (details && Number.isFinite(details.lat) && Number.isFinite(details.lng)) {
           coords = { lat: details.lat, lng: details.lng };
-          if (details.description) desc = details.description;
+          desc = preferReadableAddress(desc, details.description);
         }
       }
-      // Last resort only for free-text / recent rows without place_id or coords.
-      if (!coords && !sel.placeId && desc.length >= 3) {
+      // Truncated Google session ids (Ei…) 404 Place Details — geocode the label.
+      if (!coords && desc.length >= 3) {
         const resolved = await resolveAddressToCoords(desc);
         if (resolved) {
           coords = { lat: resolved.lat, lng: resolved.lng };
-          desc = String(resolved.address || desc).trim() || desc;
+          desc = preferReadableAddress(desc, resolved.address);
         }
       }
       if (!coords) {
@@ -1019,6 +1045,12 @@ function BookInDriveStyle() {
         if (!mounted || manualPickupRef.current) return;
         setPickupCoords({ lat: state.lat, lng: state.lng });
         setCurrentLocation({ lat: state.lat, lng: state.lng, address: state.label });
+        // Route search is the first screen — never overwrite the field the rider is typing.
+        if (routeSearchOpenRef.current) {
+          setPickupDetecting(false);
+          if (!state.detecting) setGpsStatus('locked');
+          return;
+        }
         // Engine never sets detecting=true once a last-known/GPS fix exists.
         setPickup(
           state.detecting
@@ -1086,8 +1118,15 @@ function BookInDriveStyle() {
           }
         }
 
-        // Paint from warm / last-known BEFORE any Detecting… spinner.
-        const quick = await peekQuickLocation();
+        // Paint from sync last-known BEFORE any Detecting… spinner or GPS.
+        let quick = getWarmedLocation();
+        if (!quick) {
+          await hydrateLocationPersist();
+          quick = getWarmedLocation();
+        }
+        if (!quick) {
+          quick = await peekQuickLocation();
+        }
         if (quick && mounted) {
           setPickupCoords({ lat: quick.lat, lng: quick.lng });
           setCurrentLocation({
@@ -1095,12 +1134,28 @@ function BookInDriveStyle() {
             lng: quick.lng,
             address: SAFE_PICKUP_FALLBACK,
           });
-          setPickup(SAFE_PICKUP_FALLBACK);
+          setPickup((prev) => {
+            if (manualPickupRef.current) return prev;
+            if (
+              routeSearchOpenRef.current &&
+              prev.trim() &&
+              prev !== SAFE_PICKUP_FALLBACK &&
+              !isDetectingPickupLabel(prev)
+            ) {
+              return prev;
+            }
+            return SAFE_PICKUP_FALLBACK;
+          });
           setPickupDetecting(false);
           setGpsStatus('locked');
           engine.onGpsFix(quick.lat, quick.lng, { final: false });
         } else if (mounted) {
-          setPickup(DETECTING_PICKUP);
+          setPickup((prev) =>
+            manualPickupRef.current ||
+            (routeSearchOpenRef.current && prev.trim() && !isDetectingPickupLabel(prev))
+              ? prev
+              : DETECTING_PICKUP,
+          );
           setPickupDetecting(true);
         }
 
@@ -1179,7 +1234,15 @@ function BookInDriveStyle() {
           const resolved = await resolveInstantPickup(pickupCoords.lat, pickupCoords.lng, {
             forceNetwork: true,
           });
-          if (cancelled) return;
+          if (cancelled || manualPickupRef.current) return;
+          if (
+            routeSearchOpenRef.current &&
+            pickup.trim() &&
+            pickup !== SAFE_PICKUP_FALLBACK &&
+            !isDetectingPickupLabel(pickup)
+          ) {
+            return;
+          }
           setPickup(safePickupDisplay(resolved.label));
           setPickupDetecting(false);
           setCurrentLocation((prev: { lat: number; lng: number; address: string } | null) =>
@@ -1591,6 +1654,13 @@ function BookInDriveStyle() {
         inferCity(pickup, destination) ||
         'default';
 
+      const cacheKey = fareMatrixCacheKey(pLat, pLng, dLat, dLng, city);
+      const cached = getCachedFareMatrix(cacheKey);
+      if (cached && Object.keys(cached.matrix).length) {
+        setFareMatrix(cached.matrix);
+        setFareMatrixOriginal(cached.original);
+      }
+
       const results = await Promise.all(
         availableVehicles.map(async (vehicle) => {
           try {
@@ -1631,6 +1701,7 @@ function BookInDriveStyle() {
       }
       setFareMatrix(nextMatrix);
       setFareMatrixOriginal(nextOrig);
+      setCachedFareMatrix(cacheKey, { matrix: nextMatrix, original: nextOrig });
 
       let veh = selectedVehicle;
       if (!veh && (nextMatrix['economy'] ?? 0) > 0) {
@@ -1855,6 +1926,24 @@ function BookInDriveStyle() {
       setOptimizedRoute(null);
       return;
     }
+    const city =
+      inferCityFromCoords(pickupCoords.lat, pickupCoords.lng) ||
+      inferCityFromCoords(destinationCoords.lat, destinationCoords.lng) ||
+      inferCity(pickup, destination) ||
+      'default';
+    const cached = getCachedFareMatrix(
+      fareMatrixCacheKey(
+        pickupCoords.lat,
+        pickupCoords.lng,
+        destinationCoords.lat,
+        destinationCoords.lng,
+        city,
+      ),
+    );
+    if (cached && Object.keys(cached.matrix).length) {
+      setFareMatrix(cached.matrix);
+      setFareMatrixOriginal(cached.original);
+    }
     const run = async () => {
       try {
         await calculateAllVehiclePrices();
@@ -1862,7 +1951,7 @@ function BookInDriveStyle() {
         /* fare matrix best-effort */
       }
     };
-    const timer = setTimeout(run, 400);
+    const timer = setTimeout(run, cached ? 0 : 400);
     return () => {
       clearTimeout(timer);
     };
@@ -2344,12 +2433,7 @@ function BookInDriveStyle() {
           dropoffLabel={destination}
           stopLabel={stop}
           showStop={showStopField || Boolean(stop?.trim())}
-          origin={
-            pickupCoords ||
-            (currentLocation && Number.isFinite(currentLocation.lat)
-              ? { lat: currentLocation.lat, lng: currentLocation.lng }
-              : null)
-          }
+          origin={routeSearchOrigin}
           initialFocus={routeSearchFocus}
           onClose={() => {
             if (destinationCoords && destination?.trim()) {
@@ -2374,9 +2458,16 @@ function BookInDriveStyle() {
             setRouteSearchFocus('stop');
           }}
           onPickupChangeText={(t) => {
-            setPickup(t);
-            // Typing over a selected pickup clears the pin until a new suggestion is chosen.
-            if (pickupCoords) setPickupCoords(null);
+            const next = String(t || '');
+            if (
+              next.trim() &&
+              next.trim() !== SAFE_PICKUP_FALLBACK &&
+              !isDetectingPickupLabel(next)
+            ) {
+              manualPickupRef.current = true;
+            }
+            setPickup(next);
+            // Keep last GPS pin for search bias; pin is replaced when a suggestion is chosen.
           }}
           onDropoffChangeText={(t) => {
             setDestination(t);
@@ -3570,7 +3661,7 @@ function BookInDriveStyle() {
                     const details = await fetchPlaceDetails(placeId, loc.sessionToken);
                     if (details && Number.isFinite(details.lat) && Number.isFinite(details.lng)) {
                       coords = { lat: details.lat, lng: details.lng };
-                      if (details.description) desc = details.description;
+                      desc = preferReadableAddress(desc, details.description);
                     }
                   }
 
@@ -3578,7 +3669,7 @@ function BookInDriveStyle() {
                     const resolved = await resolveAddressToCoords(desc);
                     if (resolved && Number.isFinite(resolved.lat) && Number.isFinite(resolved.lng)) {
                       coords = { lat: resolved.lat, lng: resolved.lng };
-                      desc = String(resolved.address || desc).trim() || desc;
+                      desc = preferReadableAddress(desc, resolved.address);
                     }
                   }
 

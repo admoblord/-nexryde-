@@ -774,6 +774,23 @@ async def apply_driver_online_toggle(
     return await toggle_driver_online(user_id=driver_id, is_online=is_online, request=request, lat=lat, lng=lng)
 
 
+async def _invalidate_driver_profile_cache(user_id: str) -> None:
+    """
+    Drop the cached driver profile after an online/offline write.
+
+    GET /drivers/{id}/profile is served from a 5-minute hot cache. Without this
+    the endpoint keeps reporting the previous state for up to five minutes, so a
+    driver who taps Go Online can be told they are still offline. Best-effort:
+    a cache that will not clear must never fail the toggle itself.
+    """
+    try:
+        from hot_cache import invalidate_driver_hot_cache
+
+        await invalidate_driver_hot_cache(user_id)
+    except Exception as cache_error:
+        logger.warning("Driver hot-cache invalidation failed for %s: %s", user_id, cache_error)
+
+
 async def toggle_driver_online(user_id: str, is_online: bool, request: Request, *, lat: float = 0.0, lng: float = 0.0):
     verify_owner_strict(request, user_id)
     from driver_presence import (
@@ -807,6 +824,7 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
                     }
                 },
             )
+            await _invalidate_driver_profile_cache(user_id)
             return {"message": "Driver is now online", "already_online": True}
 
         # Lean projection — never pull bloated profile blobs on this hot path.
@@ -933,6 +951,7 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
                 {"id": user_id},
                 {"$set": {"subscription_active": False}},
             )
+            await _invalidate_driver_profile_cache(user_id)
             if subscription and subscription.get("status") == "pending_payment":
                 raise HTTPException(
                     status_code=403,
@@ -982,6 +1001,7 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
                 {"id": user_id},
                 {"$set": {"subscription_active": False, "subscription_expiry": expiry}},
             )
+            await _invalidate_driver_profile_cache(user_id)
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -999,6 +1019,7 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
             {"id": user_id},
             {"$set": {"subscription_active": True, "subscription_expiry": expiry}},
         )
+        await _invalidate_driver_profile_cache(user_id)
 
         if profile.get("hours_driven_today", 0) >= 10:
             raise HTTPException(status_code=403, detail="You've been driving for over 10 hours. Please take a break for safety.")
@@ -1027,6 +1048,7 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
                     {"user_id": user_id},
                     {"$set": {"is_online": False}},
                 )
+                await _invalidate_driver_profile_cache(user_id)
                 return {"message": "Driver is now offline", "already_offline": True}
 
     profile_online_update: dict = {"$set": {"is_online": is_online}}
@@ -1055,6 +1077,7 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
         except Exception:
             pass
         await db.driver_profiles.update_one({"user_id": user_id}, profile_online_update)
+        await _invalidate_driver_profile_cache(user_id)
         # Surge sync is best-effort — never block go-online on demand scans.
         try:
             import asyncio
@@ -1091,6 +1114,7 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request, 
         except Exception:
             pass
         await db.driver_profiles.update_one({"user_id": user_id}, profile_online_update)
+        await _invalidate_driver_profile_cache(user_id)
 
     return {"message": f"Driver is now {'online' if is_online else 'offline'}"}
 

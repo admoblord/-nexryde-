@@ -15,7 +15,6 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useThemeColors } from '@/src/constants/theme';
 import { bootstrapThemeFromStorage, persistThemePreference } from '@/src/theme/appearanceTheme';
 import { ErrorBoundary } from '@/src/components/ErrorBoundary';
-import { OfflineBanner } from '@/src/components/OfflineBanner';
 import { RiderSessionEffects } from '@/src/components/rider/RiderSessionEffects';
 import { LanguageProvider } from '@/src/i18n/LanguageContext';
 import { ErrorToastProvider } from '@/src/components/shared/ErrorToast';
@@ -146,6 +145,9 @@ function RootLayout() {
   useEffect(() => {
     if (Platform.OS !== 'web') {
       warmBackendConnection(true);
+      void import('@/src/services/locationWarm').then((m) => {
+        void m.hydrateLocationPersist();
+      });
       // Register background GPS task after React mounts (still before driver goes online).
       void import('@/src/tasks/backgroundLocationTask').catch((err) => {
         console.warn('[startup] backgroundLocationTask registration failed:', err);
@@ -291,7 +293,6 @@ function RootLayout() {
               <LanguageProvider>
                 <ErrorToastProvider>
                 <StatusBar style={isDark ? 'light' : 'dark'} />
-                <OfflineBanner />
                 <RiderSessionEffects />
                 <Stack
                   screenOptions={{

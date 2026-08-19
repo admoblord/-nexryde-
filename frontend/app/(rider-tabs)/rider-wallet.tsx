@@ -45,6 +45,8 @@ import {
   getAuthHeaders,
 } from '@/src/services/api';
 import { tabCacheGet, tabCacheSet } from '@/src/services/tabDataCache';
+import { queryClient } from '@/src/providers/QueryProvider';
+import { qk } from '@/src/services/queryKeys';
 import {
   saveWalletCheckoutSession,
   loadWalletCheckoutSession,
@@ -106,7 +108,11 @@ export default function RiderWalletScreen() {
 
   const walletCacheKey = uid ? `rider-wallet:${uid}` : '';
   const walletCached = uid
-    ? tabCacheGet<{ balance: number; txs: Record<string, unknown>[] }>(`rider-wallet:${uid}`)
+    ? tabCacheGet<{ balance: number; txs: Record<string, unknown>[] }>(`rider-wallet:${uid}`) ??
+      queryClient.getQueryData<{ balance: number; txs: Record<string, unknown>[] }>(
+        qk.riderWallet(uid),
+      ) ??
+      null
     : null;
   const [balance, setBalance] = useState(() => Number(walletCached?.balance ?? 0));
   const [promoCreditBalance, setPromoCreditBalance] = useState(0);

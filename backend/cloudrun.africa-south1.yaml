@@ -21,6 +21,7 @@ spec:
       annotations:
         # Keep one warm instance + always-allocated CPU so tab switches /
         # reverse-geocode never pay a cold start or CPU-thaw delay after idle.
+        # Timer work is POST /api/ops/maintenance-tick (async) plus in-process loops.
         autoscaling.knative.dev/minScale: "1"
         autoscaling.knative.dev/maxScale: "10"
         run.googleapis.com/startup-cpu-boost: "true"
@@ -135,8 +136,17 @@ spec:
               value: "1"
             - name: WORK_ZONE_EARLY_ACCESS_EMAILS
               value: "loopy9ice@gmail.com,timothy_okunola@yahoo.com"
+            # Off until the send path is batched. The old 25k-user gather froze
+            # the event loop, Cloud Run killed the instance, and Route search
+            # showed "No places found". Re-enable after ENGAGEMENT_SCAN_LIMIT.
             - name: ENGAGEMENT_LOOP_ENABLED
-              value: "true"
+              value: "false"
+            - name: ENGAGEMENT_SCAN_LIMIT
+              value: "400"
+            - name: ENGAGEMENT_SEND_CONCURRENCY
+              value: "8"
+            - name: ENGAGEMENT_BATCH_SIZE
+              value: "50"
             - name: ENGAGEMENT_MAX_PER_DAY
               value: "2"
             - name: ENGAGEMENT_MIN_HOURS_BETWEEN
@@ -229,6 +239,7 @@ spec:
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 30
+            timeoutSeconds: 5
             failureThreshold: 3
 
           readinessProbe:
@@ -236,6 +247,7 @@ spec:
               path: /api/health/ready
               port: 8080
             periodSeconds: 30
+            timeoutSeconds: 8
             failureThreshold: 3
 
           startupProbe:
@@ -244,6 +256,7 @@ spec:
               port: 8080
             initialDelaySeconds: 10
             periodSeconds: 5
+            timeoutSeconds: 5
             failureThreshold: 12
 
       volumes:

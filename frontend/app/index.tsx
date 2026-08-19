@@ -197,6 +197,9 @@ export default function SplashScreen() {
 
           setUser(userData);
           setIsAuthenticated(true);
+          void import('@/src/services/prefetchTabData').then(({ warmSessionData }) => {
+            warmSessionData(userData.role, userData.id);
+          });
           void setTokens(userData.token || '', userData.refresh_token);
           void warmTokenCache();
 

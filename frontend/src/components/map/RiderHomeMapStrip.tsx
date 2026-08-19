@@ -12,13 +12,18 @@ import {
 import MapView, { Circle, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 import { getNexrydeMapStyleAuto, MAP_3D, isLocalMapNight } from '@/src/constants/nexrydeMap3d';
 import { BRAND } from '@/src/constants/designSystem';
 import { getAvailableDrivers } from '@/src/services/api';
 import { MapAnimatedTaxiMarker } from '@/src/components/map/MapAnimatedTaxiMarker';
 import { clusterMapMarkers } from '@/src/utils/mapMarkerCluster';
 import { MapClusterMarker } from '@/src/components/map/MapClusterMarker';
+import {
+  getWarmedLocation,
+  lastKnownLatLng,
+  shouldAcceptGpsUpdate,
+  subscribeWarmedLocation,
+} from '@/src/services/locationWarm';
 
 const LAGOS = { latitude: 6.5244, longitude: 3.3792 };
 
@@ -37,8 +42,8 @@ type Props = {
 
 export function RiderHomeMapStrip({ height = 260, onPress }: Props) {
   const mapRef = useRef<MapView>(null);
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [locating, setLocating] = useState(true);
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(lastKnownLatLng);
+  const [locating, setLocating] = useState(() => !getWarmedLocation());
   const [drivers, setDrivers] = useState<NearbyDriver[]>([]);
   const [trafficOn, setTrafficOn] = useState(false);
   const mapNight = isLocalMapNight();
@@ -62,48 +67,29 @@ export function RiderHomeMapStrip({ height = 260, onPress }: Props) {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        // Prefer warmed / last-known so the home map never waits on a cold GPS fix.
-        const { peekQuickLocation } = await import('@/src/services/locationWarm');
-        const quick = await peekQuickLocation();
-        if (!cancelled && quick) {
-          setCoords({ lat: quick.lat, lng: quick.lng });
-          applyCamera(quick.lat, quick.lng);
-          setLocating(false);
-        }
-
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
-          if (!cancelled) setLocating(false);
-          return;
-        }
-        const pos = await Promise.race([
-          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
-        ]);
-        if (cancelled || !pos) {
-          if (!cancelled) setLocating(false);
-          return;
-        }
-        const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        if (
-          Number.isFinite(next.lat) &&
-          Number.isFinite(next.lng) &&
-          !(Math.abs(next.lat) < 1e-5 && Math.abs(next.lng) < 1e-5)
-        ) {
-          setCoords(next);
+    // First frame is already last-known (useState). Subscribe for persist hydrate
+    // + background GPS from warmLocationOnLaunch — never await getCurrentPosition here.
+    const unsub = subscribeWarmedLocation((loc) => {
+      if (!loc) return;
+      setCoords((prev) => {
+        const next = { lat: loc.lat, lng: loc.lng };
+        if (!prev || shouldAcceptGpsUpdate(prev, next)) {
           applyCamera(next.lat, next.lng);
+          return next;
         }
-      } catch {
-        /* Lagos fallback */
-      } finally {
-        if (!cancelled) setLocating(false);
-      }
-    })();
+        return prev;
+      });
+      setLocating(false);
+    });
+    const seeded = getWarmedLocation();
+    if (seeded) {
+      applyCamera(seeded.lat, seeded.lng);
+      setLocating(false);
+    }
+    const failsafe = setTimeout(() => setLocating(false), 8000);
     return () => {
-      cancelled = true;
+      unsub();
+      clearTimeout(failsafe);
     };
   }, [applyCamera]);
 

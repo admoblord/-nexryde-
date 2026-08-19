@@ -1016,6 +1016,31 @@ async def _verify_squad_transaction(reference: str) -> dict:
     }
 
 
+def _classify_squad_verify_failure(verify_result: dict) -> tuple[str, str]:
+    """
+    Turn an unverified Squad result into (reason_code, transaction_status).
+
+    _verify_squad_transaction reports Squad's state as ``provider_status``.
+    Reading ``transaction_status`` instead made every unpaid transaction look
+    like "gateway_failed", so a driver waiting on their bank OTP was told the
+    gateway had failed and could pay a second time.
+    """
+    reason_txt = str((verify_result or {}).get("reason") or "").lower()
+    tx_status = str(
+        (verify_result or {}).get("provider_status")
+        or (verify_result or {}).get("transaction_status")
+        or ""
+    ).strip().lower()
+
+    if tx_status in ("pending", "processing", "in_progress"):
+        return "payment_pending", tx_status
+    if tx_status in ("failed", "declined", "reversed", "abandoned", "cancelled", "canceled"):
+        return "payment_failed", tx_status
+    if "timeout" in reason_txt or "connect" in reason_txt or "request failed" in reason_txt:
+        return "network_timeout", tx_status
+    return "gateway_failed", tx_status
+
+
 async def _read_driver_subscription_flags(driver_id: str) -> dict:
     """Read-only subscription flags for GET endpoints — no writes on read."""
     user = await find_user_by_id(
@@ -1959,16 +1984,7 @@ async def verify_pending_subscription_checkout(
     logger.info("sub_verify_squad_result: driver=%s ref=%s verified=%s reason=%s",
                 driver_id, ref, verify_result.get("verified"), verify_result.get("reason"))
     if not verify_result.get("verified"):
-        reason_txt = str(verify_result.get("reason") or "").lower()
-        tx_status = str(verify_result.get("transaction_status") or "").lower()
-        if "timeout" in reason_txt or "connect" in reason_txt:
-            reason_code = "network_timeout"
-        elif tx_status in ("pending", "processing"):
-            reason_code = "payment_pending"
-        elif tx_status in ("failed", "declined", "reversed"):
-            reason_code = "payment_failed"
-        else:
-            reason_code = "gateway_failed"
+        reason_code, tx_status = _classify_squad_verify_failure(verify_result)
         logger.info(
             "sub_verify_not_verified: driver=%s ref=%s reason=%s tx_status=%s",
             driver_id, ref, reason_code, tx_status,

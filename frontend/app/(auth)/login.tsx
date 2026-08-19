@@ -165,6 +165,9 @@ export default function LoginScreen() {
         await setTokens(resolvedToken, resolvedRefreshToken);
         setUser(data.user as User);
         setIsAuthenticated(true);
+        void import('@/src/services/prefetchTabData').then(({ warmSessionData }) => {
+          warmSessionData((data.user as User).role, (data.user as User).id);
+        });
         await saveUserSession({
           ...(data.user as User),
           token: resolvedToken,

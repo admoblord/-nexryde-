@@ -233,6 +233,43 @@ async def _set_cache(key: str, response: dict, ttl_seconds: int) -> None:
     except Exception:
         pass  # best-effort persistence — Redis hit is sufficient
 
+
+# A good answer stays usable long after it stops being fresh. Google outages,
+# Cloud Run cold starts and Lagos network blips used to turn a 300 s expiry into
+# "No places found"; the stale copy is what the rider sees instead.
+STALE_TTL_SECONDS = 86400 * 30
+
+# Background writes are held here so the event loop cannot garbage-collect a
+# task mid-flight (asyncio only keeps weak references to running tasks).
+_stale_writes: set = set()
+
+
+async def _set_stale_cache(key: str, response: dict) -> None:
+    """
+    Long-lived last-good copy, written alongside every successful lookup.
+
+    Fire-and-forget: the rider already has their suggestions, so this must not
+    add a Redis + Mongo round trip to the response they are waiting on.
+    """
+    if not (response or {}).get("predictions"):
+        return
+    import asyncio
+
+    task = asyncio.create_task(_set_cache(f"stale:{key}", response, ttl_seconds=STALE_TTL_SECONDS))
+    _stale_writes.add(task)
+    task.add_done_callback(_stale_writes.discard)
+
+
+async def _get_stale_cache(key: str) -> "dict | None":
+    """Last-good answer for this exact query, regardless of freshness."""
+    doc = await _get_cache(f"stale:{key}")
+    if not doc:
+        return None
+    response = doc.get("response") if isinstance(doc, dict) else None
+    if isinstance(response, dict) and response.get("predictions"):
+        return response
+    return None
+
 class PlacePrediction(BaseModel):
     place_id: str
     description: str
@@ -247,6 +284,10 @@ class PlaceDetails(BaseModel):
     latitude: float
     longitude: float
     address: str
+
+
+# Too coarse to be anyone's pickup or dropoff.
+_TOO_COARSE_GEOCODE_TYPES = {"country", "continent", "administrative_area_level_1"}
 
 
 async def _geocode_search_fallback_predictions(input_text: str, components: str) -> Optional[dict]:
@@ -276,17 +317,24 @@ async def _geocode_search_fallback_predictions(input_text: str, components: str)
         formatted = str(r.get("formatted_address") or "").strip()
         if not formatted:
             continue
+        # Geocoding answers a typo with the country itself. "Nigeria" pins the
+        # trip at 9.08, 8.68 — the middle of the country, hundreds of km from
+        # the rider. Showing nothing is far safer than that.
+        if set(r.get("types") or []) & _TOO_COARSE_GEOCODE_TYPES:
+            continue
         parts = [p.strip() for p in formatted.split(",") if p.strip()]
         main = parts[0] if parts else formatted
         secondary = ", ".join(parts[1:]) if len(parts) > 1 else ""
-        predictions.append(
-            {
-                "place_id": pid or f"geocode-result-{idx}",
-                "description": formatted,
-                "main_text": main,
-                "secondary_text": secondary,
-            }
-        )
+        row = {
+            "place_id": pid or f"geocode-result-{idx}",
+            "description": formatted,
+            "main_text": main,
+            "secondary_text": secondary,
+        }
+        # A fallback suggestion that shares nothing with what was typed is noise.
+        if not _predictions_match_typed_query([row], raw):
+            continue
+        predictions.append(row)
     if not predictions:
         return None
     return {"predictions": predictions, "status": "OK"}
@@ -317,25 +365,160 @@ _LAGOS_LANDMARKS: list[dict] = [
 
 
 def _local_landmark_predictions(input_text: str) -> list[dict]:
+    """Match the landmark name, not a generic token like 'Lagos' or 'Island'."""
     q = (input_text or "").strip().lower()
     if len(q) < 3:
         return []
+    tokens = [t for t in q.split() if len(t) >= 3]
     out = []
     for row in _LAGOS_LANDMARKS:
+        main = str(row["main_text"]).lower()
         hay = f"{row['main_text']} {row['description']}".lower()
-        if q in hay or any(tok and tok in hay for tok in q.split()):
-            out.append(
-                {
-                    "place_id": row["place_id"],
-                    "description": row["description"],
-                    "main_text": row["main_text"],
-                    "secondary_text": row["secondary_text"],
-                    "lat": row["lat"],
-                    "lng": row["lng"],
-                    "source": "local_landmark",
-                }
-            )
+        name_hit = q == main or main.startswith(q) or q in main
+        multi_hit = len(tokens) >= 2 and all(t in hay for t in tokens)
+        if not (name_hit or multi_hit):
+            continue
+        out.append(
+            {
+                "place_id": row["place_id"],
+                "description": row["description"],
+                "main_text": row["main_text"],
+                "secondary_text": row["secondary_text"],
+                "lat": row["lat"],
+                "lng": row["lng"],
+                "source": "local_landmark",
+            }
+        )
     return out[:5]
+
+
+def _merge_place_predictions(*groups: list[dict]) -> list[dict]:
+    """Dedup by place_id / description. First group wins (Google rank first)."""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for group in groups:
+        for row in group or []:
+            pid = str(row.get("place_id") or "").strip().lower()
+            desc = str(row.get("description") or row.get("main_text") or "").strip().lower()
+            key = pid or desc
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            if desc:
+                seen.add(desc)
+            out.append(row)
+    return out[:12]
+
+
+def _autocomplete_google_has_rows(data: Optional[dict]) -> bool:
+    return bool(data and data.get("status") == "OK" and data.get("predictions"))
+
+
+def _typed_query_tokens(input_text: str) -> list[str]:
+    return [t for t in re.split(r"[^a-z0-9]+", (input_text or "").lower()) if len(t) >= 3]
+
+
+def _predictions_match_typed_query(predictions: list[dict], input_text: str) -> bool:
+    """True when at least one row mentions a typed token (Peace / garden / Estate)."""
+    tokens = _typed_query_tokens(input_text)
+    if not tokens:
+        return bool(predictions)
+    for row in predictions or []:
+        hay = f"{row.get('description', '')} {row.get('main_text', '')} {row.get('secondary_text', '')}".lower()
+        if any(t in hay for t in tokens):
+            return True
+    return False
+
+
+def _google_autocomplete_url(
+    input_text: str,
+    *,
+    components: Optional[str],
+    location_bias: Optional[str],
+    radius: Optional[int],
+    session: str,
+    include_bias: bool,
+) -> str:
+    location_params = f"&components={components}" if components else ""
+    if include_bias and location_bias and radius:
+        location_params += f"&location={location_bias}&radius={radius}"
+    session_param = f"&sessiontoken={quote(session)}" if session else ""
+    return (
+        f"https://maps.googleapis.com/maps/api/place/autocomplete/json"
+        f"?input={quote(input_text)}{location_params}{session_param}&key={GOOGLE_MAPS_API_KEY}"
+    )
+
+
+def _autocomplete_google_reached(data: Optional[dict]) -> bool:
+    """False only when Google never answered (timeout, DNS, circuit breaker)."""
+    return data is not None
+
+
+async def _google_autocomplete_once(url: str) -> Optional[dict]:
+    """One Google call that reports failure instead of raising."""
+    try:
+        client = get_http_client()
+        response = await client.get(url, timeout=10.0)
+        return response.json()
+    except Exception as exc:
+        print(f"places.autocomplete google call failed: {exc}")
+        return None
+
+
+async def _google_autocomplete_data(
+    input_text: str,
+    *,
+    components: Optional[str],
+    location_bias: Optional[str],
+    radius: Optional[int],
+    session: str,
+) -> tuple[Optional[dict], bool]:
+    """
+    Biased Google Autocomplete, retried unbiased when the bias buries the answer.
+
+    A far or stale GPS pin used to hide a real Lagos estate behind "nearby only"
+    results, so a biased miss is never the final word. Returns the chosen payload
+    and whether the unbiased retry already ran, so the app does not repeat it.
+    """
+    def build(include_bias: bool) -> str:
+        return _google_autocomplete_url(
+            input_text,
+            components=components,
+            location_bias=location_bias,
+            radius=radius,
+            session=session,
+            include_bias=include_bias,
+        )
+
+    biased = await _google_autocomplete_once(build(True))
+    if not location_bias:
+        return biased, False
+
+    rows = _normalize_google_autocomplete_predictions(biased or {})
+    if _autocomplete_google_has_rows(biased) and _predictions_match_typed_query(rows, input_text):
+        return biased, False
+
+    unbiased = await _google_autocomplete_once(build(False))
+    if _autocomplete_google_has_rows(unbiased):
+        # Only trade nearby results away for something that actually matches
+        # what the rider typed.
+        unbiased_rows = _normalize_google_autocomplete_predictions(unbiased)
+        if not rows or _predictions_match_typed_query(unbiased_rows, input_text):
+            return unbiased, True
+    return (biased, True) if _autocomplete_google_reached(biased) else (unbiased, True)
+
+
+def _normalize_google_autocomplete_predictions(data: dict) -> list[dict]:
+    predictions = []
+    for pred in data.get("predictions") or []:
+        formatting = pred.get("structured_formatting") or {}
+        predictions.append({
+            "place_id": pred.get("place_id", ""),
+            "description": pred.get("description", ""),
+            "main_text": formatting.get("main_text", pred.get("description", "")),
+            "secondary_text": formatting.get("secondary_text", ""),
+        })
+    return predictions
 
 
 @places_router.get("/autocomplete")
@@ -352,6 +535,7 @@ async def autocomplete_places(
     Searches for places and returns predictions.
 
     Pass ``sessiontoken`` from the client so autocomplete + place details bill as one session.
+    Session tokens must never disable Redis — the app sends one on every keystroke.
     """
     await _require_places_auth(request)
     if not GOOGLE_MAPS_API_KEY:
@@ -360,67 +544,53 @@ async def autocomplete_places(
     if len(input) < 3:
         return {"predictions": [], "status": "OK"}
 
+    # Landmarks are a boost only — never replace Google. Token-OR matching used
+    # to return "Landmark Beach" for any query containing "Island" / "Lagos".
     local_hits = _local_landmark_predictions(input)
-    if local_hits:
-        return {"predictions": local_hits, "status": "OK", "cache": "local_landmark"}
 
     import time as _time
     t0 = _time.perf_counter()
-    
+
+    session = (sessiontoken or "").strip()
+    # Cache even when sessiontoken is present. Skipping cache made every
+    # pickup/destination keystroke a cold Google call (timeout → empty list).
+    key = _cache_key("autocomplete_v2", {
+        "input": input.strip().lower(),
+        "location_bias": location_bias,
+        "radius": radius,
+        "components": components,
+    })
+
     try:
         await _ensure_places_cache_indexes()
-        session = (sessiontoken or "").strip()
-        use_cache = not session
-        if use_cache:
-            key = _cache_key("autocomplete", {
-                "input": input.strip().lower(),
-                "location_bias": location_bias,
-                "radius": radius,
-                "components": components,
-            })
-            cached = await _get_cache(key)
-            if cached:
-                try:
-                    from realtime_platform.observability import observe_ms, incr
-                    observe_ms("places.autocomplete_ms", (_time.perf_counter() - t0) * 1000, cache="hit")
-                    incr("places.autocomplete_cache_hit")
-                except Exception:
-                    pass
-                return cached["response"]
+        cached = await _get_cache(key)
+        if cached:
+            try:
+                from realtime_platform.observability import observe_ms, incr
+                observe_ms("places.autocomplete_ms", (_time.perf_counter() - t0) * 1000, cache="hit")
+                incr("places.autocomplete_cache_hit")
+            except Exception:
+                pass
+            return cached["response"]
 
-        # Build location bias parameter
-        location_params = f"&components={components}" if components else ""
-        if location_bias and radius:
-            location_params += f"&location={location_bias}&radius={radius}"
-
-        safe_in = quote(input)
-        session_param = f"&sessiontoken={quote(session)}" if session else ""
-        url = (
-            f"https://maps.googleapis.com/maps/api/place/autocomplete/json"
-            f"?input={safe_in}{location_params}{session_param}&key={GOOGLE_MAPS_API_KEY}"
+        data, unbiased_retried = await _google_autocomplete_data(
+            input,
+            components=components,
+            location_bias=location_bias,
+            radius=radius,
+            session=session,
         )
 
-        client = get_http_client()
-        response = await client.get(url, timeout=10.0)
-        data = response.json()
-
-        if data.get("status") == "OK" and data.get("predictions"):
-            predictions = []
-            for pred in data.get("predictions", []):
-                formatting = pred.get("structured_formatting", {})
-                predictions.append({
-                    "place_id": pred.get("place_id", ""),
-                    "description": pred.get("description", ""),
-                    "main_text": formatting.get("main_text", pred.get("description", "")),
-                    "secondary_text": formatting.get("secondary_text", ""),
-                })
-
+        if _autocomplete_google_has_rows(data):
+            predictions = _normalize_google_autocomplete_predictions(data)
+            merged = _merge_place_predictions(predictions, local_hits)
             response_payload = {
-                "predictions": predictions,
+                "predictions": merged,
                 "status": "OK",
+                "bias_retried": unbiased_retried,
             }
-            if use_cache:
-                await _set_cache(key, response_payload, ttl_seconds=300)
+            await _set_cache(key, response_payload, ttl_seconds=300)
+            await _set_stale_cache(key, response_payload)
             try:
                 from realtime_platform.observability import observe_ms, incr
                 observe_ms("places.autocomplete_ms", (_time.perf_counter() - t0) * 1000, cache="miss")
@@ -431,28 +601,64 @@ async def autocomplete_places(
 
         fb = await _geocode_search_fallback_predictions(input, components or "country:ng")
         if fb:
-            if use_cache:
-                await _set_cache(key, fb, ttl_seconds=300)
+            fb_preds = _merge_place_predictions(fb.get("predictions") or [], local_hits)
+            fb = {**fb, "predictions": fb_preds, "status": "OK", "bias_retried": unbiased_retried}
+            await _set_cache(key, fb, ttl_seconds=300)
+            await _set_stale_cache(key, fb)
             return fb
 
-        if data.get("status") == "OK":
-            response_payload = {"predictions": [], "status": "OK"}
-            if use_cache:
-                await _set_cache(key, response_payload, ttl_seconds=120)
+        # Only Google itself saying "nothing matches" counts as an empty result.
+        # Timeouts, quota and key errors mean the rider gets the last good answer
+        # for this query instead of "No places found".
+        google_status = (data or {}).get("status") if _autocomplete_google_reached(data) else None
+        genuinely_empty = google_status in ("OK", "ZERO_RESULTS")
+
+        if not genuinely_empty:
+            stale = await _get_stale_cache(key)
+            if stale:
+                return {**stale, "status": "OK", "cache": "stale", "bias_retried": unbiased_retried}
+
+        if local_hits:
+            return {
+                "predictions": local_hits,
+                "status": "OK",
+                "cache": "local_landmark",
+                "bias_retried": unbiased_retried,
+            }
+
+        if genuinely_empty:
+            response_payload = {
+                "predictions": [],
+                "status": "OK",
+                "bias_retried": unbiased_retried,
+            }
+            await _set_cache(key, response_payload, ttl_seconds=60)
             return response_payload
 
-        response_payload = {
+        return {
             "predictions": [],
-            "status": data.get("status", "ERROR"),
-            "error_message": data.get("error_message", "Unknown error"),
+            "status": google_status or "UNAVAILABLE",
+            "error_message": (data or {}).get("error_message", "Address search temporarily unavailable"),
+            "bias_retried": unbiased_retried,
         }
-        if use_cache:
-            await _set_cache(key, response_payload, ttl_seconds=60)
-        return response_payload
-    
+
     except Exception as e:
+        # Autocomplete must never 500 — a crash here is what painted
+        # "No places found" over a working Google account.
         print(f"Error in autocomplete: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error fetching places: {str(e)}")
+        try:
+            stale = await _get_stale_cache(key)
+            if stale:
+                return {**stale, "status": "OK", "cache": "stale"}
+        except Exception:
+            pass
+        if local_hits:
+            return {"predictions": local_hits, "status": "OK", "cache": "local_landmark"}
+        return {
+            "predictions": [],
+            "status": "UNAVAILABLE",
+            "error_message": "Address search temporarily unavailable",
+        }
 
 
 
@@ -498,12 +704,10 @@ async def get_place_details(
     try:
         await _ensure_places_cache_indexes()
         session = (sessiontoken or "").strip()
-        use_cache = not session
-        if use_cache:
-            key = _cache_key("place_details", {"place_id": place_id})
-            cached = await _get_cache(key)
-            if cached:
-                return cached["response"]
+        key = _cache_key("place_details", {"place_id": place_id})
+        cached = await _get_cache(key)
+        if cached:
+            return cached["response"]
 
         session_param = f"&sessiontoken={quote(session)}" if session else ""
         url = (
@@ -523,8 +727,7 @@ async def get_place_details(
                 "address": result["formatted_address"],
                 "status": "OK"
             }
-            if use_cache:
-                await _set_cache(key, response_payload, ttl_seconds=86400 * 30)
+            await _set_cache(key, response_payload, ttl_seconds=86400 * 30)
             return response_payload
         else:
             raise HTTPException(

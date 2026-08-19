@@ -15,8 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { BACKEND_URL } from '@/src/services/api';
-import { authedFetch } from '@/src/utils/sessionRefresh';
+import { searchPlacesAutocomplete } from '@/src/services/placesSearch';
 import {
   loadIdleRouteSuggestions,
   mapPlacesPredictions,
@@ -89,12 +88,15 @@ export function BoltRouteSearch({
   const [idle, setIdle] = useState<RouteSuggestion[]>([]);
   const [places, setPlaces] = useState<RouteSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState<'auth' | 'network' | 'offline' | null>(null);
   const sessionRef = useRef<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reqIdRef = useRef(0);
+  const originRef = useRef(origin);
   const pickupRef = useRef<TextInput>(null);
   const dropoffRef = useRef<TextInput>(null);
   const stopRef = useRef<TextInput>(null);
+  originRef.current = origin;
 
   const activeQuery = useMemo(() => {
     if (focused === 'pickup') return pickupLabel;
@@ -130,36 +132,47 @@ export function BoltRouteSearch({
     async (input: string) => {
       const reqId = ++reqIdRef.current;
       setLoading(true);
+      setSearchError(null);
       try {
         const session = ensureSession();
-        let url = `${BACKEND_URL}/api/places/autocomplete?input=${encodeURIComponent(
-          input,
-        )}&components=country:ng&sessiontoken=${encodeURIComponent(session)}`;
-        if (origin && Number.isFinite(origin.lat) && Number.isFinite(origin.lng)) {
-          url += `&location_bias=${encodeURIComponent(`${origin.lat},${origin.lng}`)}&radius=45000`;
-        }
-        const res = await authedFetch(url, { method: 'GET', preserveSessionOn401: true });
-        const data = await res.json().catch(() => ({}));
+        const data = await searchPlacesAutocomplete(input, {
+          origin: originRef.current,
+          sessionToken: session,
+          countryCode: 'ng',
+        });
         if (reqId !== reqIdRef.current) return;
-        if (res.ok && data?.status === 'OK') {
-          setPlaces(
-            mapPlacesPredictions(
-              data.predictions || [],
-              input,
-              origin,
-              session,
-            ),
-          );
-        } else {
-          setPlaces([]);
+        const rows = mapPlacesPredictions(
+          data.predictions || [],
+          input,
+          originRef.current,
+          session,
+        );
+        if (rows.length) {
+          setPlaces(rows);
+          setSearchError(null);
+          return;
         }
+        if (data.httpStatus === 401) {
+          setSearchError('auth');
+          setPlaces([]);
+          return;
+        }
+        if (data.emptyConfirmed) {
+          // Backend reached Google and there is genuinely no such place.
+          setPlaces([]);
+          setSearchError(null);
+          return;
+        }
+        // Degraded response: keep the suggestions already on screen rather than
+        // replacing real addresses with an empty state.
+        setSearchError(data.offline ? 'offline' : 'network');
       } catch {
-        if (reqId === reqIdRef.current) setPlaces([]);
+        if (reqId === reqIdRef.current) setSearchError('offline');
       } finally {
         if (reqId === reqIdRef.current) setLoading(false);
       }
     },
-    [ensureSession, origin],
+    [ensureSession],
   );
 
   useEffect(() => {
@@ -353,11 +366,31 @@ export function BoltRouteSearch({
         style={styles.list}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
-          <Text style={styles.empty}>
-            {activeQuery.trim().length >= MIN_CHARS
-              ? 'No places found'
-              : 'Saved places and recent searches appear here'}
-          </Text>
+          <View style={styles.emptyWrap}>
+            <Text style={styles.empty}>
+              {loading
+                ? 'Searching addresses…'
+                : searchError === 'auth'
+                  ? 'Sign in again to search pickup and destination'
+                  : searchError === 'offline'
+                    ? 'No internet connection. Check your Wi-Fi or mobile data.'
+                    : searchError === 'network'
+                      ? 'Address search is busy right now.'
+                      : activeQuery.trim().length >= MIN_CHARS
+                        ? 'No places found'
+                        : 'Saved places and recent searches appear here'}
+            </Text>
+            {!loading && (searchError === 'offline' || searchError === 'network') ? (
+              <TouchableOpacity
+                style={styles.retryBtn}
+                onPress={() => void fetchPlaces(activeQuery.trim())}
+                accessibilityRole="button"
+              >
+                <Ionicons name="refresh" size={16} color={TEXT} />
+                <Text style={styles.retryText}>Try again</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         }
       />
     </SafeAreaView>
@@ -478,6 +511,20 @@ const styles = StyleSheet.create({
   sugSub: { fontSize: 13, color: MUTED, marginTop: 2 },
   sugDist: { fontSize: 13, color: MUTED, marginLeft: 8, fontWeight: '500' },
   empty: { textAlign: 'center', color: MUTED, marginTop: 32, paddingHorizontal: 24 },
+  emptyWrap: { alignItems: 'center' },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 22,
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  retryText: { fontSize: 15, fontWeight: '600', color: TEXT },
 });
 
 export default BoltRouteSearch;

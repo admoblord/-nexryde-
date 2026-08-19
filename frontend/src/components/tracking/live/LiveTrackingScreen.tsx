@@ -15,7 +15,6 @@ import {
   StyleSheet,
   StatusBar,
   TouchableOpacity,
-  InteractionManager,
   Alert,
   Platform,
   Animated,
@@ -499,8 +498,8 @@ export default function LiveTrackingScreen() {
       setMapMountReady(false);
       return;
     }
-    const task = InteractionManager.runAfterInteractions(() => setMapMountReady(true));
-    return () => task.cancel();
+    // Instant map: pickup is already known — mount this frame, not after interactions.
+    setMapMountReady(true);
   }, [canMountMap, pickupKey, mapRetryKey]);
 
   // Haptics on key phase transitions

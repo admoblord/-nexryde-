@@ -1920,14 +1920,23 @@ async def debug_test_crash(request: Request):
     )
 
 
+_MAINTENANCE_TICK_LOCK = asyncio.Lock()
+_MAINTENANCE_TICK_TIMEOUT_S = 45.0
+
+
 @api_router.post("/ops/maintenance-tick")
 async def ops_maintenance_tick(request: Request):
-    """Run one maintenance tick — for Cloud Scheduler when nothing stays warm.
+    """Accept one maintenance tick — for Cloud Scheduler when nothing stays warm.
 
     Guardians, saga retries, the outbox drain and the safe-arrival escalation are
     timer work. With minScale 0 there is no always-on process to run them, so a
     scheduled call to this endpoint is what keeps them happening. Same tick the
     worker loop runs.
+
+    The HTTP response returns immediately (accepted) and the tick runs in the
+    background. Running it inline blocked the event loop for 90–110s every 2
+    minutes, which killed the Cloud Run connection and stormed 503 / uptime /
+    latency alerts. Overlapping ticks are skipped; a hung tick is cut at 45s.
 
     Gated by X-NEXRYDE-OPS-KEY (wrong/missing key -> 404) — Cloud Scheduler sends
     it as a header.
@@ -1939,8 +1948,38 @@ async def ops_maintenance_tick(request: Request):
 
     from realtime_platform.maintenance import run_maintenance_tick
 
-    result = await run_maintenance_tick()
-    return {"ok": True, "tick": result, "revision": os.environ.get("K_REVISION", "unknown")}
+    if _MAINTENANCE_TICK_LOCK.locked():
+        return {
+            "ok": True,
+            "accepted": True,
+            "skipped": "in_flight",
+            "revision": os.environ.get("K_REVISION", "unknown"),
+        }
+
+    async def _run_tick() -> None:
+        if _MAINTENANCE_TICK_LOCK.locked():
+            logger.info("ops_maintenance_tick_skipped in_flight")
+            return
+        async with _MAINTENANCE_TICK_LOCK:
+            try:
+                await asyncio.wait_for(
+                    run_maintenance_tick(),
+                    timeout=_MAINTENANCE_TICK_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "ops_maintenance_tick_timeout timeout_s=%s",
+                    _MAINTENANCE_TICK_TIMEOUT_S,
+                )
+            except Exception:
+                logger.exception("ops_maintenance_tick_background_failed")
+
+    asyncio.create_task(_run_tick())
+    return {
+        "ok": True,
+        "accepted": True,
+        "revision": os.environ.get("K_REVISION", "unknown"),
+    }
 
 
 @api_router.post("/ops/migrate-driver-document-binaries")
@@ -1974,6 +2013,38 @@ async def ops_migrate_trip_face_binaries(request: Request, dry_run: bool = True)
     from trip_face_storage import run_trip_face_migration
     summary = await run_trip_face_migration(dry_run=dry_run)
     return summary
+
+
+@api_router.get("/ops/mongo-performance")
+async def ops_mongo_performance(request: Request):
+    """Ops runbook for the slow-mongo alert — in-process command stats.
+
+    Gated by X-NEXRYDE-OPS-KEY (wrong/missing key → 404).
+    """
+    expected = (os.environ.get("NEXRYDE_OPS_KEY") or "").strip()
+    got = (request.headers.get("x-nexryde-ops-key") or "").strip()
+    if not expected or got != expected:
+        raise HTTPException(status_code=404, detail="Not found")
+    from realtime_platform.gateway import _mongo_performance_payload
+
+    return {"ok": True, **_mongo_performance_payload(), "revision": os.environ.get("K_REVISION", "unknown")}
+
+
+@api_router.post("/ops/ensure-indexes")
+async def ops_ensure_indexes(request: Request):
+    """Re-run Mongo index ensure without a full restart.
+
+    Safe to call after a unique-index failure skipped later collections.
+    Gated by X-NEXRYDE-OPS-KEY (wrong/missing key → 404).
+    """
+    expected = (os.environ.get("NEXRYDE_OPS_KEY") or "").strip()
+    got = (request.headers.get("x-nexryde-ops-key") or "").strip()
+    if not expected or got != expected:
+        raise HTTPException(status_code=404, detail="Not found")
+    from db_indexes import ensure_indexes
+
+    await ensure_indexes(db)
+    return {"ok": True, "revision": os.environ.get("K_REVISION", "unknown")}
 
 
 @api_router.get("/route-cache/stats")

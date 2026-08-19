@@ -152,6 +152,7 @@ WATCH_METRIC_KEYS = (
     "push.deliver_ms",
     "event_bus.publish_ms",
     "healing.session_ms",
+    "mongo.slow_command_ms",
 )
 
 
@@ -170,14 +171,37 @@ def _pick_watch(snapshot: dict[str, Any]) -> dict[str, Any]:
     return {"counters": watched_c, "latency_ms": watched_l}
 
 
+def _mongo_performance_payload() -> dict[str, Any]:
+    from mongo_slow_monitor import slow_command_listener
+    from realtime_platform.observability import snapshot
+
+    snap = snapshot()
+    mongo = slow_command_listener.snapshot()
+    return {
+        **snap,
+        "mongo": mongo,
+        "mongo.command_ms": mongo.get("latency_ms") or {},
+        "success_criteria": SUCCESS_CRITERIA,
+    }
+
+
 @realtime_gateway_router.get("/metrics")
 async def realtime_metrics(request: Request):
     # Ops-facing; require auth to avoid public scrape of internals.
     if not _auth_sub(request):
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
-    from realtime_platform.observability import snapshot
+    return _mongo_performance_payload()
 
-    return {**snapshot(), "success_criteria": SUCCESS_CRITERIA}
+
+@realtime_gateway_router.get("/performance")
+async def realtime_performance(request: Request):
+    """In-process latency snapshot including mongo.command_ms / slow commands.
+
+    The Cloud Monitoring slow-mongo runbook points here. Same auth as /metrics.
+    """
+    if not _auth_sub(request):
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    return _mongo_performance_payload()
 
 
 @realtime_gateway_router.get("/metrics/watch")

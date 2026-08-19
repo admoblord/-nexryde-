@@ -19,8 +19,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useQuery } from '@tanstack/react-query';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, deleteUserAccount, getUser, getUserTrustSummary, getAuthHeaders, updateUser } from '@/src/services/api';
+import { queryClient } from '@/src/providers/QueryProvider';
+import { qk } from '@/src/services/queryKeys';
+import { applyRiderProfileToStore } from '@/src/utils/hydrateRiderProfile';
 import { buildInviteUrl, buildShareMessage } from '@/src/services/referralService';
 import { sentryTestCrash } from '@/src/utils/sentry';
 import { shareTextViaWhatsApp } from '@/src/services/socialWhatsApp';
@@ -249,13 +253,29 @@ export default function RiderProfileScreen() {
 
   const [profileImage, setProfileImage] = useState<string | null>(user?.profile_image || null);
   const [showDriverModal, setShowDriverModal] = useState(false);
-  const [trustSummary, setTrustSummary] = useState<any>(null);
-  const [loadingTrust, setLoadingTrust] = useState(false);
+  const seededTrust = userId ? queryClient.getQueryData(qk.riderTrust(userId)) : undefined;
+  const [trustSummary, setTrustSummary] = useState<any>(seededTrust ?? null);
+  const [loadingTrust, setLoadingTrust] = useState(() => !seededTrust);
   const [achievementStats, setAchievementStats] = useState<{
     totalTrips: number;
     rating: number;
     riderReputationTripCount?: number;
-  } | null>(null);
+  } | null>(() => {
+    const seeded = userId
+      ? (queryClient.getQueryData(qk.riderProfile(userId)) as Record<string, unknown> | undefined)
+      : undefined;
+    const trips = Number(seeded?.total_trips ?? user?.total_trips ?? 0);
+    const rating = Number(seeded?.rating ?? user?.rating ?? 5);
+    if (!seeded && !user) return null;
+    return {
+      totalTrips: Number.isFinite(trips) ? trips : 0,
+      rating: Number.isFinite(rating) ? rating : 5,
+      riderReputationTripCount:
+        seeded?.rider_reputation_trip_count != null
+          ? Number(seeded.rider_reputation_trip_count)
+          : user?.rider_reputation_trip_count,
+    };
+  });
   const [referralInviteUrl, setReferralInviteUrl] = useState('');
   const [referralUsername, setReferralUsername] = useState('');
   const [referralCode, setReferralCode] = useState('');
@@ -270,37 +290,54 @@ export default function RiderProfileScreen() {
     ]).start();
   }, []);
 
+  const profileQuery = useQuery({
+    queryKey: userId ? qk.riderProfile(userId) : ['rider', 'profile', 'none'],
+    enabled: Boolean(userId && canCallAuthedApi),
+    queryFn: async () => {
+      const res = await getUser(userId!);
+      return res.data;
+    },
+  });
+
+  const trustQuery = useQuery({
+    queryKey: userId ? qk.riderTrust(userId) : ['rider', 'trust', 'none'],
+    enabled: Boolean(userId && canCallAuthedApi),
+    queryFn: async () => {
+      const res = await getUserTrustSummary(userId!);
+      return res.data;
+    },
+  });
+
   useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      if (!userId || !canCallAuthedApi) return;
-      setLoadingTrust(true);
+    const d = profileQuery.data as Record<string, unknown> | undefined;
+    if (!d) return;
+    setAchievementStats({
+      totalTrips: Number(d.total_trips ?? user?.total_trips ?? 0),
+      rating: Number(d.rating ?? user?.rating ?? 5),
+      riderReputationTripCount:
+        d.rider_reputation_trip_count != null
+          ? Number(d.rider_reputation_trip_count)
+          : undefined,
+    });
+    void applyRiderProfileToStore(d);
+  }, [profileQuery.data, user?.rating, user?.total_trips]);
 
-      try {
-        const trustRes = await getUserTrustSummary(userId);
-        if (mounted) setTrustSummary(trustRes.data);
-      } catch { /* non-critical */ }
+  useEffect(() => {
+    if (trustQuery.data) {
+      setTrustSummary(trustQuery.data);
+      setLoadingTrust(false);
+      return;
+    }
+    if (trustQuery.isLoading && !trustSummary) setLoadingTrust(true);
+    if (trustQuery.isFetched) setLoadingTrust(false);
+  }, [trustQuery.data, trustQuery.isLoading, trustQuery.isFetched, trustSummary]);
 
-      try {
-        const userRes = await getUser(userId);
-        if (mounted && userRes?.data) {
-          const d = userRes.data as Record<string, unknown>;
-          setAchievementStats({
-            totalTrips: Number(d.total_trips ?? user?.total_trips ?? 0),
-            rating: Number(d.rating ?? user?.rating ?? 5),
-            riderReputationTripCount:
-              d.rider_reputation_trip_count != null
-                ? Number(d.rider_reputation_trip_count)
-                : undefined,
-          });
-        }
-      } catch { /* non-critical — fall back to store for badges */ }
-
-      if (mounted) setLoadingTrust(false);
-    };
-    void load();
-    return () => { mounted = false; };
-  }, [canCallAuthedApi, userId, user?.rating, user?.total_trips]);
+  useEffect(() => {
+    const img = user?.profile_image;
+    if (typeof img === 'string' && img && img !== profileImage) {
+      setProfileImage(img);
+    }
+  }, [user?.profile_image, profileImage]);
 
   useEffect(() => {
     let mounted = true;
