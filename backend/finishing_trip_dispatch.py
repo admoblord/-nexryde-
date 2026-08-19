@@ -22,11 +22,13 @@ DISPATCH_OFFER_CAP = 40
 DISPATCH_RADIUS_M_NEAR = 8_000
 DISPATCH_RADIUS_M_FAR = 20_000
 
+# Rider-facing copy. Single source of truth — the push senders below build from
+# these so the wording cannot drift between the two notifications.
 RIDER_FINISHING_HEADLINE = "Your driver is finishing a trip nearby"
 RIDER_FINISHING_BODY = "They'll join you shortly."
-DRIVER_NEXT_RIDE_HINT = "Next ride · after you drop off"
 RIDER_NOW_EN_ROUTE_TITLE = "Your driver is on the way"
 RIDER_NOW_EN_ROUTE_BODY = "just finished nearby and is heading to you now."
+DEFAULT_DRIVER_NAME = "Your driver"
 
 
 def _coord(loc: Any) -> Optional[tuple[float, float]]:
@@ -108,11 +110,17 @@ def chained_distance_km(
 
 
 def rider_finishing_push(driver_name: str) -> tuple[str, str]:
-    name = (driver_name or "").strip() or "Your driver"
-    return (
-        f"{name} is finishing a trip nearby",
-        RIDER_FINISHING_BODY,
-    )
+    """Told to the rider when a finishing driver accepts their request."""
+    name = (driver_name or "").strip()
+    if not name:
+        return RIDER_FINISHING_HEADLINE, RIDER_FINISHING_BODY
+    return f"{name} is finishing a trip nearby", RIDER_FINISHING_BODY
+
+
+def rider_en_route_push(driver_name: str) -> tuple[str, str]:
+    """Told to the queued rider once the prior trip ends and they are promoted."""
+    name = (driver_name or "").strip() or DEFAULT_DRIVER_NAME
+    return RIDER_NOW_EN_ROUTE_TITLE, f"{name} {RIDER_NOW_EN_ROUTE_BODY}"
 
 
 def merge_driver_profiles(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:

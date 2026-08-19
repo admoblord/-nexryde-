@@ -48,6 +48,7 @@ from finishing_trip_dispatch import (
     eligibility_rank_key,
     finishing_offer_state,
     merge_driver_profiles,
+    rider_en_route_push,
     rider_finishing_push,
 )
 from trip_fare_adjustments import (
@@ -1456,12 +1457,12 @@ async def _promote_or_release_driver_lock(driver_id: str, releasing_trip_id: str
                 next_trip["_id"] = str(next_trip["_id"])
             try:
                 driver_user = await db.users.find_one({"id": driver_id}, {"name": 1})
-                name = (driver_user or {}).get("name") or "Your driver"
                 if next_trip.get("rider_id"):
+                    title, body = rider_en_route_push((driver_user or {}).get("name") or "")
                     await send_push_notification(
                         next_trip["rider_id"],
-                        "Your driver is on the way",
-                        f"{name} just finished nearby and is heading to you now.",
+                        title,
+                        body,
                         {"type": "trip_driver_en_route", "trip_id": queued_id},
                     )
                 await _emit_rider_trip_realtime(queued_id)

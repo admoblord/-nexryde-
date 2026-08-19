@@ -1,12 +1,16 @@
 """Unit tests for Bolt-style finishing-trip dispatch (no DB)."""
 from finishing_trip_dispatch import (
     FINISHING_RADIUS_KM,
+    RIDER_FINISHING_BODY,
+    RIDER_FINISHING_HEADLINE,
+    RIDER_NOW_EN_ROUTE_TITLE,
     accept_lock_decision,
     cancel_lock_decision,
     chained_distance_km,
     eligibility_rank_key,
     finishing_offer_state,
     merge_driver_profiles,
+    rider_en_route_push,
     rider_finishing_push,
 )
 
@@ -146,3 +150,31 @@ def test_eligibility_rank_prefers_idle_over_finishing():
     finishing = {"driver_id": "f", "finishing_trip": True, "distance_to_pickup": 1, "visibility_score": 90}
     ranked = sorted([finishing, preferred, idle], key=lambda d: eligibility_rank_key(d, "p"))
     assert [d["driver_id"] for d in ranked] == ["p", "i", "f"]
+
+
+def test_promoted_rider_is_told_the_driver_is_coming_now():
+    title, body = rider_en_route_push("Ada")
+    assert title == RIDER_NOW_EN_ROUTE_TITLE
+    assert body.startswith("Ada ")
+    assert "heading to you now" in body
+
+
+def test_promoted_push_survives_a_missing_driver_name():
+    title, body = rider_en_route_push("")
+    assert title == RIDER_NOW_EN_ROUTE_TITLE
+    assert body.startswith("Your driver ")
+
+
+def test_finishing_push_falls_back_to_the_shared_headline():
+    title, body = rider_finishing_push("   ")
+    assert title == RIDER_FINISHING_HEADLINE
+    assert body == RIDER_FINISHING_BODY
+
+
+def test_rider_copy_is_not_duplicated_in_the_trips_router():
+    """The wording lives in one place; the router must not re-type it."""
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1].joinpath("routers", "trips.py").read_text()
+    assert "just finished nearby and is heading to you now" not in src
+    assert "rider_en_route_push" in src
