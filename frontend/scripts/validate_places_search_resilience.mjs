@@ -41,7 +41,20 @@ const stubs = {
       return globalThis.__FETCH__(url, opts);
     }`,
   '@/src/services/platformConnectionManager': `
-    export function isHardOffline() { return globalThis.__HARD_OFFLINE__ === true; }`,
+    export function isHardOffline() { return globalThis.__HARD_OFFLINE__ === true; }
+    export function getPlatformConnectionSnapshot() {
+      if (globalThis.__HARD_OFFLINE__ === true) {
+        return { internetReachable: false };
+      }
+      return {
+        internetReachable: Object.prototype.hasOwnProperty.call(
+          globalThis,
+          '__INTERNET_REACHABLE__',
+        )
+          ? globalThis.__INTERNET_REACHABLE__
+          : null,
+      };
+    }`,
 };
 
 const frontendRoot = pathToFileURL(path.join(__dirname, '..')).href;
@@ -77,7 +90,7 @@ const searchMod = await import(
 const cacheMod = await import(
   pathToFileURL(path.join(__dirname, '..', 'src', 'services', 'placesCache.ts')).href
 );
-const { searchPlacesAutocomplete } = searchMod;
+const { searchPlacesAutocomplete, classifyPlacesFailure, PLACES_TOTAL_DEADLINE_MS } = searchMod;
 
 const results = [];
 function check(id, label, pass, detail) {
@@ -110,6 +123,7 @@ function reset() {
   cacheMod.__resetPlacesCache();
   globalThis.__STORAGE__?.clear();
   globalThis.__HARD_OFFLINE__ = false;
+  delete globalThis.__INTERNET_REACHABLE__;
 }
 
 // 1. a single dropped request recovers on retry — the screenshot case
@@ -128,7 +142,7 @@ check(
   `${calls} attempts`,
 );
 
-// 2. a timeout is not retried — 20s of waiting is already enough
+// 2. a timeout is not retried — 9s of waiting is already enough
 reset();
 calls = 0;
 globalThis.__FETCH__ = async () => {
@@ -138,19 +152,19 @@ globalThis.__FETCH__ = async () => {
 out = await searchPlacesAutocomplete('Somewhere new entirely', { countryCode: 'ng' });
 check(
   'timeout-not-retried',
-  'a 20s timeout is not doubled by a retry',
-  calls === 1 && out.offline === true,
-  `${calls} attempt`,
+  'a timeout is not doubled by a retry',
+  calls === 1 && out.failure?.kind === 'timeout' && out.offline !== true,
+  `${calls} attempt kind=${out.failure?.kind} offline=${out.offline}`,
 );
 
-// 3. total failure is reported as offline, not as "no places found"
+// 3. a timeout on a phone that still has signal is NOT "no internet"
 check(
-  'reports-offline-not-empty',
-  'an unreachable backend is reported as offline',
-  out.offline === true && out.emptyConfirmed !== true,
+  'timeout-is-not-no-internet',
+  'timeout copy is timeout, not "No internet connection"',
+  out.failure?.kind === 'timeout' && out.offline !== true && out.emptyConfirmed !== true,
 );
 
-// 4. a previously found address still resolves with the network fully down
+// 4. a previously found address still resolves when the request is dropped
 reset();
 globalThis.__FETCH__ = async () => respond(okBody);
 await searchPlacesAutocomplete('Peace garden Estate', { countryCode: 'ng' });
@@ -159,12 +173,15 @@ globalThis.__FETCH__ = async () => {
 };
 out = await searchPlacesAutocomplete('Peace garden Estate', { countryCode: 'ng' });
 check(
-  'offline-still-answers-known-query',
-  'an address searched before still resolves offline',
-  out.predictions.length === 1 && out.fromCache === true && out.offline === true,
+  'dropped-request-still-answers-known-query',
+  'an address searched before still resolves from cache',
+  out.predictions.length === 1 &&
+    out.fromCache === true &&
+    out.failure?.kind === 'unreachable' &&
+    out.offline !== true,
 );
 
-// 5. when already hard offline, do not burn a second attempt
+// 5. when already hard offline, do not burn a second attempt, and DO say no internet
 reset();
 calls = 0;
 globalThis.__HARD_OFFLINE__ = true;
@@ -172,8 +189,34 @@ globalThis.__FETCH__ = async () => {
   calls += 1;
   throw new TypeError('Network request failed');
 };
-await searchPlacesAutocomplete('Another new place', { countryCode: 'ng' });
+out = await searchPlacesAutocomplete('Another new place', { countryCode: 'ng' });
 check('no-retry-when-offline', 'a known-offline device does not retry pointlessly', calls === 1);
+check(
+  'device-offline-is-the-only-no-internet',
+  'NetInfo internetReachable===false is what sets offline',
+  out.offline === true && out.failure?.kind === 'no_network',
+);
+
+// 5b. classifyPlacesFailure itself
+reset();
+check(
+  'classify-timeout',
+  'ApiTimeoutError is timeout while the device is reachable',
+  classifyPlacesFailure(Object.assign(new Error('timeout'), { name: 'ApiTimeoutError' })).kind ===
+    'timeout',
+);
+globalThis.__INTERNET_REACHABLE__ = false;
+check(
+  'classify-no-network-only-from-netinfo',
+  'any error becomes no_network only when the device says so',
+  classifyPlacesFailure(new Error('timeout')).kind === 'no_network',
+);
+delete globalThis.__INTERNET_REACHABLE__;
+check(
+  'classify-dropped-packet',
+  'Network request failed with unknown connectivity is unreachable, not offline',
+  classifyPlacesFailure(new TypeError('Network request failed')).kind === 'unreachable',
+);
 
 // 6. a genuine empty result is still honest
 reset();
@@ -212,6 +255,22 @@ check(
   'failed-second-opinion-keeps-first',
   'a failed unbiased retry keeps the biased results',
   out.predictions.length === 1 && out.predictions[0].main_text === 'Ajah Bus Stop',
+);
+
+// 8. a hung token/request cannot stall past the 12s ceiling, and still is not "no internet"
+reset();
+const hungStarted = Date.now();
+globalThis.__FETCH__ = () => new Promise(() => {});
+out = await searchPlacesAutocomplete('Victoria Island hung', { countryCode: 'ng' });
+const hungMs = Date.now() - hungStarted;
+check(
+  'deadline-aborts-hung-search',
+  'a hung request unblocks the rider at the 12s ceiling',
+  out.failure?.kind === 'timeout' &&
+    out.offline !== true &&
+    hungMs >= PLACES_TOTAL_DEADLINE_MS - 200 &&
+    hungMs < PLACES_TOTAL_DEADLINE_MS + 2500,
+  `${hungMs}ms kind=${out.failure?.kind} offline=${out.offline}`,
 );
 
 const failed = results.filter((p) => !p).length;

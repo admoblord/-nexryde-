@@ -12,7 +12,7 @@ export function apiErrorMessage(error: unknown, fallback = 'Something went wrong
     return 'Request timed out. Check your connection and try again.';
   }
   if (ax.message === 'Network Error') {
-    return 'No internet connection. Check your network and try again.';
+    return 'Could not reach NexRyde. Your device may still be online.';
   }
   const data = ax.response?.data;
   if (data && typeof data === 'object') {

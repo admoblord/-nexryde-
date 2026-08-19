@@ -15,7 +15,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { searchPlacesAutocomplete } from '@/src/services/placesSearch';
+import {
+  classifyPlacesFailure,
+  searchPlacesAutocomplete,
+  type PlacesFailure,
+} from '@/src/services/placesSearch';
 import {
   loadIdleRouteSuggestions,
   mapPlacesPredictions,
@@ -67,6 +71,31 @@ function newSessionToken(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
 }
 
+/**
+ * Say what actually happened. Claiming "no internet" on a phone with full
+ * signal sends the rider to their router instead of telling us anything.
+ */
+function failureHeadline(failure: PlacesFailure | null): string {
+  switch (failure?.kind) {
+    case 'no_network':
+      return 'No internet connection. Check your Wi-Fi or mobile data.';
+    case 'timeout':
+      return 'Address search timed out. Your connection reached us but the reply was too slow.';
+    case 'dns':
+      return "Could not look up NexRyde's address server. This is usually a DNS or Wi-Fi problem.";
+    case 'tls':
+      return 'Secure connection to NexRyde failed.';
+    case 'unreachable':
+      return 'Could not reach NexRyde. Your device is online but the connection was refused.';
+    case 'auth':
+      return 'Sign in again to search pickup and destination';
+    case 'http':
+      return 'Address search returned an error.';
+    default:
+      return 'Address search did not respond.';
+  }
+}
+
 export function BoltRouteSearch({
   userId,
   pickupLabel,
@@ -89,6 +118,7 @@ export function BoltRouteSearch({
   const [places, setPlaces] = useState<RouteSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchError, setSearchError] = useState<'auth' | 'network' | 'offline' | null>(null);
+  const [failure, setFailure] = useState<PlacesFailure | null>(null);
   const sessionRef = useRef<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reqIdRef = useRef(0);
@@ -133,6 +163,7 @@ export function BoltRouteSearch({
       const reqId = ++reqIdRef.current;
       setLoading(true);
       setSearchError(null);
+      setFailure(null);
       try {
         const session = ensureSession();
         const data = await searchPlacesAutocomplete(input, {
@@ -152,6 +183,7 @@ export function BoltRouteSearch({
           setSearchError(null);
           return;
         }
+        setFailure(data.failure ?? null);
         if (data.httpStatus === 401) {
           setSearchError('auth');
           setPlaces([]);
@@ -166,8 +198,12 @@ export function BoltRouteSearch({
         // Degraded response: keep the suggestions already on screen rather than
         // replacing real addresses with an empty state.
         setSearchError(data.offline ? 'offline' : 'network');
-      } catch {
-        if (reqId === reqIdRef.current) setSearchError('offline');
+      } catch (err) {
+        if (reqId === reqIdRef.current) {
+          const f = classifyPlacesFailure(err);
+          setFailure(f);
+          setSearchError(f.kind === 'no_network' ? 'offline' : 'network');
+        }
       } finally {
         if (reqId === reqIdRef.current) setLoading(false);
       }
@@ -372,14 +408,18 @@ export function BoltRouteSearch({
                 ? 'Searching addresses…'
                 : searchError === 'auth'
                   ? 'Sign in again to search pickup and destination'
-                  : searchError === 'offline'
-                    ? 'No internet connection. Check your Wi-Fi or mobile data.'
-                    : searchError === 'network'
-                      ? 'Address search is busy right now.'
-                      : activeQuery.trim().length >= MIN_CHARS
-                        ? 'No places found'
-                        : 'Saved places and recent searches appear here'}
+                  : searchError === 'offline' || searchError === 'network'
+                    ? failureHeadline(failure)
+                    : activeQuery.trim().length >= MIN_CHARS
+                      ? 'No places found'
+                      : 'Saved places and recent searches appear here'}
             </Text>
+            {/* The exact reason, so a screenshot is enough to diagnose it. */}
+            {!loading && failure ? (
+              <Text style={styles.emptyDetail} selectable>
+                {failure.kind}: {failure.detail}
+              </Text>
+            ) : null}
             {!loading && (searchError === 'offline' || searchError === 'network') ? (
               <TouchableOpacity
                 style={styles.retryBtn}
@@ -512,6 +552,14 @@ const styles = StyleSheet.create({
   sugDist: { fontSize: 13, color: MUTED, marginLeft: 8, fontWeight: '500' },
   empty: { textAlign: 'center', color: MUTED, marginTop: 32, paddingHorizontal: 24 },
   emptyWrap: { alignItems: 'center' },
+  emptyDetail: {
+    textAlign: 'center',
+    color: MUTED,
+    marginTop: 8,
+    paddingHorizontal: 28,
+    fontSize: 12,
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: undefined }),
+  },
   retryBtn: {
     flexDirection: 'row',
     alignItems: 'center',

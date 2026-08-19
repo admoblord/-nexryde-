@@ -194,6 +194,14 @@ jobs:
         working-directory: frontend
         run: node ./scripts/validate_places_instant.mjs
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Pickup / destination search behaviour
+        working-directory: frontend
+        run: node --experimental-strip-types --no-warnings ./scripts/validate_places_search_resilience.mjs
+
       # Stacked dispatch touches the offer ring timer on both JS and native;
       # these keep the 40s countdown inside the 60s backend TTL.
       - name: Finishing-trip offer contract

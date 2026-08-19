@@ -2030,6 +2030,26 @@ async def ops_mongo_performance(request: Request):
     return {"ok": True, **_mongo_performance_payload(), "revision": os.environ.get("K_REVISION", "unknown")}
 
 
+@api_router.get("/ops/places-google-probe")
+async def ops_places_google_probe(request: Request, input: str = "Victoria"):
+    """Raw Google Places Autocomplete as seen from this Cloud Run revision.
+
+    Cloud Run has no SSH. This is the in-process equivalent of
+    ``curl -v -m 15`` against maps.googleapis.com from the running instance.
+    Gated by X-NEXRYDE-OPS-KEY (wrong/missing key → 404). The Maps API key is
+    stripped from the URL, headers and body.
+    """
+    expected = (os.environ.get("NEXRYDE_OPS_KEY") or "").strip()
+    got = (request.headers.get("x-nexryde-ops-key") or "").strip()
+    if not expected or got != expected:
+        raise HTTPException(status_code=404, detail="Not found")
+    from places_service import probe_google_places_autocomplete
+
+    payload = await probe_google_places_autocomplete(input)
+    payload["revision"] = os.environ.get("K_REVISION", "unknown")
+    return payload
+
+
 @api_router.post("/ops/ensure-indexes")
 async def ops_ensure_indexes(request: Request):
     """Re-run Mongo index ensure without a full restart.
