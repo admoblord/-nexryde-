@@ -256,10 +256,25 @@ results.push(
 results.push(
   printRow(
     'offline-is-named-honestly',
-    'an unreachable backend says so instead of blaming the search',
-    src.places.includes('offline?: boolean') &&
-      src.bolt.includes("searchError === 'offline'") &&
-      src.bolt.includes('No internet connection'),
+    'No internet is only claimed when the device reports no connectivity',
+    src.places.includes("kind: 'no_network'") &&
+      src.places.includes('internetReachable === false') &&
+      src.places.includes("offline: resolved.kind === 'no_network'") &&
+      src.places.includes('classifyPlacesFailure') &&
+      src.bolt.includes('failureHeadline') &&
+      src.bolt.includes('No internet connection') &&
+      src.bolt.includes('Address search timed out') &&
+      src.bolt.includes('selectable'),
+  ),
+);
+
+results.push(
+  printRow(
+    'search-has-hard-deadline',
+    'token refresh cannot stall search past a 12s ceiling',
+    src.places.includes('PLACES_TOTAL_DEADLINE_MS = 12000') &&
+      src.places.includes('withDeadline') &&
+      src.places.includes('including the token step'),
   ),
 );
 

@@ -17,6 +17,12 @@ def test_fare_and_places_require_auth():
     assert not api_path_is_public("/api/places/autocomplete")
 
 
+def test_ops_google_probe_is_ops_keyed_not_jwt():
+    """Cloud Run has no SSH; the probe is gated by the ops header, not a rider JWT."""
+    assert not api_path_is_protected("/api/ops/places-google-probe")
+    assert not api_path_is_public("/api/ops/places-google-probe")
+
+
 def test_public_squad_and_subscription_config():
     assert api_path_is_public("/api/squad/webhook")
     assert api_path_is_public("/api/subscriptions/config")

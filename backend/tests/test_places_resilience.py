@@ -346,3 +346,61 @@ def test_matching_biased_result_does_not_spend_a_second_google_call(monkeypatch)
 
     assert len(fake.calls) == 1
     assert out["bias_retried"] is False
+
+
+def test_google_probe_redacts_key_and_returns_predictions(monkeypatch):
+    class _Resp:
+        status_code = 200
+        reason_phrase = "OK"
+        headers = {"content-type": "application/json", "x-fake": "test-key"}
+        text = '{"status":"OK","predictions":[{"description":"Victoria Island, Lagos, Nigeria"}]}'
+
+        def json(self):
+            return {
+                "status": "OK",
+                "predictions": [{"description": "Victoria Island, Lagos, Nigeria"}],
+            }
+
+    class _Client:
+        async def get(self, url, timeout=None):
+            assert timeout == 15.0
+            assert "input=Victoria" in url
+            assert "key=test-key" in url
+            return _Resp()
+
+    monkeypatch.setattr(places_service, "get_http_client", lambda: _Client())
+    out = asyncio.run(places_service.probe_google_places_autocomplete("Victoria"))
+    assert out["ok"] is True
+    assert out["timeout"] is False
+    assert out["http_status"] == 200
+    assert out["google_status"] == "OK"
+    assert "Victoria Island" in out["predictions"][0]
+    assert "test-key" not in out["url"]
+    assert "REDACTED" in out["url"]
+    assert "test-key" not in out["body"]
+    assert out["headers"]["x-fake"] == "REDACTED"
+
+
+def test_google_probe_timeout_is_named(monkeypatch):
+    class _Client:
+        async def get(self, url, timeout=None):
+            raise TimeoutError("google timed out")
+
+    monkeypatch.setattr(places_service, "get_http_client", lambda: _Client())
+    out = asyncio.run(places_service.probe_google_places_autocomplete("Victoria"))
+    assert out["ok"] is False
+    assert out["timeout"] is True
+    assert out["http_status"] is None
+    assert "test-key" not in (out.get("error") or "")
+
+
+def test_google_probe_ops_route_is_gated():
+    import pathlib
+
+    text = (pathlib.Path(__file__).resolve().parent.parent / "server.py").read_text()
+    start = text.index("/ops/places-google-probe")
+    body = text[start : start + 1200]
+    assert "NEXRYDE_OPS_KEY" in body
+    assert "x-nexryde-ops-key" in body
+    assert "status_code=404" in body
+    assert "probe_google_places_autocomplete" in body

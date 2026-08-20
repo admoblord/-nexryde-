@@ -456,13 +456,128 @@ def _autocomplete_google_reached(data: Optional[dict]) -> bool:
 
 async def _google_autocomplete_once(url: str) -> Optional[dict]:
     """One Google call that reports failure instead of raising."""
+    t0 = time.perf_counter()
     try:
         client = get_http_client()
         response = await client.get(url, timeout=10.0)
-        return response.json()
+        ms = int((time.perf_counter() - t0) * 1000)
+        http_status = getattr(response, "status_code", None)
+        try:
+            data = response.json()
+        except Exception:
+            print(
+                f"places.autocomplete google http={http_status if http_status is not None else 'n/a'} "
+                f"json_error ms={ms}"
+            )
+            return None
+        status = data.get("status") if isinstance(data, dict) else None
+        rows = len((data or {}).get("predictions") or []) if isinstance(data, dict) else 0
+        print(
+            f"places.autocomplete google http={http_status if http_status is not None else 'n/a'} "
+            f"status={status} ms={ms} rows={rows}"
+        )
+        return data if isinstance(data, dict) else None
     except Exception as exc:
-        print(f"places.autocomplete google call failed: {exc}")
+        ms = int((time.perf_counter() - t0) * 1000)
+        print(f"places.autocomplete google call failed ms={ms}: {exc}")
         return None
+
+
+def _redact_maps_key(text: str) -> str:
+    key = GOOGLE_MAPS_API_KEY or ""
+    if key and text:
+        return text.replace(key, "REDACTED")
+    return text
+
+
+async def probe_google_places_autocomplete(input_text: str = "Victoria") -> dict:
+    """
+    In-process equivalent of:
+
+        curl -v -m 15 "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=Victoria&key=$MAPS_KEY"
+
+    Cloud Run has no SSH/exec, so this is the only way to see the Google HTTP
+    exchange from the running revision (headers, body, timing). The API key is
+    stripped from every field.
+    """
+    raw = (input_text or "Victoria").strip() or "Victoria"
+    if len(raw) > 80:
+        raw = raw[:80]
+    key = GOOGLE_MAPS_API_KEY or ""
+    if not key:
+        return {
+            "ok": False,
+            "timeout": False,
+            "error": "GOOGLE_MAPS_API_KEY not configured",
+            "url": None,
+            "http_status": None,
+            "body": None,
+            "google_status": None,
+            "predictions": [],
+        }
+    url = (
+        "https://maps.googleapis.com/maps/api/place/autocomplete/json"
+        f"?input={quote(raw)}&key={key}"
+    )
+    t0 = time.perf_counter()
+    try:
+        client = get_http_client()
+        response = await client.get(url, timeout=15.0)
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        body_text = getattr(response, "text", None)
+        if body_text is None:
+            try:
+                body_text = json.dumps(response.json())
+            except Exception:
+                body_text = ""
+        try:
+            payload = response.json()
+        except Exception:
+            payload = None
+        headers_src = getattr(response, "headers", {}) or {}
+        try:
+            headers = {str(k): _redact_maps_key(str(v)) for k, v in dict(headers_src).items()}
+        except Exception:
+            headers = {}
+        preds: list[str] = []
+        google_status = None
+        error_message = None
+        if isinstance(payload, dict):
+            google_status = payload.get("status")
+            error_message = payload.get("error_message")
+            for row in payload.get("predictions") or []:
+                desc = (row or {}).get("description")
+                if desc:
+                    preds.append(str(desc))
+        http_status = getattr(response, "status_code", None)
+        return {
+            "ok": http_status == 200 and google_status == "OK",
+            "timeout": False,
+            "elapsed_ms": elapsed_ms,
+            "url": _redact_maps_key(url),
+            "http_status": http_status,
+            "reason": getattr(response, "reason_phrase", None) or "",
+            "headers": headers,
+            "body": _redact_maps_key(str(body_text)),
+            "google_status": google_status,
+            "error_message": error_message,
+            "predictions": preds,
+        }
+    except Exception as exc:
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        name = type(exc).__name__
+        lowered = f"{name} {exc}".lower()
+        return {
+            "ok": False,
+            "timeout": "timeout" in lowered,
+            "elapsed_ms": elapsed_ms,
+            "url": _redact_maps_key(url),
+            "http_status": None,
+            "error": _redact_maps_key(f"{name}: {exc}"),
+            "body": None,
+            "google_status": None,
+            "predictions": [],
+        }
 
 
 async def _google_autocomplete_data(

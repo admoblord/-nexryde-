@@ -65,7 +65,13 @@ const stubs = {
     };`,
   '@/src/services/api': `export const BACKEND_URL = ${JSON.stringify(BASE)};`,
   '@/src/services/platformConnectionManager': `
-    export function isHardOffline() { return globalThis.__HARD_OFFLINE__ === true; }`,
+    export function isHardOffline() { return globalThis.__HARD_OFFLINE__ === true; }
+    export function getPlatformConnectionSnapshot() {
+      if (globalThis.__HARD_OFFLINE__ === true) {
+        return { internetReachable: false };
+      }
+      return { internetReachable: null };
+    }`,
   // Real HTTP with the internal rider's JWT, plus scripted transport failures.
   '@/src/utils/sessionRefresh': `
     export class ApiTimeoutError extends Error {
@@ -211,10 +217,13 @@ const cold = await searchPlacesAutocomplete('Somewhere never typed before', {
   origin: ORIGIN,
   countryCode: 'ng',
 });
-const coldOk = cold.offline === true && cold.predictions.length === 0;
+const coldOk =
+  cold.failure?.kind === 'unreachable' &&
+  cold.offline !== true &&
+  cold.predictions.length === 0;
 console.log(
-  `  ${coldOk ? 'OK  ' : 'FAIL'} says offline instead of "No places found": ` +
-    `offline=${cold.offline} results=${cold.predictions.length}`,
+  `  ${coldOk ? 'OK  ' : 'FAIL'} names the transport failure instead of "No internet": ` +
+    `kind=${cold.failure?.kind} offline=${cold.offline} results=${cold.predictions.length}`,
 );
 coldOk ? (pass += 1) : (fail += 1);
 
