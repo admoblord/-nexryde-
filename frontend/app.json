@@ -142,10 +142,11 @@
         {
           "provider": "play-services",
           "enableBrotli": true,
-          "enableQuic": true,
+          "enableQuic": false,
           "enableHttp2": true
         }
       ],
+      "./plugins/withNexrydeOkHttp.js",
       [
         "expo-build-properties",
         {

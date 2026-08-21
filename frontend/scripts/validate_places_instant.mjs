@@ -255,16 +255,29 @@ results.push(
 
 results.push(
   printRow(
-    'device-hang-hedge-and-abort',
-    'typing cancels the previous search and a hung connection is hedged',
-    src.places.includes('PLACES_HEDGE_AFTER_MS') &&
-      src.places.includes('useXhrTimeout: true') &&
-      src.places.includes('_nxh=1') &&
-      src.bolt.includes('abortRef') &&
+    'device-search-aborts-and-uses-tcp',
+    'typing cancels the previous search; Android Cronet is TCP not QUIC',
+    src.bolt.includes('abortRef') &&
       src.bolt.includes('signal: ac.signal') &&
-      src.ac.includes('signal: ac.signal'),
+      src.ac.includes('signal: ac.signal') &&
+      src.places.includes('isPlacesAbortError') &&
+      !src.places.includes('PLACES_HEDGE_AFTER_MS') &&
+      !src.places.includes('_nxh=1'),
   ),
 );
+
+{
+  const appJson = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8'));
+  const plugins = appJson.expo?.plugins || [];
+  const cronet = plugins.find((p) => Array.isArray(p) && p[0] === 'expo-cronet');
+  results.push(
+    printRow(
+      'android-cronet-quic-off',
+      'store Android fetch uses Cronet HTTP/2 over TCP, not HTTP/3 QUIC',
+      cronet?.[1]?.enableQuic === false && plugins.includes('./plugins/withNexrydeOkHttp.js'),
+    ),
+  );
+}
 
 results.push(
   printRow(

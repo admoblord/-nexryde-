@@ -183,24 +183,6 @@ check(
   out.failure?.kind === 'timeout' && out.offline !== true && out.emptyConfirmed !== true,
 );
 
-// 2b. a hung first connection is recovered by the hedge, not by waiting 9s
-reset();
-calls = 0;
-globalThis.__FETCH__ = async (url) => {
-  calls += 1;
-  if (String(url).includes('_nxh=1')) return respond(okBody);
-  return new Promise(() => {});
-};
-const hedgeStarted = Date.now();
-out = await searchPlacesAutocomplete('Victoria Island hedge', { countryCode: 'ng' });
-const hedgeMs = Date.now() - hedgeStarted;
-check(
-  'hedge-recovers-hung-first-connection',
-  'a hung first HTTP connection is replaced by a second one',
-  out.predictions.length === 1 && !out.offline && hedgeMs < 5000 && calls >= 2,
-  `${hedgeMs}ms calls=${calls} top=${out.predictions[0]?.main_text || ''}`,
-);
-
 // 3b. cancelling a search (new keystroke) must not paint timeout: timeout
 reset();
 {

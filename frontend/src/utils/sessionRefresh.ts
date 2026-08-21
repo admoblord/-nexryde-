@@ -1,4 +1,3 @@
-import axios, { isAxiosError } from 'axios';
 import { BACKEND_URL } from '@/src/services/api';
 import { forceRefresh, getCachedToken, getValidToken } from '@/src/lib/tokenStore';
 import { useAppStore } from '@/src/store/appStore';
@@ -14,14 +13,6 @@ export type AuthedFetchOptions = RequestInit & {
    * Use on driver accept/bid and other in-progress critical actions.
    */
   preserveSessionOn401?: boolean;
-  /**
-   * Use XMLHttpRequest (OkHttp timeout) instead of fetch + AbortController.
-   *
-   * Pickup/destination search needs this on Android: a JS abort often leaves the
-   * native call running, which then occupies the connection pool so the next
-   * keystroke hangs until `timeout: timeout`.
-   */
-  useXhrTimeout?: boolean;
 };
 
 export class ApiTimeoutError extends Error {
@@ -88,92 +79,28 @@ function abortError(): Error {
   return err;
 }
 
-function axiosToFetchResponse(data: unknown, status: number, statusText: string): Response {
-  const body =
-    data == null || data === ''
-      ? ''
-      : typeof data === 'string'
-        ? data
-        : JSON.stringify(data);
-  return new Response(body, { status: status || 200, statusText: statusText || '' });
-}
-
-/** Native timeout via XHR/OkHttp so a hung places GET actually dies. */
-async function xhrTimedRequest(
-  url: string,
-  fetchInit: RequestInit,
+function requestHeaders(
   token: string | null,
-  timeoutMs: number,
-): Promise<Response> {
-  if (callerAborted(fetchInit.signal)) throw abortError();
-  try {
-    const res = await axios.request({
-      url,
-      method: (fetchInit.method as string) || 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(fetchInit.headers as Record<string, string> | undefined),
-      },
-      data: fetchInit.body,
-      timeout: timeoutMs,
-      signal: fetchInit.signal,
-      // Keep 401 as a Response so the existing refresh retry can run.
-      validateStatus: () => true,
-      transitional: { clarifyTimeoutError: true },
-    });
-    return axiosToFetchResponse(res.data, res.status, res.statusText);
-  } catch (e) {
-    if (callerAborted(fetchInit.signal)) throw abortError();
-    if (isAxiosError(e)) {
-      const code = String(e.code || '');
-      if (code === 'ECONNABORTED' || code === 'ETIMEDOUT') {
-        throw new ApiTimeoutError();
-      }
-      if (code === 'ERR_CANCELED' || e.name === 'CanceledError') {
-        throw abortError();
-      }
-      throw new TypeError(e.message || 'Network request failed');
-    }
-    throw e;
-  }
-}
-
-async function fetchTimedRequest(
-  url: string,
   fetchInit: RequestInit,
-  token: string | null,
-  timeoutMs: number,
-): Promise<Response> {
-  if (callerAborted(fetchInit.signal)) throw abortError();
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const mergedSignal = fetchInit.signal;
-  if (mergedSignal) {
-    if (mergedSignal.aborted) controller.abort();
-    else mergedSignal.addEventListener('abort', () => controller.abort(), { once: true });
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(fetchInit.headers as Record<string, string> | undefined),
+  };
+  const method = String(fetchInit.method || 'GET').toUpperCase();
+  const hasBody = fetchInit.body != null && fetchInit.body !== '';
+  // GET/HEAD with Content-Type: application/json and no body makes some
+  // intermediaries wait for a payload that never comes.
+  if (
+    hasBody &&
+    method !== 'GET' &&
+    method !== 'HEAD' &&
+    !headers['Content-Type'] &&
+    !headers['content-type']
+  ) {
+    headers['Content-Type'] = 'application/json';
   }
-
-  try {
-    return await fetch(url, {
-      ...fetchInit,
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(fetchInit.headers as Record<string, string> | undefined),
-      },
-    });
-  } catch (e) {
-    if (e instanceof Error && e.name === 'AbortError') {
-      if (callerAborted(mergedSignal)) throw abortError();
-      throw new ApiTimeoutError();
-    }
-    throw e;
-  } finally {
-    clearTimeout(timer);
-  }
+  return headers;
 }
 
 /**
@@ -185,35 +112,51 @@ export async function authedFetch(
   options: AuthedFetchOptions = {},
   retry = true,
 ): Promise<Response> {
-  const {
-    timeoutMs = API_REQUEST_TIMEOUT_MS,
-    preserveSessionOn401 = false,
-    useXhrTimeout = false,
-    ...fetchInit
-  } = options;
+  const { timeoutMs = API_REQUEST_TIMEOUT_MS, preserveSessionOn401 = false, ...fetchInit } = options;
   const token = (await getValidToken()) ?? getCachedToken();
   if (callerAborted(fetchInit.signal)) throw abortError();
 
-  const res = useXhrTimeout
-    ? await xhrTimedRequest(url, fetchInit, token, timeoutMs)
-    : await fetchTimedRequest(url, fetchInit, token, timeoutMs);
-
-  if (res.status === 401 && retry) {
-    const path = url.replace(BACKEND_URL, '');
-    console.log('[API_401_RETRY]', { path });
-    const fresh = await forceRefresh();
-    if (fresh) return authedFetch(url, options, false);
-    if (!preserveSessionOn401) {
-      try {
-        await useAppStore.getState().logout();
-      } catch {
-        /* silent */
-      }
-      forceNavigateToLogin();
-    }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const mergedSignal = fetchInit.signal;
+  if (mergedSignal) {
+    if (mergedSignal.aborted) controller.abort();
+    else mergedSignal.addEventListener('abort', () => controller.abort(), { once: true });
   }
 
-  return res;
+  try {
+    const res = await fetch(url, {
+      ...fetchInit,
+      signal: controller.signal,
+      headers: requestHeaders(token, fetchInit),
+    });
+
+    if (res.status === 401 && retry) {
+      const path = url.replace(BACKEND_URL, '');
+      console.log('[API_401_RETRY]', { path });
+      const fresh = await forceRefresh();
+      if (fresh) return authedFetch(url, options, false);
+      if (!preserveSessionOn401) {
+        try {
+          await useAppStore.getState().logout();
+        } catch {
+          /* silent */
+        }
+        forceNavigateToLogin();
+      }
+    }
+
+    return res;
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      // Rider typed another character — not a 9s backend hang.
+      if (callerAborted(mergedSignal)) throw abortError();
+      throw new ApiTimeoutError();
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** @deprecated Use authedFetch */
