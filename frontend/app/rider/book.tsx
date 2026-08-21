@@ -2425,8 +2425,8 @@ function BookInDriveStyle() {
   // Bolt Route entry — full screen until dropoff suggestion is tapped (selection = confirm).
   if (routeSearchOpen) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#F2F3F5' }}>
-        <StatusBar barStyle="dark-content" backgroundColor="#F2F3F5" />
+      <View style={{ flex: 1, backgroundColor: '#0D1420' }}>
+        <StatusBar barStyle="light-content" backgroundColor="#0D1420" />
         <BoltRouteSearch
           userId={riderId}
           pickupLabel={pickup}

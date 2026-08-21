@@ -110,7 +110,7 @@ results.push(
     'no-empty-while-loading',
     'Route does not show No places found while search is in flight',
     src.bolt.includes("Searching addresses…") &&
-      src.bolt.includes("activeQuery.trim().length >= MIN_CHARS") &&
+      src.bolt.includes('isSearchableQuery') &&
       src.bolt.includes("searchError === 'auth'"),
   ),
 );
@@ -250,6 +250,18 @@ results.push(
     src.places.includes('fetchAutocompleteWithRetry') &&
       src.places.includes('ApiTimeoutError') &&
       src.places.includes('RETRY_DELAY_MS'),
+  ),
+);
+
+results.push(
+  printRow(
+    'route-search-uses-nexryde-brand',
+    'Route search uses NEXRYDE navy/green, not the light Bolt grey sheet',
+    src.bolt.includes('BRAND.bgDeep') &&
+      src.bolt.includes('isSearchableQuery') &&
+      src.bolt.includes('underlineColorAndroid') &&
+      src.bolt.includes('<View style={[styles.fieldRow') &&
+      !src.bolt.includes('#F2F3F5'),
   ),
 );
 

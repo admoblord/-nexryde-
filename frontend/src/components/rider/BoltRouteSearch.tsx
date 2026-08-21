@@ -1,5 +1,6 @@
 /**
- * Bolt-style Route entry: stacked pickup/dropoff, inline suggestions, no confirm step.
+ * Route entry: stacked pickup/dropoff, inline suggestions, no confirm step.
+ * NEXRYDE brand (navy + neon green) — same tokens as the rest of the rider app.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -11,6 +12,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Keyboard,
+  KeyboardAvoidingView,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -28,15 +30,29 @@ import {
   splitHighlight,
   type RouteSuggestion,
 } from '@/src/services/routeSuggestions';
+import { BRAND } from '@/src/constants/designSystem';
+import {
+  SAFE_PICKUP_FALLBACK,
+  isDetectingPickupLabel,
+  isRawLatLngLabel,
+} from '@/src/services/instantPickupEngine';
 
-const GREEN = '#22E180';
-const BG = '#F2F3F5';
-const CARD = '#FFFFFF';
-const TEXT = '#0F172A';
-const MUTED = '#64748B';
-const FIELD_GREY = '#ECEEF1';
+const GREEN = BRAND.primary;
+const BG = BRAND.bgDeep;
+const CARD = BRAND.bgCard;
+const TEXT = BRAND.textPrimary;
+const MUTED = BRAND.textSecondary;
+const FIELD_IDLE = BRAND.bgElevated;
 const DEBOUNCE_MS = 300;
 const MIN_CHARS = 3;
+
+function isSearchableQuery(input: string): boolean {
+  const t = String(input || '').trim();
+  if (t.length < MIN_CHARS) return false;
+  if (t === SAFE_PICKUP_FALLBACK) return false;
+  if (isDetectingPickupLabel(t) || isRawLatLngLabel(t)) return false;
+  return true;
+}
 
 export type RouteField = 'pickup' | 'dropoff' | 'stop';
 
@@ -223,7 +239,7 @@ export function BoltRouteSearch({
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const q = activeQuery.trim();
-    if (q.length < MIN_CHARS) {
+    if (!isSearchableQuery(q)) {
       abortRef.current?.abort();
       setPlaces([]);
       setLoading(false);
@@ -273,13 +289,9 @@ export function BoltRouteSearch({
   ) => {
     const isFocused = focused === field;
     return (
-      <TouchableOpacity
-        activeOpacity={1}
-        onPress={() => setFocused(field)}
-        style={[styles.fieldRow, isFocused ? styles.fieldFocused : styles.fieldIdle]}
-      >
+      <View style={[styles.fieldRow, isFocused ? styles.fieldFocused : styles.fieldIdle]}>
         {isFocused ? (
-          <Ionicons name="search" size={18} color={MUTED} style={styles.fieldLeftIcon} />
+          <Ionicons name="search" size={18} color={GREEN} style={styles.fieldLeftIcon} />
         ) : (
           <View style={[styles.dotIcon, field === 'pickup' ? styles.dotPickup : styles.dotDrop]} />
         )}
@@ -293,11 +305,14 @@ export function BoltRouteSearch({
           placeholderTextColor={MUTED}
           returnKeyType="search"
           autoCorrect={false}
-          autoCapitalize="words"
+          autoCapitalize="none"
+          underlineColorAndroid="transparent"
+          keyboardAppearance="dark"
+          importantForAutofill="no"
         />
         {isFocused ? (
           <View style={styles.fieldRight}>
-            {value.trim().length > 0 ? (
+            {value.trim().length > 0 && value.trim() !== SAFE_PICKUP_FALLBACK ? (
               <TouchableOpacity
                 onPress={() => onClear(field)}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -316,7 +331,7 @@ export function BoltRouteSearch({
             </TouchableOpacity>
           </View>
         ) : null}
-      </TouchableOpacity>
+      </View>
     );
   };
 
@@ -348,6 +363,10 @@ export function BoltRouteSearch({
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
+      <KeyboardAvoidingView
+        style={styles.kb}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
       <View style={styles.header}>
         <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <Ionicons name="close" size={26} color={TEXT} />
@@ -409,6 +428,7 @@ export function BoltRouteSearch({
         keyExtractor={(item) => item.id}
         renderItem={renderSuggestion}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         style={styles.list}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
@@ -420,11 +440,10 @@ export function BoltRouteSearch({
                   ? 'Sign in again to search pickup and destination'
                   : searchError === 'offline' || searchError === 'network'
                     ? failureHeadline(failure)
-                    : activeQuery.trim().length >= MIN_CHARS
+                    : isSearchableQuery(activeQuery)
                       ? 'No places found'
-                      : 'Saved places and recent searches appear here'}
+                      : 'Type a destination — saved and recent places show here'}
             </Text>
-            {/* The exact reason, so a screenshot is enough to diagnose it. */}
             {!loading && failure ? (
               <Text style={styles.emptyDetail} selectable>
                 {failure.kind}: {failure.detail}
@@ -443,12 +462,14 @@ export function BoltRouteSearch({
           </View>
         }
       />
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
+  kb: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -473,11 +494,8 @@ const styles = StyleSheet.create({
     backgroundColor: CARD,
     borderRadius: 16,
     padding: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(34,225,128,0.12)',
   },
   fieldRow: {
     flexDirection: 'row',
@@ -487,12 +505,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   fieldFocused: {
-    backgroundColor: CARD,
+    backgroundColor: FIELD_IDLE,
     borderWidth: 2,
     borderColor: GREEN,
   },
   fieldIdle: {
-    backgroundColor: FIELD_GREY,
+    backgroundColor: FIELD_IDLE,
     borderWidth: 0,
   },
   fieldLeftIcon: { marginRight: 8 },
@@ -503,7 +521,7 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   dotPickup: { backgroundColor: GREEN },
-  dotDrop: { backgroundColor: '#0F172A' },
+  dotDrop: { backgroundColor: BRAND.textPrimary },
   fieldInput: {
     flex: 1,
     fontSize: 16,
@@ -521,7 +539,7 @@ const styles = StyleSheet.create({
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#CBD5E1',
+    backgroundColor: BRAND.textMuted,
   },
   sideBtns: { justifyContent: 'space-between', paddingVertical: 4 },
   sideBtn: {
@@ -532,7 +550,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
-    elevation: 1,
+    borderWidth: 1,
+    borderColor: 'rgba(34,225,128,0.18)',
   },
   loadingRow: { paddingVertical: 8, alignItems: 'center' },
   list: { flex: 1, marginTop: 8 },
@@ -543,7 +562,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E2E8F0',
+    borderBottomColor: 'rgba(143,163,188,0.18)',
     backgroundColor: BG,
   },
   sugIconWrap: {
@@ -580,7 +599,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     backgroundColor: CARD,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: 'rgba(34,225,128,0.35)',
   },
   retryText: { fontSize: 15, fontWeight: '600', color: TEXT },
 });
