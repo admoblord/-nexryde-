@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
   classifyPlacesFailure,
+  isPlacesAbortError,
   searchPlacesAutocomplete,
   type PlacesFailure,
 } from '@/src/services/placesSearch';
@@ -122,6 +123,7 @@ export function BoltRouteSearch({
   const sessionRef = useRef<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reqIdRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
   const originRef = useRef(origin);
   const pickupRef = useRef<TextInput>(null);
   const dropoffRef = useRef<TextInput>(null);
@@ -153,6 +155,10 @@ export function BoltRouteSearch({
     return () => clearTimeout(t);
   }, [focused]);
 
+  useEffect(() => () => {
+    abortRef.current?.abort();
+  }, []);
+
   const ensureSession = useCallback(() => {
     if (!sessionRef.current) sessionRef.current = newSessionToken();
     return sessionRef.current;
@@ -160,6 +166,9 @@ export function BoltRouteSearch({
 
   const fetchPlaces = useCallback(
     async (input: string) => {
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
       const reqId = ++reqIdRef.current;
       setLoading(true);
       setSearchError(null);
@@ -170,8 +179,9 @@ export function BoltRouteSearch({
           origin: originRef.current,
           sessionToken: session,
           countryCode: 'ng',
+          signal: ac.signal,
         });
-        if (reqId !== reqIdRef.current) return;
+        if (reqId !== reqIdRef.current || ac.signal.aborted) return;
         const rows = mapPlacesPredictions(
           data.predictions || [],
           input,
@@ -199,11 +209,10 @@ export function BoltRouteSearch({
         // replacing real addresses with an empty state.
         setSearchError(data.offline ? 'offline' : 'network');
       } catch (err) {
-        if (reqId === reqIdRef.current) {
-          const f = classifyPlacesFailure(err);
-          setFailure(f);
-          setSearchError(f.kind === 'no_network' ? 'offline' : 'network');
-        }
+        if (reqId !== reqIdRef.current || ac.signal.aborted || isPlacesAbortError(err)) return;
+        const f = classifyPlacesFailure(err);
+        setFailure(f);
+        setSearchError(f.kind === 'no_network' ? 'offline' : 'network');
       } finally {
         if (reqId === reqIdRef.current) setLoading(false);
       }
@@ -215,6 +224,7 @@ export function BoltRouteSearch({
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const q = activeQuery.trim();
     if (q.length < MIN_CHARS) {
+      abortRef.current?.abort();
       setPlaces([]);
       setLoading(false);
       return;

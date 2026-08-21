@@ -38,7 +38,26 @@ const stubs = {
     }
     globalThis.__ApiTimeoutError__ = ApiTimeoutError;
     export async function authedFetch(url, opts) {
-      return globalThis.__FETCH__(url, opts);
+      const signal = opts && opts.signal;
+      const work = globalThis.__FETCH__(url, opts);
+      if (!signal) return work;
+      if (signal.aborted) {
+        const e = new Error('Aborted');
+        e.name = 'AbortError';
+        throw e;
+      }
+      return new Promise((resolve, reject) => {
+        const onAbort = () => {
+          const e = new Error('Aborted');
+          e.name = 'AbortError';
+          reject(e);
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        Promise.resolve(work).then(
+          (v) => { signal.removeEventListener('abort', onAbort); resolve(v); },
+          (e) => { signal.removeEventListener('abort', onAbort); reject(e); },
+        );
+      });
     }`,
   '@/src/services/platformConnectionManager': `
     export function isHardOffline() { return globalThis.__HARD_OFFLINE__ === true; }
@@ -163,6 +182,46 @@ check(
   'timeout copy is timeout, not "No internet connection"',
   out.failure?.kind === 'timeout' && out.offline !== true && out.emptyConfirmed !== true,
 );
+
+// 2b. a hung first connection is recovered by the hedge, not by waiting 9s
+reset();
+calls = 0;
+globalThis.__FETCH__ = async (url) => {
+  calls += 1;
+  if (String(url).includes('_nxh=1')) return respond(okBody);
+  return new Promise(() => {});
+};
+const hedgeStarted = Date.now();
+out = await searchPlacesAutocomplete('Victoria Island hedge', { countryCode: 'ng' });
+const hedgeMs = Date.now() - hedgeStarted;
+check(
+  'hedge-recovers-hung-first-connection',
+  'a hung first HTTP connection is replaced by a second one',
+  out.predictions.length === 1 && !out.offline && hedgeMs < 5000 && calls >= 2,
+  `${hedgeMs}ms calls=${calls} top=${out.predictions[0]?.main_text || ''}`,
+);
+
+// 3b. cancelling a search (new keystroke) must not paint timeout: timeout
+reset();
+{
+  const ac = new AbortController();
+  globalThis.__FETCH__ = () => new Promise(() => {});
+  const abortStarted = Date.now();
+  setTimeout(() => ac.abort(), 30);
+  let abortThrew = null;
+  try {
+    await searchPlacesAutocomplete('Abort me now xx', { countryCode: 'ng', signal: ac.signal });
+  } catch (e) {
+    abortThrew = e;
+  }
+  const abortMs = Date.now() - abortStarted;
+  check(
+    'typing-abort-is-not-timeout',
+    'cancelling a search does not surface as timeout: timeout',
+    abortThrew?.name === 'AbortError' && abortMs < 2000,
+    `${abortMs}ms name=${abortThrew?.name}`,
+  );
+}
 
 // 4. a previously found address still resolves when the request is dropped
 reset();

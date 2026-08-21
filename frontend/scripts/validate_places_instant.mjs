@@ -255,6 +255,19 @@ results.push(
 
 results.push(
   printRow(
+    'device-hang-hedge-and-abort',
+    'typing cancels the previous search and a hung connection is hedged',
+    src.places.includes('PLACES_HEDGE_AFTER_MS') &&
+      src.places.includes('useXhrTimeout: true') &&
+      src.places.includes('_nxh=1') &&
+      src.bolt.includes('abortRef') &&
+      src.bolt.includes('signal: ac.signal') &&
+      src.ac.includes('signal: ac.signal'),
+  ),
+);
+
+results.push(
+  printRow(
     'offline-is-named-honestly',
     'No internet is only claimed when the device reports no connectivity',
     src.places.includes("kind: 'no_network'") &&
