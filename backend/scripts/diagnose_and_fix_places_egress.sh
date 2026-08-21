@@ -94,7 +94,13 @@ echo "parsed network=${NETWORK:-?} subnet=${SUBNET:-none} ipCidrRange=${CIDR:-no
 # ── 3. Cloud NAT ─────────────────────────────────────────────────────────────
 hdr "3. Cloud NAT in ${REGION} (must cover the connector subnet / range)"
 echo "--- routers ---"
-gcloud compute routers list --regions="$REGION" --format='table(name,region,network,bgp.asn)'
+ROUTERS_ERR="$(gcloud compute routers list --regions="$REGION" --format='table(name,region,network,bgp.asn)' 2>&1)"
+echo "$ROUTERS_ERR"
+IAM_BLOCKED=false
+if grep -q "PERMISSION_DENIED\|Required 'compute.routers.list'" <<<"$ROUTERS_ERR"; then
+  IAM_BLOCKED=true
+  echo "IAM: compute.routers.list denied. Empty NAT list is NOT proof that NAT is missing."
+fi
 echo "--- addresses (looking for Atlas NAT ${ATLAS_NAT_IP}) ---"
 gcloud compute addresses list --filter="region:($REGION)" \
   --format='table(name,address,status,purpose,users.list())'
@@ -131,7 +137,10 @@ for router in "${ROUTERS[@]:-}"; do
   done
 done
 
-if ! $NAT_FOUND; then
+if $IAM_BLOCKED; then
+  echo "DIAGNOSIS: cannot read Cloud NAT (IAM compute.routers.list denied)."
+  echo "The in-process Google probe above is the ground truth for 443 to googleapis.com."
+elif ! $NAT_FOUND; then
   echo "DIAGNOSIS: NO Cloud NAT gateway in ${REGION}. With vpc-egress=all-traffic,"
   echo "public HTTPS (maps.googleapis.com:443) has nowhere to SNAT. Mongo/Atlas may"
   echo "still work if it is private-IP / peered; Google will SYN-hang."
@@ -169,7 +178,10 @@ fi
 # ── 5. Fix ───────────────────────────────────────────────────────────────────
 hdr "5. Fix NAT/firewall (vpc-egress stays all-traffic)"
 
-if ! $NAT_FOUND; then
+if $IAM_BLOCKED; then
+  echo "Skipping NAT create/update: this SA cannot list routers. Grant compute.networkAdmin"
+  echo "(or routers.list + nats.update + firewalls.create) on nexryde-app and re-run."
+elif ! $NAT_FOUND; then
   # Reuse the Atlas NAT IP so Mongo keep working.
   ADDR_NAME="$(gcloud compute addresses list --filter="region:($REGION) AND address=${ATLAS_NAT_IP}" \
     --format='value(name)' 2>/dev/null || true)"
