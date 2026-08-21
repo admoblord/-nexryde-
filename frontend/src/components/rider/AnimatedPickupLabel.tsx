@@ -3,12 +3,8 @@
  * Never renders raw coordinates (engine sanitizes before pass-in).
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, StyleSheet, TextStyle, Text } from 'react-native';
-import {
-  DETECTING_PICKUP,
-  isDetectingPickupLabel,
-  safePickupDisplay,
-} from '@/src/services/instantPickupEngine';
+import { Animated, StyleSheet, TextStyle } from 'react-native';
+import { safePickupDisplay } from '@/src/services/instantPickupEngine';
 
 type Props = {
   label: string;
@@ -46,15 +42,16 @@ export function AnimatedPickupLabel({
     });
   }, [display, shown, opacity]);
 
-  const isDetecting = detecting || isDetectingPickupLabel(shown);
+  const MAP_PICKUP_PLACEHOLDER = 'Pickup';
+  const isDetecting = Boolean(detecting) && !shown;
 
   return (
     <Animated.Text
       style={[styles.text, isDetecting && styles.detecting, style, { opacity }]}
       numberOfLines={numberOfLines}
-      accessibilityLabel={shown || DETECTING_PICKUP}
+      accessibilityLabel={shown || MAP_PICKUP_PLACEHOLDER}
     >
-      {shown || DETECTING_PICKUP}
+      {shown || MAP_PICKUP_PLACEHOLDER}
     </Animated.Text>
   );
 }

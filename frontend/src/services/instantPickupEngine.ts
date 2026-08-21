@@ -57,6 +57,25 @@ let memoryCache: CacheEntry[] = [];
 const sessionRoundCache = new Map<string, InstantPickupResult>();
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 let cacheLoaded = false;
+let lastKnownGood: { lat: number; lng: number; label: string } | null = null;
+
+function rememberGoodLabel(lat: number, lng: number, label: string): void {
+  const t = String(label || '').trim();
+  if (isBadPickupLabel(t) || isPlaceholderPickupLabel(t)) return;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  lastKnownGood = { lat, lng, label: t };
+}
+
+/** Last reverse-geocoded street/area near these coords — empty until a real hit. */
+export function peekLastKnownPickupLabel(lat?: number, lng?: number): string {
+  if (!lastKnownGood || isPlaceholderPickupLabel(lastKnownGood.label)) return '';
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    if (haversineMeters(lastKnownGood.lat, lastKnownGood.lng, lat as number, lng as number) > 250) {
+      return '';
+    }
+  }
+  return lastKnownGood.label;
+}
 
 export function roundCoordKey(lat: number, lng: number): string {
   return `${lat.toFixed(4)},${lng.toFixed(4)}`;
@@ -82,20 +101,22 @@ export function isBadPickupLabel(s: string): boolean {
 
 export function isDetectingPickupLabel(s: string): boolean {
   const t = String(s || '').trim();
-  return (
-    !t ||
-    t === DETECTING_PICKUP ||
-    t === 'Finding address…' ||
-    t === 'Finding address...' ||
-    isRawLatLngLabel(t)
-  );
+  return t === DETECTING_PICKUP || t === 'Finding address…' || t === 'Finding address...';
 }
 
-/** Safe UI string — never raw coordinates or Plus Codes. */
+/** Empty / detecting / legacy "Near your location" / raw coords / Plus Codes. */
+export function isPlaceholderPickupLabel(s: string): boolean {
+  const t = String(s || '').trim();
+  if (!t || t === SAFE_PICKUP_FALLBACK || t === 'Current location') return true;
+  if (isDetectingPickupLabel(t)) return true;
+  return isRawLatLngLabel(t) || isPlusCodeLabel(t);
+}
+
+/** Safe UI string — never raw coordinates, Plus Codes, or fake "Near your location". */
 export function safePickupDisplay(label: string | null | undefined, detecting = false): string {
+  if (detecting) return '';
   const t = String(label || '').trim();
-  if (detecting || isDetectingPickupLabel(t)) return DETECTING_PICKUP;
-  if (isBadPickupLabel(t)) return SAFE_PICKUP_FALLBACK;
+  if (isPlaceholderPickupLabel(t)) return '';
   return t;
 }
 
@@ -147,9 +168,13 @@ async function ensureCacheLoaded(): Promise<void> {
           e &&
           typeof e.label === 'string' &&
           !isBadPickupLabel(e.label) &&
+          !isPlaceholderPickupLabel(e.label) &&
           Number.isFinite(e.lat) &&
           Number.isFinite(e.lng),
       );
+      if (memoryCache[0]) {
+        rememberGoodLabel(memoryCache[0].lat, memoryCache[0].lng, memoryCache[0].label);
+      }
     }
   } catch {
     /* ignore */
@@ -173,7 +198,8 @@ function remember(entry: CacheEntry): void {
     ),
   ].slice(0, MAX_CACHE);
   schedulePersist();
-  if (!isBadPickupLabel(entry.label)) {
+  if (!isBadPickupLabel(entry.label) && !isPlaceholderPickupLabel(entry.label)) {
+    rememberGoodLabel(entry.lat, entry.lng, entry.label);
     sessionRoundCache.set(roundCoordKey(entry.lat, entry.lng), {
       label: entry.label,
       tier: (entry.tier as PickupTier) || 'area',
@@ -188,7 +214,7 @@ function remember(entry: CacheEntry): void {
 
 function lookupSessionRound(lat: number, lng: number): InstantPickupResult | null {
   const hit = sessionRoundCache.get(roundCoordKey(lat, lng));
-  if (!hit || isBadPickupLabel(hit.label)) return null;
+  if (!hit || isBadPickupLabel(hit.label) || isPlaceholderPickupLabel(hit.label)) return null;
   return { ...hit, lat, lng, fromCache: true };
 }
 
@@ -198,7 +224,10 @@ export async function lookupPickupCache(
   radiusM = PICKUP_REUSE_RADIUS_M,
 ): Promise<InstantPickupResult | null> {
   const session = lookupSessionRound(lat, lng);
-  if (session) return session;
+  if (session) {
+    rememberGoodLabel(session.lat, session.lng, session.label);
+    return session;
+  }
 
   await ensureCacheLoaded();
   const cell = geoCellKey(lat, lng);
@@ -213,7 +242,8 @@ export async function lookupPickupCache(
       }
     }
   }
-  if (!best || isBadPickupLabel(best.label)) return null;
+  if (!best || isBadPickupLabel(best.label) || isPlaceholderPickupLabel(best.label)) return null;
+  rememberGoodLabel(best.lat, best.lng, best.label);
   return {
     label: best.label,
     tier: (best.tier as PickupTier) || 'area',
@@ -266,7 +296,7 @@ export async function resolveInstantPickup(
   const t0 = Date.now();
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return {
-      label: SAFE_PICKUP_FALLBACK,
+      label: '',
       tier: 'fallback',
       lat: 0,
       lng: 0,
@@ -318,7 +348,7 @@ export async function resolveInstantPickup(
 
   void lastErr;
   return {
-    label: SAFE_PICKUP_FALLBACK,
+    label: '',
     tier: 'fallback',
     lat,
     lng,
@@ -344,8 +374,8 @@ export type InstantPickupController = {
 
 /**
  * Continuous pickup detection — call from booking screen.
- * With a GPS/last-known fix: never emit Detecting… — show cache or Near your location
- * while reverse-geocode completes.
+ * With a GPS/last-known fix: emit a cached street/area instantly, otherwise
+ * an empty label (never "Near your location" / "Detecting…") while reverse-geocode runs.
  */
 export function startInstantPickupEngine(handlers: {
   onUpdate: (state: {
@@ -362,7 +392,7 @@ export function startInstantPickupEngine(handlers: {
   const moveThreshold = handlers.moveThresholdM ?? PICKUP_MOVE_THRESHOLD_M;
   let stopped = false;
   let lastResolved: { lat: number; lng: number } | null = null;
-  let lastLabel = DETECTING_PICKUP;
+  let lastLabel = '';
   let lastTier: PickupTier = 'detecting';
   let current: { lat: number; lng: number } | null = null;
   let seq = 0;
@@ -371,19 +401,14 @@ export function startInstantPickupEngine(handlers: {
   let hasGpsFix = false;
 
   const emitPlaceholder = (lat: number, lng: number) => {
-    // Spec: never show Detecting… while a last-known / GPS position exists.
-    const label = hasGpsFix
-      ? isDetectingPickupLabel(lastLabel)
-        ? SAFE_PICKUP_FALLBACK
-        : lastLabel
-      : DETECTING_PICKUP;
+    const label = isPlaceholderPickupLabel(lastLabel) ? '' : lastLabel;
     const detecting = !hasGpsFix;
     handlers.onUpdate({
       label,
       detecting,
       lat,
       lng,
-      tier: detecting ? 'detecting' : lastTier === 'detecting' ? 'fallback' : lastTier,
+      tier: detecting ? 'detecting' : lastTier === 'detecting' ? 'area' : lastTier,
       fromCache: false,
     });
   };
@@ -422,10 +447,10 @@ export function startInstantPickupEngine(handlers: {
       });
       if (stopped || my !== seq || handlers.isManualPickup?.()) return;
       lastResolved = { lat, lng };
-      lastLabel = result.label;
+      lastLabel = safePickupDisplay(result.label);
       lastTier = result.tier;
       handlers.onUpdate({
-        label: safePickupDisplay(result.label),
+        label: lastLabel,
         detecting: false,
         lat,
         lng,
@@ -452,13 +477,11 @@ export function startInstantPickupEngine(handlers: {
         ) {
           lastPropagated = { lat, lng };
           handlers.onUpdate({
-            label: isDetectingPickupLabel(lastLabel)
-              ? SAFE_PICKUP_FALLBACK
-              : safePickupDisplay(lastLabel),
+            label: isPlaceholderPickupLabel(lastLabel) ? '' : safePickupDisplay(lastLabel),
             detecting: false,
             lat,
             lng,
-            tier: lastTier === 'detecting' ? 'fallback' : lastTier,
+            tier: lastTier === 'detecting' ? 'area' : lastTier,
             fromCache: true,
           });
         }
@@ -481,7 +504,7 @@ export function startInstantPickupEngine(handlers: {
     getSnapshot() {
       return {
         label: lastLabel,
-        detecting: !hasGpsFix && isDetectingPickupLabel(lastLabel),
+        detecting: !hasGpsFix,
         lat: current?.lat ?? null,
         lng: current?.lng ?? null,
         tier: lastTier,

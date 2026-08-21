@@ -58,7 +58,7 @@ const engine = await import(
   pathToFileURL(path.join(__dirname, '..', 'src', 'services', 'instantPickupEngine.ts')).href
 );
 
-const { preferReadableAddress, stripPlusCodeHead, safePickupDisplay, isPlusCodeLabel } = engine;
+const { preferReadableAddress, stripPlusCodeHead, safePickupDisplay, isPlusCodeLabel, isPlaceholderPickupLabel, DETECTING_PICKUP, SAFE_PICKUP_FALLBACK } = engine;
 
 const results = [];
 function check(id, label, pass, detail) {
@@ -123,6 +123,20 @@ check(
   'an ordinary address containing a plus sign is left alone',
   preferReadableAddress('somewhere', 'Shop 4 + 5, Admiralty Way, Lekki') ===
     'Shop 4 + 5, Admiralty Way, Lekki',
+);
+
+check(
+  'never-near-your-location',
+  'safePickupDisplay never fills the field with Near your location or Detecting…',
+  safePickupDisplay('') === '' &&
+    safePickupDisplay(SAFE_PICKUP_FALLBACK) === '' &&
+    safePickupDisplay(DETECTING_PICKUP) === '' &&
+    safePickupDisplay('6.6018, 3.3515') === '' &&
+    safePickupDisplay(DETAILS) === '' &&
+    safePickupDisplay(TAPPED) === TAPPED &&
+    isPlaceholderPickupLabel(SAFE_PICKUP_FALLBACK) &&
+    isPlaceholderPickupLabel('') &&
+    !isPlaceholderPickupLabel(TAPPED),
 );
 
 const failed = results.filter((p) => !p).length;

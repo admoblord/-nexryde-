@@ -266,7 +266,7 @@ class DriverOffersSocketManager {
       this.ws = null;
     }
 
-    // Prefer Connect-SSE (HTTP/2–3 / QUIC via Cronet); fall back to WebSocket.
+    // Prefer Connect-SSE (HTTP/2 over TCP). QUIC is off — UDP 443 black-holes.
     if (!this.connectSseUnsupported) {
       const usedConnect = await this.openConnectSse(gen);
       if (usedConnect || gen !== this.connectGeneration || !this.shouldStayConnected) {

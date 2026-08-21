@@ -69,6 +69,40 @@ export async function ensureFreshAuthSession(): Promise<void> {
   await ensureCriticalSessionReady();
 }
 
+function callerAborted(signal: AbortSignal | null | undefined): boolean {
+  return !!signal && signal.aborted;
+}
+
+function abortError(): Error {
+  const err = new Error('Aborted');
+  err.name = 'AbortError';
+  return err;
+}
+
+function requestHeaders(
+  token: string | null,
+  fetchInit: RequestInit,
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(fetchInit.headers as Record<string, string> | undefined),
+  };
+  const method = String(fetchInit.method || 'GET').toUpperCase();
+  const hasBody = fetchInit.body != null && fetchInit.body !== '';
+  // GET/HEAD with Content-Type: application/json and no body makes some
+  // intermediaries wait for a payload that never comes.
+  if (
+    hasBody &&
+    method !== 'GET' &&
+    method !== 'HEAD' &&
+    !headers['Content-Type'] &&
+    !headers['content-type']
+  ) {
+    headers['Content-Type'] = 'application/json';
+  }
+  return headers;
+}
+
 /**
  * Authenticated fetch — token loaded/refreshed transparently by tokenStore.
  * 401 retries once after refresh; timeouts/network errors fail immediately (no retry).
@@ -80,23 +114,21 @@ export async function authedFetch(
 ): Promise<Response> {
   const { timeoutMs = API_REQUEST_TIMEOUT_MS, preserveSessionOn401 = false, ...fetchInit } = options;
   const token = (await getValidToken()) ?? getCachedToken();
+  if (callerAborted(fetchInit.signal)) throw abortError();
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const mergedSignal = fetchInit.signal;
   if (mergedSignal) {
-    mergedSignal.addEventListener('abort', () => controller.abort(), { once: true });
+    if (mergedSignal.aborted) controller.abort();
+    else mergedSignal.addEventListener('abort', () => controller.abort(), { once: true });
   }
 
   try {
     const res = await fetch(url, {
       ...fetchInit,
       signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(fetchInit.headers as Record<string, string> | undefined),
-      },
+      headers: requestHeaders(token, fetchInit),
     });
 
     if (res.status === 401 && retry) {
@@ -117,6 +149,8 @@ export async function authedFetch(
     return res;
   } catch (e) {
     if (e instanceof Error && e.name === 'AbortError') {
+      // Rider typed another character — not a 9s backend hang.
+      if (callerAborted(mergedSignal)) throw abortError();
       throw new ApiTimeoutError();
     }
     throw e;

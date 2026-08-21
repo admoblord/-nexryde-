@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '../constants/theme';
 import { DIRECTIONS_ROUTE_MIN_POINTS } from '../navigation/navUtils';
 import { NEXRYDE_MAP_STYLE } from '../constants/nexrydeMapBehavior';
-import { SAFE_PICKUP_FALLBACK, safePickupDisplay } from '../services/instantPickupEngine';
+import { safePickupDisplay } from '../services/instantPickupEngine';
 
 interface Location {
   latitude: number;
@@ -42,7 +42,7 @@ const WebPlaceholder: React.FC<MapComponentProps> = ({ pickup, dropoff, style })
           <View style={styles.locationRow}>
             <View style={styles.pickupDot} />
             <Text style={styles.locationText} numberOfLines={1}>
-              {placeLabel(pickup, SAFE_PICKUP_FALLBACK)}
+              {placeLabel(pickup, 'Pickup')}
             </Text>
           </View>
         </View>
@@ -206,7 +206,7 @@ const NativeMap: React.FC<MapComponentProps> = ({
           <Marker
             coordinate={{ latitude: pickup!.latitude, longitude: pickup!.longitude }}
             title="Pickup"
-            description={placeLabel(pickup, SAFE_PICKUP_FALLBACK)}
+            description={placeLabel(pickup, 'Pickup')}
             pinColor="#22C55E"
             tracksViewChanges={false}
           />

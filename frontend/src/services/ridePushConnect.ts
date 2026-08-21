@@ -1,6 +1,8 @@
 /**
  * Uber RAMEN-lite Connect transport (SSE over HTTPS).
- * On Android + Cronet this can ride HTTP/3 (QUIC). WebSocket remains fallback.
+ * On Android this is HTTPS (HTTP/2). HTTP/3/QUIC is disabled — UDP 443
+ * black-holes on common Nigerian mobile networks and the 9s search abort
+ * fires before Cronet falls back to TCP.
  */
 import { BACKEND_URL } from '@/src/services/api';
 import { getValidToken } from '@/src/lib/tokenStore';

@@ -94,9 +94,14 @@ export function classifyPlacesFailure(err: unknown): PlacesFailure {
     || lower.includes('trust anchor')) {
     return { kind: 'tls', detail: raw };
   }
-  if (lower.includes('network request failed') || lower.includes('econnrefused')
-    || lower.includes('econnreset') || lower.includes('unreachable')
-    || lower.includes('connection') || lower.includes('socket')) {
+  const code = String((err as { code?: string } | null)?.code || '').toUpperCase();
+  if (code === 'ECONNABORTED' || code === 'ETIMEDOUT') {
+    return { kind: 'timeout', detail: raw || code };
+  }
+  if (lower.includes('network request failed') || lower.includes('network error')
+    || lower.includes('econnrefused') || lower.includes('econnreset')
+    || lower.includes('unreachable') || lower.includes('connection')
+    || lower.includes('socket') || code === 'ERR_NETWORK') {
     return { kind: 'unreachable', detail: raw || 'connection failed' };
   }
   return { kind: 'unknown', detail: raw || name || 'unknown error' };
@@ -179,11 +184,17 @@ export function predictionsMatchTypedQuery(
 
 type RawAutocomplete = PlacesSearchResult & { biasRetried: boolean };
 
-async function fetchAutocomplete(url: string): Promise<RawAutocomplete> {
+export function isPlacesAbortError(err: unknown): boolean {
+  const name = (err as { name?: string } | null)?.name || '';
+  return name === 'AbortError' || name === 'CanceledError';
+}
+
+async function fetchAutocomplete(url: string, signal?: AbortSignal): Promise<RawAutocomplete> {
   const res = await authedFetch(url, {
     method: 'GET',
     preserveSessionOn401: true,
     timeoutMs: PLACES_SEARCH_TIMEOUT_MS,
+    signal,
   });
   const data = await res.json().catch(() => ({}));
   const predictions = normalizePredictions((data as { predictions?: unknown }).predictions);
@@ -212,19 +223,28 @@ const RETRY_DELAY_MS = 500;
  * typed another character. A timeout is not retried — 9s of waiting is already
  * more than enough, and the 12s ceiling around the whole search would just fire.
  */
-async function fetchAutocompleteWithRetry(url: string): Promise<RawAutocomplete> {
+async function fetchAutocompleteWithRetry(
+  url: string,
+  signal?: AbortSignal,
+): Promise<RawAutocomplete> {
   try {
-    return await fetchAutocomplete(url);
+    return await fetchAutocomplete(url, signal);
   } catch (err) {
     if (
-      err instanceof ApiTimeoutError
+      isPlacesAbortError(err)
+      || err instanceof ApiTimeoutError
       || err instanceof PlacesDeadlineError
       || isHardOffline()
     ) {
       throw err;
     }
     await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-    return fetchAutocomplete(url);
+    if (signal?.aborted) {
+      const abort = new Error('Aborted');
+      abort.name = 'AbortError';
+      throw abort;
+    }
+    return fetchAutocomplete(url, signal);
   }
 }
 
@@ -234,6 +254,8 @@ export async function searchPlacesAutocomplete(
     origin?: { lat: number; lng: number } | null;
     sessionToken?: string;
     countryCode?: string;
+    /** Cancel when the rider types another character — do not pile up 9s GETs. */
+    signal?: AbortSignal;
   },
 ): Promise<PlacesSearchResult> {
   const q = input.trim();
@@ -257,7 +279,10 @@ export async function searchPlacesAutocomplete(
   let result: RawAutocomplete | null = null;
   let failure: PlacesFailure | undefined;
   try {
-    result = await withDeadline(fetchAutocompleteWithRetry(biased), PLACES_TOTAL_DEADLINE_MS);
+    result = await withDeadline(
+      fetchAutocompleteWithRetry(biased, opts?.signal),
+      PLACES_TOTAL_DEADLINE_MS,
+    );
     // Bias / wrong GPS must never hide a real Nigerian address. Newer backends
     // already retry unbiased and say so, which saves a round trip.
     const needUnbiased =
@@ -266,7 +291,7 @@ export async function searchPlacesAutocomplete(
       (result.predictions.length === 0 || !predictionsMatchTypedQuery(result.predictions, q));
     if (needUnbiased) {
       try {
-        const unbiased = await fetchAutocomplete(base);
+        const unbiased = await fetchAutocomplete(base, opts?.signal);
         if (
           unbiased.predictions.length &&
           (result.predictions.length === 0 || predictionsMatchTypedQuery(unbiased.predictions, q))
@@ -278,6 +303,9 @@ export async function searchPlacesAutocomplete(
       }
     }
   } catch (err) {
+    if (opts?.signal?.aborted || isPlacesAbortError(err)) {
+      throw err;
+    }
     result = null;
     // Read-only with respect to the connectivity FSM on purpose — search must
     // not be able to push the whole app into a degraded state.

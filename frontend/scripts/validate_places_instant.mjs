@@ -110,7 +110,7 @@ results.push(
     'no-empty-while-loading',
     'Route does not show No places found while search is in flight',
     src.bolt.includes("Searching addresses…") &&
-      src.bolt.includes("activeQuery.trim().length >= MIN_CHARS") &&
+      src.bolt.includes('isSearchableQuery') &&
       src.bolt.includes("searchError === 'auth'"),
   ),
 );
@@ -255,6 +255,44 @@ results.push(
 
 results.push(
   printRow(
+    'route-search-uses-nexryde-brand',
+    'Route search uses NEXRYDE navy/green, not the light Bolt grey sheet',
+    src.bolt.includes('BRAND.bgDeep') &&
+      src.bolt.includes('isSearchableQuery') &&
+      src.bolt.includes('underlineColorAndroid') &&
+      src.bolt.includes('<View style={[styles.fieldRow') &&
+      !src.bolt.includes('#F2F3F5'),
+  ),
+);
+
+results.push(
+  printRow(
+    'device-search-aborts-and-uses-tcp',
+    'typing cancels the previous search; Android Cronet is TCP not QUIC',
+    src.bolt.includes('abortRef') &&
+      src.bolt.includes('signal: ac.signal') &&
+      src.ac.includes('signal: ac.signal') &&
+      src.places.includes('isPlacesAbortError') &&
+      !src.places.includes('PLACES_HEDGE_AFTER_MS') &&
+      !src.places.includes('_nxh=1'),
+  ),
+);
+
+{
+  const appJson = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8'));
+  const plugins = appJson.expo?.plugins || [];
+  const cronet = plugins.find((p) => Array.isArray(p) && p[0] === 'expo-cronet');
+  results.push(
+    printRow(
+      'android-cronet-quic-off',
+      'store Android fetch uses Cronet HTTP/2 over TCP, not HTTP/3 QUIC',
+      cronet?.[1]?.enableQuic === false && plugins.includes('./plugins/withNexrydeOkHttp.js'),
+    ),
+  );
+}
+
+results.push(
+  printRow(
     'offline-is-named-honestly',
     'No internet is only claimed when the device reports no connectivity',
     src.places.includes("kind: 'no_network'") &&
@@ -304,6 +342,24 @@ results.push(
       !src.book.includes('if (details.description) desc = details.description;') &&
       (src.book.match(/preferReadableAddress\(desc, /g) || []).length >= 3 &&
       src.saved.includes('preferReadableAddress'),
+  ),
+);
+
+results.push(
+  printRow(
+    'route-pickup-never-near-your-location',
+    'Route pickup is GPS reverse-geocode or typed search, never Near your location',
+    src.engine.includes('export function isPlaceholderPickupLabel') &&
+      src.engine.includes("if (detecting) return ''") &&
+      !src.book.includes('setPickup(SAFE_PICKUP_FALLBACK)') &&
+      !src.book.includes('setPickup(DETECTING_PICKUP)') &&
+      !src.book.includes('return SAFE_PICKUP_FALLBACK') &&
+      !src.book.includes('address: SAFE_PICKUP_FALLBACK') &&
+      src.book.includes('applyGpsPickupLabel') &&
+      src.bolt.includes("'Search pickup'") &&
+      src.bolt.includes('isPlaceholderPickupLabel') &&
+      !src.engine.includes('? SAFE_PICKUP_FALLBACK') &&
+      !src.engine.includes('label: SAFE_PICKUP_FALLBACK'),
   ),
 );
 

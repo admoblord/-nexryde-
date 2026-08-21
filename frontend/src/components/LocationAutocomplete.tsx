@@ -98,6 +98,7 @@ export default function LocationAutocomplete({
   const debounceTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const activeRequestIdRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
   const sessionTokenRef = useRef<string | null>(null);
   const predictionCacheRef = useRef<Map<string, Prediction[]>>(new Map());
 
@@ -153,6 +154,7 @@ export default function LocationAutocomplete({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      abortRef.current?.abort();
     };
   }, []);
 
@@ -161,6 +163,9 @@ export default function LocationAutocomplete({
 
   const fetchPredictions = useCallback(
     async (input: string) => {
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
       const requestId = activeRequestIdRef.current + 1;
       activeRequestIdRef.current = requestId;
       setIsLoading(true);
@@ -178,8 +183,9 @@ export default function LocationAutocomplete({
           origin,
           sessionToken: session,
           countryCode,
+          signal: ac.signal,
         });
-        if (!mountedRef.current || requestId !== activeRequestIdRef.current) return;
+        if (!mountedRef.current || requestId !== activeRequestIdRef.current || ac.signal.aborted) return;
 
         const normalized = (data.predictions || []).map((p, index) =>
           normalizePrediction(p, index),
@@ -197,6 +203,7 @@ export default function LocationAutocomplete({
         }
         // Degraded response — leave the suggestions already on screen alone.
       } catch (error) {
+        if (ac.signal.aborted) return;
         console.error('Error fetching predictions:', error);
       } finally {
         if (mountedRef.current && requestId === activeRequestIdRef.current) {
@@ -204,7 +211,7 @@ export default function LocationAutocomplete({
         }
       }
     },
-    [countryCode, ensureSessionToken],
+    [countryCode, ensureSessionToken, storeCachedPredictions],
   );
 
   useEffect(() => {
@@ -214,6 +221,7 @@ export default function LocationAutocomplete({
 
     const trimmed = value.trim();
     if (trimmed.length < AUTOCOMPLETE_MIN_CHARS) {
+      abortRef.current?.abort();
       setPredictions([]);
       setShowSuggestions(false);
       setIsLoading(false);
@@ -226,6 +234,7 @@ export default function LocationAutocomplete({
 
     const cached = readCachedPredictions(trimmed);
     if (cached) {
+      abortRef.current?.abort();
       setPredictions(cached);
       setShowSuggestions(cached.length > 0);
       setIsLoading(false);
