@@ -206,6 +206,10 @@ jobs:
         working-directory: frontend
         run: node --experimental-strip-types --no-warnings ./scripts/validate_places_search_resilience.mjs
 
+      - name: Pickup label never Near your location
+        working-directory: frontend
+        run: node --experimental-strip-types --no-warnings ./scripts/validate_place_label_quality.mjs
+
       # Stacked dispatch touches the offer ring timer on both JS and native;
       # these keep the 40s countdown inside the 60s backend TTL.
       - name: Finishing-trip offer contract

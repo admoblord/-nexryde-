@@ -92,11 +92,10 @@ import {
   peekQuickLocation,
 } from '@/src/services/locationWarm';
 import {
-  DETECTING_PICKUP,
-  SAFE_PICKUP_FALLBACK,
-  isDetectingPickupLabel,
-  isPlusCodeLabel,
+  isPlaceholderPickupLabel,
   isRawLatLngLabel,
+  lookupPickupCache,
+  peekLastKnownPickupLabel,
   preferReadableAddress,
   preloadPickupAt,
   resolveInstantPickup,
@@ -297,7 +296,7 @@ function BookInDriveStyle() {
     [colors, isDark],
   );
 
-  const [pickup, setPickup] = useState(() => (getWarmedLocation() ? SAFE_PICKUP_FALLBACK : ''));
+  const [pickup, setPickup] = useState('');
   const [destination, setDestination] = useState('');
   const [stop, setStop] = useState('');
   const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | null>(lastKnownLatLng);
@@ -307,7 +306,9 @@ function BookInDriveStyle() {
   const [tripDraft, setTripDraft] = useState<TripDraft>(EMPTY_TRIP_DRAFT);
   const [currentLocation, setCurrentLocation] = useState<any>(() => {
     const w = getWarmedLocation();
-    return w ? { lat: w.lat, lng: w.lng, address: SAFE_PICKUP_FALLBACK } : null;
+    if (!w) return null;
+    const cached = peekLastKnownPickupLabel(w.lat, w.lng);
+    return { lat: w.lat, lng: w.lng, address: cached };
   });
   const [gpsStatus, setGpsStatus] = useState<'detecting' | 'locked' | 'error'>(() =>
     getWarmedLocation() ? 'locked' : 'detecting',
@@ -1038,29 +1039,26 @@ function BookInDriveStyle() {
     const presetPLat = Number(params.pickupLat);
     const presetPLng = Number(params.pickupLng);
 
+    const applyGpsPickupLabel = (raw: string) => {
+      if (!mounted || manualPickupRef.current) return;
+      const next = safePickupDisplay(raw);
+      if (!next) return;
+      setPickup((prev) => (isPlaceholderPickupLabel(prev) ? next : prev));
+    };
+
     const engine = startInstantPickupEngine({
       isManualPickup: () => manualPickupRef.current,
       moveThresholdM: 50,
       onUpdate: (state) => {
         if (!mounted || manualPickupRef.current) return;
+        const label = safePickupDisplay(state.label);
         setPickupCoords({ lat: state.lat, lng: state.lng });
-        setCurrentLocation({ lat: state.lat, lng: state.lng, address: state.label });
-        // Route search is the first screen — never overwrite the field the rider is typing.
-        if (routeSearchOpenRef.current) {
-          setPickupDetecting(false);
-          if (!state.detecting) setGpsStatus('locked');
-          return;
-        }
-        // Engine never sets detecting=true once a last-known/GPS fix exists.
-        setPickup(
-          state.detecting
-            ? DETECTING_PICKUP
-            : safePickupDisplay(
-                isDetectingPickupLabel(state.label) ? SAFE_PICKUP_FALLBACK : state.label,
-              ),
-        );
-        setPickupDetecting(state.detecting);
+        setCurrentLocation({ lat: state.lat, lng: state.lng, address: label });
+        setPickupDetecting(Boolean(state.detecting) && !label);
         if (!state.detecting) setGpsStatus('locked');
+        // Route is the first screen: fill a real street/area, never a fake
+        // "Near your location". Leave the field empty so the rider can type.
+        applyGpsPickupLabel(label);
       },
     });
     pickupEngineRef.current = engine;
@@ -1073,7 +1071,6 @@ function BookInDriveStyle() {
           if (mounted) {
             setGpsStatus('error');
             setPickupDetecting(false);
-            setPickup(SAFE_PICKUP_FALLBACK);
           }
           return;
         }
@@ -1082,8 +1079,8 @@ function BookInDriveStyle() {
         if (presetPickupTxt && Number.isFinite(presetPLat) && Number.isFinite(presetPLng)) {
           const lat0 = presetPLat;
           const lng0 = presetPLng;
-          const label0 = isRawLatLngLabel(presetPickupTxt)
-            ? SAFE_PICKUP_FALLBACK
+          const label0 = isPlaceholderPickupLabel(presetPickupTxt)
+            ? ''
             : safePickupDisplay(presetPickupTxt);
           if (!mounted) return;
           setPickupCoords({ lat: lat0, lng: lng0 });
@@ -1093,15 +1090,16 @@ function BookInDriveStyle() {
           setGpsStatus('locked');
           try {
             const resolved = await resolveInstantPickup(lat0, lng0);
-            if (!mounted) return;
-            setPickup(safePickupDisplay(resolved.label));
+            if (!mounted || manualPickupRef.current) return;
+            applyGpsPickupLabel(resolved.label);
             setPickupDetecting(false);
-            setCurrentLocation({ lat: lat0, lng: lng0, address: resolved.label });
+            setCurrentLocation({
+              lat: lat0,
+              lng: lng0,
+              address: safePickupDisplay(resolved.label) || label0,
+            });
           } catch {
-            if (mounted && isDetectingPickupLabel(label0)) {
-              setPickup(SAFE_PICKUP_FALLBACK);
-              setPickupDetecting(false);
-            }
+            if (mounted) setPickupDetecting(false);
           }
           return;
         }
@@ -1118,7 +1116,7 @@ function BookInDriveStyle() {
           }
         }
 
-        // Paint from sync last-known BEFORE any Detecting… spinner or GPS.
+        // Pin from last-known GPS immediately; fill the street from cache/network.
         let quick = getWarmedLocation();
         if (!quick) {
           await hydrateLocationPersist();
@@ -1128,34 +1126,27 @@ function BookInDriveStyle() {
           quick = await peekQuickLocation();
         }
         if (quick && mounted) {
+          const peeked = peekLastKnownPickupLabel(quick.lat, quick.lng);
           setPickupCoords({ lat: quick.lat, lng: quick.lng });
           setCurrentLocation({
             lat: quick.lat,
             lng: quick.lng,
-            address: SAFE_PICKUP_FALLBACK,
+            address: peeked,
           });
-          setPickup((prev) => {
-            if (manualPickupRef.current) return prev;
-            if (
-              routeSearchOpenRef.current &&
-              prev.trim() &&
-              prev !== SAFE_PICKUP_FALLBACK &&
-              !isDetectingPickupLabel(prev)
-            ) {
-              return prev;
-            }
-            return SAFE_PICKUP_FALLBACK;
-          });
+          applyGpsPickupLabel(peeked);
           setPickupDetecting(false);
           setGpsStatus('locked');
           engine.onGpsFix(quick.lat, quick.lng, { final: false });
+          void lookupPickupCache(quick.lat, quick.lng).then((hit) => {
+            if (!mounted || manualPickupRef.current || !hit) return;
+            applyGpsPickupLabel(hit.label);
+            setCurrentLocation((prev: { lat: number; lng: number; address: string } | null) =>
+              prev && Number(prev.lat) === quick.lat && Number(prev.lng) === quick.lng
+                ? { ...prev, address: safePickupDisplay(hit.label) || prev.address }
+                : prev,
+            );
+          });
         } else if (mounted) {
-          setPickup((prev) =>
-            manualPickupRef.current ||
-            (routeSearchOpenRef.current && prev.trim() && !isDetectingPickupLabel(prev))
-              ? prev
-              : DETECTING_PICKUP,
-          );
           setPickupDetecting(true);
         }
 
@@ -1177,19 +1168,12 @@ function BookInDriveStyle() {
             if (mounted && !gotFix) {
               setGpsStatus('error');
               setPickupDetecting(false);
-              setPickup((prev) =>
-                isDetectingPickupLabel(prev) ? SAFE_PICKUP_FALLBACK : prev,
-              );
             }
           },
         });
 
-        // Hard UI failsafe — never leave Detecting… past 8s.
         setTimeout(() => {
           if (!mounted || manualPickupRef.current) return;
-          setPickup((prev) =>
-            isDetectingPickupLabel(prev) ? SAFE_PICKUP_FALLBACK : prev,
-          );
           setPickupDetecting(false);
           if (!gotFix) setGpsStatus((s) => (s === 'detecting' ? 'error' : s));
         }, 8000);
@@ -1197,7 +1181,6 @@ function BookInDriveStyle() {
         if (mounted) {
           setGpsStatus('error');
           setPickupDetecting(false);
-          setPickup(SAFE_PICKUP_FALLBACK);
         }
       }
     };
@@ -1216,17 +1199,10 @@ function BookInDriveStyle() {
     params.pickupLng,
   ]);
 
-  // If pickup is still detecting / raw / Plus Code after lock, retry Instant Pickup.
+  // If pickup is still empty / raw / Plus Code after GPS lock, retry Instant Pickup.
   useEffect(() => {
     if (gpsStatus !== 'locked' || !pickupCoords) return;
-    if (
-      !isDetectingPickupLabel(pickup) &&
-      !isRawLatLngLabel(pickup) &&
-      !isPlusCodeLabel(pickup) &&
-      pickup !== SAFE_PICKUP_FALLBACK
-    ) {
-      return;
-    }
+    if (!isPlaceholderPickupLabel(pickup)) return;
     let cancelled = false;
     const t = setTimeout(() => {
       void (async () => {
@@ -1235,19 +1211,13 @@ function BookInDriveStyle() {
             forceNetwork: true,
           });
           if (cancelled || manualPickupRef.current) return;
-          if (
-            routeSearchOpenRef.current &&
-            pickup.trim() &&
-            pickup !== SAFE_PICKUP_FALLBACK &&
-            !isDetectingPickupLabel(pickup)
-          ) {
-            return;
-          }
-          setPickup(safePickupDisplay(resolved.label));
+          const next = safePickupDisplay(resolved.label);
+          if (!next) return;
+          setPickup((prev) => (isPlaceholderPickupLabel(prev) ? next : prev));
           setPickupDetecting(false);
           setCurrentLocation((prev: { lat: number; lng: number; address: string } | null) =>
             prev && Number(prev.lat) === pickupCoords.lat && Number(prev.lng) === pickupCoords.lng
-              ? { ...prev, address: resolved.label }
+              ? { ...prev, address: next }
               : prev,
           );
         } catch {
@@ -1261,23 +1231,25 @@ function BookInDriveStyle() {
     };
   }, [gpsStatus, pickupCoords?.lat, pickupCoords?.lng, pickup]);
 
-  // Opening pickup search — resolve detecting / legacy labels when modal opens.
+  // Opening pickup search — resolve empty / leftover labels when modal opens.
   useEffect(() => {
     if (!showLocationModal || editingField !== 'pickup' || !pickupCoords) return;
-    if (!isDetectingPickupLabel(pickup) && !isRawLatLngLabel(pickup)) return;
+    if (!isPlaceholderPickupLabel(pickup)) return;
     let cancelled = false;
     void (async () => {
       const resolved = await resolveInstantPickup(pickupCoords.lat, pickupCoords.lng, {
         forceNetwork: true,
       });
-      if (cancelled) return;
-      setPickup(safePickupDisplay(resolved.label));
+      if (cancelled || manualPickupRef.current) return;
+      const next = safePickupDisplay(resolved.label);
+      if (!next) return;
+      setPickup((prev) => (isPlaceholderPickupLabel(prev) ? next : prev));
       setPickupDetecting(false);
       setCurrentLocation((prev: { lat: number; lng: number; address: string } | null) =>
         prev &&
         Number(prev.lat) === pickupCoords.lat &&
         Number(prev.lng) === pickupCoords.lng
-          ? { ...prev, address: resolved.label }
+          ? { ...prev, address: next }
           : prev,
       );
     })();
@@ -2459,11 +2431,9 @@ function BookInDriveStyle() {
           }}
           onPickupChangeText={(t) => {
             const next = String(t || '');
-            if (
-              next.trim() &&
-              next.trim() !== SAFE_PICKUP_FALLBACK &&
-              !isDetectingPickupLabel(next)
-            ) {
+            if (!next.trim()) {
+              manualPickupRef.current = false;
+            } else if (!isPlaceholderPickupLabel(next)) {
               manualPickupRef.current = true;
             }
             setPickup(next);
@@ -3679,7 +3649,7 @@ function BookInDriveStyle() {
                     if (coords) {
                       manualPickupRef.current = true;
                       setPickupCoords(coords);
-                      if (isRawLatLngLabel(desc) || isDetectingPickupLabel(desc)) {
+                      if (isPlaceholderPickupLabel(desc)) {
                         void resolveInstantPickup(coords.lat, coords.lng).then((r) => {
                           setPickup(safePickupDisplay(r.label));
                         });

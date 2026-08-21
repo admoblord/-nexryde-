@@ -76,10 +76,15 @@ has(
   /startInstantPickupEngine\(/,
   'book screen uses Instant Pickup Detection Engine',
 );
+missing(
+  'app/rider/book.tsx',
+  /setPickup\(SAFE_PICKUP_FALLBACK\)|setPickup\(DETECTING_PICKUP\)/,
+  'Route pickup field is never filled with Near your location or Detecting…',
+);
 has(
   'app/rider/book.tsx',
-  /DETECTING_PICKUP|Detecting your pickup/,
-  'shows detecting-pickup loading copy (not raw coords)',
+  /applyGpsPickupLabel/,
+  'GPS reverse-geocode fills Route pickup while the rider has not typed',
 );
 has(
   'app/rider/book.tsx',

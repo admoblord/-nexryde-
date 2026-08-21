@@ -347,6 +347,24 @@ results.push(
 
 results.push(
   printRow(
+    'route-pickup-never-near-your-location',
+    'Route pickup is GPS reverse-geocode or typed search, never Near your location',
+    src.engine.includes('export function isPlaceholderPickupLabel') &&
+      src.engine.includes("if (detecting) return ''") &&
+      !src.book.includes('setPickup(SAFE_PICKUP_FALLBACK)') &&
+      !src.book.includes('setPickup(DETECTING_PICKUP)') &&
+      !src.book.includes('return SAFE_PICKUP_FALLBACK') &&
+      !src.book.includes('address: SAFE_PICKUP_FALLBACK') &&
+      src.book.includes('applyGpsPickupLabel') &&
+      src.bolt.includes("'Search pickup'") &&
+      src.bolt.includes('isPlaceholderPickupLabel') &&
+      !src.engine.includes('? SAFE_PICKUP_FALLBACK') &&
+      !src.engine.includes('label: SAFE_PICKUP_FALLBACK'),
+  ),
+);
+
+results.push(
+  printRow(
     'match-peace-garden',
     'typed-query matcher keeps Peace Garden and rejects unrelated landmarks',
     (() => {

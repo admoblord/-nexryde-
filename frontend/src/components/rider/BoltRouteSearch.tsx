@@ -31,11 +31,7 @@ import {
   type RouteSuggestion,
 } from '@/src/services/routeSuggestions';
 import { BRAND } from '@/src/constants/designSystem';
-import {
-  SAFE_PICKUP_FALLBACK,
-  isDetectingPickupLabel,
-  isRawLatLngLabel,
-} from '@/src/services/instantPickupEngine';
+import { isPlaceholderPickupLabel, isRawLatLngLabel } from '@/src/services/instantPickupEngine';
 
 const GREEN = BRAND.primary;
 const BG = BRAND.bgDeep;
@@ -49,8 +45,7 @@ const MIN_CHARS = 3;
 function isSearchableQuery(input: string): boolean {
   const t = String(input || '').trim();
   if (t.length < MIN_CHARS) return false;
-  if (t === SAFE_PICKUP_FALLBACK) return false;
-  if (isDetectingPickupLabel(t) || isRawLatLngLabel(t)) return false;
+  if (isPlaceholderPickupLabel(t) || isRawLatLngLabel(t)) return false;
   return true;
 }
 
@@ -312,7 +307,7 @@ export function BoltRouteSearch({
         />
         {isFocused ? (
           <View style={styles.fieldRight}>
-            {value.trim().length > 0 && value.trim() !== SAFE_PICKUP_FALLBACK ? (
+            {value.trim().length > 0 && !isPlaceholderPickupLabel(value) ? (
               <TouchableOpacity
                 onPress={() => onClear(field)}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -377,7 +372,7 @@ export function BoltRouteSearch({
 
       <View style={styles.cardRow}>
         <View style={styles.card}>
-          {renderField('pickup', pickupLabel, 'Current location', onPickupChangeText, pickupRef)}
+          {renderField('pickup', pickupLabel, 'Search pickup', onPickupChangeText, pickupRef)}
           <View style={styles.connector}>
             <View style={styles.connectorDot} />
           </View>
@@ -442,7 +437,7 @@ export function BoltRouteSearch({
                     ? failureHeadline(failure)
                     : isSearchableQuery(activeQuery)
                       ? 'No places found'
-                      : 'Type a destination — saved and recent places show here'}
+                      : 'Type a pickup or dropoff — saved and recent places show here'}
             </Text>
             {!loading && failure ? (
               <Text style={styles.emptyDetail} selectable>
