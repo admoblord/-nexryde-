@@ -1,0 +1,46 @@
+name: Diagnose Places Egress
+
+# Cloud Run has no SSH. This job is the in-instance Google curl + NAT/firewall dump.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, cursor/fix-places-vpc-egress-1fc9]
+    paths:
+      - ".github/workflows/diagnose-places-egress.yml"
+      - "backend/scripts/diagnose_and_fix_places_egress.sh"
+      - "backend/places_service.py"
+      - "backend/cloudrun.africa-south1.yaml"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  diagnose-and-fix:
+    name: NAT / firewall / in-process Google probe
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      PROJECT_ID: nexryde-app
+      PROD_REGION: africa-south1
+      CLOUD_RUN_SERVICE: nexryde-backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: 1–4 dump NAT/firewall and probe Google from Cloud Run
+        run: |
+          chmod +x backend/scripts/diagnose_and_fix_places_egress.sh
+          backend/scripts/diagnose_and_fix_places_egress.sh
+
+      - name: 5 apply NAT all-subnets + egress ALLOW 443 (keep vpc-egress=all-traffic)
+        run: backend/scripts/diagnose_and_fix_places_egress.sh --apply

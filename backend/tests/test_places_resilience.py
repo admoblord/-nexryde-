@@ -363,7 +363,7 @@ def test_google_probe_redacts_key_and_returns_predictions(monkeypatch):
 
     class _Client:
         async def get(self, url, timeout=None):
-            assert timeout == 15.0
+            assert timeout == places_service.GOOGLE_PLACES_PROBE_TIMEOUT_S
             assert "input=Victoria" in url
             assert "key=test-key" in url
             return _Resp()
@@ -404,3 +404,13 @@ def test_google_probe_ops_route_is_gated():
     assert "x-nexryde-ops-key" in body
     assert "status_code=404" in body
     assert "probe_google_places_autocomplete" in body
+
+
+def test_google_autocomplete_uses_8s_hard_timeout():
+    import inspect
+
+    src = inspect.getsource(places_service._google_autocomplete_once)
+    assert "GOOGLE_PLACES_TIMEOUT_S" in src
+    assert places_service.GOOGLE_PLACES_TIMEOUT_S == 8.0
+    assert "err_type=" in src
+    assert "timeout=" in src
