@@ -168,6 +168,12 @@ def _geocode_result_payload(first_result: dict) -> dict:
 places_router = APIRouter(prefix="/api/places", tags=["places"])
 
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
+# Fail fast. The rider app aborts at 9s; a 10s Google hang made the phone
+# report "timed out" while this process was still waiting on maps.googleapis.com
+# through the VPC connector / Cloud NAT.
+GOOGLE_PLACES_TIMEOUT_S = 8.0
+# Ops probe matches `curl -m 15` so a NAT/firewall drop is visible as a timeout.
+GOOGLE_PLACES_PROBE_TIMEOUT_S = 15.0
 _cache_index_ready = False
 
 
@@ -305,9 +311,10 @@ async def _geocode_search_fallback_predictions(input_text: str, components: str)
     )
     try:
         client = get_http_client()
-        response = await client.get(url, timeout=10.0)
+        response = await client.get(url, timeout=GOOGLE_PLACES_TIMEOUT_S)
         data = response.json()
-    except Exception:
+    except Exception as exc:
+        print(f"places.geocode_fallback google call failed: {type(exc).__name__}: {exc}")
         return None
     if data.get("status") != "OK" or not data.get("results"):
         return None
@@ -454,12 +461,23 @@ def _autocomplete_google_reached(data: Optional[dict]) -> bool:
     return data is not None
 
 
+def _google_exc_is_timeout(exc: BaseException) -> bool:
+    name = type(exc).__name__.lower()
+    text = str(exc).lower()
+    return (
+        isinstance(exc, (TimeoutError, httpx.TimeoutException))
+        or "timeout" in name
+        or "timed out" in text
+        or "timeout" in text
+    )
+
+
 async def _google_autocomplete_once(url: str) -> Optional[dict]:
     """One Google call that reports failure instead of raising."""
     t0 = time.perf_counter()
     try:
         client = get_http_client()
-        response = await client.get(url, timeout=10.0)
+        response = await client.get(url, timeout=GOOGLE_PLACES_TIMEOUT_S)
         ms = int((time.perf_counter() - t0) * 1000)
         http_status = getattr(response, "status_code", None)
         try:
@@ -479,7 +497,10 @@ async def _google_autocomplete_once(url: str) -> Optional[dict]:
         return data if isinstance(data, dict) else None
     except Exception as exc:
         ms = int((time.perf_counter() - t0) * 1000)
-        print(f"places.autocomplete google call failed ms={ms}: {exc}")
+        print(
+            f"places.autocomplete google call failed timeout={str(_google_exc_is_timeout(exc)).lower()} "
+            f"ms={ms} err_type={type(exc).__name__} err={exc}"
+        )
         return None
 
 
@@ -522,7 +543,7 @@ async def probe_google_places_autocomplete(input_text: str = "Victoria") -> dict
     t0 = time.perf_counter()
     try:
         client = get_http_client()
-        response = await client.get(url, timeout=15.0)
+        response = await client.get(url, timeout=GOOGLE_PLACES_PROBE_TIMEOUT_S)
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         body_text = getattr(response, "text", None)
         if body_text is None:
@@ -831,7 +852,7 @@ async def get_place_details(
         )
         
         client = get_http_client()
-        response = await client.get(url, timeout=10.0)
+        response = await client.get(url, timeout=GOOGLE_PLACES_TIMEOUT_S)
         data = response.json()
         
         if data.get("status") == "OK" and data.get("result"):
@@ -912,7 +933,7 @@ async def reverse_geocode(
         )
 
         client = get_http_client()
-        response = await client.get(url, timeout=8.0)
+        response = await client.get(url, timeout=GOOGLE_PLACES_TIMEOUT_S)
         data = response.json()
 
         results = data.get("results") or []
@@ -967,7 +988,7 @@ async def geocode_address(
         )
 
         client = get_http_client()
-        response = await client.get(url, timeout=10.0)
+        response = await client.get(url, timeout=GOOGLE_PLACES_TIMEOUT_S)
         data = response.json()
 
         if data.get("status") == "OK" and data.get("results"):
@@ -1021,7 +1042,7 @@ async def nearby_places(
             f"?location={lat},{lng}&radius={radius}&type={type}&key={GOOGLE_MAPS_API_KEY}"
         )
         client = get_http_client()
-        response = await client.get(url, timeout=10.0)
+        response = await client.get(url, timeout=GOOGLE_PLACES_TIMEOUT_S)
         data = response.json()
 
         response_payload = {"results": data.get("results", []), "status": data.get("status", "ERROR")}
