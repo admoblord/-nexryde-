@@ -11,7 +11,11 @@ import {
   getUser,
   getUserTrustSummary,
   getDriverSubscriptionStatus,
+  getEmergencyContacts,
+  getFavoriteDrivers,
 } from '@/src/services/api';
+import { emergencyContactsCacheKey } from '@/src/hooks/useEmergencyContacts';
+import { riderFavoriteDriversCacheKey } from '@/src/components/rider/RiderFavoritesHomeStrip';
 import { authedFetch } from '@/src/utils/sessionRefresh';
 import { loadRiderSavedPlaces } from '@/src/services/riderSavedPlaces';
 import { fetchFeatureAnnouncements } from '@/src/services/featureAnnouncements';
@@ -69,6 +73,32 @@ export async function prefetchRiderTabs(userId: string): Promise<void> {
         return next;
       },
     }),
+    // Safety and the Home favourites strip were the last tabs still starting
+    // from a spinner on every visit.
+    (async () => {
+      const res = await getEmergencyContacts(userId);
+      const rows = Array.isArray(res.data?.contacts) ? res.data.contacts : [];
+      tabCacheSet(emergencyContactsCacheKey(userId), rows);
+    })(),
+    (async () => {
+      const res = await getFavoriteDrivers(userId);
+      const raw = res.data?.favorite_drivers || res.data;
+      const rows = Array.isArray(raw)
+        ? raw
+            .map((d: Record<string, unknown>) => ({
+              id: String(d.driver_id || d.id || ''),
+              name: String(d.name || 'Driver'),
+              rating: Number(d.rating || 0),
+              totalTrips: Number(d.total_trips || 0),
+              vehicle: String(d.vehicle_model || d.vehicle || 'Vehicle'),
+              plate: String(d.vehicle_plate || d.plate || ''),
+              isOnline: Boolean(d.is_online),
+              profileImage: (d.profile_image as string) || null,
+            }))
+            .sort((a, b) => Number(b.isOnline) - Number(a.isOnline))
+        : [];
+      tabCacheSet(riderFavoriteDriversCacheKey(userId), rows);
+    })(),
     queryClient.prefetchQuery({
       queryKey: qk.riderNotifs(userId),
       queryFn: async () => {
