@@ -52,8 +52,30 @@ if (!/CONNECT_TIMEOUT_SECONDS\s*=\s*([1-9]|10)L?\b/.test(http)) {
 if (!/\.readTimeout\(/.test(http) || !/\.writeTimeout\(/.test(http)) {
   fail('read/write timeouts missing — a stalled socket never errors');
 }
+if (!/READ_TIMEOUT_SECONDS\s*=\s*([1-9]|1[0-5])L?\b/.test(http)) {
+  fail('read timeout must stay under the 9s places abort plus a retry, or a stalled '
+    + 'response burns the whole rider budget before OkHttp reports anything');
+}
 if (!/\.dns\(\s*Ipv4FirstDns\s*\)/.test(http)) {
   fail('IPv4-first DNS missing — an unroutable IPv6 answer costs the whole request');
+}
+
+// connectTimeout starts at the socket, so a silent DNS server is unbounded without this.
+if (!/DNS_TIMEOUT_SECONDS\s*=\s*[1-5]L?\b/.test(http)) {
+  fail('no DNS timeout — Dns.SYSTEM.lookup blocks past the 9s abort and connectTimeout '
+    + 'never applies, so the rider waits on name resolution with nothing logged server-side');
+}
+if (!/pending\.get\(\s*DNS_TIMEOUT_SECONDS/.test(http) || !/UnknownHostException/.test(http)) {
+  fail('DNS timeout is declared but the lookup does not enforce it');
+}
+
+// A pooled HTTP/2 connection that died on a Wi-Fi → mobile switch accepts the
+// request and never answers; pings surface that in seconds.
+if (!/\.pingInterval\(/.test(http)) {
+  fail('no pingInterval — a half-open pooled connection swallows the request until readTimeout');
+}
+if (!/PING_INTERVAL_SECONDS\s*=\s*[1-9]L?\b/.test(http)) {
+  fail('ping interval must be seconds, not minutes, to beat the 9s abort');
 }
 
 if (!fs.existsSync(mainApp)) {
@@ -78,5 +100,8 @@ if (cronet) {
   fail('expo-cronet is back in app.json but prebuild never runs — it cannot take effect');
 }
 
-console.log('[verify_android_http] OK — bounded connect/read/write timeouts, IPv4 first');
+console.log(
+  '[verify_android_http] OK — bounded connect/read/write timeouts, bounded DNS, '
+  + 'HTTP/2 pings, IPv4 first',
+);
 process.exit(0);

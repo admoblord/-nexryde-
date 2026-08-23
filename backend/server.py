@@ -1834,6 +1834,23 @@ async def health_ready():
     return {"status": "ready", **checks, "timestamp": datetime.utcnow().isoformat()}
 
 
+@api_router.get("/health/maps")
+async def health_maps():
+    """Is Maps Platform actually reachable from this revision, right now?
+
+    Rider booking depends on maps.googleapis.com answering from inside the VPC,
+    and a silent egress path looks exactly like a slow phone from the outside.
+    Unauthenticated on purpose so this can be checked in one curl while riders
+    are complaining, and memoised for a few seconds so it cannot run up the
+    Maps bill. Returns timing and what the host resolved to; never the key.
+    """
+    from places_service import maps_platform_health
+
+    payload = await maps_platform_health()
+    payload["revision"] = os.environ.get("K_REVISION", "unknown")
+    return payload
+
+
 @api_router.get("/health/ops")
 async def health_ops(request: Request):
     """

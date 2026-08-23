@@ -115,6 +115,49 @@ function classifyPlacesError(err: unknown): PlacesFailure {
   return { kind: 'unknown', detail: raw || name || 'unknown error' };
 }
 
+/** Long enough for a healthy link, short enough to be useless to a dead one. */
+const LINK_PROBE_TIMEOUT_MS = 2500;
+
+/**
+ * After a timeout, ask the smallest possible question: is the link up at all?
+ *
+ * A places timeout on its own cannot tell a dead phone connection from one
+ * request hanging on a stale pooled connection while the rest of the app is
+ * fine, and that ambiguity is what kept this fault open for a week. An
+ * unauthenticated GET of /api/health straight afterwards settles it: an answer
+ * in milliseconds means the link was never the problem.
+ *
+ * Logged, never rendered — the rider keeps the same message and does not wait
+ * on this.
+ */
+async function logLinkProbe(failure: PlacesFailure): Promise<void> {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LINK_PROBE_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/health`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    console.log(
+      '[places] link probe after', failure.kind,
+      `— /api/health ${res.status} in ${Date.now() - started}ms:`,
+      res.ok
+        ? 'the connection is fine, so that one request stalled on its own'
+        : 'the backend answered but is unhealthy',
+    );
+  } catch (err) {
+    const name = (err as { name?: string } | null)?.name || 'error';
+    console.log(
+      '[places] link probe after', failure.kind,
+      `— /api/health ${name} after ${Date.now() - started}ms:`,
+      'the phone could not reach us at all',
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export type PlacesPrediction = {
   place_id: string;
   description: string;
@@ -320,6 +363,10 @@ export async function searchPlacesAutocomplete(
     // not be able to push the whole app into a degraded state.
     failure = classifyPlacesFailure(err, Date.now() - startedAt);
     console.log('[places] search failed', failure.kind, failure.detail);
+    // Fire and forget: the rider falls through to cache now, not in 2.5s.
+    if (failure.kind === 'timeout' || failure.kind === 'unreachable') {
+      void logLinkProbe(failure);
+    }
   }
 
   if (result?.predictions.length) {

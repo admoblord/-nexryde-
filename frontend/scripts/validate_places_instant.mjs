@@ -299,7 +299,33 @@ results.push(
         mainApp.includes('setOkHttpClientFactory(NexrydeOkHttpClientFactory())'),
     ),
   );
+  results.push(
+    printRow(
+      'android-dns-cannot-outlast-the-rider',
+      'a silent DNS server fails fast instead of eating the 9s search budget',
+      okhttp.includes('DNS_TIMEOUT_SECONDS') &&
+        okhttp.includes('pending.get(DNS_TIMEOUT_SECONDS') &&
+        okhttp.includes('UnknownHostException'),
+    ),
+  );
+  results.push(
+    printRow(
+      'android-drops-dead-pooled-connections',
+      'a connection killed by a Wi-Fi to mobile switch is reaped, not written into',
+      okhttp.includes('.pingInterval(') && /PING_INTERVAL_SECONDS\s*=\s*[1-9]L/.test(okhttp),
+    ),
+  );
 }
+
+results.push(
+  printRow(
+    'places-timeout-says-whether-the-link-was-up',
+    'a timeout probes /api/health so the next report is a diagnosis, not a guess',
+    src.places.includes('logLinkProbe') &&
+      src.places.includes('/api/health') &&
+      src.places.includes('void logLinkProbe(failure)'),
+  ),
+);
 
 results.push(
   printRow(

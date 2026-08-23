@@ -501,7 +501,38 @@ async def _google_autocomplete_once(url: str) -> Optional[dict]:
             f"places.autocomplete google call failed timeout={str(_google_exc_is_timeout(exc)).lower()} "
             f"ms={ms} err_type={type(exc).__name__} err={exc}"
         )
+        _log_maps_egress_diagnostic()
         return None
+
+
+def _log_maps_egress_diagnostic() -> None:
+    """Log what maps.googleapis.com resolves to, without delaying the rider.
+
+    When Google goes silent the next question is always the same: did the name
+    resolve to a Private Google Access VIP, and did we get an IP at all. Resolve
+    off the request path so the answer is in the logs while the caller still
+    falls back to cache immediately.
+    """
+    import asyncio
+
+    async def _run() -> None:
+        dns = await resolve_maps_host()
+        print(
+            f"places.maps_egress host={MAPS_HOST} "
+            f"resolved={','.join(dns.get('addresses') or []) or 'none'} "
+            f"private_google_access={dns.get('private_google_access')} "
+            f"detail={dns.get('private_google_access_detail') or dns.get('error') or 'ok'}"
+        )
+
+    try:
+        task = asyncio.ensure_future(_run())
+        _EGRESS_DIAGNOSTIC_TASKS.add(task)
+        task.add_done_callback(_EGRESS_DIAGNOSTIC_TASKS.discard)
+    except RuntimeError:
+        pass
+
+
+_EGRESS_DIAGNOSTIC_TASKS: set = set()
 
 
 def _redact_maps_key(text: str) -> str:
@@ -509,6 +540,145 @@ def _redact_maps_key(text: str) -> str:
     if key and text:
         return text.replace(key, "REDACTED")
     return text
+
+
+# Private Google Access VIPs. A Cloud DNS private zone for googleapis.com sends
+# every Google host to one of these, and GCP APIs keep working — but Maps
+# Platform is not served there, so maps.googleapis.com would accept the
+# connection and never answer. That failure is indistinguishable from a NAT drop
+# from the outside, so resolve the name and say which range it landed in.
+_RESTRICTED_VIP = "199.36.153."
+_PRIVATE_VIP_HOSTS = {"restricted.googleapis.com", "private.googleapis.com"}
+MAPS_HOST = "maps.googleapis.com"
+
+
+def _classify_maps_ip(ip: str) -> Optional[str]:
+    if not ip.startswith(_RESTRICTED_VIP):
+        return None
+    try:
+        last = int(ip.rsplit(".", 1)[1])
+    except (IndexError, ValueError):
+        return "private_google_access_vip"
+    if 4 <= last <= 7:
+        return "restricted.googleapis.com VIP (199.36.153.4/30) — Maps is not served here"
+    if 8 <= last <= 11:
+        return "private.googleapis.com VIP (199.36.153.8/30) — Maps is not served here"
+    return "private_google_access_vip"
+
+
+async def resolve_maps_host(timeout_s: float = 3.0) -> dict:
+    """What this revision's resolver returns for maps.googleapis.com.
+
+    Cloud Run has no shell, so this is the in-process ``nslookup``.
+    """
+    import asyncio
+    import socket
+
+    def _lookup() -> list[str]:
+        infos = socket.getaddrinfo(MAPS_HOST, 443, proto=socket.IPPROTO_TCP)
+        seen: list[str] = []
+        for info in infos:
+            addr = str(info[4][0])
+            if addr not in seen:
+                seen.append(addr)
+        return seen
+
+    try:
+        addresses = await asyncio.wait_for(asyncio.to_thread(_lookup), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        return {"addresses": [], "error": f"DNS lookup exceeded {timeout_s}s", "private_google_access": None}
+    except Exception as exc:
+        return {"addresses": [], "error": f"{type(exc).__name__}: {exc}", "private_google_access": None}
+
+    hijacked = [a for a in addresses if _classify_maps_ip(a)]
+    return {
+        "addresses": addresses,
+        "error": None,
+        "private_google_access": bool(hijacked),
+        "private_google_access_detail": _classify_maps_ip(hijacked[0]) if hijacked else None,
+    }
+
+
+_MAPS_HEALTH_TTL_S = 15.0
+_maps_health_cache: "tuple[float, dict] | None" = None
+
+
+async def maps_platform_health() -> dict:
+    """Can this revision actually reach Maps Platform right now?
+
+    Answers in one unauthenticated call the question that took days to settle by
+    hand: is Maps reachable from inside the VPC, what does the name resolve to,
+    and how long did Google take. Memoised for a few seconds so it cannot be
+    used to run up the Maps bill, and the API key never appears in the output.
+    """
+    global _maps_health_cache
+    now = time.monotonic()
+    if _maps_health_cache and now - _maps_health_cache[0] < _MAPS_HEALTH_TTL_S:
+        cached = dict(_maps_health_cache[1])
+        cached["cached"] = True
+        return cached
+
+    dns = await resolve_maps_host()
+
+    if not GOOGLE_MAPS_API_KEY:
+        result = {
+            "ok": False,
+            "reachable": False,
+            "reason": "GOOGLE_MAPS_API_KEY not configured",
+            "dns": dns,
+        }
+        _maps_health_cache = (now, result)
+        return result
+
+    url = (
+        f"https://{MAPS_HOST}/maps/api/place/autocomplete/json"
+        f"?input=Victoria&components=country:ng&key={GOOGLE_MAPS_API_KEY}"
+    )
+    t0 = time.perf_counter()
+    try:
+        client = get_http_client()
+        response = await client.get(url, timeout=GOOGLE_PLACES_TIMEOUT_S)
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        try:
+            payload = response.json()
+        except Exception:
+            payload = {}
+        google_status = payload.get("status") if isinstance(payload, dict) else None
+        rows = len((payload or {}).get("predictions") or []) if isinstance(payload, dict) else 0
+        result = {
+            # Google answering REQUEST_DENIED still proves the network path works.
+            "ok": response.status_code == 200 and google_status == "OK" and rows > 0,
+            "reachable": True,
+            "http_status": response.status_code,
+            "google_status": google_status,
+            "predictions": rows,
+            "elapsed_ms": elapsed_ms,
+            "error_message": _redact_maps_key(str((payload or {}).get("error_message") or "")) or None,
+            "dns": dns,
+        }
+    except Exception as exc:
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        name = type(exc).__name__
+        timed_out = "timeout" in f"{name} {exc}".lower()
+        result = {
+            "ok": False,
+            # Nothing came back: the egress path itself is the suspect, so lead
+            # with what the name resolved to.
+            "reachable": False,
+            "timeout": timed_out,
+            "elapsed_ms": elapsed_ms,
+            "error": _redact_maps_key(f"{name}: {exc}"),
+            "dns": dns,
+        }
+        print(
+            f"places.maps_health unreachable timeout={str(timed_out).lower()} ms={elapsed_ms} "
+            f"err_type={name} resolved={','.join(dns.get('addresses') or []) or 'none'} "
+            f"private_google_access={dns.get('private_google_access')}"
+        )
+
+    result["cached"] = False
+    _maps_health_cache = (now, result)
+    return result
 
 
 async def probe_google_places_autocomplete(input_text: str = "Victoria") -> dict:
