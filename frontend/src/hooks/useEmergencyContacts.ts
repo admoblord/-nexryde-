@@ -4,6 +4,9 @@ import {
   getEmergencyContacts,
   removeEmergencyContact,
 } from '@/src/services/api';
+import { tabCacheGet, tabCacheSet } from '@/src/services/tabDataCache';
+
+export const emergencyContactsCacheKey = (userId: string) => `rider-emergency:${userId}`;
 
 export interface EmergencyContact {
   name: string;
@@ -13,7 +16,9 @@ export interface EmergencyContact {
 }
 
 export function useEmergencyContacts(userId?: string | null) {
-  const [contacts, setContacts] = useState<EmergencyContact[]>([]);
+  const cacheKey = userId ? emergencyContactsCacheKey(userId) : '';
+  const cached = cacheKey ? tabCacheGet<EmergencyContact[]>(cacheKey) : null;
+  const [contacts, setContacts] = useState<EmergencyContact[]>(() => cached ?? []);
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -21,10 +26,14 @@ export function useEmergencyContacts(userId?: string | null) {
       setContacts([]);
       return;
     }
-    setLoading(true);
+    // Opening Safety again shows the contacts already known while we revalidate.
+    const key = emergencyContactsCacheKey(userId);
+    if (!tabCacheGet(key)) setLoading(true);
     try {
       const response = await getEmergencyContacts(userId);
-      setContacts(Array.isArray(response.data?.contacts) ? response.data.contacts : []);
+      const rows = Array.isArray(response.data?.contacts) ? response.data.contacts : [];
+      setContacts(rows);
+      tabCacheSet(key, rows);
     } finally {
       setLoading(false);
     }

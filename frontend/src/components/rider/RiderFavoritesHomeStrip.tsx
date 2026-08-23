@@ -25,6 +25,9 @@ import {
 } from '@/src/constants/riderFavorites';
 import { RiderFavoriteIcon } from '@/src/components/rider/RiderFavoriteIcon';
 import { BORDER_RADIUS, COLORS, FONT_SIZE, SPACING, useThemeColors } from '@/src/constants/theme';
+import { tabCacheGet, tabCacheSet } from '@/src/services/tabDataCache';
+
+export const riderFavoriteDriversCacheKey = (riderId: string) => `rider-fav-drivers:${riderId}`;
 
 function mapRow(d: Record<string, unknown>): RiderFavoriteDriverRow {
   const id = String(d.driver_id || d.id || '');
@@ -43,8 +46,11 @@ function mapRow(d: Record<string, unknown>): RiderFavoriteDriverRow {
 export function RiderFavoritesHomeStrip() {
   const router = useRouter();
   const { userId: riderId, canCallAuthedApi } = useAuthedUserId();
-  const [loading, setLoading] = useState(true);
-  const [drivers, setDrivers] = useState<RiderFavoriteDriverRow[]>([]);
+  const cachedFavorites = riderId
+    ? tabCacheGet<RiderFavoriteDriverRow[]>(riderFavoriteDriversCacheKey(riderId))
+    : null;
+  const [loading, setLoading] = useState(!cachedFavorites);
+  const [drivers, setDrivers] = useState<RiderFavoriteDriverRow[]>(() => cachedFavorites ?? []);
   const { colors, isDark } = useThemeColors();
 
   const load = useCallback(async () => {
@@ -59,14 +65,15 @@ export function RiderFavoritesHomeStrip() {
       const rows = Array.isArray(raw) ? raw.map((d) => mapRow(d as Record<string, unknown>)) : [];
       rows.sort((a, b) => Number(b.isOnline) - Number(a.isOnline));
       setDrivers(rows);
+      tabCacheSet(riderFavoriteDriversCacheKey(riderId), rows);
     } catch {
-      setDrivers([]);
+      // Keep whatever is already on screen rather than blanking the strip.
     } finally {
       setLoading(false);
     }
   }, [riderId, canCallAuthedApi]);
 
-  const loadedOnceRef = useRef(false);
+  const loadedOnceRef = useRef(Boolean(cachedFavorites));
   useFocusEffect(
     useCallback(() => {
       if (!canCallAuthedApi) return;

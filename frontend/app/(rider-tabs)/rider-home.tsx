@@ -120,16 +120,22 @@ export default function ModernRiderHome() {
   useEffect(() => {
     const enforceRiderVerification = async () => {
       if (!canCallAuthedApi || !riderId || user?.role !== 'rider') return;
+      // Verification does not depend on the legal sync, so both round trips run
+      // together instead of stacking on a phone's latency.
+      const verificationPromise = fetch(
+        `${BACKEND_URL}/api/users/${riderId}/rider-verification-status`,
+        { headers: getAuthHeaders() },
+      ).catch(() => null);
       await syncUserLegalStatus(riderId);
       const effectiveUser = useAppStore.getState().user ?? user;
       if (logLegalGateCheck(effectiveUser, 'rider-home')) {
+        void verificationPromise;
         replaceLegalTermsIfNeeded(router, 'rider', segments);
         return;
       }
       try {
-        const res = await fetch(`${BACKEND_URL}/api/users/${riderId}/rider-verification-status`, {
-          headers: getAuthHeaders(),
-        });
+        const res = await verificationPromise;
+        if (!res) return;
         // Auth / identity errors → re-login only when we had a token (avoid pre-hydration 401).
         if (res.status === 401 || res.status === 403) {
           router.replace('/(auth)/login');
