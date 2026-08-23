@@ -86,7 +86,6 @@
     "expo-clipboard": "~8.0.8",
     "expo-constants": "~18.0.13",
     "expo-contacts": "~15.0.11",
-    "expo-cronet": "^0.2.7",
     "expo-device": "^8.0.10",
     "expo-file-system": "~19.0.23",
     "expo-font": "~14.0.12",

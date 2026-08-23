@@ -74,7 +74,15 @@ async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
  * Name the real failure. "No internet connection" is only correct when the
  * device actually reports no connectivity — never as a catch-all.
  */
-export function classifyPlacesFailure(err: unknown): PlacesFailure {
+export function classifyPlacesFailure(err: unknown, elapsedMs?: number): PlacesFailure {
+  const failure = classifyPlacesError(err);
+  if (!Number.isFinite(elapsedMs)) return failure;
+  // How long the phone actually waited separates "hung on a dead route" from
+  // "answered and failed" without asking the rider to reproduce anything.
+  return { ...failure, detail: `${failure.detail} after ${Math.round(elapsedMs as number)}ms` };
+}
+
+function classifyPlacesError(err: unknown): PlacesFailure {
   const name = (err as { name?: string } | null)?.name || '';
   const raw = String((err as { message?: string } | null)?.message || err || '').trim();
   const lower = raw.toLowerCase();
@@ -278,6 +286,7 @@ export async function searchPlacesAutocomplete(
 
   let result: RawAutocomplete | null = null;
   let failure: PlacesFailure | undefined;
+  const startedAt = Date.now();
   try {
     result = await withDeadline(
       fetchAutocompleteWithRetry(biased, opts?.signal),
@@ -309,7 +318,7 @@ export async function searchPlacesAutocomplete(
     result = null;
     // Read-only with respect to the connectivity FSM on purpose — search must
     // not be able to push the whole app into a degraded state.
-    failure = classifyPlacesFailure(err);
+    failure = classifyPlacesFailure(err, Date.now() - startedAt);
     console.log('[places] search failed', failure.kind, failure.detail);
   }
 

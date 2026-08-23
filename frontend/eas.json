@@ -12,7 +12,7 @@
       },
       "autoIncrement": false,
       "android": {
-        "prebuildCommand": "npx expo prebuild --platform android --no-install && node ./scripts/verify_driver_experience_package.cjs --require-success && node ./scripts/verify_cronet_tcp.cjs --require-success",
+        "prebuildCommand": "npx expo prebuild --platform android --no-install && node ./scripts/verify_driver_experience_package.cjs --require-success && node ./scripts/verify_android_http.cjs --require-success",
         "buildType": "apk"
       },
       "ios": {
@@ -32,7 +32,7 @@
       },
       "autoIncrement": false,
       "android": {
-        "prebuildCommand": "npx expo prebuild --platform android --no-install && node ./scripts/verify_driver_experience_package.cjs --require-success && node ./scripts/verify_cronet_tcp.cjs --require-success",
+        "prebuildCommand": "npx expo prebuild --platform android --no-install && node ./scripts/verify_driver_experience_package.cjs --require-success && node ./scripts/verify_android_http.cjs --require-success",
         "buildType": "app-bundle",
         "gradleCommand": ":app:bundleRelease",
         "resourceClass": "medium"

@@ -267,8 +267,8 @@ results.push(
 
 results.push(
   printRow(
-    'device-search-aborts-and-uses-tcp',
-    'typing cancels the previous search; Android Cronet is TCP not QUIC',
+    'device-search-aborts-previous-request',
+    'typing cancels the previous search instead of stacking 9s GETs',
     src.bolt.includes('abortRef') &&
       src.bolt.includes('signal: ac.signal') &&
       src.ac.includes('signal: ac.signal') &&
@@ -279,14 +279,24 @@ results.push(
 );
 
 {
-  const appJson = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8'));
-  const plugins = appJson.expo?.plugins || [];
-  const cronet = plugins.find((p) => Array.isArray(p) && p[0] === 'expo-cronet');
+  // The Android build is bare: app.json plugins never run, only committed native
+  // sources ship. A dead route must fail over long before the 9s places abort.
+  const okhttp = fs.readFileSync(
+    path.join(root, 'android/app/src/main/java/com/nexryde/app/NexrydeOkHttp.kt'),
+    'utf8',
+  );
+  const mainApp = fs.readFileSync(
+    path.join(root, 'android/app/src/main/java/com/nexryde/app/MainApplication.kt'),
+    'utf8',
+  );
   results.push(
     printRow(
-      'android-cronet-quic-off',
-      'store Android fetch uses Cronet HTTP/2 over TCP, not HTTP/3 QUIC',
-      cronet?.[1]?.enableQuic === false && plugins.includes('./plugins/withNexrydeOkHttp.js'),
+      'android-http-fails-over-fast',
+      'store Android fetch has a bounded connect timeout and tries IPv4 first',
+      okhttp.includes('OkHttpClientFactory') &&
+        okhttp.includes('.connectTimeout(') &&
+        okhttp.includes('.dns(Ipv4FirstDns)') &&
+        mainApp.includes('setOkHttpClientFactory(NexrydeOkHttpClientFactory())'),
     ),
   );
 }
