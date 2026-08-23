@@ -116,7 +116,12 @@ def _saga_inline() -> bool:
     return raw not in ("0", "false", "off", "no")
 
 
-async def enqueue_completion_saga(trip_id: str, *, trip: dict[str, Any]) -> dict[str, Any]:
+async def enqueue_completion_saga(
+    trip_id: str,
+    *,
+    trip: dict[str, Any],
+    run_now: bool = True,
+) -> dict[str, Any]:
     saga = await _upsert_saga(trip_id, "complete", COMPLETE_STEPS)
     await publish_saga(
         "completion_enqueued",
@@ -130,6 +135,11 @@ async def enqueue_completion_saga(trip_id: str, *, trip: dict[str, Any]) -> dict
     incr("saga.complete_enqueued")
     if not _saga_inline():
         return {"ok": True, "deferred": True, "saga_id": saga["id"]}
+    if not run_now:
+        # Caller runs the steps once the driver already has their response. The
+        # durable saga row and event above are written first, so the outbox and
+        # maintenance retry still own it if this instance dies in between.
+        return {"ok": True, "deferred": True, "run_pending": True, "saga_id": saga["id"]}
     # Default: run in-request; kafka-worker still retries partials.
     result = await run_completion_saga(trip_id, trip=trip)
     return result
