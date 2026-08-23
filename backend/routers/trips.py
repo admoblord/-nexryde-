@@ -1229,6 +1229,34 @@ def _compute_visibility_score(stats: dict) -> float:
     return max(0.0, min(100.0, round(score, 2)))
 
 
+_AFTER_RESPONSE_TASKS: set[asyncio.Task] = set()
+
+
+def after_response(coro, label: str) -> None:
+    """
+    Run a side effect once the caller already has their answer.
+
+    Accepting a ride used to take ~6s and completing one ~10s, almost none of it
+    the state change itself: an Expo push (15s timeout, one HTTP call per device),
+    a Google Routes lookup (8s timeout), an audit row and three count_documents
+    were all awaited before replying. None of that decides whether the tap
+    succeeded. Cloud Run runs this service with cpu-throttling off and a warm
+    instance, so these finish moments after the response instead of inside it.
+    """
+    task = asyncio.ensure_future(coro)
+    _AFTER_RESPONSE_TASKS.add(task)
+
+    def _done(finished: asyncio.Task) -> None:
+        _AFTER_RESPONSE_TASKS.discard(finished)
+        if finished.cancelled():
+            return
+        exc = finished.exception()
+        if exc is not None:
+            logger.warning("after_response %s failed: %s", label, exc)
+
+    task.add_done_callback(_done)
+
+
 async def _refresh_driver_visibility_score(driver_id: str):
     try:
         accepted = await db.trips.count_documents({"driver_id": driver_id, "status": {"$in": ["accepted", "ongoing", "completed"]}})
@@ -3382,51 +3410,63 @@ async def _accept_trip_commit(
             or ((driver_profile or {}).get("current_location") or {}).get("lng")
             or pickup.get("lng")
         )
-        await store_active_leg_route(
-            trip_id,
-            leg="to_pickup",
-            origin_lat=d_lat,
-            origin_lng=d_lng,
-            dest_lat=float(pickup["lat"]),
-            dest_lng=float(pickup["lng"]),
+        after_response(
+            store_active_leg_route(
+                trip_id,
+                leg="to_pickup",
+                origin_lat=d_lat,
+                origin_lng=d_lng,
+                dest_lat=float(pickup["lat"]),
+                dest_lng=float(pickup["lng"]),
+            ),
+            "accept:leg_route",
         )
-        trip = await db.trips.find_one({"id": trip_id}) or trip
-        if trip and trip.get("_id"):
-            trip["_id"] = str(trip["_id"])
     except Exception:
         logger.warning("accept leg route (driver→pickup) failed", exc_info=True)
-    await _log_trip_event(
-        trip_id,
-        "trip_accepted",
-        driver_id,
-        ride_event_log_data(
-            trip=trip,
-            old_status="pending_driver_offers",
-            new_status="accepted",
-            actor_id=driver_id,
-            reason="driver_accept",
+    after_response(
+        _log_trip_event(
+            trip_id,
+            "trip_accepted",
+            driver_id,
+            ride_event_log_data(
+                trip=trip,
+                old_status="pending_driver_offers",
+                new_status="accepted",
+                actor_id=driver_id,
+                reason="driver_accept",
+            ),
         ),
+        "accept:trip_event",
     )
-    await _refresh_driver_visibility_score(driver_id)
+    after_response(_refresh_driver_visibility_score(driver_id), "accept:visibility")
     if trip and trip.get("rider_id"):
-        driver_user = await db.users.find_one({"id": driver_id}, {"name": 1})
-        driver_name = (driver_user or {}).get("name", "Your driver")
-        if finishing_accept:
-            push_title, push_body = rider_finishing_push(driver_name)
-        else:
-            push_title, push_body = (
-                "Driver Found!",
-                f"{driver_name} has accepted your ride. They're on their way!",
+        rider_id_for_push = trip["rider_id"]
+
+        async def _notify_rider_accepted() -> None:
+            driver_user = await db.users.find_one({"id": driver_id}, {"name": 1})
+            driver_name = (driver_user or {}).get("name", "Your driver")
+            if finishing_accept:
+                push_title, push_body = rider_finishing_push(driver_name)
+            else:
+                push_title, push_body = (
+                    "Driver Found!",
+                    f"{driver_name} has accepted your ride. They're on their way!",
+                )
+            await send_push_notification(
+                rider_id_for_push,
+                push_title,
+                push_body,
+                {"type": "trip_accepted", "trip_id": trip_id},
             )
-        await send_push_notification(
-            trip["rider_id"],
-            push_title,
-            push_body,
-            {"type": "trip_accepted", "trip_id": trip_id},
-        )
+
+        async def _seed_and_emit() -> None:
+            await _seed_trip_driver_location_on_accept(trip_id, dict(trip or {}))
+            await _emit_rider_trip_realtime(trip_id)
+
+        # The rider's screen is driven by realtime, so it still moves immediately.
+        after_response(_seed_and_emit(), "accept:realtime")
+        after_response(_notify_rider_accepted(), "accept:push")
         trip.pop("_id", None)
-        trip = await _seed_trip_driver_location_on_accept(trip_id, trip)
-        await _emit_rider_trip_realtime(trip_id)
     if accept_event_id:
         try:
             await complete_accept_ack(accept_event_id, driver_id=driver_id)
@@ -3439,25 +3479,23 @@ async def _accept_trip_commit(
         pass
     try:
         from realtime_platform.offer_ledger import mark_offer
-        await mark_offer(
-            str(active_offer.get("id") or ""),
-            delivery_status="accepted",
-            event_id=accept_event_id,
-        )
-    except Exception:
-        pass
-    try:
         from realtime_platform.lifecycle import withdraw_trip_offers
         from realtime_platform.event_bus import publish_trip
 
-        # Sibling offers already closed above; ensure any race leftovers withdraw.
-        await withdraw_trip_offers(trip_id, reason="trip_accepted")
-        await publish_trip(
-            "trip_accepted",
-            trip_id=trip_id,
-            actor_id=driver_id,
-            offer_id=str(active_offer.get("id") or ""),
-        )
+        offer_ref = str(active_offer.get("id") or "")
+
+        async def _close_out_offers() -> None:
+            await mark_offer(offer_ref, delivery_status="accepted", event_id=accept_event_id)
+            # Sibling offers already closed above; ensure any race leftovers withdraw.
+            await withdraw_trip_offers(trip_id, reason="trip_accepted")
+            await publish_trip(
+                "trip_accepted",
+                trip_id=trip_id,
+                actor_id=driver_id,
+                offer_id=offer_ref,
+            )
+
+        after_response(_close_out_offers(), "accept:close_offers")
     except Exception:
         pass
     payload = enrich_ride_payload(trip or {})
@@ -4016,41 +4054,47 @@ async def start_trip(trip_id: str, request: Request):
 
         pickup = trip.get("pickup_location") or {}
         dropoff = trip.get("dropoff_location") or {}
-        await store_active_leg_route(
-            trip_id,
-            leg="to_dropoff",
-            origin_lat=float(pickup["lat"]),
-            origin_lng=float(pickup["lng"]),
-            dest_lat=float(dropoff["lat"]),
-            dest_lng=float(dropoff["lng"]),
-            force=True,
+        after_response(
+            store_active_leg_route(
+                trip_id,
+                leg="to_dropoff",
+                origin_lat=float(pickup["lat"]),
+                origin_lng=float(pickup["lng"]),
+                dest_lat=float(dropoff["lat"]),
+                dest_lng=float(dropoff["lng"]),
+                force=True,
+            ),
+            "start:leg_route",
         )
-        trip = await db.trips.find_one({"id": trip_id}) or trip
-        trip["_id"] = str(trip["_id"])
     except Exception:
         logger.warning("start leg route (pickup→dropoff) failed", exc_info=True)
-    await _log_trip_event(
-        trip_id,
-        "trip_started",
-        trip.get("driver_id"),
-        ride_event_log_data(
-            trip=trip,
-            old_status="accepted",
-            new_status="ongoing",
-            actor_id=driver_id,
-            reason="driver_start_trip",
+    after_response(
+        _log_trip_event(
+            trip_id,
+            "trip_started",
+            trip.get("driver_id"),
+            ride_event_log_data(
+                trip=trip,
+                old_status="accepted",
+                new_status="ongoing",
+                actor_id=driver_id,
+                reason="driver_start_trip",
+            ),
         ),
+        "start:trip_event",
     )
-    # Push trip_started notification to rider
     rider_id_for_push = trip.get("rider_id")
     if rider_id_for_push:
-        await send_push_notification(
-            rider_id_for_push,
-            "Trip Started 🚗",
-            "Your driver has started the trip. Sit back and enjoy the ride!",
-            {"type": "trip_started", "trip_id": trip_id},
+        after_response(
+            send_push_notification(
+                rider_id_for_push,
+                "Trip Started 🚗",
+                "Your driver has started the trip. Sit back and enjoy the ride!",
+                {"type": "trip_started", "trip_id": trip_id},
+            ),
+            "start:push",
         )
-    await _emit_rider_trip_realtime(trip_id)
+    after_response(_emit_rider_trip_realtime(trip_id), "start:realtime")
     return enrich_ride_payload(trip)
 
 
@@ -4191,30 +4235,36 @@ async def arrive_at_pickup(trip_id: str, request: dict, http_request: Request):
         raise HTTPException(status_code=409, detail="Trip status has changed — refresh and try again")
     updated = await db.trips.find_one({"id": trip_id}, {"_id": 0})
     gate_access = await _build_estate_gate_access(updated or {}, driver_id) if updated else None
-    await _log_trip_event(trip_id, "driver_arrived_pickup", driver_id, {
-        **ride_event_log_data(
-            trip=updated,
-            old_status=trip.get("status"),
-            new_status="arrived",
-            actor_id=driver_id,
-            reason="driver_arrived_pickup",
-        ),
-        "estate_gate_code_window_opened": bool(gate_access and gate_access.get("available")),
-        "estate_gate_code_expires_at": (gate_access or {}).get("expires_at"),
-    })
+    after_response(
+        _log_trip_event(trip_id, "driver_arrived_pickup", driver_id, {
+            **ride_event_log_data(
+                trip=updated,
+                old_status=trip.get("status"),
+                new_status="arrived",
+                actor_id=driver_id,
+                reason="driver_arrived_pickup",
+            ),
+            "estate_gate_code_window_opened": bool(gate_access and gate_access.get("available")),
+            "estate_gate_code_expires_at": (gate_access or {}).get("expires_at"),
+        }),
+        "arrive:trip_event",
+    )
     if updated and updated.get("rider_id"):
         arrive_msg = (
             "Your driver has arrived. Show your pickup code before starting the ride."
             if _trip_pickup_code_required(updated)
             else "Your driver has arrived at the pickup point."
         )
-        await send_push_notification(
-            updated["rider_id"],
-            "Driver Arrived",
-            arrive_msg,
-            {"type": "driver_arrived", "trip_id": trip_id},
+        after_response(
+            send_push_notification(
+                updated["rider_id"],
+                "Driver Arrived",
+                arrive_msg,
+                {"type": "driver_arrived", "trip_id": trip_id},
+            ),
+            "arrive:push",
         )
-        await _emit_rider_trip_realtime(trip_id)
+        after_response(_emit_rider_trip_realtime(trip_id), "arrive:realtime")
     if updated:
         updated["estate_gate_access"] = gate_access
     return enrich_ride_payload(updated or {})
@@ -5552,56 +5602,70 @@ async def complete_trip(trip_id: str, request: Request):
             except Exception:
                 actual_s = 0.0
         if pickup.get("lat") is not None and pickup.get("lng") is not None and quoted_s and actual_s:
-            await record_trip_duration_sample(
-                pickup_lat=float(pickup["lat"]),
-                pickup_lng=float(pickup["lng"]),
-                quoted_duration_s=quoted_s,
-                actual_duration_s=actual_s,
+            after_response(
+                record_trip_duration_sample(
+                    pickup_lat=float(pickup["lat"]),
+                    pickup_lng=float(pickup["lng"]),
+                    quoted_duration_s=quoted_s,
+                    actual_duration_s=actual_s,
+                ),
+                "complete:traffic_sample",
             )
     except Exception:
         logger.debug("traffic factor sample skipped", exc_info=True)
 
-    await _log_trip_event(
-        trip_id,
-        "trip_completed",
-        trip.get("driver_id"),
-        {
-            **ride_event_log_data(
-                trip=trip,
-                old_status=trip_before.get("status"),
-                new_status="completed",
-                actor_id=trip.get("driver_id"),
-                reason="driver_complete_trip",
-            ),
-            "fare": trip.get("fare"),
-            "maps_api_calls": trip.get("maps_api_calls"),
-        },
+    after_response(
+        _log_trip_event(
+            trip_id,
+            "trip_completed",
+            trip.get("driver_id"),
+            {
+                **ride_event_log_data(
+                    trip=trip,
+                    old_status=trip_before.get("status"),
+                    new_status="completed",
+                    actor_id=trip.get("driver_id"),
+                    reason="driver_complete_trip",
+                ),
+                "fare": trip.get("fare"),
+                "maps_api_calls": trip.get("maps_api_calls"),
+            },
+        ),
+        "complete:trip_event",
     )
 
     if payment_status_after == "completed":
-        await _log_trip_event(
-            trip_id,
-            "payment_confirmed",
-            trip.get("driver_id"),
-            {
-                "payment_status": "completed",
-                "payment_method": pm,
-                "reason": "settled_on_completion",
-            },
+        after_response(
+            _log_trip_event(
+                trip_id,
+                "payment_confirmed",
+                trip.get("driver_id"),
+                {
+                    "payment_status": "completed",
+                    "payment_method": pm,
+                    "reason": "settled_on_completion",
+                },
+            ),
+            "complete:payment_event",
         )
 
     # Durable completion saga — stats, incentives, wallet, pushes, metrics, realtime.
     # Retries until confirmed; Kafka/outbox notifies other workers.
     try:
-        from realtime_platform.saga import enqueue_completion_saga
+        from realtime_platform.saga import enqueue_completion_saga, run_completion_saga
         from realtime_platform.event_bus import publish_trip
 
-        await enqueue_completion_saga(trip_id, trip=trip)
-        await publish_trip(
-            "trip_completed",
-            trip_id=trip_id,
-            actor_id=str(trip.get("driver_id") or ""),
-            fare=float(trip.get("fare") or 0),
+        saga_state = await enqueue_completion_saga(trip_id, trip=trip, run_now=False)
+        if saga_state.get("run_pending"):
+            after_response(run_completion_saga(trip_id, trip=dict(trip)), "complete:saga")
+        after_response(
+            publish_trip(
+                "trip_completed",
+                trip_id=trip_id,
+                actor_id=str(trip.get("driver_id") or ""),
+                fare=float(trip.get("fare") or 0),
+            ),
+            "complete:publish",
         )
     except Exception as saga_exc:
         logger.warning("completion saga failed trip=%s: %s — falling back inline", trip_id, saga_exc)
@@ -5629,10 +5693,7 @@ async def complete_trip(trip_id: str, request: Request):
         await _emit_rider_trip_realtime(trip_id)
 
     if trip.get("driver_id"):
-        try:
-            await _refresh_driver_visibility_score(trip["driver_id"])
-        except Exception:
-            pass
+        after_response(_refresh_driver_visibility_score(trip["driver_id"]), "complete:visibility")
     if trip.get("payment_status") == "completed":
         schedule_trip_receipt_emails_after_payment(trip_id)
 
