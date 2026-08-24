@@ -431,6 +431,87 @@ def test_google_autocomplete_uses_8s_hard_timeout():
     assert "timeout=" in src
 
 
+def test_outbound_sockets_are_bound_to_ipv4():
+    """IPv6 egress skips the VPC connector, so it skips Cloud NAT too.
+
+    That is what stopped us restricting the Maps key to our NAT address.
+    """
+    import http_client
+
+    assert http_client._IPV4_ANY == "0.0.0.0"
+    client = http_client.get_http_client()
+    try:
+        transport = client._transport
+        assert transport._pool._local_address == "0.0.0.0"
+        assert transport._pool._http2 is False
+    finally:
+        http_client._client = None
+
+
+def test_response_peer_survives_a_client_without_network_info():
+    from http_client import response_peer
+
+    class _Bare:
+        extensions: dict = {}
+
+    assert response_peer(_Bare()) is None
+    assert response_peer(object()) is None
+
+
+def test_egress_ops_route_is_gated():
+    import pathlib
+
+    text = (pathlib.Path(__file__).resolve().parent.parent / "server.py").read_text()
+    start = text.index("/ops/egress-ip")
+    body = text[start : start + 1200]
+    assert "NEXRYDE_OPS_KEY" in body
+    assert "x-nexryde-ops-key" in body
+    assert "status_code=404" in body
+    assert "egress_report" in body
+
+
+def test_egress_report_flags_a_single_ipv4_source(monkeypatch):
+    class _Echo:
+        text = "34.35.108.112\n"
+        extensions: dict = {}
+
+    class _Client:
+        async def get(self, url, timeout=None):
+            return _Echo()
+
+    async def _dns():
+        return {"addresses": ["172.217.112.4"], "private_google_access": False}
+
+    monkeypatch.setattr(places_service, "get_http_client", lambda: _Client())
+    monkeypatch.setattr(places_service, "resolve_maps_host", _dns)
+
+    out = asyncio.run(places_service.egress_report())
+
+    assert out["source_ips"] == ["34.35.108.112"]
+    assert out["single_ipv4_source"] is True
+    assert out["maps_key_ip_restrictable"] is True
+
+
+def test_egress_report_refuses_to_bless_an_ipv6_source(monkeypatch):
+    class _Echo:
+        text = "2600:1900:4243:200::"
+        extensions: dict = {}
+
+    class _Client:
+        async def get(self, url, timeout=None):
+            return _Echo()
+
+    async def _dns():
+        return {"addresses": [], "private_google_access": None}
+
+    monkeypatch.setattr(places_service, "get_http_client", lambda: _Client())
+    monkeypatch.setattr(places_service, "resolve_maps_host", _dns)
+
+    out = asyncio.run(places_service.egress_report())
+
+    assert out["maps_key_ip_restrictable"] is False
+
+
 def test_geocode_fallback_still_returns_google_io_logs(monkeypatch):
     """Sangotedo-style miss: Autocomplete ZERO_RESULTS, Geocoding has the street."""
     fake = _FakeGoogle(

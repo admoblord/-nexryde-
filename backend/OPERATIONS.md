@@ -22,6 +22,8 @@ Auth path allowlists live in **`nexryde_api_paths.py`**; change them there and r
 | `GET /api/health` | Public | Process alive |
 | `GET /api/health/ready` | Public | MongoDB `ping` (503 if DB down) |
 | `GET /api/health/ops` | Header `X-NEXRYDE-OPS-KEY` = `NEXRYDE_OPS_KEY` | DLQ counts; wrong key → 404 |
+| `GET /api/health/maps` | Public | Maps reachability + the last Google BEFORE/AFTER call lines |
+| `GET /api/ops/egress-ip` | Header `X-NEXRYDE-OPS-KEY` | Public source IP we egress from; `maps_key_ip_restrictable` says whether the Maps key can be locked to it |
 
 ## Environment variables
 

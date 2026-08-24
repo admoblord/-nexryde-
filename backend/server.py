@@ -2067,6 +2067,24 @@ async def ops_places_google_probe(request: Request, input: str = "Victoria"):
     return payload
 
 
+@api_router.get("/ops/egress-ip")
+async def ops_egress_ip(request: Request):
+    """Public source address this revision egresses from.
+
+    Answers the question that blocked restricting the Maps API key by IP: are
+    all outbound calls leaving through Cloud NAT on one IPv4 address, or can
+    they slip out over IPv6 and bypass it. Gated by X-NEXRYDE-OPS-KEY
+    (wrong/missing key → 404) because it reveals our NAT address.
+    """
+    expected = (os.environ.get("NEXRYDE_OPS_KEY") or "").strip()
+    got = (request.headers.get("x-nexryde-ops-key") or "").strip()
+    if not expected or got != expected:
+        raise HTTPException(status_code=404, detail="Not found")
+    from places_service import egress_report
+
+    return await egress_report()
+
+
 @api_router.post("/ops/ensure-indexes")
 async def ops_ensure_indexes(request: Request):
     """Re-run Mongo index ensure without a full restart.

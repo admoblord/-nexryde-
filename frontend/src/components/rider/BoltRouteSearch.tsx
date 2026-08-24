@@ -92,7 +92,10 @@ function failureHeadline(failure: PlacesFailure | null): string {
     case 'no_network':
       return 'No internet connection. Check your Wi-Fi or mobile data.';
     case 'timeout':
-      return 'Address search timed out. Your connection reached us but the reply was too slow.';
+      // Never claim the request arrived. A stalled connection is aborted on the
+      // phone with nothing sent, and blaming a slow backend reply sent us
+      // hunting Cloud Run for a week while the fault was the mobile link.
+      return 'Address search could not complete. Your phone did not get a reply — this is usually the mobile network.';
     case 'dns':
       return "Could not look up NexRyde's address server. This is usually a DNS or Wi-Fi problem.";
     case 'tls':
