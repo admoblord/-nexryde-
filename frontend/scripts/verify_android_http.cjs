@@ -109,6 +109,23 @@ if (cronet) {
   fail('expo-cronet is back in app.json but prebuild never runs — it cannot take effect');
 }
 
+// Same trap as the plugins: EAS reads the version from the native code, so a
+// bump in app.json alone ships a build labelled with the previous version. We
+// spent a week unsure which build was on the phone; the labels must not lie.
+const gradle = fs.readFileSync(path.join(androidDir, 'app/build.gradle'), 'utf8');
+const gradleCode = gradle.match(/versionCode\s+(\d+)/);
+const gradleName = gradle.match(/versionName\s+"([^"]+)"/);
+if (!gradleCode || !gradleName) {
+  fail('android/app/build.gradle has no versionCode/versionName — EAS would label the build blind');
+}
+if (String(json.expo?.android?.versionCode) !== gradleCode[1]) {
+  fail(`versionCode mismatch: app.json ${json.expo?.android?.versionCode} vs `
+    + `build.gradle ${gradleCode[1]} — the native value is the one that ships`);
+}
+if (String(json.expo?.version) !== gradleName[1]) {
+  fail(`version mismatch: app.json ${json.expo?.version} vs build.gradle ${gradleName[1]}`);
+}
+
 console.log(
   '[verify_android_http] OK — bounded connect/read/write timeouts, bounded DNS, '
   + 'HTTP/1.1 only, IPv4 only, short keep-alive',
