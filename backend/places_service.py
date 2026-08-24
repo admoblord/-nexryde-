@@ -529,12 +529,36 @@ async def _google_autocomplete_once(url: str) -> Optional[dict]:
 _GOOGLE_IO: deque = deque(maxlen=20)
 
 
+def _google_io_log_lines(call_id: str, ms: int, http_status, error: Optional[str] = None) -> tuple[str, str]:
+    before = f"GOOGLE_PLACES_CALL_BEFORE id={call_id} host={MAPS_HOST}"
+    if error:
+        after = (
+            f"GOOGLE_PLACES_CALL_AFTER id={call_id} host={MAPS_HOST} "
+            f"ms={ms} error={error}"
+        )
+    else:
+        after = (
+            f"GOOGLE_PLACES_CALL_AFTER id={call_id} host={MAPS_HOST} "
+            f"ms={ms} http={http_status if http_status is not None else 'n/a'}"
+        )
+    return before, after
+
+
 def _remember_google_io(call_id: str, ms: int, http_status, **extra) -> None:
+    error = extra.get("error")
+    before, after = _google_io_log_lines(
+        call_id,
+        ms,
+        http_status,
+        error if isinstance(error, str) else None,
+    )
     event = {
         "id": call_id,
         "ms": ms,
         "http": http_status,
         "revision": os.environ.get("K_REVISION", "unknown"),
+        "before": before,
+        "after": after,
         **{k: v for k, v in extra.items() if v is not None},
     }
     _GOOGLE_IO.appendleft(event)
@@ -542,6 +566,11 @@ def _remember_google_io(call_id: str, ms: int, http_status, **extra) -> None:
 
 def recent_google_io() -> list:
     return list(_GOOGLE_IO)
+
+
+def _with_google_io(payload: dict) -> dict:
+    """Attach the reconstructed BEFORE/AFTER lines so we do not need Cloud Logging."""
+    return {**payload, "google_io": recent_google_io()[:6]}
 
 
 def _log_maps_egress_diagnostic() -> None:
@@ -957,7 +986,7 @@ async def autocomplete_places(
                 incr("places.autocomplete_cache_miss")
             except Exception:
                 pass
-            return {**response_payload, "google_io": recent_google_io()[:6]}
+            return _with_google_io(response_payload)
 
         fb = await _geocode_search_fallback_predictions(input, components or "country:ng")
         if fb:
@@ -965,7 +994,7 @@ async def autocomplete_places(
             fb = {**fb, "predictions": fb_preds, "status": "OK", "bias_retried": unbiased_retried}
             await _set_cache(key, fb, ttl_seconds=300)
             await _set_stale_cache(key, fb)
-            return fb
+            return _with_google_io(fb)
 
         # Only Google itself saying "nothing matches" counts as an empty result.
         # Timeouts, quota and key errors mean the rider gets the last good answer
@@ -976,15 +1005,17 @@ async def autocomplete_places(
         if not genuinely_empty:
             stale = await _get_stale_cache(key)
             if stale:
-                return {**stale, "status": "OK", "cache": "stale", "bias_retried": unbiased_retried}
+                return _with_google_io(
+                    {**stale, "status": "OK", "cache": "stale", "bias_retried": unbiased_retried}
+                )
 
         if local_hits:
-            return {
+            return _with_google_io({
                 "predictions": local_hits,
                 "status": "OK",
                 "cache": "local_landmark",
                 "bias_retried": unbiased_retried,
-            }
+            })
 
         if genuinely_empty:
             response_payload = {
@@ -993,14 +1024,14 @@ async def autocomplete_places(
                 "bias_retried": unbiased_retried,
             }
             await _set_cache(key, response_payload, ttl_seconds=60)
-            return response_payload
+            return _with_google_io(response_payload)
 
-        return {
+        return _with_google_io({
             "predictions": [],
             "status": google_status or "UNAVAILABLE",
             "error_message": (data or {}).get("error_message", "Address search temporarily unavailable"),
             "bias_retried": unbiased_retried,
-        }
+        })
 
     except Exception as e:
         # Autocomplete must never 500 — a crash here is what painted
@@ -1009,16 +1040,18 @@ async def autocomplete_places(
         try:
             stale = await _get_stale_cache(key)
             if stale:
-                return {**stale, "status": "OK", "cache": "stale"}
+                return _with_google_io({**stale, "status": "OK", "cache": "stale"})
         except Exception:
             pass
         if local_hits:
-            return {"predictions": local_hits, "status": "OK", "cache": "local_landmark"}
-        return {
+            return _with_google_io(
+                {"predictions": local_hits, "status": "OK", "cache": "local_landmark"}
+            )
+        return _with_google_io({
             "predictions": [],
             "status": "UNAVAILABLE",
             "error_message": "Address search temporarily unavailable",
-        }
+        })
 
 
 

@@ -98,6 +98,7 @@ def _isolate_places(monkeypatch):
     monkeypatch.setattr(places_service, "_ensure_places_cache_indexes", _no_indexes)
     monkeypatch.setattr(places_service, "_get_cache", _get_cache)
     monkeypatch.setattr(places_service, "_set_cache", _set_cache)
+    places_service._GOOGLE_IO.clear()
     return store
 
 
@@ -131,6 +132,15 @@ def test_happy_path_returns_google_rows(monkeypatch):
 
     assert out["status"] == "OK"
     assert out["predictions"][0]["main_text"] == "Peace Garden Estate"
+    assert out["google_io"]
+    assert out["google_io"][0]["before"].startswith("GOOGLE_PLACES_CALL_BEFORE id=")
+    assert "host=maps.googleapis.com" in out["google_io"][0]["before"]
+    assert out["google_io"][0]["after"].startswith("GOOGLE_PLACES_CALL_AFTER id=")
+    assert out["google_io"][0]["id"] in out["google_io"][0]["before"]
+    assert out["google_io"][0]["id"] in out["google_io"][0]["after"]
+
+    cached = _autocomplete()
+    assert cached["google_io"] == []
 
 
 def test_timeout_serves_last_good_answer_instead_of_empty(monkeypatch, _isolate_places):
@@ -419,3 +429,29 @@ def test_google_autocomplete_uses_8s_hard_timeout():
     assert "flush=True" in src
     assert "err_type=" in src
     assert "timeout=" in src
+
+
+def test_geocode_fallback_still_returns_google_io_logs(monkeypatch):
+    """Sangotedo-style miss: Autocomplete ZERO_RESULTS, Geocoding has the street."""
+    fake = _FakeGoogle(
+        autocomplete={"status": "ZERO_RESULTS", "predictions": []},
+        geocode={
+            "status": "OK",
+            "results": [
+                {
+                    "place_id": "ChIJ-sangotedo",
+                    "formatted_address": "Sangotedo, Lagos, Nigeria",
+                    "types": ["neighborhood", "political"],
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(places_service, "get_http_client", lambda: fake)
+
+    out = _autocomplete(input="Sangotedo")
+
+    assert out["status"] == "OK"
+    assert out["predictions"]
+    assert out["google_io"], "geocode fallback used to drop the BEFORE/AFTER lines"
+    assert out["google_io"][0]["before"].startswith("GOOGLE_PLACES_CALL_BEFORE")
+    assert "GOOGLE_PLACES_CALL_AFTER" in out["google_io"][0]["after"]
