@@ -73,6 +73,20 @@ PROBE_OUT="$(curl -sS -m 20 -w '\nHTTP_CODE=%{http_code} TIME_TOTAL=%{time_total
 PROBE_RC=$?
 echo "$PROBE_OUT"
 echo "curl_exit=$PROBE_RC"
+
+# Which public address do we actually egress from? An IPv6 source would mean
+# traffic left without traversing the connector, and therefore without Cloud
+# NAT — the reason the Maps key could not be restricted by IP. One IPv4 source
+# here is the evidence needed to restore that restriction.
+echo
+echo "--- GET /api/ops/egress-ip ---"
+EGRESS_OUT="$(curl -sS -m 20 -w '\nHTTP_CODE=%{http_code} TIME_TOTAL=%{time_total}\n' \
+  -H "X-NEXRYDE-OPS-KEY: ${OPS_KEY}" \
+  "${URL}/api/ops/egress-ip")"
+EGRESS_RC=$?
+echo "$EGRESS_OUT"
+echo "curl_exit=$EGRESS_RC"
+
 # Never leak the ops key if it appeared (it should not).
 unset OPS_KEY
 

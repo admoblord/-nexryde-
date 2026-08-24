@@ -52,12 +52,21 @@ if (!/CONNECT_TIMEOUT_SECONDS\s*=\s*([1-9]|10)L?\b/.test(http)) {
 if (!/\.readTimeout\(/.test(http) || !/\.writeTimeout\(/.test(http)) {
   fail('read/write timeouts missing — a stalled socket never errors');
 }
-if (!/READ_TIMEOUT_SECONDS\s*=\s*([1-9]|1[0-5])L?\b/.test(http)) {
-  fail('read timeout must stay under the 9s places abort plus a retry, or a stalled '
-    + 'response burns the whole rider budget before OkHttp reports anything');
+if (!/READ_TIMEOUT_SECONDS\s*=\s*[1-8]L?\b/.test(http)) {
+  fail('read timeout must stay under the 9s places abort, or a stalled HTTP/2 stream '
+    + 'burns the whole rider budget and the phone reports timeout: timeout');
 }
 if (!/\.dns\(\s*Ipv4FirstDns\s*\)/.test(http)) {
   fail('IPv4-first DNS missing — an unroutable IPv6 answer costs the whole request');
+}
+if (/ipv4 \+ resolved\.filterNot/.test(http)) {
+  fail('DNS still appends AAAA records — IPv6 black-holes must not be tried at all');
+}
+if (!/\.protocols\(\s*listOf\(\s*Protocol\.HTTP_1_1\s*\)\s*\)/.test(http)) {
+  fail('HTTP/1.1-only missing — a dead HTTP/2 stream on Cloud Run sits silent until the JS abort');
+}
+if (!/\.connectionPool\(/.test(http) || !/KEEP_ALIVE_SECONDS\s*=\s*[1-9]L?\b/.test(http)) {
+  fail('short keep-alive pool missing — a connection that survived a network switch is reused');
 }
 
 // connectTimeout starts at the socket, so a silent DNS server is unbounded without this.
@@ -102,6 +111,6 @@ if (cronet) {
 
 console.log(
   '[verify_android_http] OK — bounded connect/read/write timeouts, bounded DNS, '
-  + 'HTTP/2 pings, IPv4 first',
+  + 'HTTP/1.1 only, IPv4 only, short keep-alive',
 );
 process.exit(0);

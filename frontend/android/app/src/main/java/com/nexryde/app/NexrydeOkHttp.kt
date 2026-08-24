@@ -9,8 +9,10 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import okhttp3.ConnectionPool
 import okhttp3.Dns
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 
 /**
  * Every fetch() in the app goes through this client.
@@ -22,41 +24,47 @@ import okhttp3.OkHttpClient
  * AbortController fires, which the rider sees as "Address search timed out"
  * (timeout: timeout) even though the backend answers in under a second.
  *
- * A bounded connect timeout turns that dead route into a fast failover — OkHttp
- * moves to the next address inside the same call — and IPv4 is tried first
- * because Nigerian mobile data hands out unroutable IPv6 far more often.
+ * Live evidence from revision nexryde-backend-00248-slm: Google Places returns
+ * HTTP 200 in 215–1272ms (BEFORE and AFTER both printed). The 9s abort is
+ * therefore not Maps, Redis, or our handler. It is the phone holding an HTTP
+ * call that never completes.
  *
- * Two ways to burn the rider's whole 9s budget survived that change, and both
- * look identical from the phone: nine seconds of silence while the server logs
- * no request at all.
+ * HTTP/2 is the remaining match. Cloud Run's frontend ACKs HTTP/2 pings even
+ * when the request stream is dead (Wi-Fi → LTE, a half-open multiplexed
+ * connection). pingInterval then looks healthy, readTimeout (previously 12s)
+ * never fires before the JS 9s abort, and Cloud Run often never sees the
+ * request. HTTP/1.1 has one request per connection: a dead socket errors
+ * instead of sitting silent.
  *
- * 1. DNS. connectTimeout starts at the socket, so it does not cover name
- *    resolution. Android's resolver retries a silent DNS server for well over
- *    9s, and OkHttp waits for however long that takes.
- * 2. A pooled connection that died without a FIN. Switching Wi-Fi to mobile
- *    data leaves an established HTTP/2 connection in the pool whose socket is
- *    already gone; the request is written into it and no byte ever comes back,
- *    so the call sits there until readTimeout. HTTP/2 pings detect that in
- *    seconds and let OkHttp open a fresh connection instead.
+ * IPv6 is dropped entirely. Trying it second still costs a connectTimeout when
+ * the carrier has unroutable AAAA records; eight of those burned the 9s budget
+ * even after IPv4-first ordering.
  *
  * Timeouts here are per-operation, not per-call, so document and photo uploads
  * are still free to take as long as they need. The call timeout is only a
- * backstop against a wedged call, far above any real upload.
+ * backstop against a wedged call, far above any real upload. Places search is
+ * capped in JS at 9s, so connect and read must stay under that.
  */
-private const val CONNECT_TIMEOUT_SECONDS = 4L
-private const val READ_TIMEOUT_SECONDS = 12L
+private const val CONNECT_TIMEOUT_SECONDS = 2L
+private const val READ_TIMEOUT_SECONDS = 8L
 private const val WRITE_TIMEOUT_SECONDS = 15L
 private const val CALL_TIMEOUT_SECONDS = 90L
 private const val PING_INTERVAL_SECONDS = 5L
 private const val DNS_TIMEOUT_SECONDS = 3L
+private const val KEEP_ALIVE_SECONDS = 5L
+private const val MAX_IDLE_CONNECTIONS = 5
 
 /**
- * IPv4 first, and never wait on the system resolver longer than a rider will.
+ * IPv4 only, and never wait on the system resolver longer than a rider will.
  *
  * [Dns.SYSTEM] is a blocking getaddrinfo with no ceiling of its own, so the
  * lookup runs on a daemon thread we can walk away from. A resolver that never
  * answers becomes UnknownHostException in [DNS_TIMEOUT_SECONDS] instead of
  * silence, which OkHttp reports immediately rather than holding the call open.
+ *
+ * AAAA records are discarded when any A record exists. Nigerian mobile data
+ * frequently returns unroutable IPv6; each black-holed connect used to consume
+ * the whole places budget before OkHttp moved on.
  */
 internal object Ipv4FirstDns : Dns {
   private val resolvers =
@@ -84,7 +92,7 @@ internal object Ipv4FirstDns : Dns {
 
     val ipv4 = resolved.filterIsInstance<Inet4Address>()
     if (ipv4.isEmpty()) return resolved
-    return ipv4 + resolved.filterNot { it is Inet4Address }
+    return ipv4
   }
 }
 
@@ -97,6 +105,8 @@ internal class NexrydeOkHttpClientFactory : OkHttpClientFactory {
           .callTimeout(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
           .pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS)
           .retryOnConnectionFailure(true)
+          .connectionPool(ConnectionPool(MAX_IDLE_CONNECTIONS, KEEP_ALIVE_SECONDS, TimeUnit.SECONDS))
+          .protocols(listOf(Protocol.HTTP_1_1))
           .dns(Ipv4FirstDns)
           .build()
 }

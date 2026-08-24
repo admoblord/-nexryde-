@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import List, Optional
 import httpx
-from http_client import get_http_client
+from http_client import get_http_client, response_peer
 import os
 import json
 import hashlib
@@ -488,9 +488,11 @@ async def _google_autocomplete_once(url: str) -> Optional[dict]:
         response = await client.get(url, timeout=GOOGLE_PLACES_TIMEOUT_S)
         ms = int((time.perf_counter() - t0) * 1000)
         http_status = getattr(response, "status_code", None)
+        peer = response_peer(response)
         print(
             f"GOOGLE_PLACES_CALL_AFTER id={call_id} host={MAPS_HOST} "
-            f"ms={ms} http={http_status if http_status is not None else 'n/a'}",
+            f"ms={ms} http={http_status if http_status is not None else 'n/a'} "
+            f"peer={peer or 'n/a'}",
             flush=True,
         )
         try:
@@ -500,7 +502,7 @@ async def _google_autocomplete_once(url: str) -> Optional[dict]:
                 f"places.autocomplete google http={http_status if http_status is not None else 'n/a'} "
                 f"json_error ms={ms}"
             )
-            _remember_google_io(call_id, ms, http_status, error="json_error")
+            _remember_google_io(call_id, ms, http_status, error="json_error", peer=peer)
             return None
         status = data.get("status") if isinstance(data, dict) else None
         rows = len((data or {}).get("predictions") or []) if isinstance(data, dict) else 0
@@ -508,7 +510,7 @@ async def _google_autocomplete_once(url: str) -> Optional[dict]:
             f"places.autocomplete google http={http_status if http_status is not None else 'n/a'} "
             f"status={status} ms={ms} rows={rows}"
         )
-        _remember_google_io(call_id, ms, http_status, google_status=status, rows=rows)
+        _remember_google_io(call_id, ms, http_status, google_status=status, rows=rows, peer=peer)
         return data if isinstance(data, dict) else None
     except Exception as exc:
         ms = int((time.perf_counter() - t0) * 1000)
@@ -529,12 +531,45 @@ async def _google_autocomplete_once(url: str) -> Optional[dict]:
 _GOOGLE_IO: deque = deque(maxlen=20)
 
 
+def _google_io_log_lines(
+    call_id: str,
+    ms: int,
+    http_status,
+    error: Optional[str] = None,
+    peer: Optional[str] = None,
+) -> tuple[str, str]:
+    before = f"GOOGLE_PLACES_CALL_BEFORE id={call_id} host={MAPS_HOST}"
+    if error:
+        after = (
+            f"GOOGLE_PLACES_CALL_AFTER id={call_id} host={MAPS_HOST} "
+            f"ms={ms} error={error}"
+        )
+    else:
+        after = (
+            f"GOOGLE_PLACES_CALL_AFTER id={call_id} host={MAPS_HOST} "
+            f"ms={ms} http={http_status if http_status is not None else 'n/a'} "
+            f"peer={peer or 'n/a'}"
+        )
+    return before, after
+
+
 def _remember_google_io(call_id: str, ms: int, http_status, **extra) -> None:
+    error = extra.get("error")
+    peer = extra.get("peer")
+    before, after = _google_io_log_lines(
+        call_id,
+        ms,
+        http_status,
+        error if isinstance(error, str) else None,
+        peer if isinstance(peer, str) else None,
+    )
     event = {
         "id": call_id,
         "ms": ms,
         "http": http_status,
         "revision": os.environ.get("K_REVISION", "unknown"),
+        "before": before,
+        "after": after,
         **{k: v for k, v in extra.items() if v is not None},
     }
     _GOOGLE_IO.appendleft(event)
@@ -542,6 +577,11 @@ def _remember_google_io(call_id: str, ms: int, http_status, **extra) -> None:
 
 def recent_google_io() -> list:
     return list(_GOOGLE_IO)
+
+
+def _with_google_io(payload: dict) -> dict:
+    """Attach the reconstructed BEFORE/AFTER lines so we do not need Cloud Logging."""
+    return {**payload, "google_io": recent_google_io()[:6]}
 
 
 def _log_maps_egress_diagnostic() -> None:
@@ -759,9 +799,11 @@ async def probe_google_places_autocomplete(input_text: str = "Victoria") -> dict
     try:
         response = await client.get(url, timeout=GOOGLE_PLACES_PROBE_TIMEOUT_S)
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        peer = response_peer(response)
         print(
             f"GOOGLE_PLACES_CALL_AFTER id={probe_id} host={MAPS_HOST} probe=1 "
-            f"ms={elapsed_ms} http={getattr(response, 'status_code', None)}",
+            f"ms={elapsed_ms} http={getattr(response, 'status_code', None)} "
+            f"peer={peer or 'n/a'}",
             flush=True,
         )
         body_text = getattr(response, "text", None)
@@ -802,6 +844,7 @@ async def probe_google_places_autocomplete(input_text: str = "Victoria") -> dict
             "google_status": google_status,
             "error_message": error_message,
             "predictions": preds,
+            "peer": peer,
         }
     except Exception as exc:
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
@@ -823,6 +866,59 @@ async def probe_google_places_autocomplete(input_text: str = "Victoria") -> dict
             "google_status": None,
             "predictions": [],
         }
+
+
+# Plain-text echoes of the source address a server actually egressed from.
+# Two providers because the answer is what unblocks the Maps key restriction,
+# and one of them being down should not make us guess.
+_EGRESS_ECHO_URLS = (
+    "https://checkip.amazonaws.com",
+    "https://api.ipify.org",
+)
+
+
+async def egress_report() -> dict:
+    """Which address does the outside world see this revision leave from?
+
+    The Maps key could not be IP-restricted because Cloud Run egress was
+    believed to reach Google over IPv6, which does not traverse the Serverless
+    VPC connector and therefore not Cloud NAT either. Every outbound socket is
+    now bound to an IPv4 source, so this reports the evidence needed to restore
+    that restriction: the public source IP, and the peer address our own Google
+    call landed on.
+    """
+    client = get_http_client()
+    observed: list[dict] = []
+    for url in _EGRESS_ECHO_URLS:
+        t0 = time.perf_counter()
+        try:
+            response = await client.get(url, timeout=5.0)
+            observed.append({
+                "echo": url,
+                "source_ip": (getattr(response, "text", "") or "").strip() or None,
+                "peer": response_peer(response),
+                "ms": int((time.perf_counter() - t0) * 1000),
+            })
+        except Exception as exc:
+            observed.append({
+                "echo": url,
+                "error": f"{type(exc).__name__}: {exc}",
+                "ms": int((time.perf_counter() - t0) * 1000),
+            })
+
+    source_ips = sorted({row["source_ip"] for row in observed if row.get("source_ip")})
+    ipv6_source = [ip for ip in source_ips if ":" in ip]
+    return {
+        "revision": os.environ.get("K_REVISION", "unknown"),
+        "outbound_bound_to_ipv4": True,
+        "source_ips": source_ips,
+        # A single IPv4 source is the precondition for restricting the Maps key.
+        "single_ipv4_source": len(source_ips) == 1 and not ipv6_source,
+        "maps_key_ip_restrictable": len(source_ips) == 1 and not ipv6_source,
+        "echoes": observed,
+        "maps_dns": await resolve_maps_host(),
+        "recent_google_io": recent_google_io(),
+    }
 
 
 async def _google_autocomplete_data(
@@ -957,7 +1053,7 @@ async def autocomplete_places(
                 incr("places.autocomplete_cache_miss")
             except Exception:
                 pass
-            return {**response_payload, "google_io": recent_google_io()[:6]}
+            return _with_google_io(response_payload)
 
         fb = await _geocode_search_fallback_predictions(input, components or "country:ng")
         if fb:
@@ -965,7 +1061,7 @@ async def autocomplete_places(
             fb = {**fb, "predictions": fb_preds, "status": "OK", "bias_retried": unbiased_retried}
             await _set_cache(key, fb, ttl_seconds=300)
             await _set_stale_cache(key, fb)
-            return fb
+            return _with_google_io(fb)
 
         # Only Google itself saying "nothing matches" counts as an empty result.
         # Timeouts, quota and key errors mean the rider gets the last good answer
@@ -976,15 +1072,17 @@ async def autocomplete_places(
         if not genuinely_empty:
             stale = await _get_stale_cache(key)
             if stale:
-                return {**stale, "status": "OK", "cache": "stale", "bias_retried": unbiased_retried}
+                return _with_google_io(
+                    {**stale, "status": "OK", "cache": "stale", "bias_retried": unbiased_retried}
+                )
 
         if local_hits:
-            return {
+            return _with_google_io({
                 "predictions": local_hits,
                 "status": "OK",
                 "cache": "local_landmark",
                 "bias_retried": unbiased_retried,
-            }
+            })
 
         if genuinely_empty:
             response_payload = {
@@ -993,14 +1091,14 @@ async def autocomplete_places(
                 "bias_retried": unbiased_retried,
             }
             await _set_cache(key, response_payload, ttl_seconds=60)
-            return response_payload
+            return _with_google_io(response_payload)
 
-        return {
+        return _with_google_io({
             "predictions": [],
             "status": google_status or "UNAVAILABLE",
             "error_message": (data or {}).get("error_message", "Address search temporarily unavailable"),
             "bias_retried": unbiased_retried,
-        }
+        })
 
     except Exception as e:
         # Autocomplete must never 500 — a crash here is what painted
@@ -1009,16 +1107,18 @@ async def autocomplete_places(
         try:
             stale = await _get_stale_cache(key)
             if stale:
-                return {**stale, "status": "OK", "cache": "stale"}
+                return _with_google_io({**stale, "status": "OK", "cache": "stale"})
         except Exception:
             pass
         if local_hits:
-            return {"predictions": local_hits, "status": "OK", "cache": "local_landmark"}
-        return {
+            return _with_google_io(
+                {"predictions": local_hits, "status": "OK", "cache": "local_landmark"}
+            )
+        return _with_google_io({
             "predictions": [],
             "status": "UNAVAILABLE",
             "error_message": "Address search temporarily unavailable",
-        }
+        })
 
 
 

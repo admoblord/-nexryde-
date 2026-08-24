@@ -337,7 +337,9 @@ results.push(
       src.places.includes('classifyPlacesFailure') &&
       src.bolt.includes('failureHeadline') &&
       src.bolt.includes('No internet connection') &&
-      src.bolt.includes('Address search timed out') &&
+      src.bolt.includes('Address search could not complete') &&
+      // A timeout cannot promise the request arrived — it is aborted on the phone.
+      !src.bolt.includes('reached us') &&
       src.bolt.includes('selectable'),
   ),
 );
