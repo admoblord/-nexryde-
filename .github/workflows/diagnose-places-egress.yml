@@ -9,6 +9,9 @@ on:
       - ".github/workflows/diagnose-places-egress.yml"
       - "backend/scripts/diagnose_and_fix_places_egress.sh"
       - "backend/places_service.py"
+      # Where outbound sockets are bound to IPv4, which is what decides whether
+      # egress traverses the connector and Cloud NAT at all.
+      - "backend/http_client.py"
       - "backend/cloudrun.africa-south1.yaml"
 
 permissions:
