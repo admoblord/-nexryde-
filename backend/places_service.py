@@ -25,6 +25,8 @@ from datetime import datetime, timedelta, timezone
 import re
 import time
 from urllib.parse import quote
+from collections import deque
+import uuid as _uuid
 
 # Circuit breaker — prevents cascading failures when Google Maps degrades
 try:
@@ -474,12 +476,23 @@ def _google_exc_is_timeout(exc: BaseException) -> bool:
 
 async def _google_autocomplete_once(url: str) -> Optional[dict]:
     """One Google call that reports failure instead of raising."""
+    call_id = _uuid.uuid4().hex[:8]
+    client = get_http_client()
     t0 = time.perf_counter()
+    # These two lines are the split: if BEFORE never appears, the hang is
+    # upstream of Google. If BEFORE appears and AFTER never does, we are
+    # blocked at the network boundary. flush=True so a hang after this
+    # print cannot leave BEFORE stuck in a stdout buffer.
+    print(f"GOOGLE_PLACES_CALL_BEFORE id={call_id} host={MAPS_HOST}", flush=True)
     try:
-        client = get_http_client()
         response = await client.get(url, timeout=GOOGLE_PLACES_TIMEOUT_S)
         ms = int((time.perf_counter() - t0) * 1000)
         http_status = getattr(response, "status_code", None)
+        print(
+            f"GOOGLE_PLACES_CALL_AFTER id={call_id} host={MAPS_HOST} "
+            f"ms={ms} http={http_status if http_status is not None else 'n/a'}",
+            flush=True,
+        )
         try:
             data = response.json()
         except Exception:
@@ -487,6 +500,7 @@ async def _google_autocomplete_once(url: str) -> Optional[dict]:
                 f"places.autocomplete google http={http_status if http_status is not None else 'n/a'} "
                 f"json_error ms={ms}"
             )
+            _remember_google_io(call_id, ms, http_status, error="json_error")
             return None
         status = data.get("status") if isinstance(data, dict) else None
         rows = len((data or {}).get("predictions") or []) if isinstance(data, dict) else 0
@@ -494,15 +508,40 @@ async def _google_autocomplete_once(url: str) -> Optional[dict]:
             f"places.autocomplete google http={http_status if http_status is not None else 'n/a'} "
             f"status={status} ms={ms} rows={rows}"
         )
+        _remember_google_io(call_id, ms, http_status, google_status=status, rows=rows)
         return data if isinstance(data, dict) else None
     except Exception as exc:
         ms = int((time.perf_counter() - t0) * 1000)
         print(
+            f"GOOGLE_PLACES_CALL_AFTER id={call_id} host={MAPS_HOST} "
+            f"ms={ms} error={type(exc).__name__}: {exc}",
+            flush=True,
+        )
+        print(
             f"places.autocomplete google call failed timeout={str(_google_exc_is_timeout(exc)).lower()} "
             f"ms={ms} err_type={type(exc).__name__} err={exc}"
         )
+        _remember_google_io(call_id, ms, None, error=f"{type(exc).__name__}: {exc}")
         _log_maps_egress_diagnostic()
         return None
+
+
+_GOOGLE_IO: deque = deque(maxlen=20)
+
+
+def _remember_google_io(call_id: str, ms: int, http_status, **extra) -> None:
+    event = {
+        "id": call_id,
+        "ms": ms,
+        "http": http_status,
+        "revision": os.environ.get("K_REVISION", "unknown"),
+        **{k: v for k, v in extra.items() if v is not None},
+    }
+    _GOOGLE_IO.appendleft(event)
+
+
+def recent_google_io() -> list:
+    return list(_GOOGLE_IO)
 
 
 def _log_maps_egress_diagnostic() -> None:
@@ -616,6 +655,7 @@ async def maps_platform_health() -> dict:
     if _maps_health_cache and now - _maps_health_cache[0] < _MAPS_HEALTH_TTL_S:
         cached = dict(_maps_health_cache[1])
         cached["cached"] = True
+        cached["recent_google_io"] = recent_google_io()
         return cached
 
     dns = await resolve_maps_host()
@@ -677,7 +717,9 @@ async def maps_platform_health() -> dict:
         )
 
     result["cached"] = False
-    _maps_health_cache = (now, result)
+    cached_copy = dict(result)
+    result["recent_google_io"] = recent_google_io()
+    _maps_health_cache = (now, cached_copy)
     return result
 
 
@@ -711,10 +753,17 @@ async def probe_google_places_autocomplete(input_text: str = "Victoria") -> dict
         f"?input={quote(raw)}&key={key}"
     )
     t0 = time.perf_counter()
+    probe_id = _uuid.uuid4().hex[:8]
+    client = get_http_client()
+    print(f"GOOGLE_PLACES_CALL_BEFORE id={probe_id} host={MAPS_HOST} probe=1", flush=True)
     try:
-        client = get_http_client()
         response = await client.get(url, timeout=GOOGLE_PLACES_PROBE_TIMEOUT_S)
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        print(
+            f"GOOGLE_PLACES_CALL_AFTER id={probe_id} host={MAPS_HOST} probe=1 "
+            f"ms={elapsed_ms} http={getattr(response, 'status_code', None)}",
+            flush=True,
+        )
         body_text = getattr(response, "text", None)
         if body_text is None:
             try:
@@ -758,6 +807,11 @@ async def probe_google_places_autocomplete(input_text: str = "Victoria") -> dict
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         name = type(exc).__name__
         lowered = f"{name} {exc}".lower()
+        print(
+            f"GOOGLE_PLACES_CALL_AFTER id={probe_id} host={MAPS_HOST} probe=1 "
+            f"ms={elapsed_ms} error={name}: {exc}",
+            flush=True,
+        )
         return {
             "ok": False,
             "timeout": "timeout" in lowered,
@@ -877,7 +931,7 @@ async def autocomplete_places(
                 incr("places.autocomplete_cache_hit")
             except Exception:
                 pass
-            return cached["response"]
+            return {**cached["response"], "google_io": []}
 
         data, unbiased_retried = await _google_autocomplete_data(
             input,
@@ -903,7 +957,7 @@ async def autocomplete_places(
                 incr("places.autocomplete_cache_miss")
             except Exception:
                 pass
-            return response_payload
+            return {**response_payload, "google_io": recent_google_io()[:6]}
 
         fb = await _geocode_search_fallback_predictions(input, components or "country:ng")
         if fb:

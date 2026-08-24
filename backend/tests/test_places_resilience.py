@@ -412,5 +412,10 @@ def test_google_autocomplete_uses_8s_hard_timeout():
     src = inspect.getsource(places_service._google_autocomplete_once)
     assert "GOOGLE_PLACES_TIMEOUT_S" in src
     assert places_service.GOOGLE_PLACES_TIMEOUT_S == 8.0
+    assert "GOOGLE_PLACES_CALL_BEFORE" in src
+    assert "GOOGLE_PLACES_CALL_AFTER" in src
+    assert src.index("GOOGLE_PLACES_CALL_BEFORE") < src.index("client.get(")
+    assert src.index("client.get(") < src.index("GOOGLE_PLACES_CALL_AFTER")
+    assert "flush=True" in src
     assert "err_type=" in src
     assert "timeout=" in src
