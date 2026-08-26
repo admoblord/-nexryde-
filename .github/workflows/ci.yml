@@ -613,6 +613,36 @@ jobs:
           echo "has_token=true" >> "$GITHUB_OUTPUT"
           echo "::notice title=EAS::EXPO_TOKEN resolved from ${SOURCE}"
 
+      # Every push to main used to start a paid Android build, including
+      # backend-only and CI-only merges. An app build is only meaningful when
+      # something the app ships actually changed.
+      - name: Decide what to build
+        id: plan
+        run: |
+          set -uo pipefail
+          BEFORE="${{ github.event.before }}"
+          if [ -z "${BEFORE}" ] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            BEFORE="${GITHUB_SHA}^"
+          fi
+          CHANGED="$(git diff --name-only "${BEFORE}" "${GITHUB_SHA}" -- frontend/ 2>/dev/null | wc -l | tr -d ' ')"
+          echo "frontend files changed: ${CHANGED}"
+          MSG="$(git log -1 --pretty=%s "${GITHUB_SHA}")"
+          WANT_AAB=false
+          WANT_APK=false
+          if [ "${CHANGED}" != "0" ]; then WANT_AAB=true; fi
+          case "${MSG}" in
+            *"[aab]"*) WANT_AAB=true ;;
+          esac
+          case "${MSG}" in
+            *"[apk]"*) WANT_APK=true ;;
+          esac
+          case "${MSG}" in
+            *"[skip-build]"*) WANT_AAB=false; WANT_APK=false ;;
+          esac
+          echo "aab=${WANT_AAB}" >> "$GITHUB_OUTPUT"
+          echo "apk=${WANT_APK}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=EAS plan::aab=${WANT_AAB} apk=${WANT_APK} (frontend files changed: ${CHANGED})"
+
       - uses: actions/setup-node@v4
         if: steps.expo.outputs.has_token == 'true'
         with:
@@ -630,7 +660,9 @@ jobs:
         run: npm install -g eas-cli
 
       - name: Trigger EAS production build (non-blocking)
-        if: steps.expo.outputs.has_token == 'true'
+        if: >-
+          steps.expo.outputs.has_token == 'true' &&
+          steps.plan.outputs.aab == 'true'
         working-directory: frontend
         run: |
           eas build \
@@ -640,13 +672,13 @@ jobs:
             --no-wait \
             --message "CI: prod-${GITHUB_SHA::8}"
 
-      # A store AAB cannot be sideloaded, so device verification waits on a Play
-      # upload. Put "[apk]" in the merge commit subject to also get an
-      # installable APK against the production backend from the same commit.
+      # A store AAB cannot be sideloaded, so device verification would otherwise
+      # wait on a Play upload. Put "[apk]" in the merge commit subject to also
+      # get an installable APK against the production backend.
       - name: Trigger EAS device-check APK (non-blocking)
         if: >-
           steps.expo.outputs.has_token == 'true' &&
-          contains(github.event.head_commit.message, '[apk]')
+          steps.plan.outputs.apk == 'true'
         working-directory: frontend
         run: |
           eas build \
@@ -655,3 +687,11 @@ jobs:
             --non-interactive \
             --no-wait \
             --message "CI: apk-${GITHUB_SHA::8}"
+
+      # The Expo dashboard needs a login, so an agent or anyone without an Expo
+      # account cannot see whether a build finished or where the artifact is.
+      # Print it here, where the token already is.
+      - name: Report recent EAS builds
+        if: steps.expo.outputs.has_token == 'true'
+        working-directory: frontend
+        run: node ./scripts/report_eas_builds.mjs
