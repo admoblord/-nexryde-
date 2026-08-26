@@ -116,6 +116,23 @@ import { BRAND, SURFACE } from '@/src/constants/designSystem';
 const BOOKING_PROMO_ENABLED = String(process.env.EXPO_PUBLIC_BOOKING_PROMO ?? 'true').toLowerCase() !== 'false';
 const BOOKING_PROMO_DISMISS_KEY = '@nexryde_booking_promo_dismissed_v1';
 
+/**
+ * Which Route entry the rider gets for pickup and destination.
+ *
+ * `classic` is the flow that shipped before 11 August: this screen opens on the
+ * map with the Where-to fields, and tapping one opens the single-field location
+ * modal below. `bolt` is the stacked full-screen rebuild that replaced it.
+ *
+ * Classic is the default because it is the flow riders were not complaining
+ * about. Both use the same backend proxy and the same placesSearch service, so
+ * the cache, the honest failure messages and the request budget apply either
+ * way — the difference is the surface, not the network path.
+ *
+ * Set `EXPO_PUBLIC_RIDER_ROUTE_ENTRY=bolt` to get the August screen back.
+ */
+const USE_BOLT_ROUTE_ENTRY =
+  String(process.env.EXPO_PUBLIC_RIDER_ROUTE_ENTRY ?? 'classic').trim().toLowerCase() === 'bolt';
+
 /** Distance/base fare only — time line appears when rider adds a stop (all cities). */
 function isDistanceOnlyFare(fd: FareEstimateResponse | null | undefined): boolean {
   if (!fd) return false;
@@ -340,9 +357,12 @@ function BookInDriveStyle() {
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [editingField, setEditingField] = useState<'pickup' | 'destination' | 'stop'>('pickup');
   const [showVehicleModal, setShowVehicleModal] = useState(false);
-  /** Bolt Route screen — open until dropoff is confirmed by suggestion tap. */
-  const [routeSearchOpen, setRouteSearchOpen] = useState(true);
-  const routeSearchOpenRef = useRef(true);
+  /**
+   * Bolt Route screen — open until dropoff is confirmed by suggestion tap.
+   * Never opens in the classic flow, which searches from the location modal.
+   */
+  const [routeSearchOpen, setRouteSearchOpen] = useState(USE_BOLT_ROUTE_ENTRY);
+  const routeSearchOpenRef = useRef(USE_BOLT_ROUTE_ENTRY);
   routeSearchOpenRef.current = routeSearchOpen;
   const [routeSearchFocus, setRouteSearchFocus] = useState<RouteField>('dropoff');
   const [showStopField, setShowStopField] = useState(false);
@@ -729,6 +749,12 @@ function BookInDriveStyle() {
     [],
   );
 
+  /** One place decides which search surface opens, so the two cannot diverge. */
+  const openSearchSurface = useCallback(() => {
+    if (USE_BOLT_ROUTE_ENTRY) setRouteSearchOpen(true);
+    else setShowLocationModal(true);
+  }, []);
+
   const openDestinationSearch = useCallback(() => {
     // Preload pickup label before rider types destination (feels instant on NG networks).
     if (pickupCoords) {
@@ -739,18 +765,18 @@ function BookInDriveStyle() {
     requestAnimationFrame(() => {
       setEditingField('destination');
       setRouteSearchFocus('dropoff');
-      setRouteSearchOpen(true);
+      openSearchSurface();
     });
-  }, [pickupCoords?.lat, pickupCoords?.lng]);
+  }, [pickupCoords?.lat, pickupCoords?.lng, openSearchSurface]);
 
   const openStopSearch = useCallback(() => {
     requestAnimationFrame(() => {
       setEditingField('stop');
       setShowStopField(true);
       setRouteSearchFocus('stop');
-      setRouteSearchOpen(true);
+      openSearchSurface();
     });
-  }, []);
+  }, [openSearchSurface]);
 
   const clearStop = useCallback(() => {
     setStop('');
@@ -762,9 +788,9 @@ function BookInDriveStyle() {
     requestAnimationFrame(() => {
       setEditingField('pickup');
       setRouteSearchFocus('pickup');
-      setRouteSearchOpen(true);
+      openSearchSurface();
     });
-  }, []);
+  }, [openSearchSurface]);
 
   const dismissBookingPromo = useCallback(async () => {
     setBookingPromoVisible(false);
@@ -2633,8 +2659,9 @@ function BookInDriveStyle() {
             <TouchableOpacity
               style={s.backBtnCircle}
               onPress={() => {
+                setEditingField('destination');
                 setRouteSearchFocus('dropoff');
-                setRouteSearchOpen(true);
+                openSearchSurface();
               }}
               accessibilityLabel="Close route"
               accessibilityRole="button"
