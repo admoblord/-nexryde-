@@ -52,9 +52,11 @@ if (!/CONNECT_TIMEOUT_SECONDS\s*=\s*([1-9]|10)L?\b/.test(http)) {
 if (!/\.readTimeout\(/.test(http) || !/\.writeTimeout\(/.test(http)) {
   fail('read/write timeouts missing — a stalled socket never errors');
 }
+// This is the bound that decides a dead link, so it has to fire well before the
+// JS backstop — otherwise the app cancels first and we learn nothing.
 if (!/READ_TIMEOUT_SECONDS\s*=\s*[1-8]L?\b/.test(http)) {
-  fail('read timeout must stay under the 9s places abort, or a stalled HTTP/2 stream '
-    + 'burns the whole rider budget and the phone reports timeout: timeout');
+  fail('read timeout must stay in single-figure seconds: it is what turns a stalled '
+    + 'stream into an error the app can report instead of silence');
 }
 if (!/\.dns\(\s*Ipv4FirstDns\s*\)/.test(http)) {
   fail('IPv4-first DNS missing — an unroutable IPv6 answer costs the whole request');
@@ -107,6 +109,26 @@ const plugins = json.expo?.plugins || [];
 const cronet = plugins.find((p) => (Array.isArray(p) ? p[0] : p) === 'expo-cronet');
 if (cronet) {
   fail('expo-cronet is back in app.json but prebuild never runs — it cannot take effect');
+}
+
+// The native timeouts and the JS backstop are one budget, and they were fighting:
+// a 9s JS abort fired before OkHttp's own bound, so every stall looked like a
+// timeout with nothing logged server-side. The native layer must always lose the
+// race to nothing — it has to be the one that reports a dead link.
+const placesSearch = fs.readFileSync(
+  path.join(root, 'src/services/placesSearch.ts'),
+  'utf8',
+);
+const jsCapMs = Number(placesSearch.match(/PLACES_SEARCH_TIMEOUT_MS = (\d+)/)?.[1]);
+const connectS = Number(http.match(/CONNECT_TIMEOUT_SECONDS\s*=\s*(\d+)/)?.[1]);
+const readS = Number(http.match(/READ_TIMEOUT_SECONDS\s*=\s*(\d+)/)?.[1]);
+if (!Number.isFinite(jsCapMs) || !Number.isFinite(connectS) || !Number.isFinite(readS)) {
+  fail('could not read the JS places cap or the native timeouts to compare them');
+}
+if (jsCapMs <= (connectS + readS) * 1000) {
+  fail(`the JS places cap (${jsCapMs}ms) is not above the native dead-link bound `
+    + `(${connectS}s connect + ${readS}s read) — it would cancel live requests `
+    + 'before OkHttp can report a dead one');
 }
 
 // Same trap as the plugins: EAS reads the version from the native code, so a

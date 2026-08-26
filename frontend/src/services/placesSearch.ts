@@ -16,21 +16,32 @@ import {
 } from '@/src/services/placesCache';
 
 /**
- * One request's cap. A cold Google lookup behind our cache is ~1.5s, so 9s is
- * generous; 20s just meant the rider stared at a spinner.
+ * One request's backstop — deliberately far above a healthy lookup.
+ *
+ * This used to be 9s, and that was the bug riders actually felt. A dead link is
+ * now bounded natively (Android OkHttp: 2s connect + 8s read, so it errors in
+ * ~10s), which means a JS timer shorter than that can only ever kill requests
+ * that were still alive and about to answer. On a cold miss the backend legally
+ * spends ~2.2s of Google time, and Lagos mobile data adds handshake and transfer
+ * on top; 9s was inside that range, so the app cancelled real answers and
+ * reported a timeout the server never saw.
+ *
+ * Until August this screen had no cap at all and riders did not complain, so the
+ * cap exists only to stop a wedged request living forever — not to police
+ * latency. Keep it comfortably above the native bound.
  */
-export const PLACES_SEARCH_TIMEOUT_MS = 9000;
+export const PLACES_SEARCH_TIMEOUT_MS = 20000;
 
 /**
  * Hard ceiling for the whole search, including the token step.
  *
  * authedFetch awaits getValidToken() *before* it arms its own timer, and an
  * expired token sends that through forceRefresh() → publicFetch(8s, 1 retry).
- * A stalled network could therefore burn ~17s on the token, ~20s on the request,
- * and the same again on retry — around 37s per keystroke — before the rider was
- * told their internet was down. Nothing may exceed this deadline.
+ * This bounds token + request + one retry so no keystroke can run away, and it
+ * must stay above PLACES_SEARCH_TIMEOUT_MS or it would pre-empt the request cap
+ * and hide which stage actually stalled.
  */
-export const PLACES_TOTAL_DEADLINE_MS = 12000;
+export const PLACES_TOTAL_DEADLINE_MS = 25000;
 
 /** Why a search produced nothing, in words a bug report can use. */
 export type PlacesFailureKind =
