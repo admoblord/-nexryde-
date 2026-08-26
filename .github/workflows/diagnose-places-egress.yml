@@ -86,3 +86,27 @@ jobs:
             --limit=25 \
             --format='table[no-heading](timestamp.date("%H:%M:%S"),httpRequest.status,httpRequest.requestUrl)' \
             || echo "(log read failed)"
+
+          # Distinguishes "the app was not used" from "the app was used and its
+          # search requests never arrived". okhttp is the Android app; our own
+          # harness shows up as Python-urllib and is excluded.
+          echo
+          echo "--- every request from a real device (okhttp), last 6h ---"
+          gcloud logging read \
+            "${FILTER_BASE} AND httpRequest.userAgent:\"okhttp\"" \
+            --project="${PROJECT_ID}" \
+            --freshness=6h \
+            --limit=60 \
+            --format='table[no-heading](timestamp.date("%H:%M:%S"),httpRequest.status,httpRequest.latency,httpRequest.requestUrl,httpRequest.userAgent)' \
+            || echo "(log read failed)"
+
+          echo
+          echo "--- device request count by user agent, last 6h ---"
+          gcloud logging read \
+            "${FILTER_BASE} AND httpRequest.userAgent!=\"\"" \
+            --project="${PROJECT_ID}" \
+            --freshness=6h \
+            --limit=400 \
+            --format='value(httpRequest.userAgent)' 2>/dev/null \
+            | sort | uniq -c | sort -rn | head -15 \
+            || echo "(log read failed)"
