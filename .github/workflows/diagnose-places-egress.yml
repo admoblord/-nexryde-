@@ -100,6 +100,41 @@ jobs:
             --format='table[no-heading](timestamp.date("%H:%M:%S"),httpRequest.status,httpRequest.latency,httpRequest.requestUrl,httpRequest.userAgent)' \
             || echo "(log read failed)"
 
+          # A 503 that Cloud Run reports with 30-100s of latency never entered our
+          # code: it sat in the queue because no instance would take it. That is
+          # what "nine seconds of silence with nothing in the application logs"
+          # looks like from the outside, so these three reads are the ones that
+          # tell us whether the rider was hitting a wedged instance.
+          echo
+          echo "--- every 5xx, last 24h (latency is queue time when it is huge) ---"
+          gcloud logging read \
+            "${FILTER_BASE} AND httpRequest.status>=500" \
+            --project="${PROJECT_ID}" \
+            --freshness=24h \
+            --limit=80 \
+            --format='table[no-heading](timestamp.date("%m-%d %H:%M:%S"),httpRequest.status,httpRequest.latency,httpRequest.requestUrl,resource.labels.revision_name)' \
+            || echo "(log read failed)"
+
+          echo
+          echo "--- application errors/warnings, last 24h ---"
+          gcloud logging read \
+            "${FILTER_BASE} AND severity>=WARNING" \
+            --project="${PROJECT_ID}" \
+            --freshness=24h \
+            --limit=60 \
+            --format='value(timestamp.date("%m-%d %H:%M:%S"),severity,textPayload)' \
+            || echo "(log read failed)"
+
+          echo
+          echo "--- Cloud Run instance lifecycle messages, last 24h ---"
+          gcloud logging read \
+            "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"nexryde-backend\" AND (textPayload:\"Container called exit\" OR textPayload:\"memory limit\" OR textPayload:\"failed to start\" OR textPayload:\"terminated\" OR textPayload:\"The request was aborted\" OR textPayload:\"upstream connect error\")" \
+            --project="${PROJECT_ID}" \
+            --freshness=24h \
+            --limit=40 \
+            --format='value(timestamp.date("%m-%d %H:%M:%S"),textPayload)' \
+            || echo "(log read failed)"
+
           echo
           echo "--- device request count by user agent, last 6h ---"
           gcloud logging read \
