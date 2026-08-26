@@ -1866,10 +1866,20 @@ async def health_ops(request: Request):
         dlq_replayed = await db.squad_webhook_dlq.count_documents({"status": {"$in": ["replayed", "auto_replayed"]}})
     except Exception:
         dlq_pending = dlq_replayed = -1
+    try:
+        from loop_watchdog import worst_loop_lag_ms
+
+        loop_lag = worst_loop_lag_ms()
+    except Exception:
+        loop_lag = None
     return {
         "squad_webhook_dlq_pending": dlq_pending,
         "squad_webhook_dlq_replayed_total": dlq_replayed,
         "realtime": "websocket",
+        # Worst event-loop lateness since boot. Anything approaching the 5s probe
+        # timeout means this instance is on its way to being shut down.
+        "worst_loop_lag_ms": loop_lag,
+        "revision": os.environ.get("K_REVISION", "unknown"),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -2631,6 +2641,15 @@ async def seed_promo_codes():
     set_fare_estimate_store(fare_estimate_store)
     set_payments_shared_functions(get_directions_from_google, calculate_fare, calculate_distance_haversine)
     set_payments_fare_estimate_store(fare_estimate_store)
+    # Must be first: if something later in startup blocks the loop, this is what
+    # reports it. A blocked loop cannot log from the code that blocked it.
+    try:
+        from loop_watchdog import install_slow_callback_reporting, start_loop_watchdog
+
+        start_loop_watchdog()
+        install_slow_callback_reporting()
+    except Exception:
+        logger.exception("loop watchdog start failed")
     asyncio.create_task(_deferred_startup())
     asyncio.create_task(_mongo_keepalive_loop())
     # Optional native gRPC RidePush (set NEXRYDE_GRPC_PORT). HTTPS Connect-SSE is always on.
