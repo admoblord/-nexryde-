@@ -135,6 +135,33 @@ jobs:
             --format='value(timestamp.date("%m-%d %H:%M:%S"),textPayload)' \
             || echo "(log read failed)"
 
+          # When the event loop stops answering, Cloud Run's liveness probe kills
+          # the instance and every queued request 503s. The application log goes
+          # silent at that moment, so the interesting evidence is the last thing
+          # it managed to write. Find the most recent probe failure and dump the
+          # window leading up to it, oldest first.
+          echo
+          echo "--- what the app was doing before it stopped answering ---"
+          WEDGE_TS="$(gcloud logging read \
+            "${FILTER_BASE} AND textPayload:\"probe failed\"" \
+            --project="${PROJECT_ID}" --freshness=7d --limit=1 \
+            --format='value(timestamp)' 2>/dev/null || true)"
+          if [ -z "${WEDGE_TS}" ]; then
+            echo "(no liveness/readiness probe failure in the last 7 days)"
+          else
+            echo "most recent probe failure: ${WEDGE_TS}"
+            START="$(date -u -d "${WEDGE_TS} - 5 minutes" +%Y-%m-%dT%H:%M:%SZ)"
+            END="$(date -u -d "${WEDGE_TS} + 1 minute" +%Y-%m-%dT%H:%M:%SZ)"
+            echo "window ${START} .. ${END}"
+            gcloud logging read \
+              "${FILTER_BASE} AND timestamp>=\"${START}\" AND timestamp<=\"${END}\"" \
+              --project="${PROJECT_ID}" \
+              --limit=250 \
+              --order=asc \
+              --format='value(timestamp.date("%H:%M:%S"),severity,textPayload,jsonPayload.message,jsonPayload.event)' \
+              || echo "(log read failed)"
+          fi
+
           echo
           echo "--- device request count by user agent, last 6h ---"
           gcloud logging read \
