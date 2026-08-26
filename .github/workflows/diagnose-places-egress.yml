@@ -47,3 +47,42 @@ jobs:
 
       - name: 5 apply NAT all-subnets + egress ALLOW 443 (keep vpc-egress=all-traffic)
         run: backend/scripts/diagnose_and_fix_places_egress.sh --apply
+
+      # The question we could never answer from a phone screenshot: did the
+      # rider's address search reach us at all, and if it did, how long did we
+      # take? The in-memory google_io deque cannot answer it — it is per
+      # instance and resets on every deploy. Cloud Logging can, and this
+      # service account can read it (the canary gate already does).
+      - name: 6 did the phone reach us? recent address-search requests
+        run: |
+          set -uo pipefail
+          FILTER_BASE='resource.type="cloud_run_revision" AND resource.labels.service_name="nexryde-backend"'
+
+          echo "--- /api/places/autocomplete requests, last 3h (newest first) ---"
+          gcloud logging read \
+            "${FILTER_BASE} AND httpRequest.requestUrl:\"/api/places/autocomplete\"" \
+            --project="${PROJECT_ID}" \
+            --freshness=3h \
+            --limit=40 \
+            --format='table[no-heading](timestamp.date("%H:%M:%S"),httpRequest.status,httpRequest.latency,resource.labels.revision_name,httpRequest.userAgent)' \
+            || echo "(log read failed — check roles/logging.viewer on the deploy SA)"
+
+          echo
+          echo "--- what our own Google call did, last 3h ---"
+          gcloud logging read \
+            "${FILTER_BASE} AND textPayload:\"GOOGLE_PLACES_CALL\"" \
+            --project="${PROJECT_ID}" \
+            --freshness=3h \
+            --limit=40 \
+            --format='value(timestamp.date("%H:%M:%S"),textPayload)' \
+            || echo "(log read failed)"
+
+          echo
+          echo "--- any 4xx/5xx on the places routes, last 3h ---"
+          gcloud logging read \
+            "${FILTER_BASE} AND httpRequest.requestUrl:\"/api/places/\" AND httpRequest.status>=400" \
+            --project="${PROJECT_ID}" \
+            --freshness=3h \
+            --limit=25 \
+            --format='table[no-heading](timestamp.date("%H:%M:%S"),httpRequest.status,httpRequest.requestUrl)' \
+            || echo "(log read failed)"
