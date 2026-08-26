@@ -577,7 +577,11 @@ jobs:
       id-token: write
 
     steps:
+      # depth 2 so the previous commit exists: the build plan diffs HEAD against
+      # its first parent, and the default shallow clone has no parent at all.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -618,30 +622,31 @@ jobs:
       # something the app ships actually changed.
       - name: Decide what to build
         id: plan
+        # Planning must not be able to fail the job or to silently stop building:
+        # every git call is guarded, and an undeterminable diff builds anyway.
         run: |
-          set -uo pipefail
-          BEFORE="${{ github.event.before }}"
-          if [ -z "${BEFORE}" ] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-            BEFORE="${GITHUB_SHA}^"
+          set +e
+          MSG="$(git log -1 --pretty=%s 2>/dev/null)"
+          [ -n "${MSG}" ] || MSG="${{ github.event.head_commit.message }}"
+
+          CHANGED="unknown"
+          if git rev-parse --verify -q "${GITHUB_SHA}^" >/dev/null 2>&1; then
+            CHANGED="$(git diff --name-only "${GITHUB_SHA}^" "${GITHUB_SHA}" -- frontend/ 2>/dev/null | wc -l | tr -d ' ')"
           fi
-          CHANGED="$(git diff --name-only "${BEFORE}" "${GITHUB_SHA}" -- frontend/ 2>/dev/null | wc -l | tr -d ' ')"
+          echo "commit subject: ${MSG}"
           echo "frontend files changed: ${CHANGED}"
-          MSG="$(git log -1 --pretty=%s "${GITHUB_SHA}")"
+
           WANT_AAB=false
           WANT_APK=false
-          if [ "${CHANGED}" != "0" ]; then WANT_AAB=true; fi
-          case "${MSG}" in
-            *"[aab]"*) WANT_AAB=true ;;
-          esac
-          case "${MSG}" in
-            *"[apk]"*) WANT_APK=true ;;
-          esac
-          case "${MSG}" in
-            *"[skip-build]"*) WANT_AAB=false; WANT_APK=false ;;
-          esac
+          if [ "${CHANGED}" = "unknown" ] || [ "${CHANGED}" != "0" ]; then WANT_AAB=true; fi
+          case "${MSG}" in *"[aab]"*) WANT_AAB=true ;; esac
+          case "${MSG}" in *"[apk]"*) WANT_APK=true ;; esac
+          case "${MSG}" in *"[skip-build]"*) WANT_AAB=false; WANT_APK=false ;; esac
+
           echo "aab=${WANT_AAB}" >> "$GITHUB_OUTPUT"
           echo "apk=${WANT_APK}" >> "$GITHUB_OUTPUT"
           echo "::notice title=EAS plan::aab=${WANT_AAB} apk=${WANT_APK} (frontend files changed: ${CHANGED})"
+          exit 0
 
       - uses: actions/setup-node@v4
         if: steps.expo.outputs.has_token == 'true'
