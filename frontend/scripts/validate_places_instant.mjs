@@ -364,6 +364,33 @@ results.push(
 
 results.push(
   printRow(
+    'classic-route-entry-is-the-default',
+    'pickup/destination opens the pre-11-August location modal unless explicitly set to bolt',
+    // The August rebuild made the Bolt screen the entry by defaulting this state
+    // to true. Riders were not complaining about the flow it replaced.
+    src.book.includes("EXPO_PUBLIC_RIDER_ROUTE_ENTRY ?? 'classic'") &&
+      src.book.includes('const [routeSearchOpen, setRouteSearchOpen] = useState(USE_BOLT_ROUTE_ENTRY)') &&
+      src.book.includes('openSearchSurface') &&
+      // Every opener must go through the one switch, or the two surfaces diverge.
+      !/setRouteSearchOpen\(true\)(?![\s\S]{0,40}USE_BOLT_ROUTE_ENTRY)/.test(
+        src.book.replace('if (USE_BOLT_ROUTE_ENTRY) setRouteSearchOpen(true);', ''),
+      ),
+  ),
+);
+
+results.push(
+  printRow(
+    'classic-screen-keeps-the-resilience-work',
+    'the location modal searches through placesSearch, so it inherits the cache and the budget',
+    src.ac.includes("from '@/src/services/placesSearch'") &&
+      src.ac.includes('searchPlacesAutocomplete') &&
+      // A raw fetch here would bypass the request cap, the retry and the cache.
+      !src.ac.includes('await fetch(url)'),
+  ),
+);
+
+results.push(
+  printRow(
     'request-cap-cannot-kill-a-live-answer',
     'the JS cap stays above the native dead-link bound, so slow-but-alive requests finish',
     (() => {
