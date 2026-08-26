@@ -8,7 +8,7 @@
 # ============================================================
 set -euo pipefail
 
-PROJECT="${GCLOUD_PROJECT:-nexryde-backend}"
+PROJECT="${GCLOUD_PROJECT:-nexryde-app}"
 
 echo "=== APIS CURRENTLY ENABLED ==="
 gcloud services list --enabled --project="$PROJECT" \

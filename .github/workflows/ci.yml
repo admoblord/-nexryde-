@@ -343,6 +343,12 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Print deploy identity
+        run: |
+          ACCOUNT=$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -1)
+          echo "Deploy SA: ${ACCOUNT:-unknown}"
+          echo "::notice title=Deploy SA::${ACCOUNT:-unknown}"
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -474,6 +480,9 @@ jobs:
           # failing command substitution before any of those checks ran.
           set +e
           JOB=nexryde-maintenance-tick
+          # Cloud Scheduler has no africa-south1 region — run the control plane
+          # in europe-west1 while still POSTing the africa-south1 Cloud Run URL.
+          SCHEDULER_LOCATION=europe-west1
           # Every 2 minutes: safe arrival gives the rider 5 minutes then escalates
           # 90s later, so the tick has to be well inside that to stay meaningful.
           SCHEDULE="*/2 * * * *"
@@ -494,24 +503,30 @@ jobs:
           gcloud services enable cloudscheduler.googleapis.com --quiet 2>/dev/null || true
 
           ACTION=create
-          if gcloud scheduler jobs describe "$JOB" --location "${{ env.REGION }}" &>/dev/null; then
+          HEADER_FLAG=--headers
+          if gcloud scheduler jobs describe "$JOB" --location "$SCHEDULER_LOCATION" &>/dev/null; then
             ACTION=update
+            HEADER_FLAG=--update-headers
           fi
 
+          # Scrub the ops key from any error text before surfacing it.
           if gcloud scheduler jobs "$ACTION" http "$JOB" \
-               --location "${{ env.REGION }}" \
+               --location "$SCHEDULER_LOCATION" \
                --schedule "$SCHEDULE" \
                --time-zone "Africa/Lagos" \
                --uri "${BASE_URL}/api/ops/maintenance-tick" \
                --http-method POST \
-               --update-headers "X-NEXRYDE-OPS-KEY=${OPS_KEY}" \
+               "${HEADER_FLAG}=X-NEXRYDE-OPS-KEY=${OPS_KEY}" \
                --attempt-deadline 120s \
                --max-retry-attempts 1 \
-               --quiet 2>/tmp/sched.err; then
-            echo "::notice title=Scheduler::${ACTION}d ${JOB} (${SCHEDULE}) -> ${BASE_URL}/api/ops/maintenance-tick"
+               --quiet \
+               --format=none 2>/tmp/sched.err; then
+            echo "::notice title=Scheduler::${ACTION}d ${JOB} (${SCHEDULE}) @ ${SCHEDULER_LOCATION} -> ${BASE_URL}/api/ops/maintenance-tick"
           else
-            echo "::warning title=Scheduler failed::Grant the deploy service account roles/cloudscheduler.admin, then re-run this deploy. Detail: $(head -c 300 /tmp/sched.err)"
+            SAFE_ERR=$(sed -E 's/X-NEXRYDE-OPS-KEY=[^[:space:]]+/X-NEXRYDE-OPS-KEY=***REDACTED***/g' /tmp/sched.err 2>/dev/null | head -c 300)
+            echo "::warning title=Scheduler failed::Grant roles/cloudscheduler.admin if needed. Detail: ${SAFE_ERR}"
           fi
+          unset OPS_KEY
 
       # Every deploy pushes a ~1GB image and nothing ever removed the old ones,
       # so Artifact Registry storage grew with each release and never shrank.
@@ -549,6 +564,28 @@ jobs:
           done
           echo "::notice title=Pruned::Deleted ${TOTAL} old image(s) across both registries, kept newest ${KEEP} each"
 
+      # Keep Cloud Monitoring pointed at africa-south1 (not the retired us-central1
+      # standby). Idempotent upsert of uptime + alert policies. Soft-fail if the
+      # deployer SA lacks monitoring.admin — never blocks a release.
+      - name: Sync Cloud Monitoring alerts
+        if: success()
+        continue-on-error: true
+        env:
+          PROJECT_ID: nexryde-app
+          REGION: africa-south1
+          SERVICE: nexryde-backend
+          BACKEND_HOST: nexryde-backend-993913300770.africa-south1.run.app
+          ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
+        run: |
+          set +e
+          export ALERT_EMAIL="${ALERT_EMAIL:-admin@admoblordgroup.com}"
+          pip install --quiet google-auth google-auth-httplib2 requests
+          if python3 backend/scripts/setup_monitoring.py; then
+            echo "::notice title=Monitoring::Uptime + alert policies synced for africa-south1"
+          else
+            echo "::warning title=Monitoring sync failed::Grant the deploy service account roles/monitoring.admin (and notification channel access), then re-run. Alerts may still point at the old us-central1 host until then."
+          fi
+
       - name: Rollback canary on failure
         if: failure() && env.PREV_REV != ''
         run: |
@@ -568,42 +605,64 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
-    # EXPO_TOKEN gates this job: without it we cannot authenticate to EAS, so the
-    # build steps are skipped and the job still succeeds. Add the EXPO_TOKEN repo
-    # secret to enable automatic Android production builds on every push to main.
-    env:
-      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    # Prefer GitHub secret EXPO_TOKEN; fall back to Secret Manager secret EXPO_TOKEN
+    # (same place as the rest of NexRyde secrets). Job succeeds even when missing.
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
-      - name: Check for EAS token
-        run: |
-          if [ -z "${EXPO_TOKEN}" ]; then
-            echo "::warning title=EAS build skipped::EXPO_TOKEN secret is not set — skipping the automatic Android build. Add the EXPO_TOKEN repo secret to enable auto-builds on main."
-          else
-            echo "EXPO_TOKEN present — proceeding with EAS build."
-          fi
-
       - uses: actions/checkout@v4
-        if: ${{ env.EXPO_TOKEN != '' }}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve EXPO_TOKEN
+        id: expo
+        env:
+          GH_EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set +e
+          TOKEN="${GH_EXPO_TOKEN:-}"
+          SOURCE="github"
+          if [ -z "${TOKEN}" ]; then
+            TOKEN=$(gcloud secrets versions access latest --secret=EXPO_TOKEN --project=nexryde-app 2>/dev/null || true)
+            SOURCE="secret-manager"
+          fi
+          if [ -z "${TOKEN}" ]; then
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=EAS build skipped::EXPO_TOKEN not in GitHub secrets or Secret Manager. Create an Expo access token (expo.dev → Access tokens), then: printf '%s' \"\$TOKEN\" | gcloud secrets versions add EXPO_TOKEN --data-file=-"
+            exit 0
+          fi
+          # Never echo the token. Only expose it to later steps via env file.
+          echo "EXPO_TOKEN=${TOKEN}" >> "$GITHUB_ENV"
+          echo "has_token=true" >> "$GITHUB_OUTPUT"
+          echo "::notice title=EAS::EXPO_TOKEN resolved from ${SOURCE}"
 
       - uses: actions/setup-node@v4
-        if: ${{ env.EXPO_TOKEN != '' }}
+        if: steps.expo.outputs.has_token == 'true'
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        if: ${{ env.EXPO_TOKEN != '' }}
+        if: steps.expo.outputs.has_token == 'true'
         working-directory: frontend
         run: npm ci --prefer-offline
 
       - name: Install EAS CLI
-        if: ${{ env.EXPO_TOKEN != '' }}
+        if: steps.expo.outputs.has_token == 'true'
         run: npm install -g eas-cli
 
       - name: Trigger EAS production build (non-blocking)
-        if: ${{ env.EXPO_TOKEN != '' }}
+        if: steps.expo.outputs.has_token == 'true'
         working-directory: frontend
         run: |
           eas build \
