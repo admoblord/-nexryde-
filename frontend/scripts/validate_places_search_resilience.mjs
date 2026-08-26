@@ -298,7 +298,7 @@ check(
   out.predictions.length === 1 && out.predictions[0].main_text === 'Ajah Bus Stop',
 );
 
-// 8. a hung token/request cannot stall past the 12s ceiling, and still is not "no internet"
+// 8. a hung token/request cannot stall past the ceiling, and still is not "no internet"
 reset();
 const hungStarted = Date.now();
 globalThis.__FETCH__ = () => new Promise(() => {});
@@ -306,7 +306,7 @@ out = await searchPlacesAutocomplete('Victoria Island hung', { countryCode: 'ng'
 const hungMs = Date.now() - hungStarted;
 check(
   'deadline-aborts-hung-search',
-  'a hung request unblocks the rider at the 12s ceiling',
+  `a hung request unblocks the rider at the ${PLACES_TOTAL_DEADLINE_MS}ms ceiling`,
   out.failure?.kind === 'timeout' &&
     out.offline !== true &&
     hungMs >= PLACES_TOTAL_DEADLINE_MS - 200 &&

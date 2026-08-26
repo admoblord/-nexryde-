@@ -347,10 +347,31 @@ results.push(
 results.push(
   printRow(
     'search-has-hard-deadline',
-    'token refresh cannot stall search past a 12s ceiling',
-    src.places.includes('PLACES_TOTAL_DEADLINE_MS = 12000') &&
-      src.places.includes('withDeadline') &&
-      src.places.includes('including the token step'),
+    'a keystroke cannot run away, and the ceiling sits above the request cap',
+    (() => {
+      const req = Number(src.places.match(/PLACES_SEARCH_TIMEOUT_MS = (\d+)/)?.[1]);
+      const total = Number(src.places.match(/PLACES_TOTAL_DEADLINE_MS = (\d+)/)?.[1]);
+      return (
+        Number.isFinite(req) &&
+        Number.isFinite(total) &&
+        total > req &&
+        src.places.includes('withDeadline') &&
+        src.places.includes('including the token step')
+      );
+    })(),
+  ),
+);
+
+results.push(
+  printRow(
+    'request-cap-cannot-kill-a-live-answer',
+    'the JS cap stays above the native dead-link bound, so slow-but-alive requests finish',
+    (() => {
+      // 9s here cancelled requests the backend answered in ~2.2s, and the rider
+      // was told it timed out. The native client is what bounds a dead link.
+      const req = Number(src.places.match(/PLACES_SEARCH_TIMEOUT_MS = (\d+)/)?.[1]);
+      return Number.isFinite(req) && req >= 15000;
+    })(),
   ),
 );
 
