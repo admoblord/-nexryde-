@@ -29,6 +29,7 @@ function fail(msg) {
 const PROVIDER_PATTERNS = [
   { re: /[a-z0-9-]+\.run\.app/gi, name: 'Cloud Run' },
   { re: /[a-z0-9-]+\.emergentagent\.com/gi, name: 'Emergent' },
+  { re: /[a-z0-9-]+\.emergent\.host/gi, name: 'Emergent' },
   { re: /[a-z0-9-]+\.herokuapp\.com/gi, name: 'Heroku' },
   { re: /[a-z0-9-]+\.fly\.dev/gi, name: 'Fly' },
   { re: /[a-z0-9-]+\.onrender\.com/gi, name: 'Render' },

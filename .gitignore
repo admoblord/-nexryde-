@@ -92,6 +92,7 @@ frontend/.env.*
 backend/.env
 backend/.env.*
 !backend/.env.example
+!backend/.env.emergent.example
 
 # Expo / Metro (never commit cache)
 frontend/.metro-cache/

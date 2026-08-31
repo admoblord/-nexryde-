@@ -76,8 +76,9 @@ is a Cloud Run secret volume. Two things use it:
 - **GCS media** (`gcs_cdn.py`, bucket `nexryde-media`) — driver documents; falls
   back to base64 in MongoDB when unavailable
 
-On Emergent that file has to exist on disk and `GOOGLE_APPLICATION_CREDENTIALS`
-must point at it. Nothing else about these two depends on Cloud Run.
+On Emergent use `FIREBASE_SERVICE_ACCOUNT_JSON_BASE64` (already supported — the
+service writes the JSON to `/tmp`) or put the file on disk and point
+`GOOGLE_APPLICATION_CREDENTIALS` at it.
 
 ### 2.4 Everything else in the environment is already portable
 
@@ -108,12 +109,19 @@ Cost drivers, roughly in order:
    repointed or replaced with a cron on the new host, or the guardians, saga
    retries, outbox drain and safe-arrival escalation stop running.
 
+### Already stopped in CI (this PR)
+
+- `deploy-production` / `deploy-staging` only run when
+  `vars.DEPLOY_CLOUD_RUN=true` **or** the commit subject contains
+  `[deploy-cloudrun]`. Default: **no more Cloud Build on every main merge**.
+- EAS Android builds no longer `needs: deploy-production`, so a skipped Cloud
+  Run deploy does not also skip the app build.
+- Scheduled `Diagnose Places Egress` is opt-in the same way (manual dispatch
+  still works).
+
 Manifests to retire once cutover is done: `backend/cloudrun.africa-south1.yaml`,
 `cloudrun.service.yaml`, `cloudrun.staging.yaml`, `cloudrun.grpc-ridepush.yaml`,
 `cloudrun.kafka-worker*.yaml`.
-
-CI jobs to retire: `deploy-production`, `deploy-staging`, and the
-`Diagnose Places Egress` workflow (it is entirely about NAT and VPC egress).
 
 ---
 
@@ -125,10 +133,16 @@ git-pull host that runs the FastAPI app with a `.env`, not a container platform:
 ```bash
 git pull origin main
 cd backend && pip install -r requirements.txt
+cp .env.emergent.example .env   # then fill secrets
+python scripts/check_emergent_env.py
 # uvicorn server:app --host 0.0.0.0 --port $PORT
 ```
 
 `backend/Dockerfile` already respects `PORT`, so a container host works too.
+
+Template: **`backend/.env.emergent.example`**. Checker:
+**`backend/scripts/check_emergent_env.py`**. Maintenance tick replacement:
+**`backend/scripts/emergent_maintenance_cron.sh`** (cron every 2 minutes).
 
 Minimum `.env` for the new host:
 
@@ -141,7 +155,7 @@ GOOGLE_MAPS_API_KEY=<...>
 TRUSTED_HOSTS=<new-host>
 CORS_ORIGINS=https://nexryde.app,exp://,nexryde://
 REDIS_REQUIRED=false          # or REDIS_URL=<internet-reachable redis>
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/firebase-service-account.json
+FIREBASE_SERVICE_ACCOUNT_JSON_BASE64=<base64 of service account json>
 NEXRYDE_OPS_KEY=<...>
 SQUAD_SECRET_KEY=<...>
 SQUAD_PUBLIC_KEY=<...>
@@ -154,18 +168,39 @@ NEXRYDE_PUBLIC_BACKEND_URL=https://<new-host>
 `NEXRYDE_PUBLIC_BACKEND_URL` matters: **Squad payment callbacks are built from
 it**, so a stale value sends riders back to Cloud Run after paying.
 
+> Historical hostname `https://nexryde-ui.emergent.host` returns
+> **Application not found** (checked 2026-08-31). A new Emergent app URL is
+> required before flipping `frontend/backend.config.json`.
+
 ---
 
 ## 5. Cutover order
 
-1. Stand the backend up on Emergent with the `.env` above; add its egress IP to
-   the Atlas allowlist.
+1. Stand the backend up on Emergent with the `.env` above; run
+   `python scripts/check_emergent_env.py`; add its egress IP to the Atlas
+   allowlist (`GET /api/ops/egress-ip` with the ops key once the process is up).
 2. Confirm `GET /api/health` and `GET /api/health/ready` on the new host —
    `ready` pings MongoDB, so it proves the allowlist.
 3. Point Squad callbacks at the new host (`NEXRYDE_PUBLIC_BACKEND_URL`).
-4. Change `origin` in `frontend/backend.config.json`; build; verify sign-in,
+4. Install `emergent_maintenance_cron.sh` on a 2-minute cron.
+5. Change `origin` in `frontend/backend.config.json`; build; verify sign-in,
    pickup/destination search and a trip request on a device.
-5. Move the maintenance tick to a cron on the new host.
-6. Only then delete the Cloud Run services, the VPC connector and Memorystore.
+6. Only then delete the Cloud Run services, the VPC connector and Memorystore
+   (and leave `DEPLOY_CLOUD_RUN` unset so CI does not recreate them).
 
-Steps 1–3 are reversible. Step 6 is not.
+Steps 1–4 are reversible. Step 6 is not.
+
+### Stop the Cloud Run bill *before* Emergent is ready (manual)
+
+Until Emergent serves traffic, the cheapest reversible stop is:
+
+```bash
+# Scale the always-on instance away (biggest line item)
+gcloud run services update nexryde-backend --region=africa-south1 --min=0 --cpu-throttling
+gcloud run services update nexryde-grpc-ridepush --region=africa-south1 --min=0 --cpu-throttling || true
+gcloud run services update nexryde-kafka-worker --region=africa-south1 --min=0 --cpu-throttling || true
+```
+
+Do **not** delete the VPC connector / Memorystore until the new host is healthy
+and the app origin has been flipped — Atlas still depends on that NAT IP for
+any leftover Cloud Run traffic.

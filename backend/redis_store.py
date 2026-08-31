@@ -4,6 +4,10 @@ In production (NEXRYDE_ENV/ENVIRONMENT=production and REDIS_REQUIRED!=false):
   - REDIS_URL is required at import
   - Connect failures raise
   - Mid-op Redis errors re-raise (no silent per-instance memory drift)
+
+Off Cloud Run (Emergent, VPS, …): Memorystore is VPC-only. Set
+REDIS_REQUIRED=false for a single-process in-memory fallback, or point
+REDIS_URL at an internet-reachable Redis (Upstash / Redis Cloud).
 """
 from __future__ import annotations
 
@@ -24,6 +28,13 @@ REDIS_REQUIRED = (
 
 if REDIS_REQUIRED and not REDIS_URL:
     raise RuntimeError("REDIS_URL is required in production")
+
+_env_name = os.environ.get("NEXRYDE_ENV", os.environ.get("ENVIRONMENT", "development")).strip().lower()
+if _env_name == "production" and not REDIS_REQUIRED:
+    logger.warning(
+        "REDIS_REQUIRED=false in production — using in-memory fallback. "
+        "Rate limits and realtime fanout are not shared across processes."
+    )
 
 
 class _MemStore:

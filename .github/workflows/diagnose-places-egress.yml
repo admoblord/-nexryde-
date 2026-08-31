@@ -28,6 +28,11 @@ jobs:
   diagnose-and-fix:
     name: NAT / firewall / in-process Google probe
     runs-on: ubuntu-latest
+    # Opt-in while migrating off Cloud Run — scheduled runs still hit Logging +
+    # Cloud Run exec. Re-enable with vars.DEPLOY_CLOUD_RUN=true, or run manually.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || vars.DEPLOY_CLOUD_RUN == 'true'
     environment: production
     env:
       PROJECT_ID: nexryde-app

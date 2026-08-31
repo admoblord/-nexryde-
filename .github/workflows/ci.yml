@@ -236,11 +236,18 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   # 3. Deploy to STAGING (develop branch only)
   # ─────────────────────────────────────────────────────────────────────────────
+  # Cloud Run deploys are opt-in while migrating to Emergent. Every main push
+  # used to run Cloud Build + Artifact Registry + a canary replace — that is the
+  # bill. Flip vars.DEPLOY_CLOUD_RUN=true (or put [deploy-cloudrun] in the
+  # commit subject) only when you intentionally want Cloud Run updated.
   deploy-staging:
     name: Deploy → Staging
     needs: [repo-hygiene, backend-unit, frontend-lint]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    if: >-
+      github.ref == 'refs/heads/develop' && github.event_name == 'push'
+      && (vars.DEPLOY_CLOUD_RUN == 'true'
+          || contains(github.event.head_commit.message || '', '[deploy-cloudrun]'))
     environment: staging
 
     permissions:
@@ -315,7 +322,10 @@ jobs:
     name: Deploy → Production
     needs: [repo-hygiene, backend-unit, frontend-lint]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: >-
+      github.ref == 'refs/heads/main' && github.event_name == 'push'
+      && (vars.DEPLOY_CLOUD_RUN == 'true'
+          || contains(github.event.head_commit.message || '', '[deploy-cloudrun]'))
     environment: production
 
     # Production lives in africa-south1 (Lagos-adjacent). Override the workflow-level
@@ -572,9 +582,11 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   # 5. EAS build (production APK/AAB) — triggered only on main
   # ─────────────────────────────────────────────────────────────────────────────
+  # Decoupled from deploy-production so a skipped Cloud Run deploy (migration
+  # off Google) does not also skip the Android build.
   eas-build:
     name: EAS — Android Production Build
-    needs: deploy-production
+    needs: [repo-hygiene, backend-unit, frontend-lint]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
