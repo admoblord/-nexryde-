@@ -3,6 +3,12 @@ name: Diagnose Places Egress
 # Cloud Run has no SSH. This job is the in-instance Google curl + NAT/firewall dump.
 on:
   workflow_dispatch:
+  # The loop watchdog and the 5xx reads only help if somebody looks. A wedge
+  # that shuts an instance down leaves no notification of its own, and waiting
+  # for the next places commit meant five days of silence. Twice a day is enough
+  # to catch one and cheap enough to ignore.
+  schedule:
+    - cron: "17 6,18 * * *"
   push:
     branches: [main, cursor/fix-places-vpc-egress-1fc9]
     paths:
