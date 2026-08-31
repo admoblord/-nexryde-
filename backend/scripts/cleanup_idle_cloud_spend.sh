@@ -3,25 +3,26 @@
 #
 # Dry run by default — nothing is deleted until you pass --apply.
 #
-#   ./scripts/cleanup_idle_cloud_spend.sh                 # show what would go
-#   ./scripts/cleanup_idle_cloud_spend.sh --apply          # delete the safe set
-#   ./scripts/cleanup_idle_cloud_spend.sh --apply --drop-standby
+#   ./backend/scripts/cleanup_idle_cloud_spend.sh
+#   ./backend/scripts/cleanup_idle_cloud_spend.sh --apply
+#   ./backend/scripts/cleanup_idle_cloud_spend.sh --apply --drop-cloudrun
+#   ./backend/scripts/cleanup_idle_cloud_spend.sh --apply --drop-cloudrun --drop-standby
 #
-# Safe set (no behaviour change, verified against the running service):
-#   * Managed Kafka cluster      — the bus is on Redis streams; nothing reads it
-#   * us-central1 Artifact Registry images — pre-Jul-24 region, never pruned
+# Default safe set:
+#   * Managed Kafka cluster (bus is Redis streams)
+#   * Stale Artifact Registry images
 #
-# --drop-standby additionally removes the whole us-central1 footprint:
-#   * Cloud Run services in us-central1 (old production + staging)
-#   * the us-central1 Serverless VPC connector
-# That region is your rollback target. It has probably never been exercised
-# (there is no develop branch, so staging never deployed), but deleting it means
-# africa-south1 is your only production.
+# --drop-cloudrun (API now on Emergent):
+#   * All Cloud Run services in africa-south1 (nexryde-backend, grpc-ridepush,
+#     kafka-worker, …)
+#   * africa-south1 Serverless VPC connector (only existed for Memorystore + Atlas NAT)
+#   * Memorystore Redis in africa-south1 (Emergent uses REDIS_REQUIRED=false or Upstash)
 #
-# NOT touched, deliberately:
-#   * Memorystore Redis — 20 modules and the event bus depend on it. Migrate to a
-#     serverless Redis first, then delete Memorystore and its VPC connector.
-#   * The africa-south1 VPC connector — still required for Memorystore's private IP.
+# --drop-standby:
+#   * Cloud Run + VPC connector in us-central1
+#
+# After Cloud Run is gone, drop the NAT IP from Atlas:
+#   ./backend/scripts/atlas_drop_cloudrun_nat.sh --apply
 set -uo pipefail
 
 PROJECT_ID="${GCP_PROJECT:-nexryde-app}"
@@ -33,10 +34,12 @@ KEEP_IMAGES="${KEEP_IMAGES:-10}"
 
 APPLY=false
 DROP_STANDBY=false
+DROP_CLOUDRUN=false
 for arg in "$@"; do
   case "$arg" in
     --apply) APPLY=true ;;
     --drop-standby) DROP_STANDBY=true ;;
+    --drop-cloudrun) DROP_CLOUDRUN=true ;;
     *) echo "Unknown flag: $arg" >&2; exit 2 ;;
   esac
 done
@@ -57,7 +60,7 @@ hdr() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 $APPLY || echo "DRY RUN — nothing will be deleted. Re-run with --apply."
 
 # ── Safety gate: never delete Kafka while something still points at it ───────
-hdr "Checking the live service is off Kafka"
+hdr "Checking whether any remaining Cloud Run API still uses Kafka"
 BUS=""
 URL="$(gcloud run services describe nexryde-backend --region "$PROD_REGION" \
         --project "$PROJECT_ID" --format='value(status.url)' 2>/dev/null || true)"
@@ -65,13 +68,11 @@ if [[ -n "$URL" ]]; then
   BUS="$(curl -sS -m 20 "$URL/api/realtime/health" 2>/dev/null \
           | sed -n 's/.*"event_bus"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p')"
 fi
-echo "  live event_bus = ${BUS:-unknown}"
-KAFKA_SAFE=false
-if [[ "$BUS" == "redis" || "$BUS" == "off" ]]; then
-  KAFKA_SAFE=true
-else
-  echo "  Refusing to touch Kafka: the running service still reports '${BUS:-unknown}'."
-  echo "  Deploy the Redis-bus change first, then re-run."
+echo "  live event_bus = ${BUS:-unknown (service may already be gone)}"
+KAFKA_SAFE=true
+if [[ -n "$URL" && "$BUS" != "redis" && "$BUS" != "off" && -n "$BUS" ]]; then
+  KAFKA_SAFE=false
+  echo "  Refusing to touch Kafka: the running service still reports '${BUS}'."
 fi
 
 # ── 1. Managed Kafka ────────────────────────────────────────────────────────
@@ -106,8 +107,31 @@ for REG in \
   done
 done
 
-# ── 3. us-central1 footprint (opt-in) ───────────────────────────────────────
-hdr "3. us-central1 standby footprint"
+# ── 3. africa-south1 Cloud Run + VPC + Memorystore (opt-in) ─────────────────
+hdr "3. africa-south1 Cloud Run / VPC / Memorystore"
+if ! $DROP_CLOUDRUN; then
+  echo "  skipped — pass --drop-cloudrun once Emergent serves /api/health and the app origin is flipped"
+  gcloud run services list --region "$PROD_REGION" --project "$PROJECT_ID" \
+    --format='value(metadata.name)' 2>/dev/null | sed 's/^/    would delete service: /' || true
+else
+  gcloud run services list --region "$PROD_REGION" --project "$PROJECT_ID" \
+    --format='value(metadata.name)' 2>/dev/null | while read -r svc; do
+      [[ -z "$svc" ]] && continue
+      run gcloud run services delete "$svc" --region "$PROD_REGION" \
+        --project "$PROJECT_ID" --quiet
+    done
+  gcloud redis instances list --region "$PROD_REGION" --project "$PROJECT_ID" \
+    --format='value(name)' 2>/dev/null | while read -r inst; do
+      [[ -z "$inst" ]] && continue
+      run gcloud redis instances delete "$(basename "$inst")" \
+        --region "$PROD_REGION" --project "$PROJECT_ID" --quiet
+    done
+  run gcloud compute networks vpc-access connectors delete "$VPC_CONNECTOR" \
+    --region "$PROD_REGION" --project "$PROJECT_ID" --quiet
+fi
+
+# ── 4. us-central1 footprint (opt-in) ───────────────────────────────────────
+hdr "4. us-central1 standby footprint"
 if ! $DROP_STANDBY; then
   echo "  skipped — pass --drop-standby to remove it"
   gcloud run services list --region "$OLD_REGION" --project "$PROJECT_ID" \
@@ -119,23 +143,13 @@ else
       run gcloud run services delete "$svc" --region "$OLD_REGION" \
         --project "$PROJECT_ID" --quiet
     done
-  # Connector last: deleting it while a service still uses it fails.
   run gcloud compute networks vpc-access connectors delete "$VPC_CONNECTOR" \
     --region "$OLD_REGION" --project "$PROJECT_ID" --quiet
 fi
 
-# ── 4. What is left, and why ────────────────────────────────────────────────
-hdr "4. Still billing on purpose"
-gcloud redis instances list --region "$PROD_REGION" --project "$PROJECT_ID" \
-  --format='table(name,tier,memorySizeGb)' 2>/dev/null || echo "  (could not list Memorystore)"
-cat <<'NOTE'
-  Memorystore stays: presence, idempotency, rate limits, auth revocation and the
-  event bus all depend on it, and with maxScale 10 in-process state would be ten
-  disconnected copies. To remove this line, move REDIS_URL to a serverless Redis
-  over TLS first — that also frees the africa-south1 VPC connector, which exists
-  only to reach Memorystore's private IP.
-  If the tier above says STANDARD_HA, switching to Basic roughly halves it.
-NOTE
+hdr "5. Atlas follow-up"
+echo "  After Cloud Run is deleted, drop NAT 34.35.108.112 from Atlas:"
+echo "    ./backend/scripts/atlas_drop_cloudrun_nat.sh --apply"
 
 hdr "Done"
 $APPLY || echo "That was a dry run. Re-run with --apply to delete."

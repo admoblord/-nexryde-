@@ -471,7 +471,7 @@ function evaluateStateMachine(now: number = Date.now()): void {
       !opsHealthy &&
       now - metrics.stateEnteredAt >= RECONNECTING_MAX_DWELL_MS
     ) {
-      // NetInfo can stay "online" while Cloud Run is unreachable — don't banner-stuck forever.
+      // NetInfo can stay "online" while the API is unreachable — don't banner-stuck forever.
       transitionTo('OFFLINE', now, 'reconnecting_dwell_exceeded');
     }
   } else if (current === 'OFFLINE') {

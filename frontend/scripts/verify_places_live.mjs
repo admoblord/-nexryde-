@@ -19,7 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const FRONTEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE =
   process.env.NEXRYDE_VERIFY_BACKEND ||
-  'https://nexryde-backend-993913300770.africa-south1.run.app';
+  'https://nexryde-modular.preview.emergentagent.com';
 const RIDER = process.env.NEXRYDE_VERIFY_EMAIL || '';
 
 const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);

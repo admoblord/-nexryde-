@@ -4,7 +4,7 @@
 
 ```bash
 pip install locust
-locust -f locustfile.py --host https://nexryde-backend-993913300770.us-central1.run.app
+locust -f locustfile.py --host https://nexryde-modular.preview.emergentagent.com
 # Open http://localhost:8089
 ```
 
@@ -12,7 +12,7 @@ locust -f locustfile.py --host https://nexryde-backend-993913300770.us-central1.
 
 ```bash
 locust -f locustfile.py \
-  --host https://nexryde-backend-993913300770.us-central1.run.app \
+  --host https://nexryde-modular.preview.emergentagent.com \
   --users 100 --spawn-rate 10 --run-time 5m --headless \
   --html load_report.html
 ```

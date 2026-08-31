@@ -2687,7 +2687,7 @@ function loadSysInfo(){
       ${[
         ['API URL',API],['Admin Token','••••••••'+((adminToken||'').slice(-6))],
         ['Dashboard Version','2.0.0'],['Last Refresh',new Date().toLocaleString()],
-        ['Environment','Production'],['Backend','Cloud Run (GCP)']
+        ['Environment','Production'],['Backend','Emergent']
       ].map(([l,v])=>`<div style="background:rgba(255,255,255,.04);border-radius:9px;padding:10px 12px;">
         <div style="font-size:10px;color:var(--dim);font-weight:700;text-transform:uppercase;margin-bottom:2px;">${H(l)}</div>
         <div style="font-size:12px;font-weight:600;font-family:monospace;">${H(String(v))}</div>

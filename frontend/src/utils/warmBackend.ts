@@ -5,7 +5,7 @@ let lastWarmAt = 0;
 const WARM_COOLDOWN_MS = 45 * 1000;
 
 /**
- * Fire-and-forget — wakes Cloud Run + Mongo pool while user reads/types on welcome/login.
+ * Fire-and-forget — wakes the API + Mongo pool while user reads/types on welcome/login.
  * `/health` = liveness (no DB). `/api/health/ready` = pings Mongo (what login needs).
  */
 export function warmBackendConnection(force = false): void {

@@ -143,7 +143,7 @@ gcloud alpha monitoring policies create \
 
 # ── 5. Uptime check (health endpoint every 1 min) ─────────────────────────────
 echo "Creating uptime check..."
-BACKEND_URL="https://nexryde-backend-993913300770.us-central1.run.app"
+BACKEND_URL="https://nexryde-modular.preview.emergentagent.com"
 cat > /tmp/uptime_check.json << EOF
 {
   "displayName": "NexRyde Backend — /api/health/ready",
@@ -158,7 +158,7 @@ cat > /tmp/uptime_check.json << EOF
     "type": "uptime_url",
     "labels": {
       "project_id": "${PROJECT_ID}",
-      "host": "nexryde-backend-993913300770.us-central1.run.app"
+      "host": "nexryde-modular.preview.emergentagent.com"
     }
   },
   "period": "60s",
@@ -172,7 +172,7 @@ EOF
 gcloud alpha monitoring uptime create \
   --display-name="NexRyde Backend Health" \
   --resource-type="uptime_url" \
-  --hostname="nexryde-backend-993913300770.us-central1.run.app" \
+  --hostname="nexryde-modular.preview.emergentagent.com" \
   --path="/api/health/ready" \
   --check-interval=60 \
   --project="$PROJECT_ID" 2>/dev/null || echo "  (already exists or skipped)"

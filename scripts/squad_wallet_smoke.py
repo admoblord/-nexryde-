@@ -3,7 +3,7 @@
 Optional smoke checks for Squad rider wallet endpoints (against a running API).
 
 Requires:
-  NEXRYDE_API_BASE   e.g. https://your-api.run.app  (no trailing slash)
+  NEXRYDE_API_BASE   e.g. https://nexryde-modular.preview.emergentagent.com  (no trailing slash)
   NEXRYDE_BEARER     JWT for a rider user (Authorization: Bearer ...)
 
 Uses minimum top-up amount (₦100). Does not complete card payment — only verifies

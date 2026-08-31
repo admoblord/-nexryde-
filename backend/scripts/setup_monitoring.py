@@ -34,7 +34,7 @@ except Exception as e:
 
 PROJECT_ID = os.environ.get("PROJECT_ID", "nexryde-app")
 SERVICE    = "nexryde-backend"
-BACKEND_URL = "nexryde-backend-993913300770.us-central1.run.app"
+BACKEND_URL = "nexryde-modular.preview.emergentagent.com"
 ALERT_EMAIL = os.environ.get("ALERT_EMAIL", "admin@admoblordgroup.com")
 
 BASE = f"https://monitoring.googleapis.com/v3/projects/{PROJECT_ID}"

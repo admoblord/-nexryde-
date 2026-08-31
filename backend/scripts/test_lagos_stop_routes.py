@@ -9,7 +9,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
-BACKEND = "https://nexryde-backend-993913300770.us-central1.run.app"
+BACKEND = "https://nexryde-modular.preview.emergentagent.com"
 
 # Major Lagos corridors (lat, lng)
 LOCATIONS = {

@@ -5,11 +5,11 @@ Simulates real traffic patterns across the critical rider + driver path.
 
 Usage:
     pip install locust
-    locust -f locustfile.py --host https://nexryde-backend-993913300770.us-central1.run.app
+    locust -f locustfile.py --host https://nexryde-modular.preview.emergentagent.com
 
     # Headless (CI):
     locust -f locustfile.py \
-        --host https://nexryde-backend-993913300770.us-central1.run.app \
+        --host https://nexryde-modular.preview.emergentagent.com \
         --users 50 --spawn-rate 5 --run-time 3m --headless \
         --html load_report.html
 """
