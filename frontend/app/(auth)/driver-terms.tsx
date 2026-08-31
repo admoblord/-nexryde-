@@ -29,6 +29,9 @@ import {
   SUPPORT_PHONE_DISPLAY,
 } from '@/src/constants/commercialOffers';
 
+/** Follows whichever host the app is configured against. */
+const SUPPORT_PAGE_URL = `${BACKEND_URL}/support-page`;
+
 const DriverTermsScrollBody = React.memo(function DriverTermsScrollBody() {
   return (
     <View style={styles.termsCard}>
@@ -132,7 +135,7 @@ const DriverTermsScrollBody = React.memo(function DriverTermsScrollBody() {
         • Email: {SUPPORT_EMAIL}{'\n'}
         • Phone: {SUPPORT_PHONE_DISPLAY}{'\n'}
         • In-app chat support available 24/7{'\n'}
-        • Visit: https://nexryde-backend-993913300770.us-central1.run.app/support-page
+        • Visit: {SUPPORT_PAGE_URL}
       </Text>
     </View>
   );

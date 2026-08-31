@@ -39,9 +39,26 @@ const GOOGLE_MAPS_IOS_KEY =
     process.env.EXPO_PUBLIC_GOOGLE_MAPS_IOS_KEY ||
       process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
   );
-const BACKEND_URL =
+// One committed default, in backend.config.json, so moving the API to another
+// host is a single edit instead of a hunt through app.json / eas.json / api.ts.
+const backendConfig = JSON.parse(
+  fs.readFileSync(path.join(__dirname, 'backend.config.json'), 'utf8'),
+);
+const buildProfile = process.env.EAS_BUILD_PROFILE || '';
+const usesStaging = (backendConfig.stagingProfiles || []).includes(buildProfile);
+const BACKEND_URL = (
   process.env.EXPO_PUBLIC_BACKEND_URL ||
-  "https://nexryde-backend-993913300770.africa-south1.run.app";
+  (usesStaging ? backendConfig.stagingOrigin : '') ||
+  backendConfig.origin ||
+  ''
+)
+  .trim()
+  .replace(/\/+$/, '');
+if (!BACKEND_URL) {
+  throw new Error(
+    'No backend origin: set EXPO_PUBLIC_BACKEND_URL or backend.config.json "origin"',
+  );
+}
 
 const PRIVACY_POLICY_URL = `${BACKEND_URL}/privacy-policy`;
 
@@ -76,6 +93,9 @@ module.exports = ({ config }) => ({
   extra: {
     ...config.extra,
     BACKEND_URL,
+    // Read by src/config/backendOrigin.ts to build the API host allowlist, so a
+    // host move never needs a code change.
+    extraApiHosts: backendConfig.extraApiHosts || [],
     privacyPolicyUrl: PRIVACY_POLICY_URL,
     sentryDsn: SENTRY_DSN,
     EXPO_PUBLIC_GOOGLE_NAVIGATION_ENABLED:

@@ -11,6 +11,8 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
+import { allowedApiHosts } from '@/src/config/backendOrigin';
+
 /** App + build label for support and backend diagnostics (kept in sync with native builds). */
 function clientVersionLabel(): string {
   const v =
@@ -28,15 +30,15 @@ function clientVersionLabel(): string {
   return v;
 }
 
-/** Known production API hosts (Cloud Run may show either URL shape). */
-const ALLOWED_BACKEND_HOSTS = new Set([
-  'nexryde-backend-993913300770.us-central1.run.app',
-  'nexryde-backend-pkzkptjzba-uc.a.run.app',
-]);
-
 /**
  * Validate that API requests are going to the expected host.
  * Prevents request redirection attacks.
+ *
+ * The allowed set is derived from the configured backend origin, not from a
+ * hard-coded provider. This used to permit only `*.run.app` hosts beginning
+ * with `nexryde-backend`, which meant pointing the app at any other host made
+ * every axios call fail with "Security: Invalid API endpoint" — a migration
+ * blocker hiding in a security helper.
  */
 export function validateApiUrl(url: string): boolean {
   try {
@@ -51,10 +53,7 @@ export function validateApiUrl(url: string): boolean {
       return parsed.protocol === 'http:' || parsed.protocol === 'https:';
     }
     if (parsed.protocol !== 'https:') return false;
-    const h = parsed.hostname;
-    if (ALLOWED_BACKEND_HOSTS.has(h)) return true;
-    // Any Cloud Run URL for this service name (future revision URLs).
-    return h.endsWith('.run.app') && h.startsWith('nexryde-backend');
+    return allowedApiHosts().has(parsed.hostname.toLowerCase());
   } catch {
     return false;
   }
