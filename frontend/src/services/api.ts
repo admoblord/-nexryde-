@@ -2,25 +2,11 @@ import axios, { AxiosHeaders } from 'axios';
 import { getCachedToken, getValidToken } from '@/src/lib/tokenStore';
 import Constants from 'expo-constants';
 import { SECURITY_HEADERS, validateApiUrl } from './securityConfig';
+import { resolveBackendOrigin } from '@/src/config/backendOrigin';
 
-// Backend URL - reads from app.json extra config (works in APK builds)
-const getApiUrl = () => {
-  // Priority 1: Expo config extra (for standalone builds)
-  const expoUrl = Constants.expoConfig?.extra?.BACKEND_URL;
-  if (expoUrl) {
-    // Remove /api suffix if present, we add it in baseURL
-    return expoUrl.replace(/\/api$/, '');
-  }
-  // Priority 2: Environment variable
-  const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
-  if (envUrl) {
-    return envUrl.replace(/\/api$/, '');
-  }
-  // Priority 3: Production fallback (Cloud Run)
-  return 'https://nexryde-backend-993913300770.africa-south1.run.app';
-};
-
-const API_URL = getApiUrl();
+// Where the API lives comes from build config — see src/config/backendOrigin.ts.
+// No provider URL is written here, so moving hosts is a config change.
+const API_URL = resolveBackendOrigin();
 
 function generateClientRequestId(): string {
   try {

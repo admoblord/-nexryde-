@@ -198,9 +198,19 @@ jobs:
         working-directory: frontend
         run: node ./scripts/verify_android_http.cjs --require-success
 
+      # The app must not name its hosting provider outside backend.config.json,
+      # so changing host stays a one-line change instead of a hunt.
+      - name: API host lives in config, not in code
+        working-directory: frontend
+        run: node ./scripts/verify_backend_origin.cjs --require-success
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - name: API host allowlist follows configuration
+        working-directory: frontend
+        run: node --experimental-strip-types --no-warnings ./scripts/validate_api_host_allowlist.mjs
 
       - name: Pickup / destination search behaviour
         working-directory: frontend

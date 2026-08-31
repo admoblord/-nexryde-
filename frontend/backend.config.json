@@ -1,0 +1,7 @@
+{
+  "_comment": "The only place the app names its API host. Change 'origin' to move hosts; EXPO_PUBLIC_BACKEND_URL overrides it at build time, and scripts/verify_backend_origin.cjs fails the build if any other file hardcodes a provider URL.",
+  "origin": "https://nexryde-backend-993913300770.africa-south1.run.app",
+  "stagingOrigin": "https://nexryde-backend-staging-993913300770.us-central1.run.app",
+  "stagingProfiles": ["preview", "simulator"],
+  "extraApiHosts": []
+}
