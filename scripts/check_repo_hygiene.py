@@ -22,6 +22,7 @@ BLOCKED_PATH_PATTERNS = [
 ALLOWED_PATHS = {
     ".env.example",
     "backend/.env.example",
+    "backend/.env.emergent.example",
     "frontend/.env.example",
     # Client Firebase configs (package/SHA restricted). Required for Android FCM builds.
     "frontend/google-services.json",
