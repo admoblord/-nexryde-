@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
-# One entrypoint: verify fixes, optional live smoke, Cloud Run deploy, EAS APK + AAB.
+# One entrypoint: verify fixes, optional live smoke, EAS APK + AAB.
 #
 # Usage:
 #   ./scripts/one_click_ship.sh check    # safe: unit tests + lint + live smoke (needs network)
-#   ./scripts/one_click_ship.sh all      # check + gcloud run deploy + eas build (APK then AAB)
+#   ./scripts/one_click_ship.sh all      # check + eas build (APK then AAB)
 #
 # Prerequisites for `all`:
-#   - gcloud installed, logged in, project set (or export GCP_PROJECT=...)
-#   - eas-cli: npx eas-cli whoami; for CI set EXPO_TOKEN (https://expo.dev/accounts/[account]/settings/access-tokens)
+#   - eas-cli: npx eas-cli whoami; for CI set EXPO_TOKEN
 #
 # Env (optional):
-#   GCP_REGION (default us-central1)
-#   CLOUD_RUN_SERVICE (default nexryde-backend)
-#   GCP_PROJECT (passed to gcloud --project if set)
 #   SKIP_LIVE_TESTS=1  — skip pytest against NEXRYDE_BACKEND_URL
-#   NEXRYDE_BACKEND_URL — override API base for smoke tests
+#   NEXRYDE_BACKEND_URL — override API base for smoke tests (default: Emergent)
 
 set -euo pipefail
 
@@ -24,7 +20,7 @@ MODE="${1:-}"
 usage() {
   echo "Usage: $0 check | all"
   echo "  check  — backend unit checks, live smoke tests, frontend lint"
-  echo "  all    — everything in check + Cloud Run deploy + EAS preview APK + EAS production AAB"
+  echo "  all    — everything in check + EAS preview APK + EAS production AAB"
   exit 1
 }
 
@@ -73,17 +69,12 @@ if [[ "$MODE" == "check" ]]; then
 fi
 
 echo ""
-echo "== 5/7 Cloud Run deploy (backend/) =="
-# Production only from main — prefer the checked-in YAML deploy path.
-bash "$ROOT/scripts/deploy_backend.sh"
-
-echo ""
-echo "== 6/7 EAS Android APK (profile: preview) =="
+echo "== 5/6 EAS Android APK (profile: preview) =="
 (cd "$ROOT/frontend" && npx eas-cli build --platform android --profile preview --non-interactive)
 
 echo ""
-echo "== 7/7 EAS Android AAB (profile: production / app-bundle) =="
+echo "== 6/6 EAS Android AAB (profile: production / app-bundle) =="
 (cd "$ROOT/frontend" && npx eas-cli build --platform android --profile production --non-interactive)
 
 echo ""
-echo "✅ all complete — backend deployed, EAS builds queued. Check https://expo.dev for build status."
+echo "✅ all complete — EAS builds queued (API hosts on Emergent). Check https://expo.dev for build status."

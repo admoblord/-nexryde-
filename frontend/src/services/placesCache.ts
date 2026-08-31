@@ -1,7 +1,7 @@
 /**
  * Last-good pickup/destination predictions, kept on disk.
  *
- * Lagos networks drop mid-keystroke and Cloud Run cold starts add seconds.
+ * Lagos networks drop mid-keystroke and a cold API adds seconds.
  * Without this, one failed request turns a search the rider has already done
  * into "No places found". Reads are served from memory; disk is the backup that
  * survives an app restart.

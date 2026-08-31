@@ -46,7 +46,7 @@ from debug_session_log import debug_session_log
 BASE = (
     os.environ.get("NEXRYDE_BACKEND_URL")
     or os.environ.get("EXPO_PUBLIC_BACKEND_URL")
-    or "https://nexryde-backend-993913300770.us-central1.run.app"
+    or "https://nexryde-modular.preview.emergentagent.com"
 ).rstrip("/")
 
 spec = importlib.util.spec_from_file_location("e2e", os.path.join(ROOT, "scripts", "e2e_ride_acceptance_sync_test.py"))

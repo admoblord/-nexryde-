@@ -46,7 +46,7 @@ HIGH_P95_POLICY = (
 UPTIME_SLO_POLICY = (
     "projects/nexryde-app/alertPolicies/6501353899448008958"
 )
-UPTIME_HOST = "nexryde-backend-993913300770.africa-south1.run.app"
+UPTIME_HOST = "nexryde-modular.preview.emergentagent.com"
 # One 5-minute failed check is 0% of that bucket — 99.5% on a 5m window
 # fired 21 times in 36h. Require a 15m window and <50% passing.
 UPTIME_MQL = f"""fetch uptime_url

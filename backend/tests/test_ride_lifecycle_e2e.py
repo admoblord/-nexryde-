@@ -4,7 +4,7 @@ Tests the full flow: request → accept → arrive → start → complete → pa
 Also validates: wallet hold/release, driver lock, atomic cancellation.
 
 Run with:
-    BACKEND_URL=https://nexryde-backend-993913300770.us-central1.run.app \
+    BACKEND_URL=https://nexryde-modular.preview.emergentagent.com \
     MONGO_URL=mongodb+srv://... \
     pytest backend/tests/test_ride_lifecycle_e2e.py -v
 """

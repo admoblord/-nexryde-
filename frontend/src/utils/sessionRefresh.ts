@@ -2,7 +2,7 @@ import { BACKEND_URL } from '@/src/services/api';
 import { forceRefresh, getCachedToken, getValidToken } from '@/src/lib/tokenStore';
 import { useAppStore } from '@/src/store/appStore';
 
-/** Default API cap — fail fast; warm Cloud Run should respond well under this. */
+/** Default API cap — fail fast; a warm API should respond well under this. */
 export const API_REQUEST_TIMEOUT_MS = 10000;
 
 export type AuthedFetchOptions = RequestInit & {
@@ -162,7 +162,7 @@ export async function authedFetch(
 /** @deprecated Use authedFetch */
 export const fetchAuthed = authedFetch;
 
-/** Path-relative authenticated fetch against Cloud Run API. */
+/** Path-relative authenticated fetch against the configured API origin. */
 export async function apiFetch(
   path: string,
   init: AuthedFetchOptions = {},

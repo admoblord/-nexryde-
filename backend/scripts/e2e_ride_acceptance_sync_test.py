@@ -29,7 +29,7 @@ load_dotenv(os.path.join(ROOT, ".env"))
 BASE_URL = (
     os.environ.get("NEXRYDE_BACKEND_URL")
     or os.environ.get("EXPO_PUBLIC_BACKEND_URL")
-    or "https://nexryde-backend-993913300770.us-central1.run.app"
+    or "https://nexryde-modular.preview.emergentagent.com"
 ).rstrip("/")
 
 PICKUP = {"lat": 6.5244, "lng": 3.3792, "address": "Victoria Island, Lagos"}

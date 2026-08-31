@@ -37,4 +37,4 @@ gcloud secrets add-iam-policy-binding MONGODB_URI_STAGING \
   --quiet
 
 echo "OK — MONGODB_URI_STAGING populated. Deploy staging:"
-echo "  gcloud run services replace backend/cloudrun.staging.yaml --region $REGION"
+echo "  Restart the Emergent backend after the secret is updated."

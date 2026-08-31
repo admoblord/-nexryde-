@@ -2,7 +2,7 @@
 """Poll NexRyde reliability watch metrics.
 
 Usage:
-  export NEXRYDE_API_BASE=https://nexryde-backend-….run.app
+  export NEXRYDE_API_BASE=https://nexryde-modular.preview.emergentagent.com
   export NEXRYDE_TOKEN='Bearer eyJ…'   # driver or admin JWT
   python3 backend/scripts/watch_realtime_metrics.py
   python3 backend/scripts/watch_realtime_metrics.py --once

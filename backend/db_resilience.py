@@ -1,4 +1,4 @@
-"""MongoDB retry + pool keep-alive for Cloud Run ↔ Atlas stale connections."""
+"""MongoDB retry + pool keep-alive for long-lived API processes ↔ Atlas."""
 from __future__ import annotations
 
 import asyncio

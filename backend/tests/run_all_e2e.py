@@ -9,7 +9,7 @@ Usage:
     python3 backend/tests/run_all_e2e.py
 
     # Against staging / production:
-    BASE_URL=https://nexryde-backend-xxx.run.app \
+    BASE_URL=https://nexryde-modular.preview.emergentagent.com \
     ADMIN_EMAIL=admin@admoblordgroup.com \
     ADMIN_PASSWORD=yourpassword \
     python3 backend/tests/run_all_e2e.py

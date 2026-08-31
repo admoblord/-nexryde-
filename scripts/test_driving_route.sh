@@ -3,11 +3,11 @@
 # Requires GOOGLE_MAPS_API_KEY on the backend (503 if missing).
 #
 # Usage:
-#   export BACKEND_URL=https://nexryde-backend-993913300770.us-central1.run.app
+#   export BACKEND_URL=https://nexryde-modular.preview.emergentagent.com
 #   ./scripts/test_driving_route.sh
 
 set -euo pipefail
-BASE="${BACKEND_URL:-https://nexryde-backend-993913300770.us-central1.run.app}"
+BASE="${BACKEND_URL:-https://nexryde-modular.preview.emergentagent.com}"
 BASE="${BASE%/}"
 
 # Sample: Lagos mainland → Lekki-ish (adjust if needed)

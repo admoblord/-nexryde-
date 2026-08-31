@@ -27,7 +27,7 @@ export type DriverAcceptTripOutcome =
   | { status: 'session_expired'; message: string }
   | { status: 'failed'; message: string; httpStatus?: number };
 
-/** Fail-fast accept — Cloud Run is warm; long waits feel like a stuck Accept button. */
+/** Fail-fast accept — long waits feel like a stuck Accept button. */
 const ACCEPT_TIMEOUT_MS = 8_000;
 
 const inFlightByTrip = new Map<string, Promise<DriverAcceptTripOutcome>>();

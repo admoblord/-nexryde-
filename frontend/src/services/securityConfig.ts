@@ -35,10 +35,10 @@ function clientVersionLabel(): string {
  * Prevents request redirection attacks.
  *
  * The allowed set is derived from the configured backend origin, not from a
- * hard-coded provider. This used to permit only `*.run.app` hosts beginning
- * with `nexryde-backend`, which meant pointing the app at any other host made
- * every axios call fail with "Security: Invalid API endpoint" — a migration
- * blocker hiding in a security helper.
+ * hard-coded provider. This used to permit only Cloud Run hosts beginning
+ * with `nexryde-backend`; every other host failed with
+ * `Security: Invalid API endpoint`. The allowlist is now derived from
+ * `backend.config.json` / `EXPO_PUBLIC_BACKEND_URL`.
  */
 export function validateApiUrl(url: string): boolean {
   try {

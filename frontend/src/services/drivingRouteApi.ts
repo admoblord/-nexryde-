@@ -24,7 +24,7 @@ export type DrivingRouteResult = {
 };
 
 /**
- * Server-side Google Directions (uses `GOOGLE_MAPS_API_KEY` on Cloud Run).
+ * Server-side Google Directions (uses backend `GOOGLE_MAPS_API_KEY`).
  * Use this when the app’s Maps key is Android/iOS-restricted and cannot call Directions REST from JS.
  */
 export async function fetchDrivingRoute(

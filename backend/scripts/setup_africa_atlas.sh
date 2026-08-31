@@ -90,7 +90,7 @@ if ! atlas dbusers describe "$USER" --projectId "$ATLAS_PROJECT_ID" &>/dev/null;
   atlas dbusers create --projectId "$ATLAS_PROJECT_ID" --username "$USER" --password "$PASS" \
     --role readWriteAnyDatabase --scope "$CLUSTER"
 fi
-atlas accessLists create "0.0.0.0/0" --projectId "$ATLAS_PROJECT_ID" --comment "nexryde cloud run" 2>/dev/null || true
+atlas accessLists create "0.0.0.0/0" --projectId "$ATLAS_PROJECT_ID" --comment "nexryde backend host (tighten to Emergent egress IP in prod)" 2>/dev/null || true
 
 SRV=$(atlas clusters connectionStrings describe "$CLUSTER" --projectId "$ATLAS_PROJECT_ID" -o json \
   | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("standardSrv") or d.get("standard"))')
@@ -112,4 +112,4 @@ fi
 
 echo "OK — $SECRET set for cluster $CLUSTER ($PROVIDER/$REGION_NAME)"
 echo "Point Cloud Run MONGODB_URI at $SECRET and use DB_NAME=$DB_HINT"
-echo "Then: gcloud run services replace backend/cloudrun.africa-south1.yaml --region africa-south1"
+echo "Then: set MONGODB_URI on Emergent and restart the backend."

@@ -181,7 +181,7 @@ def extract_squad_checkout_url(provider_payload: dict, data: dict) -> Optional[s
     """Resolve checkout / payment URL from Squad initiate responses (field names vary by API version).
 
     Only URLs belonging to Squad's own domains are returned — backend callback URLs
-    (e.g. nexryde-backend-*.run.app) are rejected so they are never opened in-app.
+    (our API host) are rejected so they are never opened in-app.
     """
     candidates: list[str] = []
 

@@ -1,9 +1,8 @@
 /**
  * Where the API lives, in one place.
  *
- * The app used to carry the Cloud Run URL in six files (app.json, app.config.js,
- * eas.json, api.ts, a terms screen and — worst — the security allowlist, which
- * silently refused every host that was not Cloud Run). Now `app.config.js` reads
+ * Hosting used to be hard-wired (Cloud Run URLs in six files, and a security
+ * allowlist that refused every other host). Now `app.config.js` reads
  * `backend.config.json` at build time and injects the result into
  * `expoConfig.extra`, and every consumer reads it from here.
  *

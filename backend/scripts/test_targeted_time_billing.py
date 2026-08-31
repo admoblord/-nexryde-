@@ -12,7 +12,7 @@ import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
 
-BACKEND = "https://nexryde-backend-993913300770.us-central1.run.app"
+BACKEND = "https://nexryde-modular.preview.emergentagent.com"
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _BACKEND_ROOT = os.path.dirname(_SCRIPT_DIR)

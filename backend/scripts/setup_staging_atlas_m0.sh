@@ -87,7 +87,7 @@ else
 fi
 
 # Allow GCP / 0.0.0.0 for Cloud Run egress (tighten later)
-atlas accessLists create "0.0.0.0/0" --projectId "$ATLAS_PROJECT_ID" --comment "nexryde staging Cloud Run" 2>/dev/null || true
+atlas accessLists create "0.0.0.0/0" --projectId "$ATLAS_PROJECT_ID" --comment "nexryde staging backend host" 2>/dev/null || true
 
 SRV=$(atlas clusters connectionStrings describe "$CLUSTER" --projectId "$ATLAS_PROJECT_ID" -o json \
   | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("standardSrv") or d.get("standard"))')
@@ -115,4 +115,4 @@ printf '%s' "$URI" | gcloud secrets versions add MONGODB_URI_STAGING --data-file
   || (gcloud secrets create MONGODB_URI_STAGING --data-file=- --replication-policy=automatic --project="$PROJECT_ID" <<<"$URI")
 
 echo "OK — MONGODB_URI_STAGING updated for dedicated M0 cluster $CLUSTER"
-echo "Redeploy: gcloud run services replace backend/cloudrun.staging.yaml --region $REGION"
+echo "Restart the Emergent backend after MONGODB_URI_STAGING is set."

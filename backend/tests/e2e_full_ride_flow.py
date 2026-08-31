@@ -10,7 +10,7 @@ Usage:
     python3 backend/tests/e2e_full_ride_flow.py
 
     # Against production (caution — uses real data):
-    BASE_URL=https://nexryde-backend-993913300770.us-central1.run.app \
+    BASE_URL=https://nexryde-modular.preview.emergentagent.com \
     python3 backend/tests/e2e_full_ride_flow.py
 
 Requires:

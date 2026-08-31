@@ -95,9 +95,12 @@ def test_normalize_squad_live_base_rewrites_wrong_host():
     assert "def _normalize_squad_live_base" in text
     assert '"https://api.squadco.com"' in text
     assert "https://api-d.squadco.com" in text
-    yaml = (Path(__file__).resolve().parents[1] / "cloudrun.service.yaml").read_text(encoding="utf-8")
-    assert 'value: "https://api-d.squadco.com"' in yaml
-    assert 'value: "https://api.squadco.com"' not in yaml
+    # Live Squad base must stay api-d (not the marketing api.squadco.com host).
+    assert "api.squadco.com" in text  # mentioned when rewriting wrong hosts
+    emerg = Path(__file__).resolve().parents[1] / ".env.emergent.example"
+    emerg_text = emerg.read_text(encoding="utf-8")
+    assert "SQUAD_BASE_URL=https://api-d.squadco.com" in emerg_text
+    assert "SQUAD_BASE_URL=https://api.squadco.com" not in emerg_text
 
 
 def test_generate_nexryde_squad_transaction_ref_shape():

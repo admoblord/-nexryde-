@@ -143,11 +143,7 @@ OK — Managed Kafka ready for $ENV_NAME
 
 Next:
   # Staging
-  gcloud run services replace backend/cloudrun.staging.yaml --region $REGION
-  gcloud run services replace backend/cloudrun.kafka-worker.staging.yaml --region $REGION
-
+    
   # Prod
-  gcloud run services replace backend/cloudrun.service.yaml --region $REGION
-  gcloud run services replace backend/cloudrun.kafka-worker.yaml --region $REGION
-
+    
 EOF

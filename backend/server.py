@@ -2686,7 +2686,8 @@ async def _mongo_keepalive_loop():
 _DEFAULT_CORS_ORIGINS = (
     "https://nexryde.com,"
     "https://www.nexryde.com,"
-    "https://nexryde-backend-993913300770.us-central1.run.app,"
+    "https://nexryde.app,"
+    "https://nexryde-modular.preview.emergentagent.com,"
     "http://localhost:3000,"
     "http://localhost:8081,"
     "http://127.0.0.1:8081"
