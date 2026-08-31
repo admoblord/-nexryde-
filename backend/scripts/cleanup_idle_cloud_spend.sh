@@ -147,7 +147,23 @@ else
     --region "$OLD_REGION" --project "$PROJECT_ID" --quiet
 fi
 
-hdr "5. Atlas follow-up"
+hdr "5. Cloud Scheduler jobs (still calling deleted Cloud Run URLs)"
+for REGION in "$PROD_REGION" "$OLD_REGION"; do
+  JOBS="$(gcloud scheduler jobs list --location "$REGION" --project "$PROJECT_ID" \
+            --format='value(name)' 2>/dev/null || true)"
+  if [[ -z "$JOBS" ]]; then
+    echo "  none in $REGION"
+    continue
+  fi
+  echo "$JOBS" | while read -r j; do
+    [[ -z "$j" ]] && continue
+    name="$(basename "$j")"
+    run gcloud scheduler jobs delete "$name" --location "$REGION" \
+      --project "$PROJECT_ID" --quiet
+  done
+done
+
+hdr "6. Atlas follow-up"
 echo "  After Cloud Run is deleted, drop NAT 34.35.108.112 from Atlas:"
 echo "    ./backend/scripts/atlas_drop_cloudrun_nat.sh --apply"
 
