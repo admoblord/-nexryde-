@@ -1,13 +1,7 @@
 name: Drop Cloud Run Billing
 
-# One-shot (and repeatable) teardown of billed Google hosting.
-# Triggered by a main push whose commit subject contains [drop-cloudrun],
-# or manually via workflow_dispatch.
-#
-# Deletes: Cloud Run services (africa-south1 + us-central1), Memorystore,
-# VPC connectors, Managed Kafka, Cloud Scheduler jobs, stale AR images.
-# Does NOT touch Atlas (needs Atlas API keys) — run atlas_drop_cloudrun_nat.sh
-# separately after Emergent egress is allowlisted.
+# Teardown billed Google hosting. Trigger with [drop-cloudrun] on main or
+# workflow_dispatch. Cloud Run is already gone; this pass finishes VPC + Redis.
 
 on:
   workflow_dispatch:
@@ -27,16 +21,15 @@ concurrency:
 
 jobs:
   drop:
-    name: Delete Cloud Run / VPC / Memorystore / Scheduler
+    name: Delete VPC / Memorystore / leftovers
     runs-on: ubuntu-latest
-    # No GitHub Environment gate — user asked to delete billing now; WIF secrets
-    # are repo-level (same ones the former Cloud Run deploy used).
     if: >-
       github.event_name == 'workflow_dispatch'
       || contains(github.event.head_commit.message || '', '[drop-cloudrun]')
     env:
       PROJECT_ID: nexryde-app
       GCP_PROJECT: nexryde-app
+      DEPLOY_SA: github-deployer@nexryde-app.iam.gserviceaccount.com
 
     steps:
       - uses: actions/checkout@v4
@@ -50,51 +43,127 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Preflight — list what will be deleted
+      - name: Who am I / billing status
         run: |
           set -uo pipefail
-          echo "=== africa-south1 Cloud Run ==="
-          gcloud run services list --region=africa-south1 --project="$PROJECT_ID" \
-            --format='table(metadata.name,status.url,status.conditions[0].status)' || true
-          echo "=== us-central1 Cloud Run ==="
-          gcloud run services list --region=us-central1 --project="$PROJECT_ID" \
-            --format='table(metadata.name,status.url)' || true
-          echo "=== Memorystore ==="
-          gcloud redis instances list --region=africa-south1 --project="$PROJECT_ID" \
-            --format='table(name,tier,memorySizeGb)' || true
-          echo "=== VPC connectors ==="
-          gcloud compute networks vpc-access connectors list --region=africa-south1 \
-            --project="$PROJECT_ID" --format='table(name,state)' || true
-          gcloud compute networks vpc-access connectors list --region=us-central1 \
-            --project="$PROJECT_ID" --format='table(name,state)' || true
-          echo "=== Scheduler ==="
-          gcloud scheduler jobs list --location=africa-south1 --project="$PROJECT_ID" \
-            --format='table(name,schedule,state)' || true
-          gcloud scheduler jobs list --location=us-central1 --project="$PROJECT_ID" \
-            --format='table(name,schedule,state)' || true
+          echo "Active account:"
+          gcloud auth list
+          echo "Billing:"
+          gcloud billing projects describe "$PROJECT_ID" 2>&1 || true
+          gcloud beta billing projects describe "$PROJECT_ID" 2>&1 || true
 
-      - name: Delete billed resources
+      - name: Try to grant this SA the roles it still needs
         run: |
-          set -euo pipefail
-          chmod +x backend/scripts/cleanup_idle_cloud_spend.sh
-          backend/scripts/cleanup_idle_cloud_spend.sh --apply --drop-cloudrun --drop-standby
+          set -uo pipefail
+          # Needs roles/resourcemanager.projectIamAdmin (or Owner). If this fails,
+          # VPC/Redis delete will also fail until a human owner grants the roles.
+          for ROLE in \
+            roles/vpcaccess.admin \
+            roles/redis.admin \
+            roles/cloudscheduler.admin \
+            roles/compute.networkAdmin; do
+            echo "Grant $ROLE → $DEPLOY_SA"
+            gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+              --member="serviceAccount:${DEPLOY_SA}" \
+              --role="$ROLE" \
+              --condition=None \
+              --quiet 2>&1 || echo "  (could not self-grant $ROLE)"
+          done
 
-      - name: Postflight — confirm Cloud Run is gone
+      - name: Force-delete VPC connectors by known name
         run: |
           set -uo pipefail
           FAIL=0
           for REGION in africa-south1 us-central1; do
+            echo "=== VPC connector nexryde-vpc @ $REGION ==="
+            if gcloud compute networks vpc-access connectors describe nexryde-vpc \
+                 --region="$REGION" --project="$PROJECT_ID" 2>/dev/null; then
+              if gcloud compute networks vpc-access connectors delete nexryde-vpc \
+                   --region="$REGION" --project="$PROJECT_ID" --quiet; then
+                echo "Deleted nexryde-vpc in $REGION"
+              else
+                echo "::error title=VPC connector::$REGION nexryde-vpc still present (need vpcaccess.admin on $DEPLOY_SA)"
+                FAIL=1
+              fi
+            else
+              echo "Not found (or no permission to describe) in $REGION"
+              # Still try delete — describe may be denied while delete works, or vice versa
+              gcloud compute networks vpc-access connectors delete nexryde-vpc \
+                --region="$REGION" --project="$PROJECT_ID" --quiet 2>&1 || true
+            fi
+          done
+          exit "$FAIL"
+
+      - name: Force-delete Memorystore Redis
+        run: |
+          set -uo pipefail
+          for REGION in africa-south1 us-central1; do
+            echo "=== Redis list @ $REGION ==="
+            INSTANCES="$(gcloud redis instances list --region="$REGION" --project="$PROJECT_ID" \
+                          --format='value(name)' 2>/dev/null || true)"
+            if [[ -z "$INSTANCES" ]]; then
+              echo "list empty/failed — trying common names"
+              INSTANCES="nexryde-redis nexryde nexryde-cache redis nexryde-memorystore"
+            fi
+            for raw in $INSTANCES; do
+              name="$(basename "$raw")"
+              [[ -z "$name" ]] && continue
+              echo "Delete redis instance $name @ $REGION"
+              gcloud redis instances delete "$name" \
+                --region="$REGION" --project="$PROJECT_ID" --quiet 2>&1 || true
+            done
+          done
+
+      - name: Delete any remaining Cloud Run / Scheduler
+        run: |
+          set -uo pipefail
+          chmod +x backend/scripts/cleanup_idle_cloud_spend.sh
+          backend/scripts/cleanup_idle_cloud_spend.sh --apply --drop-cloudrun --drop-standby
+
+      - name: Postflight
+        run: |
+          set -uo pipefail
+          FAIL=0
+          echo "=== Cloud Run ==="
+          for REGION in africa-south1 us-central1; do
             LEFT="$(gcloud run services list --region="$REGION" --project="$PROJECT_ID" \
                       --format='value(metadata.name)' 2>/dev/null || true)"
             if [[ -n "$LEFT" ]]; then
-              echo "::error title=Cloud Run still present::$REGION still has: $LEFT"
+              echo "::error::$REGION Cloud Run still has: $LEFT"
               FAIL=1
             else
-              echo "OK — no Cloud Run services in $REGION"
+              echo "OK — no Cloud Run in $REGION"
             fi
           done
-          echo "Probe old production URL:"
-          CODE="$(curl -sS -m 15 -o /dev/null -w '%{http_code}' \
-            https://nexryde-backend-993913300770.africa-south1.run.app/api/health || true)"
-          echo "  HTTP $CODE (expect 404/not found once DNS/revision are gone)"
+          echo "=== VPC connectors ==="
+          for REGION in africa-south1 us-central1; do
+            if gcloud compute networks vpc-access connectors describe nexryde-vpc \
+                 --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
+              echo "::error::$REGION nexryde-vpc STILL EXISTS"
+              FAIL=1
+            else
+              echo "OK — nexryde-vpc gone or invisible in $REGION"
+            fi
+          done
+          echo "=== Redis ==="
+          for REGION in africa-south1 us-central1; do
+            LEFT="$(gcloud redis instances list --region="$REGION" --project="$PROJECT_ID" \
+                      --format='value(name)' 2>/dev/null || true)"
+            if [[ -n "$LEFT" ]]; then
+              echo "::error::$REGION Redis still has: $LEFT"
+              FAIL=1
+            else
+              echo "OK — no Redis listed in $REGION (or list denied)"
+            fi
+          done
+          if [[ "$FAIL" -ne 0 ]]; then
+            echo ""
+            echo "Owner must run once (then re-trigger this workflow):"
+            echo "  gcloud projects add-iam-policy-binding $PROJECT_ID \\"
+            echo "    --member=serviceAccount:$DEPLOY_SA \\"
+            echo "    --role=roles/vpcaccess.admin"
+            echo "  gcloud projects add-iam-policy-binding $PROJECT_ID \\"
+            echo "    --member=serviceAccount:$DEPLOY_SA \\"
+            echo "    --role=roles/redis.admin"
+          fi
           exit "$FAIL"
