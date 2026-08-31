@@ -1,6 +1,7 @@
 name: Drop Cloud Run Billing
 
-# Teardown billed Google hosting. Trigger with [drop-cloudrun] on main or
+# Teardown billed Google hosting.
+# retry-vpc-delete after owner granted vpcaccess.admin Trigger with [drop-cloudrun] on main or
 # workflow_dispatch. Cloud Run is already gone; this pass finishes VPC + Redis.
 
 on:
